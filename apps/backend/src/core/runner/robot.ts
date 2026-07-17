@@ -9,7 +9,7 @@ import { getSpec, getSpecVersion, updateSpecStatusForVersion } from "../../repos
 import { runsDir } from "../paths";
 import { readSpecExecutable } from "../specs/files";
 import { withSpecLock } from "../specs/lifecycle";
-import { finalizeRunEvidence, instrumentRobotSource } from "./evidence";
+import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 
 const RUN_TIMEOUT_MS = 120_000;
 const activeRobotProcesses = new Set<ChildProcess>();
@@ -143,15 +143,14 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     const started = Date.now();
     let status: FinalRunStatus = "error";
     let failReason: string | null = "Run did not complete";
+    let plannedEvidence: PlannedEvidenceStep[] = [];
 
     try {
         const outputDir = path.join(runsDir, run.id);
         await fs.mkdir(outputDir, { recursive: true });
-        const source = instrumentRobotSource(
-            await readSpecExecutable(version.executablePath),
-            version.humanSpec.steps.length,
-        );
-        await fs.writeFile(path.join(outputDir, "spec.robot"), source, "utf8");
+        const instrumented = instrumentRobotSource(await readSpecExecutable(version.executablePath));
+        plannedEvidence = instrumented.steps;
+        await fs.writeFile(path.join(outputDir, "spec.robot"), instrumented.source, "utf8");
         await fs.mkdir(path.join(outputDir, "evidence"), { recursive: true });
         const result = await runRobotProcess(outputDir, outputDir, project.baseUrl);
         if (result.timedOut) {
@@ -172,7 +171,7 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
         status = "error";
         failReason = errorMessage(error);
     } finally {
-        await finalizeRunEvidence(path.join(runsDir, run.id), status, version.humanSpec.steps.length).catch(console.error);
+        await finalizeRunEvidence(path.join(runsDir, run.id), status, plannedEvidence).catch(console.error);
         await finishRun(run.id, status, Date.now() - started, failReason);
     }
 

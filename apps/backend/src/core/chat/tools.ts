@@ -14,6 +14,7 @@ import {
     publishSpecVersion,
 } from "../../repositories/specs";
 import { executeSpec } from "../runner/robot";
+import { namedRobotStepsError } from "../runner/evidence";
 import { validateRobotSource } from "../runner/validate";
 import { readSpecExecutable, removeSpecExecutable, writeSpecExecutable } from "../specs/files";
 import { withSpecLock } from "../specs/lifecycle";
@@ -127,7 +128,7 @@ export function createDomainTools(projectId: string) {
         defineTool({
             name: "create_spec",
             label: "create_spec",
-            description: "Create a human-readable Spec and its complete Browser-only Robot Framework executable. Use ${BASE_URL}, launch a headless Chromium browser, and include explicit assertions.",
+            description: "Create a human-readable Spec and its complete Browser-only Robot Framework executable. The Test Case must call business-readable user keywords, while Browser commands and assertions live inside those keywords.",
             parameters: Type.Object({
                 featureId: Type.String(),
                 title: Type.String(),
@@ -140,6 +141,8 @@ export function createDomainTools(projectId: string) {
                 if (!feature || feature.projectId !== projectId) {
                     return text(`Feature ${params.featureId} not found in this project.`);
                 }
+                const stepError = namedRobotStepsError(params.robotSource);
+                if (stepError) return text(`The Robot source was rejected: ${stepError}`);
                 const validation = await validateRobotSource(params.robotSource);
                 if (!validation.ok) {
                     return text(`The Robot source was rejected: ${validation.error}\nFix the file and call create_spec again.`);
@@ -195,6 +198,10 @@ export function createDomainTools(projectId: string) {
                     if (!currentVersion) return text(`Spec ${params.specId} has no current version to update.`);
                     const humanSpec = (params.humanSpec as HumanSpec | undefined) ?? currentVersion.humanSpec;
                     const robotSource = params.robotSource ?? (await readSpecExecutable(currentVersion.executablePath));
+                    if (params.robotSource !== undefined) {
+                        const stepError = namedRobotStepsError(robotSource);
+                        if (stepError) return text(`The Robot source was rejected: ${stepError}`);
+                    }
                     const validation = await validateRobotSource(robotSource);
                     if (!validation.ok) {
                         return text(`The Robot source was rejected: ${validation.error}\nFix the file and call update_spec again.`);

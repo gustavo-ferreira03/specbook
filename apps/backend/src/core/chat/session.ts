@@ -71,6 +71,7 @@ function standardSystemPrompt(
         "Explore the described flow, ask direct clarifying questions when rules, credentials, or expected outcomes are ambiguous, then create or update the Spec and verify it with run_spec.",
         "Always call list_features and list_specs before creating anything. Reuse existing features. Call get_spec before changing an existing Spec.",
         "Robot source must import only 'Library    Browser', start its own headless Chromium browser, use ${BASE_URL} instead of a literal application origin, avoid sleeps, and make explicit assertions that prove the expected result.",
+        "Structure Robot source as named business steps: the Test Case body must call only user keywords such as 'Login As Standard User', 'Add Backpack To Cart', and 'Cart Should Contain Backpack'. Put Browser commands and assertions inside the Keywords section. Each top-level user keyword becomes one named evidence screenshot, so keep each keyword focused on one coherent step.",
         "Robot source is an internal implementation detail. Do not paste it into chat unless the user explicitly asks to see it.",
         "Never claim an action succeeded unless a tool result confirms it. If a tool fails or rejects input, report that failure exactly.",
         "Reply in the same language as the user and keep answers concise.",

@@ -93,7 +93,7 @@ export function createRunsRouter(): Hono {
         ]);
         const files = directory ? await listArtifactFiles(directory) : [];
         const available = new Set(files);
-        let manifest: { steps?: { number?: number; file?: string }[]; video?: string | null } = {};
+        let manifest: { steps?: { number?: number; label?: string; file?: string }[]; video?: string | null } = {};
         if (directory && available.has("evidence.json")) {
             try {
                 manifest = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8"));
@@ -105,7 +105,9 @@ export function createRunsRouter(): Hono {
             const number = item.number as number;
             return [{
                 number,
-                label: version?.humanSpec.steps[number - 1] ?? `Step ${number}`,
+                label: typeof item.label === "string" && item.label.trim()
+                    ? item.label
+                    : version?.humanSpec.steps[number - 1] ?? `Step ${number}`,
                 file: item.file,
             }];
         });
