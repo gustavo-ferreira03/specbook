@@ -1,0 +1,22 @@
+services:
+    app:
+        build:
+            context: .
+            args:
+                NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        init: true
+        shm_size: "1gb"
+        restart: unless-stopped
+        ports:
+            - "4000:4000"
+            - "4001:4001"
+            - "53692:53692"
+        environment:
+            HOST: 0.0.0.0
+            FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4001}
+            PI_OAUTH_CALLBACK_HOST: 0.0.0.0
+        volumes:
+            - specbook-storage:/app/apps/backend/storage
+
+volumes:
+    specbook-storage:
