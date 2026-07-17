@@ -15,6 +15,40 @@ export interface LlmSettings {
     model: string;
 }
 
+export type ConversationMode = "standard" | "discovery";
+export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
+
+export interface DiscoveryBrief {
+    goal: string;
+    startUrl: string;
+    maxActions: number;
+    safetyNotes: string[];
+}
+
+export interface ProjectContext {
+    summary: string;
+    areas: { name: string; routes: string[]; description: string }[];
+    terminology: { term: string; meaning: string }[];
+    roles: { name: string; capabilities: string[] }[];
+    businessRules: string[];
+    uiPatterns: string[];
+    executionNotes: string[];
+    unknowns: string[];
+    sources: { url: string; note: string }[];
+}
+
+export const EMPTY_PROJECT_CONTEXT: ProjectContext = {
+    summary: "",
+    areas: [],
+    terminology: [],
+    roles: [],
+    businessRules: [],
+    uiPatterns: [],
+    executionNotes: [],
+    unknowns: [],
+    sources: [],
+};
+
 export const projects = sqliteTable("projects", {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
@@ -66,7 +100,23 @@ export const conversations = sqliteTable("conversations", {
     projectId: text("project_id")
         .notNull()
         .references(() => projects.id),
+    contextRevisionId: text("context_revision_id"),
     createdAt: text("created_at").notNull(),
+});
+
+export const projectContextRevisions = sqliteTable("project_context_revisions", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+        .notNull()
+        .references(() => projects.id),
+    sourceConversationId: text("source_conversation_id"),
+    status: text("status").$type<ProjectContextStatus>().notNull(),
+    brief: text("brief", { mode: "json" }).$type<DiscoveryBrief>().notNull(),
+    context: text("context", { mode: "json" }).$type<ProjectContext>().notNull(),
+    actionsUsed: integer("actions_used").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    confirmedAt: text("confirmed_at"),
 });
 
 export const runs = sqliteTable("runs", {

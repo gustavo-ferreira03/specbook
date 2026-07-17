@@ -3,15 +3,27 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, RefreshCw } from "lucide-react";
 import { LogoMark } from "@/components/LogoMark";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { Textarea } from "@/components/ui/textarea";
+import { api, createContextDiscovery, getLlmRuntimeStatus } from "@/lib/api";
 import type { Project } from "@/lib/types";
+
+function parseSafetyNotes(raw: string): string[] {
+    return raw
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 20)
+        .map((line) => line.slice(0, 200));
+}
 
 function HomeContent() {
     const router = useRouter();
@@ -23,8 +35,27 @@ function HomeContent() {
     const [loadError, setLoadError] = useState("");
     const [createError, setCreateError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
-    const [submitting, setSubmitting] = useState(false);
+    const [submitting, setSubmitting] = useState<"discovery" | "plain" | false>(false);
     const [lastProjectId, setLastProjectId] = useState<string | null>(null);
+    const [goal, setGoal] = useState("");
+    const [startUrl, setStartUrl] = useState("");
+    const [startUrlEdited, setStartUrlEdited] = useState(false);
+    const [maxActions, setMaxActions] = useState("40");
+    const [safetyNotes, setSafetyNotes] = useState("");
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [llmReady, setLlmReady] = useState(true);
+
+    useEffect(() => {
+        let active = true;
+        getLlmRuntimeStatus()
+            .then((status) => {
+                if (active) setLlmReady(status.ready);
+            })
+            .catch(() => undefined);
+        return () => {
+            active = false;
+        };
+    }, []);
 
     useEffect(() => {
         let active = true;
@@ -52,17 +83,52 @@ function HomeContent() {
         };
     }, [forceNew, retryKey, router]);
 
-    async function createProject(event: React.FormEvent<HTMLFormElement>) {
+    async function createProjectRecord(): Promise<Project> {
+        const result = await api<{ project: Project }>("/projects", {
+            method: "POST",
+            body: JSON.stringify({ name: name.trim(), baseUrl: baseUrl.trim() }),
+        });
+        localStorage.setItem("specbook:last-project", result.project.id);
+        return result.project;
+    }
+
+    async function createWithDiscovery(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         setCreateError("");
-        setSubmitting(true);
+        setSubmitting("discovery");
+        let project: Project;
         try {
-            const result = await api<{ project: Project }>("/projects", {
-                method: "POST",
-                body: JSON.stringify({ name: name.trim(), baseUrl: baseUrl.trim() }),
+            project = await createProjectRecord();
+        } catch (error) {
+            setCreateError(error instanceof Error ? error.message : String(error));
+            setSubmitting(false);
+            return;
+        }
+        try {
+            const trimmedStart = startUrl.trim();
+            const trimmedGoal = goal.trim();
+            const discovery = await createContextDiscovery(project.id, {
+                ...(trimmedGoal ? { goal: trimmedGoal } : {}),
+                ...(startUrlEdited && trimmedStart ? { startUrl: trimmedStart } : {}),
+                maxActions: Number(maxActions),
+                safetyNotes: parseSafetyNotes(safetyNotes),
             });
-            localStorage.setItem("specbook:last-project", result.project.id);
-            router.push(`/p/${result.project.id}`);
+            router.push(`/p/${project.id}/conversations/${discovery.conversation.id}`);
+        } catch {
+            router.push(`/p/${project.id}?discovery=failed`);
+        }
+    }
+
+    async function createWithoutDiscovery() {
+        if (!name.trim() || !baseUrl.trim()) {
+            setCreateError("Project name and base URL are required.");
+            return;
+        }
+        setCreateError("");
+        setSubmitting("plain");
+        try {
+            const project = await createProjectRecord();
+            router.push(`/p/${project.id}`);
         } catch (error) {
             setCreateError(error instanceof Error ? error.message : String(error));
             setSubmitting(false);
@@ -122,7 +188,7 @@ function HomeContent() {
                     </p>
                 </div>
 
-                <form onSubmit={createProject} className="rounded-[13px] border border-line bg-surface p-5">
+                <form onSubmit={createWithDiscovery} className="rounded-[13px] border border-line bg-surface p-5">
                     <h2 className="text-[0.8125rem] font-bold">Project details</h2>
                     <p className="mt-1 text-[0.65625rem] leading-4 text-ink-faint">Use a URL the self-hosted runtime can reach.</p>
                     <div className="mt-5">
@@ -131,11 +197,79 @@ function HomeContent() {
                     </div>
                     <div className="mt-4">
                         <Label className="mb-1.5" htmlFor="base-url">Base URL</Label>
-                        <Input id="base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required type="url" inputMode="url" placeholder="https://staging.example.com" />
+                        <Input
+                            id="base-url"
+                            value={baseUrl}
+                            onChange={(event) => {
+                                setBaseUrl(event.target.value);
+                                if (!startUrlEdited) setStartUrl(event.target.value);
+                            }}
+                            required
+                            type="url"
+                            inputMode="url"
+                            placeholder="https://staging.example.com"
+                        />
                     </div>
+                    <p className="mt-4 text-[0.65625rem] leading-4 text-ink-faint">The agent explores the app on its own with a bounded browser, drafts a project context, and asks for help only when it gets stuck.</p>
+                    <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="mt-4">
+                        <CollapsibleTrigger asChild>
+                            <Button type="button" variant="outline" className="w-full justify-between text-ink-soft hover:text-ink">
+                                Advanced discovery settings
+                                <ChevronDown size={14} aria-hidden className={`transition-transform duration-150 motion-reduce:transition-none ${advancedOpen ? "rotate-180" : ""}`} />
+                            </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                            <div className="mt-3 space-y-4 rounded-md border border-line bg-canvas p-3">
+                                <div>
+                                    <Label className="mb-1.5" htmlFor="discovery-goal">Discovery focus (optional)</Label>
+                                    <Input id="discovery-goal" value={goal} onChange={(event) => setGoal(event.target.value)} autoComplete="off" placeholder="e.g. Focus on the checkout flow" />
+                                    <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">Leave empty to let the agent explore everything it can reach.</p>
+                                </div>
+                                <div>
+                                    <Label className="mb-1.5" htmlFor="start-url">Start URL</Label>
+                                    <Input
+                                        id="start-url"
+                                        value={startUrl}
+                                        onChange={(event) => {
+                                            setStartUrl(event.target.value);
+                                            setStartUrlEdited(true);
+                                        }}
+                                        type="url"
+                                        inputMode="url"
+                                        placeholder={baseUrl || "Same as base URL"}
+                                    />
+                                    <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">Must stay on the base URL origin.</p>
+                                </div>
+                                <div>
+                                    <Label className="mb-1.5" htmlFor="max-actions">Maximum browser actions</Label>
+                                    <Select value={maxActions} onValueChange={setMaxActions}>
+                                        <SelectTrigger id="max-actions" className="w-full"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="20">20 actions · quick pass</SelectItem>
+                                            <SelectItem value="40">40 actions · balanced</SelectItem>
+                                            <SelectItem value="60">60 actions · deeper exploration</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label className="mb-1.5" htmlFor="safety-notes">Additional safety notes</Label>
+                                    <Textarea id="safety-notes" value={safetyNotes} onChange={(event) => setSafetyNotes(event.target.value)} rows={3} placeholder={"Do not submit contact forms\nStay out of the checkout"} />
+                                    <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">One rule per line. The agent follows them during discovery.</p>
+                                </div>
+                            </div>
+                        </CollapsibleContent>
+                    </Collapsible>
+                    {!llmReady && (
+                        <Alert className="mt-4 text-xs" role="status">
+                            <AlertDescription>No agent model is configured yet. You can create the project now; discovery will need the agent set up in Settings before it can run.</AlertDescription>
+                        </Alert>
+                    )}
                     {createError && <Alert variant="destructive" className="mt-4 text-xs" role="alert"><AlertDescription>{createError}</AlertDescription></Alert>}
-                    <Button type="submit" disabled={submitting} className="mt-5 w-full">
-                        {submitting ? "Creating project..." : "Create project"}{!submitting && <ArrowRight size={14} />}
+                    <Button type="submit" disabled={submitting !== false} className="mt-5 w-full">
+                        {submitting === "discovery" ? "Creating project..." : "Create project and explore"}{submitting === false && <ArrowRight size={14} />}
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={createWithoutDiscovery} disabled={submitting !== false} className="mt-2 w-full text-ink-soft hover:bg-canvas">
+                        {submitting === "plain" ? "Creating project..." : "Create without discovery"}
                     </Button>
                 </form>
             </div>

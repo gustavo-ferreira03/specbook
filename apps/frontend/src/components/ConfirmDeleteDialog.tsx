@@ -18,6 +18,7 @@ export function ConfirmDeleteDialog({
     title,
     description,
     confirmLabel,
+    busyLabel = "Deleting...",
     busy,
     error,
     returnFocusRef,
@@ -28,6 +29,7 @@ export function ConfirmDeleteDialog({
     title: string;
     description: React.ReactNode;
     confirmLabel: string;
+    busyLabel?: string;
     busy: boolean;
     error: string;
     returnFocusRef?: RefObject<HTMLElement | null>;
@@ -75,7 +77,7 @@ export function ConfirmDeleteDialog({
                             onConfirm();
                         }}
                     >
-                        {busy ? "Deleting..." : confirmLabel}
+                        {busy ? busyLabel : confirmLabel}
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>

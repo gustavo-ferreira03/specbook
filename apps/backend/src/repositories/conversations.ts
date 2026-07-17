@@ -1,13 +1,26 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
-import { conversations } from "../db/schema";
+import { conversations, type ConversationMode } from "../db/schema";
 
 export type ConversationRow = typeof conversations.$inferSelect;
 
-export async function insertConversation(id: string, projectId: string): Promise<ConversationRow> {
+export interface ConversationMetadata {
+    contextRevisionId?: string | null;
+}
+
+export function conversationMode(row: ConversationRow): ConversationMode {
+    return row.contextRevisionId ? "discovery" : "standard";
+}
+
+export async function insertConversation(
+    id: string,
+    projectId: string,
+    metadata: ConversationMetadata = {},
+): Promise<ConversationRow> {
     const row: ConversationRow = {
         id,
         projectId,
+        contextRevisionId: metadata.contextRevisionId ?? null,
         createdAt: new Date().toISOString(),
     };
     await db.insert(conversations).values(row);

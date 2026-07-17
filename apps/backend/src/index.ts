@@ -11,6 +11,7 @@ import { stopActiveRobotProcesses } from "./core/runner/robot";
 import { markInterruptedRuns } from "./repositories/runs";
 import { createConversationsRouter } from "./routes/conversations";
 import { createFeaturesRouter } from "./routes/features";
+import { createProjectContextsRouter } from "./routes/project-contexts";
 import { createProjectsRouter } from "./routes/projects";
 import { createRunsRouter } from "./routes/runs";
 import { createSettingsRouter } from "./routes/settings";
@@ -30,6 +31,7 @@ app.route("/", createProjectsRouter());
 app.route("/", createSpecsRouter());
 app.route("/", createRunsRouter());
 app.route("/", createConversationsRouter());
+app.route("/", createProjectContextsRouter());
 app.route("/", createFeaturesRouter());
 app.route("/", createSettingsRouter());
 

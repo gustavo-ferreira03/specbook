@@ -1,4 +1,13 @@
-import type { LlmCurrentSettings, LlmOAuthPoll, LlmOAuthStart, LlmRuntimeStatus, LlmSettingsResponse } from "./types";
+import type {
+    LlmCurrentSettings,
+    LlmOAuthPoll,
+    LlmOAuthStart,
+    LlmRuntimeStatus,
+    LlmSettingsResponse,
+    ProjectContext,
+    ProjectContextRevision,
+    ProjectContextState,
+} from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
 export const WS_URL = API_URL.replace(/^http/, "ws");
@@ -19,6 +28,45 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     }
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
+}
+
+export interface DiscoveryBriefInput {
+    goal?: string;
+    startUrl?: string;
+    maxActions?: number;
+    safetyNotes?: string[];
+}
+
+export function createContextDiscovery(
+    projectId: string,
+    brief: DiscoveryBriefInput,
+): Promise<{ revision: ProjectContextRevision; conversation: { id: string } }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/context-discoveries`, {
+        method: "POST",
+        body: JSON.stringify(brief),
+    });
+}
+
+export function getProjectContext(projectId: string): Promise<ProjectContextState> {
+    return api(`/projects/${encodeURIComponent(projectId)}/context`);
+}
+
+export function patchProjectContext(
+    revisionId: string,
+    patch: { context?: ProjectContext; maxActions?: number },
+): Promise<{ revision: ProjectContextRevision }> {
+    return api(`/project-contexts/${encodeURIComponent(revisionId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+    });
+}
+
+export function confirmProjectContext(revisionId: string): Promise<{ revision: ProjectContextRevision }> {
+    return api(`/project-contexts/${encodeURIComponent(revisionId)}/confirm`, { method: "POST" });
+}
+
+export function discardProjectContext(revisionId: string): Promise<{ revision: ProjectContextRevision }> {
+    return api(`/project-contexts/${encodeURIComponent(revisionId)}/discard`, { method: "POST" });
 }
 
 export function getLlmSettings(): Promise<LlmSettingsResponse> {

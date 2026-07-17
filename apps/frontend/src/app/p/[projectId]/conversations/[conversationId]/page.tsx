@@ -1,8 +1,9 @@
 "use client";
 
 import { Suspense, use, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowUp, ExternalLink, Monitor, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowUp, Compass, ExternalLink, Monitor, RefreshCw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { LogoMark } from "@/components/LogoMark";
@@ -65,7 +66,7 @@ function LiveBrowserCard({ sessionId }: { sessionId: string }) {
     );
 }
 
-function ConversationContent({ conversationId }: { conversationId: string }) {
+function ConversationContent({ projectId, conversationId }: { projectId: string; conversationId: string }) {
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
     const [state, setState] = useState<ConversationState | null>(null);
@@ -76,6 +77,8 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
     const [browserError, setBrowserError] = useState("");
     const [browserAttempt, setBrowserAttempt] = useState(0);
     const [sending, setSending] = useState(false);
+    const [beginning, setBeginning] = useState(false);
+    const [beginError, setBeginError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -138,8 +141,18 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
         return () => container.removeEventListener("scroll", handleScroll);
     }, [state?.messages.length]);
 
+    const discovery = state?.mode === "discovery";
+    const revisionInfo = state?.contextRevision ?? null;
+    const discoveryTerminal = discovery && revisionInfo ? revisionInfo.status !== "draft" : false;
+    const budgetExhausted =
+        discovery && revisionInfo ? revisionInfo.actionsUsed >= revisionInfo.brief.maxActions : false;
+    const discoveryComposerLocked = budgetExhausted && Boolean(revisionInfo?.hasProposal);
+    const awaitingDiscoveryStart =
+        discovery && state !== null && state.messages.length === 0 && !state.busy && !discoveryTerminal;
+
     useEffect(() => {
         if (!state || state.vncSessionId) return;
+        if (state.mode === "discovery" && state.messages.length === 0 && !state.busy) return;
         const key = `${conversationId}:${browserAttempt}`;
         if (browserStartRef.current === key) return;
         browserStartRef.current = key;
@@ -157,6 +170,31 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
             active = false;
         };
     }, [browserAttempt, conversationId, state]);
+
+    async function beginDiscovery() {
+        if (beginning) return;
+        setBeginning(true);
+        setBeginError("");
+        try {
+            const browser = await api<{ vncSessionId: string }>(`/conversations/${conversationId}/browser`, {
+                method: "POST",
+            });
+            await api<{ ok: true }>(`/conversations/${conversationId}/message`, {
+                method: "POST",
+                body: JSON.stringify({
+                    text: "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes and the action budget, then propose the project context.",
+                }),
+            });
+            stickToBottomRef.current = true;
+            setState((current) =>
+                current ? { ...current, vncSessionId: browser.vncSessionId, busy: true } : current,
+            );
+        } catch (error) {
+            setBeginError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setBeginning(false);
+        }
+    }
 
     async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -229,6 +267,22 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
                 }
             />
 
+            {discovery && revisionInfo && (
+                <div className="shrink-0 border-b border-line bg-surface-soft px-4 py-2" role="note" aria-label="Project discovery status">
+                    <div className="mx-auto flex max-w-[780px] flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem]">
+                        <span className="flex items-center gap-1.5 font-bold"><Compass size={13} className="text-ink-faint" /> Project discovery</span>
+                        <span className="min-w-0 flex-1 truncate text-ink-soft" title={revisionInfo.brief.goal}>{revisionInfo.brief.goal}</span>
+                        <span className="shrink-0 text-ink-faint">{revisionInfo.actionsUsed}/{revisionInfo.brief.maxActions} actions</span>
+                        {revisionInfo.hasProposal && revisionInfo.status === "draft" && (
+                            <Link href={`/p/${projectId}`} className="shrink-0 font-bold underline underline-offset-2">Review project context</Link>
+                        )}
+                        {!revisionInfo.hasProposal && (
+                            <Link href={`/p/${projectId}`} className="shrink-0 text-ink-faint underline underline-offset-2">Project overview</Link>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {pollError && (
                 <Alert variant="destructive" className="shrink-0 rounded-none border-b border-danger/15 px-4 py-2 text-xs" role="alert">
                     <div className="mx-auto flex max-w-[780px] items-center gap-2">
@@ -242,7 +296,25 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
             <ScrollArea ref={scrollRef} role="log" aria-live="polite" className="min-h-0 flex-1">
                 <div className="px-4 py-6 sm:px-7 sm:py-8">
                     <div className="mx-auto w-full max-w-[780px]">
-                        {state.messages.length === 0 && !state.busy && (
+                        {awaitingDiscoveryStart && revisionInfo && (
+                            <div className="py-6 sm:py-10">
+                                <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Project discovery</p>
+                                <h2 className="mt-2 text-xl font-bold tracking-[-0.025em] text-balance">Ready to explore this application</h2>
+                                <p className="mt-3 max-w-[58ch] text-[0.75rem] leading-5 text-ink-soft">
+                                    The agent will browse from <span className="font-mono text-[0.6875rem] [overflow-wrap:anywhere]">{revisionInfo.brief.startUrl}</span> with up to {revisionInfo.brief.maxActions} browser actions, following the saved goal, and draft a project context for your review.
+                                </p>
+                                {beginError && (
+                                    <Alert variant="destructive" className="mt-4 max-w-md text-xs" role="alert">
+                                        <AlertDescription>{beginError}</AlertDescription>
+                                    </Alert>
+                                )}
+                                <Button type="button" onClick={() => void beginDiscovery()} disabled={beginning} className="mt-6">
+                                    <Compass size={14} /> {beginning ? "Starting..." : "Begin discovery"}
+                                </Button>
+                            </div>
+                        )}
+
+                        {!discovery && state.messages.length === 0 && !state.busy && (
                             <div className="py-6 sm:py-10">
                                 <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">New conversation</p>
                                 <h2 className="mt-2 text-xl font-bold tracking-[-0.025em] text-balance">What should this application do?</h2>
@@ -304,6 +376,28 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
 
             <div className="shrink-0 border-t border-line bg-surface px-3 pt-3 pb-[max(14px,env(safe-area-inset-bottom))] sm:px-6 sm:pt-4">
                 <div className="mx-auto w-full max-w-[780px]">
+                    {discoveryTerminal && revisionInfo && (
+                        <Alert className="mb-2 text-xs" role="status">
+                            <AlertDescription>
+                                This discovery is closed: its context was {revisionInfo.status}.{" "}
+                                <Link href={`/p/${projectId}`} className="font-bold underline underline-offset-2">Open the project overview</Link> to see the current context.
+                            </AlertDescription>
+                        </Alert>
+                    )}
+                    {!discoveryTerminal && budgetExhausted && (
+                        <Alert className="mb-2 text-xs" role="status">
+                            <AlertDescription>
+                                {revisionInfo?.hasProposal ? (
+                                    <>
+                                        The discovery used all {revisionInfo.brief.maxActions} browser actions.{" "}
+                                        <Link href={`/p/${projectId}`} className="font-bold underline underline-offset-2">Review the drafted context</Link> on the project overview.
+                                    </>
+                                ) : (
+                                    <>The discovery used all {revisionInfo?.brief.maxActions} browser actions without saving a draft. Ask the agent to save its current findings.</>
+                                )}
+                            </AlertDescription>
+                        </Alert>
+                    )}
                     {sendError && (
                         <Alert variant="destructive" className="mb-2 flex items-start gap-2 bg-transparent p-0 text-xs leading-5" role="alert">
                             <AlertCircle size={13} className="mt-1 shrink-0" />
@@ -329,13 +423,22 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
                                         }
                                     }}
                                     rows={1}
-                                    placeholder="Describe what to explore or verify..."
+                                    disabled={discoveryTerminal || discoveryComposerLocked}
+                                    placeholder={
+                                        discoveryTerminal
+                                            ? "This discovery is closed"
+                                            : discoveryComposerLocked
+                                              ? "The discovery action budget is used up"
+                                              : discovery
+                                                ? "Guide the discovery or ask about what was found..."
+                                                : "Describe what to explore or verify..."
+                                    }
                                     className="max-h-28 min-h-10 resize-none rounded-none border-0 bg-transparent px-2 py-2 text-[0.78125rem] leading-5 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0"
                                 />
                             </Label>
                             <Button
                                 type="submit"
-                                disabled={!text.trim() || state.busy || sending}
+                                disabled={!text.trim() || state.busy || sending || discoveryTerminal || discoveryComposerLocked}
                                 size="icon-lg"
                                 className="rounded-[9px] disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-35"
                                 aria-label="Send message"
@@ -344,7 +447,11 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
                             </Button>
                         </div>
                     </form>
-                    <p className="mt-1.5 hidden text-center text-[0.59375rem] text-ink-faint sm:block">The agent can browse the application and create or update Specs.</p>
+                    <p className="mt-1.5 hidden text-center text-[0.59375rem] text-ink-faint sm:block">
+                        {discovery
+                            ? "The agent explores within the allowed origin and drafts project context. It cannot create Specs here."
+                            : "The agent can browse the application and create or update Specs."}
+                    </p>
                 </div>
             </div>
         </div>
@@ -352,10 +459,10 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
 }
 
 export default function ConversationPage({ params }: { params: Promise<{ projectId: string; conversationId: string }> }) {
-    const { conversationId } = use(params);
+    const { projectId, conversationId } = use(params);
     return (
         <Suspense fallback={<span className="sr-only" role="status">Loading conversation</span>}>
-            <ConversationContent conversationId={conversationId} />
+            <ConversationContent projectId={projectId} conversationId={conversationId} />
         </Suspense>
     );
 }

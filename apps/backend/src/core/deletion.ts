@@ -5,6 +5,7 @@ import { beginConversationDeletion, cancelConversationDeletion, removeConversati
 import { runsDir, specsDir } from "./paths";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
 import { deleteConversationRow, getConversationRow } from "../repositories/conversations";
+import { discardDraftForConversation } from "../repositories/project-contexts";
 import { deleteFeatureWithRelations, getFeatureDeletionSpecIds } from "../repositories/features";
 import { deleteSpecWithRelations } from "../repositories/specs";
 
@@ -38,6 +39,7 @@ export async function deleteConversationData(id: string): Promise<boolean> {
     if (!beginConversationDeletion(id)) throw new ResourceBusyError("Wait for the agent to finish before deleting this conversation");
     try {
         await blockConversationBrowser(id);
+        await discardDraftForConversation(id);
         await deleteConversationRow(id);
     } catch (error) {
         cancelConversationBrowserDeletion(id);

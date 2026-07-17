@@ -65,6 +65,54 @@ export interface ChatMessage {
     createdAt: string;
 }
 
+export type ConversationMode = "standard" | "discovery";
+export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
+
+export interface DiscoveryBrief {
+    goal: string;
+    startUrl: string;
+    maxActions: number;
+    safetyNotes: string[];
+}
+
+export interface ProjectContext {
+    summary: string;
+    areas: { name: string; routes: string[]; description: string }[];
+    terminology: { term: string; meaning: string }[];
+    roles: { name: string; capabilities: string[] }[];
+    businessRules: string[];
+    uiPatterns: string[];
+    executionNotes: string[];
+    unknowns: string[];
+    sources: { url: string; note: string }[];
+}
+
+export interface ProjectContextRevision {
+    id: string;
+    projectId: string;
+    sourceConversationId: string | null;
+    status: ProjectContextStatus;
+    brief: DiscoveryBrief;
+    context: ProjectContext;
+    actionsUsed: number;
+    createdAt: string;
+    updatedAt: string;
+    confirmedAt: string | null;
+}
+
+export interface ProjectContextState {
+    confirmed: ProjectContextRevision | null;
+    draft: ProjectContextRevision | null;
+}
+
+export interface ConversationContextRevision {
+    id: string;
+    status: ProjectContextStatus;
+    brief: DiscoveryBrief;
+    actionsUsed: number;
+    hasProposal: boolean;
+}
+
 export interface Conversation {
     id: string;
     title: string;
@@ -77,6 +125,8 @@ export interface ConversationState {
     busy: boolean;
     vncSessionId: string | null;
     projectId: string;
+    mode: ConversationMode;
+    contextRevision: ConversationContextRevision | null;
 }
 
 export interface ArtifactListing {

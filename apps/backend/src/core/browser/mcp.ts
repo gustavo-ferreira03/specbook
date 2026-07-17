@@ -25,6 +25,12 @@ const ALLOWED_TOOLS = new Set([
     "browser_tabs",
 ]);
 
+export interface BrowserToolPolicy {
+    allowedTools?: ReadonlySet<string>;
+    beforeCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>;
+    afterCall?: (toolName: string, args: Record<string, unknown>, result: string) => Promise<void>;
+}
+
 export interface BrowserMcp {
     client: Client;
     tools: { name: string; description?: string; inputSchema: unknown }[];
@@ -116,21 +122,43 @@ function inlineSnapshots(text: string, workDir: string): Promise<string> {
     });
 }
 
-async function renderMcpResult(result: { content?: unknown }, workDir: string): Promise<string> {
+function extractMcpText(result: { content?: unknown }): string {
     const content = Array.isArray(result.content)
         ? (result.content as { type?: string; text?: string }[])
         : [];
-    const text = content
+    return content
         .filter((item) => item.type === "text" && typeof item.text === "string")
         .map((item) => item.text)
         .join("\n")
         .trim();
-    return inlineSnapshots(text, workDir);
 }
 
-export function bridgeBrowserTools(mcp: BrowserMcp, workDir: string): ReturnType<typeof defineTool>[] {
+async function renderMcpResult(result: { content?: unknown }, workDir: string): Promise<string> {
+    return inlineSnapshots(extractMcpText(result), workDir);
+}
+
+export async function getActiveTabUrl(mcp: BrowserMcp): Promise<string | null> {
+    try {
+        const result = await mcp.client.callTool({ name: "browser_tabs", arguments: { action: "list" } });
+        const text = extractMcpText(result as { content?: unknown });
+        const pageUrl = text.match(/^- Page URL: (\S+)/m);
+        if (pageUrl) return pageUrl[1];
+        const currentTab = text.split("\n").find((line) => line.includes("(current)"));
+        const listedUrl = currentTab?.match(/\]\((\S+)\)/);
+        return listedUrl ? listedUrl[1] : null;
+    } catch {
+        return null;
+    }
+}
+
+export function bridgeBrowserTools(
+    mcp: BrowserMcp,
+    workDir: string,
+    policy?: BrowserToolPolicy,
+): ReturnType<typeof defineTool>[] {
     return mcp.tools
         .filter((tool) => ALLOWED_TOOLS.has(tool.name))
+        .filter((tool) => !policy?.allowedTools || policy.allowedTools.has(tool.name))
         .map((tool) =>
             defineTool({
                 name: tool.name,
@@ -141,22 +169,35 @@ export function bridgeBrowserTools(mcp: BrowserMcp, workDir: string): ReturnType
                 ),
                 async execute(_id, params) {
                     const args = (params ?? {}) as Record<string, unknown>;
+                    const toolError = (text: string) => ({
+                        content: [{ type: "text" as const, text }],
+                        details: undefined,
+                        terminate: false,
+                    });
+                    if (policy?.beforeCall) {
+                        try {
+                            await policy.beforeCall(tool.name, args);
+                        } catch (error) {
+                            return toolError(error instanceof Error ? error.message : String(error));
+                        }
+                    }
                     try {
                         const result = await mcp.client.callTool({ name: tool.name, arguments: args });
                         const text = await renderMcpResult(result as { content?: unknown }, workDir);
+                        if (policy?.afterCall) {
+                            try {
+                                await policy.afterCall(tool.name, args, text);
+                            } catch (error) {
+                                return toolError(error instanceof Error ? error.message : String(error));
+                            }
+                        }
                         return {
                             content: [{ type: "text" as const, text: text || "(no output)" }],
                             details: undefined,
                             terminate: false,
                         };
                     } catch (error) {
-                        return {
-                            content: [
-                                { type: "text" as const, text: `browser tool failed: ${String(error)}` },
-                            ],
-                            details: undefined,
-                            terminate: false,
-                        };
+                        return toolError(`browser tool failed: ${String(error)}`);
                     }
                 },
             }),

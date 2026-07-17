@@ -8,6 +8,13 @@
       "when": 1784255894157,
       "tag": "0000_fat_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784259172522,
+      "tag": "0001_wide_gravity",
+      "breakpoints": true
     }
   ]
 }
