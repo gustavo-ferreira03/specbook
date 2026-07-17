@@ -3,6 +3,7 @@ import path from "node:path";
 import { blockConversationBrowser, cancelConversationBrowserDeletion, removeConversationBrowserData } from "./browser/sessions";
 import { beginConversationDeletion, cancelConversationDeletion, removeConversationSession } from "./chat/session";
 import { runsDir, specsDir } from "./paths";
+import { getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
 import { deleteConversationRow, getConversationRow } from "../repositories/conversations";
 import { discardDraftForConversation } from "../repositories/project-contexts";
@@ -28,10 +29,20 @@ async function removeEntityDirectories(root: string, ids: string[]): Promise<voi
 }
 
 async function removeSpecResources(specIds: string[], runIds: string[]): Promise<void> {
+    const batchIds = new Set<string>();
+    for (const runId of runIds) {
+        try {
+            const link = JSON.parse(await fs.readFile(path.join(entityDirectory(runsDir, runId), "batch.json"), "utf8")) as { batchId?: unknown };
+            if (typeof link.batchId === "string") batchIds.add(link.batchId);
+        } catch {}
+    }
     await Promise.all([
         removeEntityDirectories(specsDir, specIds),
         removeEntityDirectories(runsDir, runIds),
     ]);
+    for (const batchId of batchIds) {
+        await fs.rm(getRunBatchDirectory(batchId), { recursive: true, force: true });
+    }
 }
 
 export async function deleteConversationData(id: string): Promise<boolean> {

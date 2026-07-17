@@ -138,6 +138,28 @@ export interface RunEvidence {
     steps: { number: number; label: string; file: string }[];
     video: string | null;
     reportAvailable: boolean;
+    reportUrl: string | null;
+}
+
+export interface RunBatchItem {
+    runId: string;
+    specId: string;
+    specVersionId: string;
+    title: string;
+    status: RunStatus;
+    durationMs: number | null;
+    failReason: string | null;
+}
+
+export interface RunBatch {
+    id: string;
+    projectId: string;
+    label: string;
+    status: RunStatus;
+    startedAt: string;
+    durationMs: number | null;
+    failReason: string | null;
+    specs: RunBatchItem[];
 }
 
 export type LlmAuthMethod = "oauth" | "api_key";

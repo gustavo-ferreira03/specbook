@@ -114,7 +114,10 @@ export function namedRobotStepsError(source: string): string | null {
     return calls > 0 ? null : "Robot Test Case must call at least one named user keyword.";
 }
 
-export function instrumentRobotSource(source: string): { source: string; steps: PlannedEvidenceStep[] } {
+export function instrumentRobotSource(
+    source: string,
+    paths: { evidence?: string; video?: string } = {},
+): { source: string; steps: PlannedEvidenceStep[] } {
     const lines = source.split(/\r?\n/);
     const captures = new Map<number, PlannedEvidenceStep[]>();
     const steps: PlannedEvidenceStep[] = [];
@@ -125,6 +128,8 @@ export function instrumentRobotSource(source: string): { source: string; steps: 
     let pageReady = false;
     let browserLine = -1;
     let contextPresent = false;
+    const evidencePath = paths.evidence ?? "evidence";
+    const videoPath = paths.video ?? "video";
 
     for (let index = 0; index < lines.length; index += 1) {
         const section = /^\*{3}\s*(.*?)\s*\*{3}$/.exec(lines[index].trim());
@@ -162,11 +167,11 @@ export function instrumentRobotSource(source: string): { source: string; steps: 
         instrumented.push(line);
         const indentation = /^\s*/.exec(line)?.[0] || "    ";
         if (index === browserLine && !contextPresent) {
-            instrumented.push(`${indentation}Run Keyword And Ignore Error    New Context    recordVideo={'dir': '\${OUTPUT DIR}/video', 'size': {'width': 1280, 'height': 720}}`);
+            instrumented.push(`${indentation}Run Keyword And Ignore Error    New Context    recordVideo={'dir': '\${OUTPUT DIR}/${videoPath}', 'size': {'width': 1280, 'height': 720}}`);
         }
         for (const step of captures.get(index) ?? []) {
             const filename = path.posix.basename(step.file);
-            instrumented.push(`${indentation}Run Keyword And Ignore Error    Take Screenshot    \${OUTPUT DIR}/evidence/${filename}`);
+            instrumented.push(`${indentation}Run Keyword And Ignore Error    Take Screenshot    \${OUTPUT DIR}/${evidencePath}/${filename}`);
         }
     }
     return { source: instrumented.join("\n"), steps };

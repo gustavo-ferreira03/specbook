@@ -92,9 +92,9 @@ function VerificationDetails({
     const evidence = loaded?.data;
     return (
         <div className="px-4 py-4 sm:px-5">
-            {showReport && evidence?.reportAvailable && (
+            {showReport && evidence?.reportUrl && (
                 <div className="mb-3 flex justify-end">
-                    <Button asChild variant="ghost" size="sm" className="text-ink-soft"><a href={artifactUrl(run.id, "report.html")} target="_blank" rel="noreferrer">Report <ExternalLink size={10} /></a></Button>
+                    <Button asChild variant="ghost" size="sm" className="text-ink-soft"><a href={`${API_URL}${evidence.reportUrl}`} target="_blank" rel="noreferrer">Report <ExternalLink size={10} /></a></Button>
                 </div>
             )}
             {run.status === "passed" && evidence?.expectedResult && (
@@ -129,9 +129,9 @@ function VerificationHeader({ run, loaded, collapsible = false }: { run: Run; lo
                 <p className="mt-1.5 text-[0.6875rem] text-ink-soft">{verificationSentence(run)}</p>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-                {!collapsible && loaded?.data?.reportAvailable && (
+                {!collapsible && loaded?.data?.reportUrl && (
                     <Button asChild variant="ghost" size="sm" className="text-ink-soft">
-                        <a href={artifactUrl(run.id, "report.html")} target="_blank" rel="noreferrer">Report <ExternalLink size={10} /></a>
+                        <a href={`${API_URL}${loaded.data.reportUrl}`} target="_blank" rel="noreferrer">Report <ExternalLink size={10} /></a>
                     </Button>
                 )}
                 {collapsible && <ChevronDown size={14} className="text-ink-faint transition-transform group-data-[state=open]/run:rotate-180" />}

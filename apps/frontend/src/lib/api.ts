@@ -7,6 +7,7 @@ import type {
     ProjectContext,
     ProjectContextRevision,
     ProjectContextState,
+    RunBatch,
 } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -67,6 +68,17 @@ export function confirmProjectContext(revisionId: string): Promise<{ revision: P
 
 export function discardProjectContext(revisionId: string): Promise<{ revision: ProjectContextRevision }> {
     return api(`/project-contexts/${encodeURIComponent(revisionId)}/discard`, { method: "POST" });
+}
+
+export function startRunBatch(projectId: string, specIds: string[], label: string): Promise<{ batch: RunBatch }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/run-batches`, {
+        method: "POST",
+        body: JSON.stringify({ specIds, label }),
+    });
+}
+
+export function getRunBatch(batchId: string): Promise<{ batch: RunBatch; reportUrl: string | null }> {
+    return api(`/run-batches/${encodeURIComponent(batchId)}`);
 }
 
 export function getLlmSettings(): Promise<LlmSettingsResponse> {

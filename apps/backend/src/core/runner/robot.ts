@@ -86,13 +86,15 @@ function terminateProcessTree(proc: ChildProcess): void {
     } catch {}
 }
 
-async function runRobotProcess(
+export async function runRobotProcess(
     workDir: string,
     outputDir: string,
     baseUrl: string,
+    target = "spec.robot",
+    timeoutMs = RUN_TIMEOUT_MS,
 ): Promise<{ code: number | null; output: string; timedOut: boolean }> {
     return new Promise((resolve, reject) => {
-        const proc = spawn("robot", ["--outputdir", outputDir, "--variable", `BASE_URL:${baseUrl}`, "spec.robot"], {
+        const proc = spawn("robot", ["--outputdir", outputDir, "--variable", `BASE_URL:${baseUrl}`, target], {
             cwd: workDir,
             detached: process.platform === "linux",
             stdio: ["ignore", "pipe", "pipe"],
@@ -109,7 +111,7 @@ async function runRobotProcess(
         const timer = setTimeout(() => {
             terminateProcessTree(proc);
             finish({ code: null, output, timedOut: true });
-        }, RUN_TIMEOUT_MS);
+        }, timeoutMs);
         proc.stdout.on("data", (data: Buffer) => (output += data.toString()));
         proc.stderr.on("data", (data: Buffer) => (output += data.toString()));
         proc.once("error", (error) => {

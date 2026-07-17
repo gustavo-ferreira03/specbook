@@ -10,18 +10,21 @@ import {
     FileCheck2,
     Folder,
     FolderOpen,
+    LoaderCircle,
     Menu,
     MessageSquare,
+    Play,
     Plus,
     RefreshCw,
     Settings,
     Trash2,
     X,
 } from "lucide-react";
-import { api, getLlmRuntimeStatus } from "@/lib/api";
-import type { Conversation, Feature, Project, SpecSummary } from "@/lib/types";
+import { API_URL, api, getLlmRuntimeStatus, getRunBatch, startRunBatch } from "@/lib/api";
+import type { Conversation, Feature, Project, RunBatch, SpecSummary } from "@/lib/types";
 import { ConfirmDeleteDialog } from "./ConfirmDeleteDialog";
 import { LogoMark } from "./LogoMark";
+import { SpecRunDialog, type SpecBatchItem } from "./SpecRunDialog";
 import { StatusDot } from "./StatusDot";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -80,7 +83,13 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
     const [deletingItem, setDeletingItem] = useState(false);
     const [deleteError, setDeleteError] = useState("");
+    const [batchOpen, setBatchOpen] = useState(false);
+    const [batchTitle, setBatchTitle] = useState("Run Specs");
+    const [batchItems, setBatchItems] = useState<SpecBatchItem[]>([]);
+    const [batchRunning, setBatchRunning] = useState(false);
+    const [batchReportUrl, setBatchReportUrl] = useState<string | null>(null);
     const deleteTriggerRef = useRef<HTMLElement | null>(null);
+    const batchActiveRef = useRef(false);
 
     useEffect(() => {
         localStorage.setItem("specbook:last-project", projectId);
@@ -248,6 +257,59 @@ export function Sidebar({ projectId }: { projectId: string }) {
         }
     }
 
+    async function runSpecBatch(title: string, selectedSpecs: SpecSummary[]) {
+        if (batchActiveRef.current || selectedSpecs.length === 0) {
+            if (batchActiveRef.current) setBatchOpen(true);
+            return;
+        }
+        batchActiveRef.current = true;
+        setBatchTitle(title);
+        setBatchItems(selectedSpecs.map((spec) => ({
+            specId: spec.id,
+            title: spec.title,
+            status: "running",
+            durationMs: null,
+            failReason: null,
+        })));
+        setBatchReportUrl(null);
+        setBatchRunning(true);
+        setBatchOpen(true);
+
+        try {
+            const applyBatch = (batch: RunBatch) => {
+                setBatchItems(batch.specs.map((item) => ({
+                    specId: item.specId,
+                    title: item.title,
+                    status: item.status,
+                    durationMs: item.durationMs,
+                    failReason: item.failReason,
+                })));
+                setSpecs((current) => current.map((spec) => {
+                    const result = batch.specs.find((item) => item.specId === spec.id);
+                    return result?.status === "passed" || result?.status === "failed"
+                        ? { ...spec, status: result.status }
+                        : spec;
+                }));
+            };
+            let { batch } = await startRunBatch(projectId, selectedSpecs.map((spec) => spec.id), title);
+            applyBatch(batch);
+            do {
+                if (batch.status === "running") await new Promise((resolve) => window.setTimeout(resolve, 750));
+                const result = await getRunBatch(batch.id);
+                batch = result.batch;
+                applyBatch(batch);
+                setBatchReportUrl(result.reportUrl ? `${API_URL}${result.reportUrl}` : null);
+            } while (batch.status === "running");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setBatchItems((current) => current.map((item) => item.status === "running" ? { ...item, status: "error", failReason: message } : item));
+        } finally {
+            batchActiveRef.current = false;
+            setBatchRunning(false);
+            setRefreshKey((key) => key + 1);
+        }
+    }
+
     function renderSpec(spec: SpecSummary, depth: number) {
         const href = `/p/${projectId}/specs/${spec.id}`;
         const selected = pathname === href;
@@ -269,6 +331,22 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         <span className="min-w-0 flex-1 break-words text-left leading-4">{spec.title}</span>
                     </Link>
                 </Button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => void runSpecBatch(`Run ${spec.title}`, [spec])}
+                            disabled={batchRunning}
+                            className="text-ink-faint opacity-70 hover:text-ink group-hover:opacity-100 focus:opacity-100"
+                            aria-label={`Run Spec ${spec.title}`}
+                        >
+                            <Play size={12} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Run Spec</TooltipContent>
+                </Tooltip>
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -305,6 +383,25 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <Badge variant="secondary" className="px-1.5 py-0.5 text-[0.5625rem] text-ink-faint">{count}</Badge>
                         </Button>
                     </CollapsibleTrigger>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => {
+                                    const featureIds = featureDeletionIds(feature.id);
+                                    void runSpecBatch(`Run ${feature.title}`, specs.filter((spec) => featureIds.has(spec.featureId)));
+                                }}
+                                disabled={batchRunning || count === 0}
+                                className="text-ink-faint opacity-70 hover:text-ink group-hover:opacity-100 focus:opacity-100"
+                                aria-label={`Run all Specs in feature ${feature.title}`}
+                            >
+                                <Play size={12} />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Run feature</TooltipContent>
+                    </Tooltip>
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
@@ -480,8 +577,19 @@ export function Sidebar({ projectId }: { projectId: string }) {
 
                     <TabsContent value="specs" className="data-[state=active]:flex data-[state=active]:flex-col">
                         {renderLoadError()}
-                        <div className="flex h-12 shrink-0 items-center px-[14px]">
+                        <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-[14px]">
                             <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Specs</span>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => batchRunning ? setBatchOpen(true) : void runSpecBatch("Run all Specs", specs)}
+                                disabled={specs.length === 0}
+                                className="text-ink-soft"
+                            >
+                                {batchRunning ? <LoaderCircle size={12} className="animate-spin motion-reduce:animate-none" /> : <Play size={12} />}
+                                {batchRunning ? "View run" : "Run all"}
+                            </Button>
                         </div>
                         <ScrollArea className="min-h-0 flex-1">
                             <div className="w-full min-w-0 overflow-hidden px-[9px] pb-3">
@@ -574,6 +682,14 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     setDeleteError("");
                 }}
                 onConfirm={() => void deleteItem()}
+            />
+            <SpecRunDialog
+                open={batchOpen}
+                onOpenChange={setBatchOpen}
+                title={batchTitle}
+                items={batchItems}
+                running={batchRunning}
+                reportUrl={batchReportUrl}
             />
         </>
     );
