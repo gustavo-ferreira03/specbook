@@ -538,11 +538,11 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                     const selected = pathname === href;
                                     return (
                                         <div key={conversation.id} className={`group mb-0.5 flex items-center rounded-[9px] transition-colors ${selected ? "bg-surface-selected" : "hover:bg-surface-hover"}`}>
-                                            <Button asChild variant="ghost" className="block h-auto min-w-0 flex-1 whitespace-normal rounded-[9px] px-2.5 py-2.5 text-left hover:bg-transparent">
+                                            <Button asChild variant="ghost" className="block h-auto min-w-0 flex-1 overflow-hidden whitespace-normal rounded-[9px] px-2.5 py-2.5 text-left hover:bg-transparent">
                                                 <Link href={href} aria-current={selected ? "page" : undefined}>
-                                                    <span className="flex items-center gap-2">
+                                                    <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                                                         <span className={`size-2 shrink-0 rounded-full ${selected ? "bg-primary" : "bg-ink-disabled"}`} />
-                                                        <span className={`min-w-0 flex-1 truncate text-[0.78125rem] ${selected ? "font-bold text-ink" : "font-semibold text-ink-soft"}`}>{conversation.title}</span>
+                                                        <span className={`block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] ${selected ? "font-bold text-ink" : "font-semibold text-ink-soft"}`}>{conversation.title}</span>
                                                     </span>
                                                     <span className="mt-1 block truncate pl-4 text-[0.625rem] font-normal text-ink-faint">Created {conversationDate(conversation.createdAt)}</span>
                                                 </Link>
