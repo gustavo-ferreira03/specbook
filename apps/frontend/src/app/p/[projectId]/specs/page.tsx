@@ -35,7 +35,7 @@ function StatTile({ label, value, tone }: { label: string; value: number; tone?:
     return (
         <div className="rounded-[13px] border border-line bg-surface p-4">
             <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">{label}</p>
-            <p className={`mt-1.5 text-2xl font-bold tracking-[-0.02em] ${toneClass}`}>{value}</p>
+            <p className={`mt-1.5 text-xl font-bold tracking-[-0.02em] tabular-nums ${toneClass}`}>{value}</p>
         </div>
     );
 }
@@ -138,6 +138,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const orderedSpecs = [...specs].sort((a, b) => listPriority[a.status] - listPriority[b.status]);
 
     const passRate = specs.length > 0 ? Math.round((counts.passed / specs.length) * 100) : 0;
+    const passRateTone = counts.failed > 0 ? "text-danger" : counts.unverified > 0 ? "text-pending" : "text-success";
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
@@ -153,7 +154,9 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
                     <div className="rounded-[13px] border border-line bg-surface p-4">
                         <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Status breakdown</p>
-                        <p className="mt-1 text-xs text-ink-soft">{passRate}% of Specs are passing</p>
+                        <p className="mt-1 text-xs text-ink-soft">
+                            <span className={`font-bold ${passRateTone}`}>{passRate}%</span> of Specs are passing
+                        </p>
                         <ChartContainer config={STATUS_CHART_CONFIG} className="mx-auto mt-3 aspect-square max-h-[170px]">
                             <PieChart>
                                 <ChartTooltip content={<ChartTooltipContent nameKey="status" hideLabel />} />
