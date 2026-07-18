@@ -8,8 +8,7 @@
         "browser:install:docker": "node scripts/install-mcp-browser.mjs --with-deps",
         "db:generate": "drizzle-kit generate",
         "db:migrate": "drizzle-kit migrate",
-        "start": "node dist/index.js",
-        "test": "vitest run"
+        "start": "node dist/index.js"
     },
     "dependencies": {
         "@earendil-works/pi-ai": "0.80.7",
@@ -35,7 +34,6 @@
         "drizzle-kit": "^0.31.10",
         "esbuild": "^0.25.12",
         "tsx": "^4.7.1",
-        "typescript": "^5.8.3",
-        "vitest": "^4.1.10"
+        "typescript": "^5.8.3"
     }
 }
