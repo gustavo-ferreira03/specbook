@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible problem in Specbook.
+title: "fix: "
+labels: [bug]
+body:
+    - type: textarea
+      id: problem
+      attributes:
+          label: What happened?
+          description: Describe the observed behavior and the expected result.
+      validations:
+          required: true
+
+    - type: textarea
+      id: reproduce
+      attributes:
+          label: Steps to reproduce
+          placeholder: |
+              1. Start Specbook with ...
+              2. Open ...
+              3. Click ...
+      validations:
+          required: true
+
+    - type: textarea
+      id: environment
+      attributes:
+          label: Environment
+          description: Include Specbook image/tag or commit, OS, browser, and provider/model when relevant.
+      validations:
+          required: true
+
+    - type: textarea
+      id: logs
+      attributes:
+          label: Logs or screenshots
+          description: Remove credentials, cookies, tokens, and private application data before attaching anything.

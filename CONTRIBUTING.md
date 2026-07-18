@@ -4,7 +4,7 @@ Specbook is early software. Small fixes, clearer docs, and focused behavior chan
 
 ## Local setup
 
-Development runs on Linux because the agent uses headed Chromium through Xvfb and x11vnc. Install Node.js 22.19+, pnpm 10.30.1, Python 3 with virtual environments, Xvfb, and x11vnc. Then run:
+Development runs on Linux because the agent uses headed Chromium through Xvfb and x11vnc. Install Node.js 26, pnpm 10.30.1, Python 3 with virtual environments, Xvfb, and x11vnc. Then run:
 
 ```bash
 pnpm install
@@ -36,3 +36,5 @@ Do not commit `apps/backend/storage`, provider credentials, browser profiles, or
 ## Pull requests
 
 Keep a pull request narrow, explain the user-visible behavior it changes, and update the README when installation, configuration, or container behavior changes. Database schema changes need a generated migration under `apps/backend/drizzle`.
+
+Use Conventional Commits for pull request titles and commits, such as `feat: add batch filtering` or `fix: retain chat selection`. Release Please uses these prefixes to prepare versioned releases and release notes.
