@@ -1,9 +1,6 @@
 services:
     app:
-        build:
-            context: .
-            args:
-                NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        image: ${SPECBOOK_IMAGE:-ghcr.io/gustavo-ferreira03/specbook:latest}
         init: true
         shm_size: "1gb"
         restart: unless-stopped
@@ -17,6 +14,12 @@ services:
             PI_OAUTH_CALLBACK_HOST: 0.0.0.0
         volumes:
             - specbook-storage:/app/apps/backend/storage
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "http://localhost:4000/health"]
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 60s
 
 volumes:
     specbook-storage:

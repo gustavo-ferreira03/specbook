@@ -1,69 +1,90 @@
 <div align="center">
   <img src="apps/frontend/public/specbook-chat-icon.svg" width="88" alt="Specbook logo">
   <h1>Specbook</h1>
-  <p><strong>Living, executable specs for web applications.</strong></p>
-  <p><a href="#quick-start">Quick start</a> &bull; <a href="#how-it-works">How it works</a> &bull; <a href="#local-development">Development</a> &bull; <a href="#configuration">Configuration</a></p>
+  <p><strong>Git-backed, executable specifications for web applications.</strong></p>
+  <p>
+    <a href="https://github.com/gustavo-ferreira03/specbook/actions/workflows/publish-image.yml"><img src="https://github.com/gustavo-ferreira03/specbook/actions/workflows/publish-image.yml/badge.svg" alt="Publish Docker image"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/gustavo-ferreira03/specbook" alt="MIT License"></a>
+    <a href="https://github.com/gustavo-ferreira03/specbook/pkgs/container/specbook"><img src="https://img.shields.io/badge/GHCR-specbook-2496ed?logo=docker&logoColor=white" alt="Docker image"></a>
+  </p>
+  <p><a href="#run-it">Run it</a> &bull; <a href="#what-you-get">What you get</a> &bull; <a href="#development">Development</a> &bull; <a href="#configuration">Configuration</a></p>
 </div>
 
-Specbook turns conversations about web application behavior into permanent, human-readable Specs. An AI agent explores your application in a visible Chromium window, asks for missing details, and creates executable checks without exposing test code in the normal workflow.
+Specbook turns a conversation about application behavior into a durable Spec that people can read, edit, review in Git, and run again. The agent works in a visible Chromium window while Robot Framework executes the saved check.
 
-Each Spec records its preconditions, steps, expected result, postconditions, verification status, immutable versions, run history, and evidence. Specbook is self-hosted and built for independent developers and small software teams.
+It is self-hosted. Your projects, credentials, chat history, source files, run evidence, and browser state stay in your own storage volume.
 
-## Features
+## Run it
 
-- **Browser-assisted authoring.** Watch the agent navigate and inspect the application while you describe a behavior in chat.
-- **Readable Specs.** Keep the expected behavior in plain language while Robot Framework runs behind the interface.
-- **Guided project discovery.** Let the agent map an application's areas, terms, roles, rules, and open questions; review the draft before later chats can use it.
-- **Recorded verification.** Inspect status, duration, failure details, screenshots, logs, Robot reports, and failure video where available.
-- **Single or batch runs.** Run one Spec, a Feature subtree, or the whole project in one Robot suite and one shared report.
-- **Local ownership.** Store projects, chats, browser profiles, provider credentials, Specs, and run artifacts on your own machine.
+You need [Docker Compose](https://docs.docker.com/compose/). The published image includes Chromium, Playwright MCP, Robot Framework, Browser Library, Xvfb, and x11vnc.
 
-## Quick start
-
-You need [Docker Compose](https://docs.docker.com/compose/).
+Download the Compose file and start Specbook:
 
 ```bash
-docker compose up --build
+curl -O https://raw.githubusercontent.com/gustavo-ferreira03/specbook/main/docker-compose.yml
+docker compose up -d
 ```
 
-Open [http://localhost:4001](http://localhost:4001), then go to **Settings** to connect an LLM provider and select a model. Specbook accepts API keys from its model registry and OAuth connections for Anthropic, OpenAI Codex, and GitHub Copilot.
+Open [http://localhost:4001](http://localhost:4001). In **Settings**, connect an LLM provider and select a model. Specbook accepts API keys from its model registry plus OAuth connections for Anthropic, OpenAI Codex, and GitHub Copilot.
 
-The API listens on [http://localhost:4000](http://localhost:4000). You can check it with:
+The frontend uses port `4001`; the internal API uses `4000`. Confirm that the service started:
 
 ```bash
 curl http://localhost:4000/health
 ```
 
-Docker Compose keeps the database and generated files in the `specbook-storage` volume. Rebuilding or replacing the container won't remove that volume.
+Compose persists all state in the named `specbook-storage` volume. Updating the image does not remove it:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+To build the image from a checkout instead of pulling GHCR:
+
+```bash
+docker build --build-arg NEXT_PUBLIC_API_URL=http://localhost:4000 -t specbook:local .
+SPECBOOK_IMAGE=specbook:local docker compose up -d
+```
 
 > [!WARNING]
-> Specbook has no application-level authentication. Docker Compose publishes the frontend, API, and OAuth callback ports on every host interface, so run it only on a trusted network or place it behind a firewall, VPN, IP allowlist, or authenticated reverse proxy.
+> Specbook has no application-level authentication. Compose exposes the frontend, API, and OAuth callback ports on every host interface. Run it on a trusted network, or place it behind a firewall, VPN, IP allowlist, or authenticated reverse proxy.
 
 > [!WARNING]
 > Chat content is stored in Specbook's persistent storage and sent to the selected LLM provider. Never paste passwords, verification codes, private keys, or application tokens into chat.
 
+## What you get
+
+- **Visible browser work.** Describe a flow while the agent inspects the application in a headed Chromium session that you can watch.
+- **Guided discovery.** Let the agent map areas, terminology, roles, rules, and unknowns before it writes a Spec.
+- **Readable files.** A Spec has a YAML document for its behavior and a Robot Framework file for execution. The UI exposes both for direct edits.
+- **Git as the source of truth.** Each project gets its own repository. Specs, Features, and confirmed context live in ordinary files, while SQLite indexes them for the application.
+- **Execution evidence.** Run one Spec, a Feature subtree, or a project; inspect status, duration, logs, Robot reports, screenshots, and failure video where available.
+
 ## How it works
 
-1. **Create a project** with the application's name and base URL.
-2. **Choose whether to explore first.** Guided discovery browses the application and drafts reusable project context. You can also skip it and start immediately.
-3. **Describe one behavior** in a chat while the agent operates the live browser.
-4. **Review the generated Spec.** Once the behavior is clear, the agent saves an immutable version and runs its Robot Framework executable.
-5. **Keep checking it.** Rerun the Spec from its page, run a Feature subtree, or execute the whole project; status and evidence remain attached to each Spec.
+1. Create a project with the application's base URL.
+2. Start discovery or a Spec chat. Discovery stays inside the project's origin and only performs read-oriented navigation.
+3. Describe a behavior while the agent uses the visible browser and asks for the details it needs.
+4. Review the generated files, commit their history in the project repository, then run the Spec whenever the application changes.
 
-### Guided discovery
+The project repository under `storage/repos/<project-id>` has this shape:
 
-Discovery can navigate, read, and follow safe links within the project's origin. It can't type into forms, accept dialogs, create Features or Specs, or trigger actions that change application data. Authentication walls remain unknown until protected credential entry is available.
-
-The resulting context covers the application summary, areas, terminology, roles, business rules, UI patterns, execution notes, unknowns, and source pages. It remains a draft until you edit and confirm it; only the latest confirmed revision reaches future Spec chats.
+```text
+context.yml
+features/<feature>/feature.yml
+specs/<feature>/<spec>/spec.yml
+specs/<feature>/<spec>/spec.robot
+```
 
 > [!NOTE]
-> Discovery's origin guard, action budget, deny list, and safety instructions reduce accidental actions, but they aren't a network sandbox. Use a disposable or staging environment when possible.
+> Discovery has an origin guard, action budget, deny list, and safety instructions. It is not a network sandbox, so prefer a disposable or staging application.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    UI[Next.js web app] -->|HTTP and WebSocket| API[Hono API]
+    UI[Next.js web app] -->|HTTP, SSE and WebSocket| API[Hono API]
     API --> Agent[Pi agent runtime]
     Agent --> Browser[Playwright MCP and Chromium]
     Browser -->|view-only VNC stream| UI
@@ -75,10 +96,10 @@ flowchart LR
 | Part | Responsibility |
 | --- | --- |
 | `apps/frontend` | Next.js 15 and React 19 interface, including chat, Spec pages, settings, and the noVNC browser viewer |
-| `apps/backend` | Hono REST API, WebSocket VNC proxy, LLM sessions, browser lifecycle, repositories, and run orchestration |
+| `apps/backend` | Hono API, SSE chat updates, WebSocket VNC proxy, LLM sessions, browser lifecycle, Git repositories, and run orchestration |
 | Playwright MCP | Headed Chromium used by the agent while exploring and authoring |
 | Robot Framework | Executes saved Specs with Browser Library and writes reports and evidence |
-| libSQL / SQLite | Stores projects, Features, Specs, versions, runs, and model selection |
+| Git and libSQL / SQLite | Git stores project files; SQLite indexes projects, Features, Specs, runs, and model selection |
 
 By default, local data lives in `apps/backend/storage`:
 
@@ -87,20 +108,20 @@ storage/
 ├── specbook.db       # Application database
 ├── pi-auth.json      # LLM provider credentials
 ├── chat/             # Chat sessions and browser profiles
-├── specs/            # Immutable Robot Framework source versions
+├── repos/            # One Git repository per project
 └── runs/             # Reports, logs, screenshots, video, and batch state
 ```
 
-## Local development
+## Development
 
-Local development currently targets Linux because headed browser sessions depend on Xvfb and x11vnc. Install:
+Local development targets Linux because headed browser sessions depend on Xvfb and x11vnc. Install:
 
 - Node.js 22.19 or newer
 - pnpm 10.30.1
 - Python 3 with virtual environment support
 - Xvfb and x11vnc
 
-Install the JavaScript packages and the Chromium revision used by Playwright MCP:
+Install packages and the Chromium revision used by Playwright MCP:
 
 ```bash
 pnpm install
@@ -113,7 +134,7 @@ On Debian or Ubuntu, install the display and VNC processes:
 sudo apt-get install xvfb x11vnc
 ```
 
-Set up Robot Framework and Browser Library:
+Create the Python environment for Robot Framework and Browser Library:
 
 ```bash
 python3 -m venv .venv
@@ -122,7 +143,7 @@ pip install -r requirements.txt
 rfbrowser init chromium
 ```
 
-Apply the database migrations, then start both applications:
+Apply database migrations, then start both applications:
 
 ```bash
 pnpm --filter backend db:migrate
@@ -143,7 +164,7 @@ The backend starts on port `4000`; the frontend starts on port `4001`. Keep the 
 | Generate a database migration | `pnpm --filter backend db:generate` |
 | Apply database migrations | `pnpm --filter backend db:migrate` |
 
-After changing `apps/backend/src/infra/db/schema.ts`, generate a migration and commit the resulting files under `apps/backend/drizzle`.
+After changing `apps/backend/src/infra/db/schema.ts`, generate a migration and commit the resulting files under `apps/backend/drizzle`. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Configuration
 
@@ -155,12 +176,16 @@ After changing `apps/backend/src/infra/db/schema.ts`, generate a migration and c
 | `PORT` | `4000` | Backend HTTP and WebSocket port. |
 | `SPECBOOK_STORAGE_DIR` | `apps/backend/storage` | Directory for the database, credentials, chats, Specs, and run artifacts. |
 
-For a deployment with public URLs, pass both origins when building and starting Compose:
+For a deployment with public URLs, build an image with the public API URL and set the backend's allowed frontend origin:
 
 ```bash
-NEXT_PUBLIC_API_URL=https://specbook-api.example.com \
+docker build \
+  --build-arg NEXT_PUBLIC_API_URL=https://specbook-api.example.com \
+  -t specbook:public .
+
+SPECBOOK_IMAGE=specbook:public \
 FRONTEND_ORIGIN=https://specbook.example.com \
-docker compose up --build
+docker compose up -d
 ```
 
 > [!IMPORTANT]
