@@ -18,9 +18,20 @@ import { createRunsRouter } from "./infra/web/routes/runs";
 import { createSettingsRouter } from "./infra/web/routes/settings";
 import { createSpecsRouter } from "./infra/web/routes/specs";
 
+function buildAllowedOrigins(frontendOrigin: string): Set<string> {
+    const allowed = new Set([frontendOrigin]);
+    try {
+        const url = new URL(frontendOrigin);
+        if (url.hostname === "localhost") allowed.add(`${url.protocol}//127.0.0.1:${url.port}`);
+        if (url.hostname === "127.0.0.1") allowed.add(`${url.protocol}//localhost:${url.port}`);
+    } catch {}
+    return allowed;
+}
+
 const app = new Hono();
 const frontendOrigin = process.env.FRONTEND_ORIGIN ?? "http://localhost:4001";
-app.use("*", cors({ origin: frontendOrigin }));
+const allowedOrigins = buildAllowedOrigins(frontendOrigin);
+app.use("*", cors({ origin: (origin) => (allowedOrigins.has(origin) ? origin : undefined) }));
 app.onError((err, c) => {
     if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
     console.error(err);
@@ -80,7 +91,7 @@ wss.on("connection", (websocket, request) => {
 server.on("upgrade", (request, socket, head) => {
     if (
         !request.url?.startsWith("/vnc/") ||
-        (request.headers.origin !== undefined && request.headers.origin !== frontendOrigin)
+        (request.headers.origin !== undefined && !allowedOrigins.has(request.headers.origin))
     ) {
         socket.destroy();
         return;
