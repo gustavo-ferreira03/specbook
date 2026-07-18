@@ -36,7 +36,7 @@ const STATUS_ICON: Record<SpecStatus, React.ComponentType<{ size?: number; class
 function StatTile({ label, value, tone }: { label: string; value: number; tone?: "success" | "danger" | "pending" }) {
     const toneClass = tone === "success" ? "text-success" : tone === "danger" ? "text-danger" : tone === "pending" ? "text-pending" : "text-ink";
     return (
-        <div className="rounded-[13px] bg-surface p-4">
+        <div className="rounded-[13px] border border-line bg-surface p-4">
             <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">{label}</p>
             <p className={`mt-1.5 text-xl font-bold tracking-[-0.02em] tabular-nums ${toneClass}`}>{value}</p>
         </div>
@@ -176,7 +176,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
-                    <div className="rounded-[13px] bg-surface p-4">
+                    <div className="rounded-[13px] border border-line bg-surface p-4">
                         <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Status breakdown</p>
                         <p className="mt-1 text-xs text-ink-soft">
                             <span className={`font-bold ${passRateTone}`}>{passRate}%</span> of Specs are passing
