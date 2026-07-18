@@ -1,9 +1,9 @@
 # <img src="apps/frontend/public/specbook-chat-icon.svg" width="32" height="32" align="absmiddle" alt=""> Specbook
 
-[![GitHub stars](https://img.shields.io/github/stars/gustavo-ferreira03/specbook?style=flat&logo=github&label=Stars)](https://github.com/gustavo-ferreira03/specbook/stargazers)
-[![Docker image](https://img.shields.io/badge/GHCR-specbook-2496ed?style=flat&logo=docker&logoColor=white)](https://github.com/gustavo-ferreira03/specbook/pkgs/container/specbook)
-[![MIT License](https://img.shields.io/github/license/gustavo-ferreira03/specbook?style=flat)](LICENSE)
-![Node.js 26](https://img.shields.io/badge/Node.js-26-3c873a?style=flat&logo=nodedotjs&logoColor=white)
+[![Docker image](https://img.shields.io/badge/Docker-GHCR-2496ed?style=flat-square&logo=docker&logoColor=white)](https://github.com/gustavo-ferreira03/specbook/pkgs/container/specbook)
+![Node.js 26](https://img.shields.io/badge/Node.js-26-3c873a?style=flat-square&logo=nodedotjs&logoColor=white)
+![Robot Framework](https://img.shields.io/badge/Robot%20Framework-000000?style=flat-square)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 ## **Describe web behavior. Keep it in Git. Run it again.**
 
