@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { Pie, PieChart } from "recharts";
-import { AlertTriangle, Check, CircleDashed, FileCheck2, GitMerge, Play, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CircleDashed, FileCheck2, GitMerge, Play, RefreshCw, X } from "lucide-react";
 import { NewFeatureDialog, NewSpecDialog } from "@/components/CreateStructureDialogs";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
@@ -13,8 +13,8 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, startRunBatch } from "@/lib/api";
-import type { Feature, SpecStatus, SpecSummary } from "@/lib/types";
+import { api, getProjectContext, startRunBatch } from "@/lib/api";
+import type { Feature, Project, ProjectContextState, SpecStatus, SpecSummary } from "@/lib/types";
 
 const STATUS_ORDER: SpecStatus[] = ["passed", "failed", "invalid", "conflict", "unverified"];
 
@@ -48,6 +48,8 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const { projectId } = use(params);
     const [features, setFeatures] = useState<Feature[] | null>(null);
     const [specs, setSpecs] = useState<SpecSummary[] | null>(null);
+    const [project, setProject] = useState<Project | null>(null);
+    const [contextState, setContextState] = useState<ProjectContextState | null>(null);
     const [syncWarning, setSyncWarning] = useState("");
     const [loadError, setLoadError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
@@ -67,6 +69,12 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 if (!active) return;
                 setLoadError(error instanceof Error ? error.message : String(error));
             });
+        api<{ project: Project }>(`/projects/${projectId}`)
+            .then((result) => { if (active) setProject(result.project); })
+            .catch(() => undefined);
+        getProjectContext(projectId)
+            .then((result) => { if (active) setContextState(result); })
+            .catch(() => undefined);
         return () => {
             active = false;
         };
@@ -191,6 +199,47 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     <StatTile label="Failed" value={counts.failed} tone="danger" />
                     <StatTile label="Unverified" value={counts.unverified} tone="pending" />
                 </div>
+
+                {project && (
+                    <div className="mt-4 rounded-[13px] border border-line bg-surface p-4">
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Project</p>
+                                <div className="mt-2 flex items-baseline gap-2">
+                                    <h3 className="truncate text-sm font-bold text-ink">{project.name}</h3>
+                                    <span className="shrink-0 font-mono text-[0.625rem] text-ink-faint [overflow-wrap:anywhere]">{project.baseUrl}</span>
+                                </div>
+                                {(() => {
+                                    const confirmed = contextState?.confirmed;
+                                    if (!confirmed) {
+                                        return (
+                                            <p className="mt-1.5 text-xs text-ink-faint">
+                                                No project context yet.{" "}
+                                                <Link href={`/p/${projectId}`} className="underline underline-offset-2 hover:text-ink">Set up context</Link>
+                                            </p>
+                                        );
+                                    }
+                                    const ctx = confirmed.context;
+                                    const stats = [
+                                        ctx.areas.length > 0 && `${ctx.areas.length} ${ctx.areas.length === 1 ? "area" : "areas"}`,
+                                        ctx.terminology.length > 0 && `${ctx.terminology.length} ${ctx.terminology.length === 1 ? "term" : "terms"}`,
+                                        ctx.roles.length > 0 && `${ctx.roles.length} ${ctx.roles.length === 1 ? "role" : "roles"}`,
+                                        ctx.businessRules.length > 0 && `${ctx.businessRules.length} ${ctx.businessRules.length === 1 ? "rule" : "rules"}`,
+                                    ].filter(Boolean);
+                                    return (
+                                        <>
+                                            {ctx.summary && <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-ink-soft">{ctx.summary}</p>}
+                                            {stats.length > 0 && <p className="mt-2 text-[0.625rem] text-ink-faint">{stats.join(" · ")}</p>}
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                            <Button asChild variant="ghost" size="icon-sm" className="mt-0.5 shrink-0">
+                                <Link href={`/p/${projectId}`}><ArrowRight size={14} /></Link>
+                            </Button>
+                        </div>
+                    </div>
+                )}
 
                 <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
                     <div className="rounded-[13px] border border-line bg-surface p-4">
