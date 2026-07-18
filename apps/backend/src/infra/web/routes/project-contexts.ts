@@ -4,6 +4,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { projectContextSchema } from "../../../core/chat/context-tools";
 import { createChat } from "../../../core/chat/session";
+import { syncBeforeMutation } from "../../../core/repo/sync";
+import { writeContextToRepo } from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
@@ -131,31 +133,44 @@ export function createProjectContextsRouter(): Hono {
     });
 
     router.post("/project-contexts/:id/confirm", async (c) => {
-        const revision = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
-        if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
-        if (revision.status === "confirmed") return c.json({ revision });
-        if (revision.status !== "draft") {
-            throw new HTTPException(409, { message: "Only draft context revisions can be confirmed" });
-        }
-        if (!revision.context.summary.trim()) {
-            throw new HTTPException(400, { message: "Confirmation requires a non-empty summary" });
-        }
-        if (revision.context.areas.length === 0 && revision.context.unknowns.length === 0) {
-            throw new HTTPException(400, { message: "Confirmation requires at least one area or unknown" });
-        }
-        const confirmed = await projectContextsRepository.confirmProjectContextRevision(revision.id);
-        return c.json({ revision: confirmed ?? revision });
+        const initial = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
+        if (!initial) throw new HTTPException(404, { message: "Context revision not found" });
+        return projectContextsRepository.withProjectContextDraftLock(initial.projectId, async () => {
+            const revision = await projectContextsRepository.getProjectContextRevision(initial.id);
+            if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
+            if (revision.status === "confirmed") {
+                await writeContextToRepo(revision.projectId, revision.context);
+                return c.json({ revision });
+            }
+            if (revision.status !== "draft") {
+                throw new HTTPException(409, { message: "Only draft context revisions can be confirmed" });
+            }
+            if (!revision.context.summary.trim()) {
+                throw new HTTPException(400, { message: "Confirmation requires a non-empty summary" });
+            }
+            if (revision.context.areas.length === 0 && revision.context.unknowns.length === 0) {
+                throw new HTTPException(400, { message: "Confirmation requires at least one area or unknown" });
+            }
+            await syncBeforeMutation(revision.projectId);
+            await writeContextToRepo(revision.projectId, revision.context);
+            const confirmed = await projectContextsRepository.confirmProjectContextRevision(revision.id);
+            return c.json({ revision: confirmed ?? revision });
+        });
     });
 
     router.post("/project-contexts/:id/discard", async (c) => {
-        const revision = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
-        if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
-        if (revision.status === "discarded") return c.json({ revision });
-        if (revision.status !== "draft") {
-            throw new HTTPException(409, { message: "Confirmed context revisions cannot be discarded" });
-        }
-        const discarded = await projectContextsRepository.discardProjectContextRevision(revision.id);
-        return c.json({ revision: discarded ?? revision });
+        const initial = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
+        if (!initial) throw new HTTPException(404, { message: "Context revision not found" });
+        return projectContextsRepository.withProjectContextDraftLock(initial.projectId, async () => {
+            const revision = await projectContextsRepository.getProjectContextRevision(initial.id);
+            if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
+            if (revision.status === "discarded") return c.json({ revision });
+            if (revision.status !== "draft") {
+                throw new HTTPException(409, { message: "Confirmed context revisions cannot be discarded" });
+            }
+            const discarded = await projectContextsRepository.discardProjectContextRevision(revision.id);
+            return c.json({ revision: discarded ?? revision });
+        });
     });
 
     return router;

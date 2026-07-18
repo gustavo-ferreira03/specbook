@@ -49,6 +49,10 @@ class ProjectsRepository {
         const rows = await db.select().from(projects).where(eq(projects.id, id));
         return rows[0] ?? null;
     }
+
+    async deleteProject(id: string): Promise<void> {
+        await db.delete(projects).where(eq(projects.id, id));
+    }
 }
 
 export const projectsRepository = new ProjectsRepository();

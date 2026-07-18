@@ -1,4 +1,4 @@
-export type SpecStatus = "draft" | "unverified" | "passed" | "failed";
+export type SpecStatus = "unverified" | "passed" | "failed" | "invalid" | "conflict";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface Project {
@@ -8,12 +8,26 @@ export interface Project {
     createdAt: string;
 }
 
+export interface GitStatus {
+    remoteUrl: string | null;
+    hasToken: boolean;
+    pushError: string | null;
+    conflictPaths: string[] | null;
+    contextSyncError: string | null;
+}
+
+export interface GitSyncOutcome {
+    status: "no-remote" | "clean" | "updated" | "conflict";
+    conflictedPaths: string[];
+}
+
 export interface Feature {
     id: string;
     projectId: string;
     parentId: string | null;
     title: string;
     description: string;
+    path: string;
     createdAt: string;
 }
 
@@ -34,7 +48,8 @@ export interface HumanSpec {
 export interface Run {
     id: string;
     specId: string;
-    specVersionId: string;
+    commitSha: string;
+    robotHash: string;
     status: RunStatus;
     startedAt: string;
     durationMs: number | null;
@@ -49,11 +64,15 @@ export interface SpecDetail {
         title: string;
         description: string;
         status: SpecStatus;
+        path: string;
+        robotHash: string;
+        markdownHash: string;
+        invalidReason: string | null;
         createdAt: string;
         updatedAt: string;
     };
     feature: Feature | null;
-    version: { id: string; version: number; humanSpec: HumanSpec } | null;
+    content: { humanSpec: HumanSpec; robotSource: string } | null;
     runs: Run[];
 }
 
@@ -144,7 +163,9 @@ export interface RunEvidence {
 export interface RunBatchItem {
     runId: string;
     specId: string;
-    specVersionId: string;
+    commitSha: string;
+    robotHash: string;
+    markdownHash: string;
     title: string;
     status: RunStatus;
     durationMs: number | null;

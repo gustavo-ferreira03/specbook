@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { runsDir } from "../../../core/paths";
+import { parseSpecMarkdown } from "../../../core/repo/markdown";
 import { getRunBatch, getRunBatchDirectory, startSpecBatch } from "../../../core/runner/batch";
 import { executeSpec } from "../../../core/runner/robot";
 import { runsRepository } from "../../repositories/runs";
@@ -135,12 +136,12 @@ export function createRunsRouter(): Hono {
         const runId = c.req.param("id");
         const run = await runsRepository.getRun(runId);
         if (!run) throw new HTTPException(404, { message: "Run not found" });
-        const [version, directory] = await Promise.all([
-            specsRepository.getSpecVersion(run.specVersionId),
-            realRunDirectory(runId),
-        ]);
+        const directory = await realRunDirectory(runId);
         const files = directory ? await listArtifactFiles(directory) : [];
         const available = new Set(files);
+        const humanSpec = directory && available.has("spec.md")
+            ? await fs.readFile(path.join(directory, "spec.md"), "utf8").then((source) => parseSpecMarkdown(source).humanSpec).catch(() => null)
+            : null;
         let manifest: { steps?: { number?: number; label?: string; file?: string }[]; video?: string | null } = {};
         if (directory && available.has("evidence.json")) {
             try {
@@ -155,7 +156,7 @@ export function createRunsRouter(): Hono {
                 number,
                 label: typeof item.label === "string" && item.label.trim()
                     ? item.label
-                    : version?.humanSpec.steps[number - 1] ?? `Step ${number}`,
+                    : humanSpec?.steps[number - 1] ?? `Step ${number}`,
                 file: item.file,
             }];
         });
@@ -176,7 +177,7 @@ export function createRunsRouter(): Hono {
             } catch {}
         }
         return c.json({
-            expectedResult: version?.humanSpec.expectedResult ?? "",
+            expectedResult: humanSpec?.expectedResult ?? "",
             steps,
             video,
             reportAvailable: reportUrl !== null,

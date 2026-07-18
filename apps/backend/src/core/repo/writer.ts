@@ -5,12 +5,16 @@ import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { serializeContextMarkdown } from "./contextMarkdown";
-import { commitAll, repoDir, withRepoLock } from "./git";
+import { assertRepoWritableUnlocked, commitAll, repoDir, withRepoLock } from "./git";
 import { parseSpecMarkdown, serializeFeatureMarkdown, serializeSpecMarkdown } from "./markdown";
 import { schedulePush } from "./remote";
 import { uniqueSlug } from "./slug";
 
 export function robotHashOf(source: string): string {
+    return crypto.createHash("sha256").update(source).digest("hex");
+}
+
+export function markdownHashOf(source: string): string {
     return crypto.createHash("sha256").update(source).digest("hex");
 }
 
@@ -37,7 +41,9 @@ export async function createFeatureInRepo(
     description: string,
 ): Promise<Feature> {
     return withRepoLock(projectId, async () => {
+        await assertRepoWritableUnlocked(projectId);
         const parent = parentId ? await featuresRepository.getFeature(parentId) : null;
+        if (parentId && (!parent || parent.projectId !== projectId)) throw new Error("Parent feature not found");
         const parentPath = parent ? parent.path : "specs";
         const id = crypto.randomUUID();
         const slug = uniqueSlug(title, await siblingNames(projectId, parentPath), id);
@@ -50,7 +56,7 @@ export async function createFeatureInRepo(
         );
         await commitAll(projectId, `feature: create "${title}"`);
         schedulePush(projectId);
-        return featuresRepository.createFeature(projectId, parentId, title, description, featurePath);
+        return featuresRepository.createFeature(projectId, parentId, title, description, featurePath, id);
     });
 }
 
@@ -63,22 +69,20 @@ export async function createSpecInRepo(input: {
     robotSource: string;
 }): Promise<{ spec: Spec; commitSha: string }> {
     return withRepoLock(input.projectId, async () => {
+        await assertRepoWritableUnlocked(input.projectId);
         const feature = await featuresRepository.getFeature(input.featureId);
-        if (!feature) throw new Error("Feature not found");
+        if (!feature || feature.projectId !== input.projectId) throw new Error("Feature not found");
         const id = crypto.randomUUID();
         const slug = uniqueSlug(input.title, await siblingNames(input.projectId, feature.path), id);
         const specPath = `${feature.path}/${slug}`;
+        const markdown = serializeSpecMarkdown({
+            id,
+            title: input.title,
+            description: input.description,
+            humanSpec: input.humanSpec,
+        });
         await fs.mkdir(absolute(input.projectId, feature.path), { recursive: true });
-        await fs.writeFile(
-            absolute(input.projectId, `${specPath}.md`),
-            serializeSpecMarkdown({
-                id,
-                title: input.title,
-                description: input.description,
-                humanSpec: input.humanSpec,
-            }),
-            "utf8",
-        );
+        await fs.writeFile(absolute(input.projectId, `${specPath}.md`), markdown, "utf8");
         await fs.writeFile(absolute(input.projectId, `${specPath}.robot`), input.robotSource, "utf8");
         const commitSha = await commitAll(input.projectId, `spec: create "${input.title}"`);
         schedulePush(input.projectId);
@@ -92,6 +96,7 @@ export async function createSpecInRepo(input: {
             status: "unverified",
             path: specPath,
             robotHash: robotHashOf(input.robotSource),
+            markdownHash: markdownHashOf(markdown),
             invalidReason: null,
             createdAt: now,
             updatedAt: now,
@@ -112,6 +117,7 @@ export async function updateSpecInRepo(
     patch: { title?: string; description?: string; humanSpec?: HumanSpec; robotSource?: string },
 ): Promise<{ spec: Spec; commitSha: string }> {
     return withRepoLock(spec.projectId, async () => {
+        await assertRepoWritableUnlocked(spec.projectId);
         const current = await readSpecFiles(spec);
         const title = patch.title ?? spec.title;
         const description = patch.description ?? spec.description;
@@ -134,11 +140,8 @@ export async function updateSpecInRepo(
                 );
             }
         }
-        await fs.writeFile(
-            absolute(spec.projectId, `${specPath}.md`),
-            serializeSpecMarkdown({ id: spec.id, title, description, humanSpec }),
-            "utf8",
-        );
+        const markdown = serializeSpecMarkdown({ id: spec.id, title, description, humanSpec });
+        await fs.writeFile(absolute(spec.projectId, `${specPath}.md`), markdown, "utf8");
         await fs.writeFile(absolute(spec.projectId, `${specPath}.robot`), robotSource, "utf8");
         const commitSha = await commitAll(spec.projectId, `spec: update "${title}"`);
         schedulePush(spec.projectId);
@@ -148,6 +151,7 @@ export async function updateSpecInRepo(
             description,
             path: specPath,
             robotHash,
+            markdownHash: markdownHashOf(markdown),
             status: "unverified",
             invalidReason: null,
         });
@@ -159,6 +163,7 @@ export async function updateSpecInRepo(
 
 export async function deleteSpecFiles(spec: Spec): Promise<void> {
     await withRepoLock(spec.projectId, async () => {
+        await assertRepoWritableUnlocked(spec.projectId);
         await fs.rm(absolute(spec.projectId, `${spec.path}.md`), { force: true });
         await fs.rm(absolute(spec.projectId, `${spec.path}.robot`), { force: true });
         await commitAll(spec.projectId, `spec: delete "${spec.title}"`);
@@ -168,6 +173,7 @@ export async function deleteSpecFiles(spec: Spec): Promise<void> {
 
 export async function deleteFeatureDirectory(projectId: string, featurePath: string, title: string): Promise<void> {
     await withRepoLock(projectId, async () => {
+        await assertRepoWritableUnlocked(projectId);
         await fs.rm(absolute(projectId, featurePath), { recursive: true, force: true });
         await commitAll(projectId, `feature: delete "${title}"`);
         schedulePush(projectId);
@@ -176,6 +182,7 @@ export async function deleteFeatureDirectory(projectId: string, featurePath: str
 
 export async function writeContextToRepo(projectId: string, context: ProjectContext): Promise<void> {
     await withRepoLock(projectId, async () => {
+        await assertRepoWritableUnlocked(projectId);
         await fs.writeFile(absolute(projectId, "context.md"), serializeContextMarkdown(context), "utf8");
         await commitAll(projectId, "context: update");
         schedulePush(projectId);

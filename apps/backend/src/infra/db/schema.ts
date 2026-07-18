@@ -86,6 +86,7 @@ export const specs = sqliteTable("specs", {
     status: text("status").$type<SpecStatus>().notNull().default("unverified"),
     path: text("path").notNull(),
     robotHash: text("robot_hash").notNull(),
+    markdownHash: text("markdown_hash").notNull().default(""),
     invalidReason: text("invalid_reason"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),

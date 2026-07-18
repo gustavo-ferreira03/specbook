@@ -678,13 +678,13 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         return <>The chat <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, its messages, and browser session will be permanently removed. Specs created from it will remain.</>;
                     }
                     if (deleteTarget.kind === "spec") {
-                        return <>The Spec <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, every version, its verification history, and all evidence will be permanently removed.</>;
+                        return <>The active files for <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, its verification history, and all evidence will be removed. Earlier file revisions remain in Git history.</>;
                     }
                     const featureIds = featureDeletionIds(deleteTarget.item.id);
                     const specCount = specs.filter((spec) => featureIds.has(spec.featureId)).length;
                     const childCount = featureIds.size - 1;
                     return <>
-                        <strong className="font-bold text-ink">{deleteTarget.item.title}</strong> will be permanently removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {specCount} {specCount === 1 ? "Spec" : "Specs"}, every version, run history, and evidence inside it.
+                        <strong className="font-bold text-ink">{deleteTarget.item.title}</strong> will be removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {specCount} active {specCount === 1 ? "Spec" : "Specs"}, run history, and evidence inside it. Earlier file revisions remain in Git history.
                     </>;
                 })() : null}
                 confirmLabel={deleteTarget?.kind === "chat" ? "Delete chat" : deleteTarget?.kind === "spec" ? "Delete Spec" : "Delete feature"}

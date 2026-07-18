@@ -3,10 +3,11 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { HumanSpec } from "../../infra/db/schema";
 import { featuresRepository } from "../../infra/repositories/features";
 import { specsRepository } from "../../infra/repositories/specs";
+import { createFeatureInRepo, createSpecInRepo, readSpecFiles, updateSpecInRepo } from "../repo/writer";
+import { syncBeforeMutation } from "../repo/sync";
 import { executeSpec } from "../runner/robot";
 import { namedRobotStepsError } from "../runner/evidence";
 import { validateRobotSource } from "../runner/validate";
-import { readSpecExecutable, removeSpecExecutable, writeSpecExecutable } from "../specs/files";
 import { withSpecLock } from "../specs/lifecycle";
 
 function text(value: string) {
@@ -73,21 +74,12 @@ export function createDomainTools(projectId: string) {
             async execute(_id, params) {
                 const spec = await specsRepository.getSpec(params.specId);
                 if (!spec || spec.projectId !== projectId) return text(`Spec ${params.specId} not found in this project.`);
-                if (!spec.currentVersionId) return text(JSON.stringify({ spec, version: null }));
-                const version = await specsRepository.getSpecVersion(spec.currentVersionId);
-                if (!version) return text(JSON.stringify({ spec, version: null }));
-                const robotSource = await readSpecExecutable(version.executablePath);
-                return text(
-                    JSON.stringify({
-                        spec,
-                        version: {
-                            id: version.id,
-                            version: version.version,
-                            humanSpec: version.humanSpec,
-                            robotSource,
-                        },
-                    }),
-                );
+                try {
+                    const files = await readSpecFiles(spec);
+                    return text(JSON.stringify({ spec, humanSpec: files.humanSpec, robotSource: files.robotSource }));
+                } catch (error) {
+                    return text(JSON.stringify({ spec, error: error instanceof Error ? error.message : String(error) }));
+                }
             },
         }),
         defineTool({
@@ -100,13 +92,14 @@ export function createDomainTools(projectId: string) {
                 description: Type.String(),
             }),
             async execute(_id, params) {
+                await syncBeforeMutation(projectId);
                 if (params.parentId) {
                     const parent = await featuresRepository.getFeature(params.parentId);
                     if (!parent || parent.projectId !== projectId) {
                         return text(`Parent feature ${params.parentId} not found in this project.`);
                     }
                 }
-                const feature = await featuresRepository.createFeature(
+                const feature = await createFeatureInRepo(
                     projectId,
                     params.parentId ?? null,
                     params.title,
@@ -127,6 +120,7 @@ export function createDomainTools(projectId: string) {
                 robotSource: Type.String(),
             }),
             async execute(_id, params) {
+                await syncBeforeMutation(projectId);
                 const feature = await featuresRepository.getFeature(params.featureId);
                 if (!feature || feature.projectId !== projectId) {
                     return text(`Feature ${params.featureId} not found in this project.`);
@@ -137,39 +131,21 @@ export function createDomainTools(projectId: string) {
                 if (!validation.ok) {
                     return text(`The Robot source was rejected: ${validation.error}\nFix the file and call create_spec again.`);
                 }
-                const spec = await specsRepository.createSpecRecord({
+                const { spec } = await createSpecInRepo({
                     projectId,
                     featureId: feature.id,
                     title: params.title,
                     description: params.description,
+                    humanSpec: params.humanSpec as HumanSpec,
+                    robotSource: params.robotSource,
                 });
-                let executablePath: string | null = null;
-                let versionId: string | null = null;
-                try {
-                    const file = await writeSpecExecutable(spec.id, 1, params.robotSource);
-                    executablePath = file.executablePath;
-                    const version = await specsRepository.addSpecVersion({
-                        specId: spec.id,
-                        version: 1,
-                        humanSpec: params.humanSpec as HumanSpec,
-                        executablePath: file.executablePath,
-                        executableHash: file.executableHash,
-                    });
-                    versionId = version.id;
-                    await specsRepository.publishSpecVersion(spec.id, version.id);
-                    return text(JSON.stringify({ specId: spec.id, version: 1 }));
-                } catch (error) {
-                    if (versionId) await specsRepository.deleteSpecVersion(versionId).catch(() => undefined);
-                    if (executablePath) await removeSpecExecutable(executablePath).catch(() => undefined);
-                    await specsRepository.deleteSpecRecord(spec.id).catch(() => undefined);
-                    throw error;
-                }
+                return text(JSON.stringify({ specId: spec.id }));
             },
         }),
         defineTool({
             name: "update_spec",
             label: "update_spec",
-            description: "Create a new immutable version of a Spec. Call get_spec first. Omitted fields keep their current values, and the status resets to unverified.",
+            description: "Update a Spec and commit the change to its git history. Call get_spec first. Omitted fields keep their current values, and the status resets to unverified.",
             parameters: Type.Object({
                 specId: Type.String(),
                 title: Type.Optional(Type.String()),
@@ -178,16 +154,16 @@ export function createDomainTools(projectId: string) {
                 robotSource: Type.Optional(Type.String()),
             }),
             async execute(_id, params) {
+                await syncBeforeMutation(projectId);
                 return withSpecLock(params.specId, async () => {
                     const spec = await specsRepository.getSpec(params.specId);
                     if (!spec || spec.projectId !== projectId) {
                         return text(`Spec ${params.specId} not found in this project.`);
                     }
-                    if (!spec.currentVersionId) return text(`Spec ${params.specId} has no version to update.`);
-                    const currentVersion = await specsRepository.getSpecVersion(spec.currentVersionId);
-                    if (!currentVersion) return text(`Spec ${params.specId} has no current version to update.`);
-                    const humanSpec = (params.humanSpec as HumanSpec | undefined) ?? currentVersion.humanSpec;
-                    const robotSource = params.robotSource ?? (await readSpecExecutable(currentVersion.executablePath));
+                    if (spec.status === "conflict") {
+                        return text(`Spec ${params.specId} has a git sync conflict. Ask the user to resolve it in the UI first.`);
+                    }
+                    const robotSource = params.robotSource ?? (await readSpecFiles(spec)).robotSource;
                     if (params.robotSource !== undefined) {
                         const stepError = namedRobotStepsError(robotSource);
                         if (stepError) return text(`The Robot source was rejected: ${stepError}`);
@@ -196,30 +172,13 @@ export function createDomainTools(projectId: string) {
                     if (!validation.ok) {
                         return text(`The Robot source was rejected: ${validation.error}\nFix the file and call update_spec again.`);
                     }
-                    const nextVersion = (await specsRepository.latestVersionNumber(spec.id)) + 1;
-                    let executablePath: string | null = null;
-                    let versionId: string | null = null;
-                    try {
-                        const file = await writeSpecExecutable(spec.id, nextVersion, robotSource);
-                        executablePath = file.executablePath;
-                        const version = await specsRepository.addSpecVersion({
-                            specId: spec.id,
-                            version: nextVersion,
-                            humanSpec,
-                            executablePath: file.executablePath,
-                            executableHash: file.executableHash,
-                        });
-                        versionId = version.id;
-                        await specsRepository.publishSpecVersion(spec.id, version.id, {
-                            title: params.title,
-                            description: params.description,
-                        });
-                        return text(JSON.stringify({ specId: spec.id, version: nextVersion }));
-                    } catch (error) {
-                        if (versionId) await specsRepository.deleteSpecVersion(versionId).catch(() => undefined);
-                        if (executablePath) await removeSpecExecutable(executablePath).catch(() => undefined);
-                        throw error;
-                    }
+                    const { spec: updated } = await updateSpecInRepo(spec, {
+                        title: params.title,
+                        description: params.description,
+                        humanSpec: params.humanSpec as HumanSpec | undefined,
+                        robotSource: params.robotSource,
+                    });
+                    return text(JSON.stringify({ specId: updated.id, path: updated.path }));
                 });
             },
         }),

@@ -14,6 +14,8 @@ const badgeVariants = cva(
                 success: "bg-success-soft text-success",
                 danger: "bg-danger-soft text-danger",
                 pending: "bg-pending-soft text-pending",
+                invalid: "bg-invalid-soft text-invalid",
+                conflict: "bg-conflict-soft text-conflict",
                 info: "bg-info-soft text-info",
             },
         },

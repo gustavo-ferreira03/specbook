@@ -10,7 +10,7 @@ export type DeleteSpecResult =
     | { status: "deleted"; runIds: string[] };
 
 export type SpecPatch = Partial<
-    Pick<Spec, "title" | "description" | "path" | "robotHash" | "status" | "invalidReason" | "featureId">
+    Pick<Spec, "title" | "description" | "path" | "robotHash" | "markdownHash" | "status" | "invalidReason" | "featureId">
 >;
 
 class SpecsRepository {
@@ -22,6 +22,7 @@ class SpecsRepository {
         description: string;
         path: string;
         robotHash: string;
+        markdownHash: string;
         status?: SpecStatus;
         invalidReason?: string | null;
     }): Promise<Spec> {
@@ -35,6 +36,7 @@ class SpecsRepository {
             status: input.status ?? "unverified",
             path: input.path,
             robotHash: input.robotHash,
+            markdownHash: input.markdownHash,
             invalidReason: input.invalidReason ?? null,
             createdAt: now,
             updatedAt: now,
@@ -79,11 +81,22 @@ class SpecsRepository {
         await this.updateSpecRecord(id, { status, invalidReason });
     }
 
-    async updateSpecStatusForHash(id: string, robotHash: string, status: SpecStatus): Promise<void> {
+    async updateSpecStatusForContent(
+        id: string,
+        robotHash: string,
+        markdownHash: string,
+        status: SpecStatus,
+    ): Promise<void> {
         await db
             .update(specs)
             .set({ status, updatedAt: new Date().toISOString() })
-            .where(and(eq(specs.id, id), eq(specs.robotHash, robotHash)));
+            .where(
+                and(
+                    eq(specs.id, id),
+                    eq(specs.robotHash, robotHash),
+                    eq(specs.markdownHash, markdownHash),
+                ),
+            );
     }
 
     async deleteSpecRecord(id: string): Promise<void> {

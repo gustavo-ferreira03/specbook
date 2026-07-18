@@ -5,11 +5,19 @@ import path from "node:path";
 import { XMLParser } from "fast-xml-parser";
 import type { RunStatus } from "../../infra/db/schema";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
-import { specsRepository, type SpecVersion } from "../../infra/repositories/specs";
+import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runBatchesDir, runsDir } from "../paths";
-import { readSpecExecutable } from "../specs/files";
-import { withSpecLocks } from "../specs/lifecycle";
+import {
+    deleteRunCommitRefsUnlocked,
+    headSha,
+    pinRunCommitUnlocked,
+    projectGit,
+    repoDir,
+    withRepoLock,
+} from "../repo/git";
+import { markdownHashOf, robotHashOf } from "../repo/writer";
+import { acquireSpecLocks } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 import { runRobotProcess } from "./robot";
 
@@ -19,7 +27,9 @@ type FinalRunStatus = Exclude<RunStatus, "running">;
 export interface RunBatchItem {
     runId: string;
     specId: string;
-    specVersionId: string;
+    commitSha: string;
+    robotHash: string;
+    markdownHash: string;
     title: string;
     status: RunStatus;
     durationMs: number | null;
@@ -39,7 +49,8 @@ export interface RunBatch {
 
 interface PreparedSpec {
     run: Run;
-    version: SpecVersion;
+    markdown: string;
+    robotSource: string;
     item: RunBatchItem;
     plannedEvidence: PlannedEvidenceStep[];
 }
@@ -156,7 +167,12 @@ async function finishPreparedSpec(
     await finalizeRunEvidence(runDir, result.status, prepared.plannedEvidence);
     await runsRepository.finishRun(prepared.run.id, result.status, result.durationMs, result.failReason);
     if (result.status === "passed" || result.status === "failed") {
-        await specsRepository.updateSpecStatusForVersion(prepared.item.specId, prepared.version.id, result.status);
+        await specsRepository.updateSpecStatusForContent(
+            prepared.item.specId,
+            prepared.item.robotHash,
+            prepared.item.markdownHash,
+            result.status,
+        );
     }
     prepared.item.status = result.status;
     prepared.item.durationMs = result.durationMs;
@@ -170,8 +186,7 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
     await fs.mkdir(suiteDir, { recursive: true });
     try {
         for (const entry of prepared) {
-            const source = await readSpecExecutable(entry.version.executablePath);
-            const instrumented = instrumentRobotSource(source, {
+            const instrumented = instrumentRobotSource(entry.robotSource, {
                 evidence: `spec-evidence/${entry.run.id}`,
                 video: `spec-video/${entry.run.id}`,
             });
@@ -180,6 +195,7 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
             await Promise.all([
                 fs.writeFile(path.join(suiteDir, `${entry.run.id}.robot`), instrumented.source, "utf8"),
                 fs.writeFile(path.join(runsDir, entry.run.id, "spec.robot"), instrumented.source, "utf8"),
+                fs.writeFile(path.join(runsDir, entry.run.id, "spec.md"), entry.markdown, "utf8"),
             ]);
         }
 
@@ -223,28 +239,66 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
     }
 }
 
-export async function startSpecBatch(projectId: string, specIds: string[], label: string): Promise<RunBatch> {
-    const project = await projectsRepository.getProject(projectId);
-    if (!project) throw new Error("Project not found");
-    const ids = [...new Set(specIds)];
-    if (ids.length === 0) throw new Error("Select at least one Spec");
-    const definitions: { specId: string; title: string; version: SpecVersion }[] = [];
-    for (const id of ids) {
-        const spec = await specsRepository.getSpec(id);
-        if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
-        if (!spec.currentVersionId) throw new Error(`Spec "${spec.title}" has no executable version`);
-        const version = await specsRepository.getSpecVersion(spec.currentVersionId);
-        if (!version) throw new Error(`Current version for Spec "${spec.title}" was not found`);
-        definitions.push({ specId: spec.id, title: spec.title, version });
-    }
+async function prepareSpecBatch(
+    projectId: string,
+    ids: string[],
+    label: string,
+): Promise<{ batch: RunBatch; prepared: PreparedSpec[] }> {
+    const { commitSha, definitions } = await withRepoLock(projectId, async () => {
+        if (!(await projectGit(projectId).status()).isClean()) {
+            throw new Error("The project repository has uncommitted changes; sync or commit them before running");
+        }
+        const commitSha = await headSha(projectId);
+        const definitions: {
+            spec: Spec;
+            markdown: string;
+            robotSource: string;
+            robotHash: string;
+            markdownHash: string;
+        }[] = [];
+        for (const id of ids) {
+            const spec = await specsRepository.getSpec(id);
+            if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
+            if (spec.status === "invalid") {
+                throw new Error(`Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
+            }
+            if (spec.status === "conflict") {
+                throw new Error(`Spec "${spec.title}" has a git sync conflict`);
+            }
+            const [markdown, robotSource] = await Promise.all([
+                fs.readFile(path.join(repoDir(projectId), `${spec.path}.md`), "utf8"),
+                fs.readFile(path.join(repoDir(projectId), `${spec.path}.robot`), "utf8"),
+            ]);
+            const robotHash = robotHashOf(robotSource);
+            const markdownHash = markdownHashOf(markdown);
+            if (robotHash !== spec.robotHash || markdownHash !== spec.markdownHash) {
+                throw new Error(`Spec "${spec.title}" changed without being reindexed`);
+            }
+            definitions.push({
+                spec,
+                markdown,
+                robotSource,
+                robotHash,
+                markdownHash,
+            });
+        }
+        return { commitSha, definitions };
+    });
 
     const createdRuns: Run[] = [];
     try {
         for (const definition of definitions) {
-            createdRuns.push(await runsRepository.createRun({ specId: definition.specId, specVersionId: definition.version.id }));
+            const run = await runsRepository.createRun({
+                specId: definition.spec.id,
+                commitSha,
+                robotHash: definition.robotHash,
+            });
+            createdRuns.push(run);
+            await withRepoLock(projectId, () => pinRunCommitUnlocked(projectId, run.id, commitSha));
         }
     } catch (error) {
         await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
+        await withRepoLock(projectId, () => deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
         throw error;
     }
 
@@ -258,9 +312,11 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
         failReason: null,
         specs: definitions.map((definition, index) => ({
             runId: createdRuns[index].id,
-            specId: definition.specId,
-            specVersionId: definition.version.id,
-            title: definition.title,
+            specId: definition.spec.id,
+            commitSha,
+            robotHash: definition.robotHash,
+            markdownHash: definition.markdownHash,
+            title: definition.spec.title,
             status: "running",
             durationMs: null,
             failReason: null,
@@ -270,15 +326,34 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
         await writeBatch(batch);
     } catch (error) {
         await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
+        await withRepoLock(projectId, () => deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
         throw error;
     }
     const prepared = definitions.map((definition, index): PreparedSpec => ({
         run: createdRuns[index],
-        version: definition.version,
+        markdown: definition.markdown,
+        robotSource: definition.robotSource,
         item: batch.specs[index],
         plannedEvidence: [],
     }));
-    const task = withSpecLocks(ids, () => executeBatch(batch, prepared, project.baseUrl));
+    return { batch, prepared };
+}
+
+export async function startSpecBatch(projectId: string, specIds: string[], label: string): Promise<RunBatch> {
+    const project = await projectsRepository.getProject(projectId);
+    if (!project) throw new Error("Project not found");
+    const ids = [...new Set(specIds)];
+    if (ids.length === 0) throw new Error("Select at least one Spec");
+    const releaseSpecLocks = await acquireSpecLocks(ids);
+    let batch: RunBatch;
+    let prepared: PreparedSpec[];
+    try {
+        ({ batch, prepared } = await prepareSpecBatch(projectId, ids, label));
+    } catch (error) {
+        await releaseSpecLocks();
+        throw error;
+    }
+    const task = executeBatch(batch, prepared, project.baseUrl).finally(releaseSpecLocks);
     activeBatches.set(batch.id, task);
     void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
     return batch;

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { XMLParser } from "fast-xml-parser";
@@ -7,7 +8,15 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
-import { readSpecExecutable } from "../specs/files";
+import {
+    deleteRunCommitRefsUnlocked,
+    headSha,
+    pinRunCommitUnlocked,
+    projectGit,
+    repoDir,
+    withRepoLock,
+} from "../repo/git";
+import { markdownHashOf } from "../repo/writer";
 import { withSpecLock } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 
@@ -135,13 +144,36 @@ function errorMessage(error: unknown): string {
 async function executeSpecLocked(specId: string, options: { persistFailures?: boolean }): Promise<Run> {
     const spec = await specsRepository.getSpec(specId);
     if (!spec) throw new Error("Spec not found");
-    if (!spec.currentVersionId) throw new Error("Spec has no executable version yet");
-    const version = await specsRepository.getSpecVersion(spec.currentVersionId);
-    if (!version) throw new Error("Spec version not found");
+    if (spec.status === "invalid") throw new Error(`Spec is invalid: ${spec.invalidReason ?? "unknown reason"}`);
+    if (spec.status === "conflict") throw new Error("Spec has a git sync conflict; resolve it before running");
     const project = await projectsRepository.getProject(spec.projectId);
     if (!project) throw new Error("Project not found");
+    const snapshot = await withRepoLock(spec.projectId, async () => {
+        if (!(await projectGit(spec.projectId).status()).isClean()) {
+            throw new Error("The project repository has uncommitted changes; sync or commit them before running");
+        }
+        const [robotSource, markdown, commitSha] = await Promise.all([
+            fs.readFile(path.join(repoDir(spec.projectId), `${spec.path}.robot`), "utf8"),
+            fs.readFile(path.join(repoDir(spec.projectId), `${spec.path}.md`), "utf8"),
+            headSha(spec.projectId),
+        ]);
+        return { robotSource, markdown, commitSha };
+    });
+    const { robotSource, markdown, commitSha } = snapshot;
+    const robotHash = crypto.createHash("sha256").update(robotSource).digest("hex");
+    const markdownHash = markdownHashOf(markdown);
+    if (robotHash !== spec.robotHash || markdownHash !== spec.markdownHash) {
+        throw new Error("Spec files changed without being reindexed");
+    }
 
-    const run = await runsRepository.createRun({ specId: spec.id, specVersionId: version.id });
+    const run = await runsRepository.createRun({ specId: spec.id, commitSha, robotHash });
+    try {
+        await withRepoLock(spec.projectId, () => pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
+    } catch (error) {
+        await runsRepository.deleteRun(run.id);
+        await withRepoLock(spec.projectId, () => deleteRunCommitRefsUnlocked(spec.projectId, [run.id])).catch(() => undefined);
+        throw error;
+    }
     const started = Date.now();
     let status: FinalRunStatus = "error";
     let failReason: string | null = "Run did not complete";
@@ -150,9 +182,12 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     try {
         const outputDir = path.join(runsDir, run.id);
         await fs.mkdir(outputDir, { recursive: true });
-        const instrumented = instrumentRobotSource(await readSpecExecutable(version.executablePath));
+        const instrumented = instrumentRobotSource(robotSource);
         plannedEvidence = instrumented.steps;
-        await fs.writeFile(path.join(outputDir, "spec.robot"), instrumented.source, "utf8");
+        await Promise.all([
+            fs.writeFile(path.join(outputDir, "spec.robot"), instrumented.source, "utf8"),
+            fs.writeFile(path.join(outputDir, "spec.md"), markdown, "utf8"),
+        ]);
         await fs.mkdir(path.join(outputDir, "evidence"), { recursive: true });
         const result = await runRobotProcess(outputDir, outputDir, project.baseUrl);
         if (result.timedOut) {
@@ -182,10 +217,11 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     if (options.persistFailures === false && finished.status !== "passed") {
         await fs.rm(path.join(runsDir, finished.id), { recursive: true, force: true });
         await runsRepository.deleteRun(finished.id);
+        await withRepoLock(spec.projectId, () => deleteRunCommitRefsUnlocked(spec.projectId, [finished.id]));
         return finished;
     }
     if (finished.status === "passed" || finished.status === "failed") {
-        await specsRepository.updateSpecStatusForVersion(spec.id, version.id, finished.status);
+        await specsRepository.updateSpecStatusForContent(spec.id, robotHash, markdownHash, finished.status);
     }
     return finished;
 }

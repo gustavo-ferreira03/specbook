@@ -32,6 +32,11 @@ function stringField(data: Record<string, unknown>, key: string): string | null 
     return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+export function parseMarkdownIdentity(source: string): { id: string | null; title: string | null } {
+    const { data } = frontmatter(source);
+    return { id: stringField(data, "id"), title: stringField(data, "title") };
+}
+
 function splitSections(content: string): { intro: string; sections: Map<string, string> } {
     const parts = content.split(/^##\s+/m);
     const sections = new Map<string, string>();

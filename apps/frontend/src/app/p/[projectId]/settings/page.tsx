@@ -1,5 +1,6 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
     AlertCircle,
@@ -18,6 +19,7 @@ import {
     X,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
+import { GitHubConnection } from "@/components/GitHubConnection";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,6 +83,7 @@ function modelCountLabel(count: number) {
 }
 
 export default function SettingsPage() {
+    const { projectId } = useParams<{ projectId: string }>();
     const [settings, setSettings] = useState<LlmSettingsResponse | null>(null);
     const [draft, setDraft] = useState<LlmCurrentSettings | null>(null);
     const [search, setSearch] = useState("");
@@ -448,6 +451,7 @@ export default function SettingsPage() {
                             )}
                         </div>
                     </section>
+                    <GitHubConnection projectId={projectId} />
                 </div>
             </div>
 

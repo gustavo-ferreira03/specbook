@@ -13,7 +13,10 @@ export function repoDir(projectId: string): string {
 }
 
 export function projectGit(projectId: string): SimpleGit {
-    return simpleGit(repoDir(projectId));
+    return simpleGit({
+        baseDir: repoDir(projectId),
+        timeout: { block: 30_000 },
+    }).env("GIT_TERMINAL_PROMPT", "0");
 }
 
 export async function withRepoLock<T>(projectId: string, work: () => Promise<T>): Promise<T> {
@@ -27,7 +30,7 @@ export async function withRepoLock<T>(projectId: string, work: () => Promise<T>)
     }
 }
 
-export async function ensureProjectRepo(projectId: string): Promise<void> {
+export async function ensureProjectRepo(projectId: string, options: { create?: boolean } = {}): Promise<void> {
     const dir = repoDir(projectId);
     await fs.mkdir(dir, { recursive: true });
     const git = simpleGit(dir);
@@ -36,6 +39,7 @@ export async function ensureProjectRepo(projectId: string): Promise<void> {
         .then((stat) => stat.isDirectory())
         .catch(() => false);
     if (hasGitDir) return;
+    if (!options.create) throw new Error(`Git repository is missing for project ${projectId}`);
     await git.init(["--initial-branch=main"]);
     await git.addConfig("user.name", "specbook");
     await git.addConfig("user.email", "specbook@local");
@@ -52,6 +56,33 @@ export async function commitAll(projectId: string, message: string): Promise<str
     const status = await git.status();
     if (!status.isClean()) await git.commit(message);
     return headSha(projectId);
+}
+
+export async function assertRepoWritableUnlocked(projectId: string): Promise<void> {
+    const gitDir = path.join(repoDir(projectId), ".git");
+    const rebaseInProgress = await Promise.all(["rebase-merge", "rebase-apply"].map((name) =>
+        fs.stat(path.join(gitDir, name)).then(() => true).catch((error) => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+        }),
+    ));
+    if (rebaseInProgress.some(Boolean)) throw new Error("The project repository has an unfinished rebase");
+    const status = await projectGit(projectId).status();
+    if (!status.isClean()) throw new Error("The project repository has uncommitted changes; sync them first");
+}
+
+export async function pinRunCommitUnlocked(projectId: string, runId: string, commitSha: string): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/i.test(runId) || !/^[0-9a-f]{40}$/i.test(commitSha)) {
+        throw new Error("Invalid run commit reference");
+    }
+    await projectGit(projectId).raw(["update-ref", `refs/specbook/runs/${runId}`, commitSha]);
+}
+
+export async function deleteRunCommitRefsUnlocked(projectId: string, runIds: string[]): Promise<void> {
+    for (const runId of runIds) {
+        if (!/^[0-9a-f-]{36}$/i.test(runId)) continue;
+        await projectGit(projectId).raw(["update-ref", "-d", `refs/specbook/runs/${runId}`]);
+    }
 }
 
 export function authedRemoteUrl(remoteUrl: string, token: string | null): string {

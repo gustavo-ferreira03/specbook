@@ -31,9 +31,10 @@ class FeaturesRepository {
         title: string,
         description: string,
         path: string,
+        id: string = crypto.randomUUID(),
     ): Promise<Feature> {
         const row: Feature = {
-            id: crypto.randomUUID(),
+            id,
             projectId,
             parentId,
             title,

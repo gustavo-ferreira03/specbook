@@ -23,3 +23,23 @@ export async function withSpecLocks<T>(specIds: string[], work: () => Promise<T>
     }
     return acquire(0);
 }
+
+export async function acquireSpecLocks(specIds: string[]): Promise<() => Promise<void>> {
+    const acquired: { id: string; current: Promise<unknown>; release: () => void }[] = [];
+    for (const id of [...new Set(specIds)].sort()) {
+        const previous = locks.get(id) ?? Promise.resolve();
+        let release: () => void = () => {};
+        const hold = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const current = previous.catch(() => undefined).then(() => hold);
+        locks.set(id, current);
+        await previous.catch(() => undefined);
+        acquired.push({ id, current, release });
+    }
+    return async () => {
+        for (const lock of acquired) lock.release();
+        await Promise.all(acquired.map((lock) => lock.current.catch(() => undefined)));
+        for (const lock of acquired) if (locks.get(lock.id) === lock.current) locks.delete(lock.id);
+    };
+}

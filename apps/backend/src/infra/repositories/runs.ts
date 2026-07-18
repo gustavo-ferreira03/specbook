@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { runs, type RunStatus } from "../db/schema";
 
@@ -41,6 +41,16 @@ class RunsRepository {
     async getRun(id: string): Promise<Run | null> {
         const rows = await db.select().from(runs).where(eq(runs.id, id));
         return rows[0] ?? null;
+    }
+
+    async hasRunningRuns(specIds: string[]): Promise<boolean> {
+        if (specIds.length === 0) return false;
+        const rows = await db
+            .select({ id: runs.id })
+            .from(runs)
+            .where(and(inArray(runs.specId, specIds), eq(runs.status, "running")))
+            .limit(1);
+        return rows.length > 0;
     }
 
     async deleteRun(id: string): Promise<void> {

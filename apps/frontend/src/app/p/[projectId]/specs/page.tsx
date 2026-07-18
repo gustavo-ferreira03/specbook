@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { Pie, PieChart } from "recharts";
-import { Check, CircleDashed, Clock3, FileCheck2, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, FileCheck2, GitMerge, RefreshCw, X } from "lucide-react";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusPill } from "@/components/StatusPill";
@@ -14,20 +14,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import type { Feature, SpecStatus, SpecSummary } from "@/lib/types";
 
-const STATUS_ORDER: SpecStatus[] = ["passed", "failed", "unverified", "draft"];
+const STATUS_ORDER: SpecStatus[] = ["passed", "failed", "invalid", "conflict", "unverified"];
 
 const STATUS_CHART_CONFIG: ChartConfig = {
     passed: { label: "Passed", color: "var(--color-success)" },
     failed: { label: "Failed", color: "var(--color-danger)" },
     unverified: { label: "Unverified", color: "var(--color-pending)" },
-    draft: { label: "Draft", color: "var(--color-ink-disabled)" },
+    invalid: { label: "Invalid", color: "var(--color-invalid)" },
+    conflict: { label: "Conflict", color: "var(--color-conflict)" },
 };
 
 const STATUS_ICON: Record<SpecStatus, React.ComponentType<{ size?: number; className?: string }>> = {
     passed: Check,
     failed: X,
     unverified: CircleDashed,
-    draft: Clock3,
+    invalid: AlertTriangle,
+    conflict: GitMerge,
 };
 
 function StatTile({ label, value, tone }: { label: string; value: number; tone?: "success" | "danger" | "pending" }) {
@@ -44,17 +46,19 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const { projectId } = use(params);
     const [features, setFeatures] = useState<Feature[] | null>(null);
     const [specs, setSpecs] = useState<SpecSummary[] | null>(null);
+    const [syncWarning, setSyncWarning] = useState("");
     const [loadError, setLoadError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
 
     useEffect(() => {
         let active = true;
         setLoadError("");
-        api<{ features: Feature[]; specs: SpecSummary[] }>(`/projects/${projectId}/tree`)
+        api<{ features: Feature[]; specs: SpecSummary[]; syncError: string | null }>(`/projects/${projectId}/tree`)
             .then((result) => {
                 if (!active) return;
                 setFeatures(result.features);
                 setSpecs(result.specs);
+                setSyncWarning(result.syncError ?? "");
             })
             .catch((error) => {
                 if (!active) return;
@@ -124,7 +128,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const featureById = new Map(features.map((feature) => [feature.id, feature]));
     const counts = STATUS_ORDER.reduce<Record<SpecStatus, number>>(
         (acc, status) => ({ ...acc, [status]: 0 }),
-        { passed: 0, failed: 0, unverified: 0, draft: 0 },
+        { passed: 0, failed: 0, unverified: 0, invalid: 0, conflict: 0 },
     );
     for (const spec of specs) counts[spec.status] += 1;
 
@@ -134,16 +138,27 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
         fill: `var(--color-${status})`,
     }));
 
-    const listPriority: Record<SpecStatus, number> = { failed: 0, unverified: 1, draft: 2, passed: 3 };
+    const listPriority: Record<SpecStatus, number> = {
+        conflict: 0,
+        invalid: 1,
+        failed: 2,
+        unverified: 3,
+        passed: 4,
+    };
     const orderedSpecs = [...specs].sort((a, b) => listPriority[a.status] - listPriority[b.status]);
 
     const passRate = specs.length > 0 ? Math.round((counts.passed / specs.length) * 100) : 0;
-    const passRateTone = counts.failed > 0 ? "text-danger" : counts.unverified > 0 ? "text-pending" : "text-success";
+    const passRateTone = counts.failed > 0 || counts.invalid > 0
+        ? "text-danger"
+        : counts.conflict > 0 || counts.unverified > 0
+          ? "text-pending"
+          : "text-success";
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader title="Specs" eyebrow="Project" />
             <div className="mx-auto w-full max-w-[1040px] flex-1 px-5 py-8">
+                {syncWarning && <Alert variant="warning" className="mb-4" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <StatTile label="Total Specs" value={specs.length} />
                     <StatTile label="Passed" value={counts.passed} tone="success" />

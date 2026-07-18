@@ -5,7 +5,6 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 export const backendRoot = path.resolve(moduleDir, "..", "..");
 export const storageRoot = process.env.SPECBOOK_STORAGE_DIR ?? path.join(backendRoot, "storage");
-export const specsDir = path.join(storageRoot, "specs");
 export const runsDir = path.join(storageRoot, "runs");
 export const runBatchesDir = path.join(runsDir, "batches");
 export const reposDir = path.join(storageRoot, "repos");

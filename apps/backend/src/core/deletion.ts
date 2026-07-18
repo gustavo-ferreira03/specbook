@@ -2,12 +2,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { blockChatBrowser, cancelChatBrowserDeletion, removeChatBrowserData } from "./browser/sessions";
 import { beginChatDeletion, cancelChatDeletion, removeChatSession } from "./chat/session";
-import { runsDir, specsDir } from "./paths";
-import { getRunBatchDirectory } from "./runner/batch";
+import { runsDir } from "./paths";
+import { deleteRunCommitRefsUnlocked, withRepoLock } from "./repo/git";
+import { deleteFeatureDirectory, deleteSpecFiles } from "./repo/writer";
+import { getRunBatch, getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
 import { chatsRepository } from "../infra/repositories/chats";
 import { projectContextsRepository } from "../infra/repositories/project-contexts";
 import { featuresRepository } from "../infra/repositories/features";
+import { runsRepository } from "../infra/repositories/runs";
 import { specsRepository } from "../infra/repositories/specs";
 
 export class ResourceBusyError extends Error {}
@@ -28,7 +31,8 @@ async function removeEntityDirectories(root: string, ids: string[]): Promise<voi
     }
 }
 
-async function removeSpecResources(specIds: string[], runIds: string[]): Promise<void> {
+async function removeRunResources(projectId: string, runIds: string[]): Promise<void> {
+    await withRepoLock(projectId, () => deleteRunCommitRefsUnlocked(projectId, runIds));
     const batchIds = new Set<string>();
     for (const runId of runIds) {
         try {
@@ -36,12 +40,12 @@ async function removeSpecResources(specIds: string[], runIds: string[]): Promise
             if (typeof link.batchId === "string") batchIds.add(link.batchId);
         } catch {}
     }
-    await Promise.all([
-        removeEntityDirectories(specsDir, specIds),
-        removeEntityDirectories(runsDir, runIds),
-    ]);
+    await removeEntityDirectories(runsDir, runIds);
     for (const batchId of batchIds) {
-        await fs.rm(getRunBatchDirectory(batchId), { recursive: true, force: true });
+        const batch = await getRunBatch(batchId);
+        if (batch?.specs.every((item) => runIds.includes(item.runId))) {
+            await fs.rm(getRunBatchDirectory(batchId), { recursive: true, force: true });
+        }
     }
 }
 
@@ -72,12 +76,18 @@ export async function deleteChatData(id: string): Promise<boolean> {
 export async function deleteSpecData(id: string): Promise<boolean> {
     if (areSpecsLocked([id])) throw new ResourceBusyError("Wait for the current Spec operation to finish before deleting it");
     return withSpecLock(id, async () => {
+        const spec = await specsRepository.getSpec(id);
+        if (!spec) return false;
+        if (await runsRepository.hasRunningRuns([id])) {
+            throw new ResourceBusyError("Wait for the current Spec run to finish before deleting it");
+        }
+        await deleteSpecFiles(spec);
         const result = await specsRepository.deleteSpecWithRelations(id);
         if (result.status === "not_found") return false;
         if (result.status === "busy") {
             throw new ResourceBusyError("Wait for the current Spec run to finish before deleting it");
         }
-        await removeSpecResources([id], result.runIds);
+        await removeRunResources(spec.projectId, result.runIds);
         return true;
     });
 }
@@ -89,12 +99,18 @@ export async function deleteFeatureData(id: string): Promise<boolean> {
         throw new ResourceBusyError("Wait for active Spec operations in this Feature to finish before deleting it");
     }
     return withSpecLocks(specIds, async () => {
+        const feature = await featuresRepository.getFeature(id);
+        if (!feature) return false;
+        if (await runsRepository.hasRunningRuns(specIds)) {
+            throw new ResourceBusyError("Wait for active Spec runs in this Feature to finish before deleting it");
+        }
+        await deleteFeatureDirectory(feature.projectId, feature.path, feature.title);
         const result = await featuresRepository.deleteFeatureWithRelations(id);
         if (result.status === "not_found") return false;
         if (result.status === "busy") {
             throw new ResourceBusyError("Wait for active Spec runs in this Feature to finish before deleting it");
         }
-        await removeSpecResources(result.specIds, result.runIds);
+        await removeRunResources(feature.projectId, result.runIds);
         return true;
     });
 }

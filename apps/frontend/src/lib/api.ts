@@ -1,4 +1,6 @@
 import type {
+    GitStatus,
+    GitSyncOutcome,
     LlmCurrentSettings,
     LlmOAuthPoll,
     LlmOAuthStart,
@@ -79,6 +81,52 @@ export function startRunBatch(projectId: string, specIds: string[], label: strin
 
 export function getRunBatch(batchId: string): Promise<{ batch: RunBatch; reportUrl: string | null }> {
     return api(`/run-batches/${encodeURIComponent(batchId)}`);
+}
+
+export function getProjectGit(projectId: string): Promise<{ git: GitStatus }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git`);
+}
+
+export function connectProjectGit(
+    projectId: string,
+    remoteUrl: string,
+    token?: string | null,
+): Promise<{ git: GitStatus }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git`, {
+        method: "PUT",
+        body: JSON.stringify({ remoteUrl, token }),
+    });
+}
+
+export function disconnectProjectGit(projectId: string): Promise<void> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git`, { method: "DELETE" });
+}
+
+export function syncProjectGit(projectId: string): Promise<{ outcome: GitSyncOutcome }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git/sync`, { method: "POST" });
+}
+
+export function resolveProjectGit(
+    projectId: string,
+    choices: { path: string; keep: "local" | "remote" }[],
+): Promise<{ outcome: GitSyncOutcome }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ choices }),
+    });
+}
+
+export function getSpecHistory(specId: string): Promise<{
+    entries: { sha: string; date: string; message: string }[];
+}> {
+    return api(`/specs/${encodeURIComponent(specId)}/history`);
+}
+
+export function getSpecAtCommit(
+    specId: string,
+    sha: string,
+): Promise<{ markdown: string | null; robot: string | null }> {
+    return api(`/specs/${encodeURIComponent(specId)}/history/${encodeURIComponent(sha)}`);
 }
 
 export function getLlmSettings(): Promise<LlmSettingsResponse> {

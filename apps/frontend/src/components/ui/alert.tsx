@@ -8,6 +8,8 @@ const alertVariants = cva("relative w-full rounded-lg px-3 py-2.5 text-[0.6875re
             default: "bg-surface-soft text-ink",
             destructive: "bg-danger-soft text-danger",
             warning: "bg-pending-soft text-pending",
+            invalid: "bg-invalid-soft text-invalid",
+            conflict: "bg-conflict-soft text-conflict",
             info: "bg-info-soft text-info",
         },
     },

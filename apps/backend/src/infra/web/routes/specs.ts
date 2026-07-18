@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
-import { readSpecExecutable } from "../../../core/specs/files";
+import { readSpecFiles } from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
 import { runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
@@ -14,21 +14,8 @@ export function createSpecsRouter(): Hono {
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         const feature = await featuresRepository.getFeature(spec.featureId);
         const runs = await runsRepository.listRuns(spec.id);
-        if (!spec.currentVersionId) return c.json({ spec, feature, version: null, runs });
-        const versionRow = await specsRepository.getSpecVersion(spec.currentVersionId);
-        if (!versionRow) return c.json({ spec, feature, version: null, runs });
-        const robotSource = await readSpecExecutable(versionRow.executablePath).catch(() => "");
-        return c.json({
-            spec,
-            feature,
-            version: {
-                id: versionRow.id,
-                version: versionRow.version,
-                humanSpec: versionRow.humanSpec,
-                robotSource,
-            },
-            runs,
-        });
+        const content = await readSpecFiles(spec).catch(() => null);
+        return c.json({ spec, feature, content, runs });
     });
 
     router.delete("/specs/:id", async (c) => {
