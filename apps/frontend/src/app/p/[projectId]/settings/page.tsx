@@ -19,6 +19,7 @@ import {
     X,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
+import { ContextFileCard } from "@/components/ContextFileCard";
 import { GitHubConnection } from "@/components/GitHubConnection";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -452,6 +453,7 @@ export default function SettingsPage() {
                         </div>
                     </section>
                     <GitHubConnection projectId={projectId} />
+                    <ContextFileCard projectId={projectId} />
                 </div>
             </div>
 

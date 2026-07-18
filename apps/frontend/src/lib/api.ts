@@ -1,4 +1,5 @@
 import type {
+    Feature,
     GitStatus,
     GitSyncOutcome,
     LlmCurrentSettings,
@@ -10,6 +11,7 @@ import type {
     ProjectContextRevision,
     ProjectContextState,
     RunBatch,
+    SpecDetail,
 } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -173,5 +175,65 @@ export function submitLlmProviderOAuthManual(providerId: string, sessionId: stri
     return api<{ ok: boolean }>(`/settings/llm/providers/${encodeURIComponent(providerId)}/oauth/manual`, {
         method: "POST",
         body: JSON.stringify({ sessionId, input }),
+    });
+}
+
+export function updateSpecFiles(specId: string, input: { yaml?: string; robot?: string }): Promise<SpecDetail> {
+    return api(`/specs/${encodeURIComponent(specId)}/files`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+    });
+}
+
+export function moveSpecToFeature(specId: string, featureId: string): Promise<SpecDetail> {
+    return api(`/specs/${encodeURIComponent(specId)}/move`, {
+        method: "POST",
+        body: JSON.stringify({ featureId }),
+    });
+}
+
+export function createManualSpec(
+    projectId: string,
+    featureId: string,
+    title: string,
+): Promise<{ spec: { id: string } }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/specs`, {
+        method: "POST",
+        body: JSON.stringify({ featureId, title }),
+    });
+}
+
+export function createFeature(
+    projectId: string,
+    input: { parentId?: string; title: string; description?: string },
+): Promise<{ feature: Feature }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/features`, {
+        method: "POST",
+        body: JSON.stringify(input),
+    });
+}
+
+export function getFeatureFile(featureId: string): Promise<{ feature: Feature; yaml: string | null }> {
+    return api(`/features/${encodeURIComponent(featureId)}/file`);
+}
+
+export function updateFeatureFile(featureId: string, yaml: string): Promise<{ feature: Feature }> {
+    return api(`/features/${encodeURIComponent(featureId)}/file`, {
+        method: "PUT",
+        body: JSON.stringify({ yaml }),
+    });
+}
+
+export function getContextFile(projectId: string): Promise<{ yaml: string | null; contextSyncError: string | null }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/context-file`);
+}
+
+export function updateContextFile(
+    projectId: string,
+    yaml: string,
+): Promise<{ yaml: string | null; contextSyncError: string | null }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/context-file`, {
+        method: "PUT",
+        body: JSON.stringify({ yaml }),
     });
 }

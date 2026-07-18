@@ -72,7 +72,7 @@ export interface SpecDetail {
         updatedAt: string;
     };
     feature: Feature | null;
-    content: { humanSpec: HumanSpec; robotSource: string } | null;
+    content: { humanSpec: HumanSpec | null; robotSource: string; yamlSource: string } | null;
     runs: Run[];
 }
 

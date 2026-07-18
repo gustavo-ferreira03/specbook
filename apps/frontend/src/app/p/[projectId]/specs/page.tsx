@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { Pie, PieChart } from "recharts";
 import { AlertTriangle, Check, CircleDashed, FileCheck2, GitMerge, RefreshCw, X } from "lucide-react";
+import { NewFeatureDialog, NewSpecDialog } from "@/components/CreateStructureDialogs";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusPill } from "@/components/StatusPill";
@@ -119,6 +120,10 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                 <FileCheck2 size={13} /> Start a chat
                             </Link>
                         </Button>
+                        <div className="mt-4 flex justify-center gap-2">
+                            <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
+                            <NewSpecDialog projectId={projectId} features={features} />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -159,6 +164,10 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             <PageHeader title="Specs" eyebrow="Project" />
             <div className="mx-auto w-full max-w-[1040px] flex-1 px-5 py-8">
                 {syncWarning && <Alert variant="warning" className="mb-4" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
+                <div className="mb-4 flex justify-end gap-2">
+                    <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
+                    <NewSpecDialog projectId={projectId} features={features} />
+                </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <StatTile label="Total Specs" value={specs.length} />
                     <StatTile label="Passed" value={counts.passed} tone="success" />

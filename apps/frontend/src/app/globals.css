@@ -191,3 +191,31 @@ summary:focus-visible {
         animation-iteration-count: 1 !important;
     }
 }
+
+.code-editor .token.comment {
+    color: var(--color-ink-faint);
+    font-style: italic;
+}
+.code-editor .token.key,
+.code-editor .token.atrule,
+.code-editor .token.keyword,
+.code-editor .token.section {
+    color: var(--color-pending);
+    font-weight: 600;
+}
+.code-editor .token.string,
+.code-editor .token.attr-value {
+    color: var(--color-success);
+}
+.code-editor .token.number,
+.code-editor .token.boolean,
+.code-editor .token.variable {
+    color: var(--color-danger);
+}
+.code-editor .token.punctuation,
+.code-editor .token.operator {
+    color: var(--color-ink-soft);
+}
+.code-editor textarea {
+    outline: none;
+}

@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useState } from "react";
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, GitMerge, Images, PencilLine, Play, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, GitMerge, Images, PencilLine, Play, RefreshCw } from "lucide-react";
+import { FeatureFileDialog } from "@/components/FeatureFileDialog";
 import { PageHeader } from "@/components/PageHeader";
+import { RawFileEditor } from "@/components/RawFileEditor";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_URL, api, resolveProjectGit } from "@/lib/api";
+import { API_URL, api, resolveProjectGit, updateSpecFiles } from "@/lib/api";
 import type { Run, RunEvidence, SpecDetail } from "@/lib/types";
 
 interface LoadedRunEvidence {
@@ -163,6 +165,10 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const [running, setRunning] = useState(false);
     const [resolving, setResolving] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
+    const [editing, setEditing] = useState(false);
+    const [yamlDraft, setYamlDraft] = useState("");
+    const [robotDraft, setRobotDraft] = useState("");
+    const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -238,6 +244,36 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         }
     }
 
+    function startEditing() {
+        if (!detail?.content) return;
+        setYamlDraft(detail.content.yamlSource);
+        setRobotDraft(detail.content.robotSource);
+        setEditing(true);
+        setActionError("");
+    }
+
+    async function saveFiles() {
+        if (!detail?.content) return;
+        setSaving(true);
+        setActionError("");
+        try {
+            const input: { yaml?: string; robot?: string } = {};
+            if (yamlDraft !== detail.content.yamlSource) input.yaml = yamlDraft;
+            if (robotDraft !== detail.content.robotSource) input.robot = robotDraft;
+            if (Object.keys(input).length === 0) {
+                setEditing(false);
+                return;
+            }
+            const nextDetail = await updateSpecFiles(specId, input);
+            setDetail(nextDetail);
+            setEditing(false);
+        } catch (error) {
+            setActionError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setSaving(false);
+        }
+    }
+
     async function resolveConflict(keep: "local" | "remote") {
         if (!detail) return;
         setResolving(true);
@@ -308,11 +344,15 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                         <p className="text-[0.625rem] text-ink-faint">{feature?.title ?? "Specs"} / {spec.title}</p>
                         <h2 className="mt-2.5 max-w-[34ch] text-xl font-bold tracking-[-0.03em] text-balance">{spec.title}</h2>
                         {spec.description && <p className="mt-2 max-w-[65ch] text-xs leading-5 text-ink-soft">{spec.description}</p>}
-                        <div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill status={spec.status} /><span className="text-[0.625rem] text-ink-faint">Updated {new Date(spec.updatedAt).toLocaleDateString()}</span></div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <StatusPill status={spec.status} />
+                            <span className="text-[0.625rem] text-ink-faint">Updated {new Date(spec.updatedAt).toLocaleDateString()}</span>
+                            {feature && <FeatureFileDialog featureId={feature.id} featureTitle={feature.title} onSaved={() => setRetryKey((key) => key + 1)} />}
+                        </div>
                     </div>
-                    <div className="flex shrink-0 gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2">
                         <SpecHistoryDialog specId={specId} />
-                        <Button asChild variant="outline" className="flex-1 sm:flex-none"><Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={13} /> Edit Spec</Link></Button>
+                        <Button type="button" variant="outline" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || spec.status === "conflict"} className="flex-1 sm:flex-none"><FileCode2 size={13} /> {editing ? "Cancel" : "Edit"}</Button>
                         <Button type="button" onClick={runNow} disabled={running || !content || spec.status === "invalid" || spec.status === "conflict"} className="flex-1 sm:flex-none"><Play size={12} fill="currentColor" /> {running ? "Running..." : "Run Spec"}</Button>
                     </div>
                 </div>
@@ -322,7 +362,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 {spec.status === "invalid" && (
                     <Alert variant="invalid" className="mt-5" role="alert">
                         <AlertTitle>Spec is invalid</AlertTitle>
-                        <AlertDescription>{spec.invalidReason ?? "The Markdown or Robot file could not be validated."}</AlertDescription>
+                        <AlertDescription>{spec.invalidReason ?? "The spec.yml or spec.robot file could not be validated."}</AlertDescription>
                     </Alert>
                 )}
 
@@ -343,8 +383,28 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 )}
 
                 <section className="mt-7" aria-labelledby="specification-heading">
-                    <h2 id="specification-heading" className="mb-2.5 text-[0.78125rem] font-bold">Specification</h2>
-                    {content ? (
+                    <div className="mb-2.5 flex items-center justify-between">
+                        <h2 id="specification-heading" className="text-[0.78125rem] font-bold">Specification</h2>
+                        {editing && (
+                            <Button type="button" size="sm" onClick={saveFiles} disabled={saving}>
+                                {saving ? "Saving..." : "Save files"}
+                            </Button>
+                        )}
+                    </div>
+                    {editing && content ? (
+                        <div className="space-y-4 rounded-[13px] border border-line p-4 sm:p-5">
+                            <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={yamlDraft} onChange={setYamlDraft} disabled={saving} />
+                            <RawFileEditor id="spec-robot" label="spec.robot" language="robotframework" value={robotDraft} onChange={setRobotDraft} disabled={saving} rows={16} />
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+                                <p className="text-[0.625rem] leading-4 text-ink-faint">Saving commits exactly what you typed. Invalid content is accepted and the Spec is marked invalid with the reason.</p>
+                                <Button asChild variant="ghost" size="sm" className="text-ink-soft">
+                                    <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={12} /> Edit with AI instead</Link>
+                                </Button>
+                            </div>
+                        </div>
+                    ) : content && !content.humanSpec ? (
+                        <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">spec.yml could not be parsed</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Use “Edit files” to fix the YAML by hand.</p></div>
+                    ) : content && content.humanSpec ? (
                         <div className="overflow-hidden rounded-[13px] border border-line">
                             <section className="px-4 py-3.5 sm:px-5">
                                 <h3 className="text-[0.625rem] font-bold tracking-[0.06em] text-ink-faint uppercase">Preconditions</h3>
@@ -366,7 +426,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                 {content.humanSpec.postconditions.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 marker:text-ink-faint">{content.humanSpec.postconditions.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul> : <p className="mt-2 text-xs leading-5 text-ink-faint">No postconditions recorded.</p>}
                             </section>
                         </div>
-                    ) : <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">Spec files unavailable</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Restore or fix the Markdown and Robot files to continue.</p></div>}
+                    ) : <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">Spec files unavailable</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Restore or fix the spec.yml and spec.robot files to continue.</p></div>}
                 </section>
 
                 <section className="mt-8" aria-labelledby="verification-heading">
