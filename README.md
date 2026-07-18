@@ -17,25 +17,36 @@ Each project has its own Git repository. Specs, Features, and confirmed project 
 
 ## Quick start
 
-You need [Docker Compose](https://docs.docker.com/compose/). The public image includes Chromium, Playwright MCP, Robot Framework, Browser Library, Xvfb, and x11vnc.
+You need [Docker](https://docs.docker.com/get-docker/). The public image includes Chromium, Playwright MCP, Robot Framework, Browser Library, Xvfb, and x11vnc.
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/gustavo-ferreira03/specbook/main/docker-compose.yml
-docker compose up -d
+docker run --detach \
+  --name specbook \
+  --restart unless-stopped \
+  --init \
+  --shm-size=1g \
+  -p 4000:4000 \
+  -p 4001:4001 \
+  -p 53692:53692 \
+  -e HOST=0.0.0.0 \
+  -e FRONTEND_ORIGIN=http://localhost:4001 \
+  -e PI_OAUTH_CALLBACK_HOST=0.0.0.0 \
+  -v specbook-storage:/app/apps/backend/storage \
+  ghcr.io/gustavo-ferreira03/specbook:latest
 ```
 
 Open [http://localhost:4001](http://localhost:4001), then connect an LLM provider in **Settings**. Specbook supports API keys from its model registry and OAuth connections for Anthropic, OpenAI Codex, and GitHub Copilot.
 
 ```bash
 curl http://localhost:4000/health
-docker compose logs -f app
+docker logs -f specbook
 ```
 
 > [!TIP]
-> Update a running installation with `docker compose pull && docker compose up -d`. The named `specbook-storage` volume keeps your data across image updates.
+> The named `specbook-storage` volume keeps your data after you remove or replace the container. Docker does not remove named volumes unless you ask it to.
 
 > [!WARNING]
-> Specbook has no application-level authentication. Compose exposes the frontend, API, and OAuth callback ports on every host interface. Use a trusted network, or place it behind a firewall, VPN, IP allowlist, or authenticated reverse proxy.
+> Specbook has no application-level authentication. The default Docker command exposes the frontend, API, and OAuth callback ports on every host interface. Use a trusted network, or place it behind a firewall, VPN, IP allowlist, or authenticated reverse proxy.
 
 ## How it works
 
@@ -111,9 +122,19 @@ docker build \
   --build-arg NEXT_PUBLIC_API_URL=https://specbook-api.example.com \
   -t specbook:public .
 
-SPECBOOK_IMAGE=specbook:public \
-FRONTEND_ORIGIN=https://specbook.example.com \
-docker compose up -d
+docker run --detach \
+  --name specbook \
+  --restart unless-stopped \
+  --init \
+  --shm-size=1g \
+  -p 4000:4000 \
+  -p 4001:4001 \
+  -p 53692:53692 \
+  -e HOST=0.0.0.0 \
+  -e FRONTEND_ORIGIN=https://specbook.example.com \
+  -e PI_OAUTH_CALLBACK_HOST=0.0.0.0 \
+  -v specbook-storage:/app/apps/backend/storage \
+  specbook:public
 ```
 
 ## Development
