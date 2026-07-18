@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
-import { AlertCircle, ChevronDown, ExternalLink, Images, PencilLine, Play, RefreshCw } from "lucide-react";
+import { use, useCallback, useEffect, useState } from "react";
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Images, PencilLine, Play, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -183,6 +183,32 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         };
     }, [retryKey, specId]);
 
+    const selectedSteps = selectedEvidence ? evidence[selectedEvidence.runId]?.data?.steps ?? [] : [];
+    const selectedIndex = selectedEvidence
+        ? selectedSteps.findIndex((step) => step.file === selectedEvidence.step.file)
+        : -1;
+    const hasPrev = selectedIndex > 0;
+    const hasNext = selectedIndex >= 0 && selectedIndex < selectedSteps.length - 1;
+
+    const stepBy = useCallback(
+        (delta: number) => {
+            if (!selectedEvidence || selectedIndex < 0) return;
+            const nextStep = selectedSteps[selectedIndex + delta];
+            if (nextStep) setSelectedEvidence({ runId: selectedEvidence.runId, step: nextStep });
+        },
+        [selectedEvidence, selectedIndex, selectedSteps],
+    );
+
+    useEffect(() => {
+        if (!selectedEvidence) return;
+        function handleKeyDown(event: KeyboardEvent) {
+            if (event.key === "ArrowLeft") stepBy(-1);
+            if (event.key === "ArrowRight") stepBy(1);
+        }
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [selectedEvidence, stepBy]);
+
     async function runNow() {
         setRunning(true);
         setActionError("");
@@ -305,10 +331,43 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
             }}>
                 <DialogContent className="max-h-[calc(100dvh-24px)] max-w-[960px] overflow-y-auto p-4 sm:p-5">
                     <DialogHeader className="pr-8">
-                        <DialogTitle>Step {selectedEvidence?.step.number}</DialogTitle>
+                        <DialogTitle>
+                            Step {selectedEvidence?.step.number}
+                            {selectedSteps.length > 1 && (
+                                <span className="ml-2 font-normal text-ink-faint">{selectedIndex + 1} of {selectedSteps.length}</span>
+                            )}
+                        </DialogTitle>
                         <DialogDescription>{selectedEvidence?.step.label}</DialogDescription>
                     </DialogHeader>
-                    {selectedEvidence && <img src={artifactUrl(selectedEvidence.runId, selectedEvidence.step.file)} alt={`Evidence for step ${selectedEvidence.step.number}: ${selectedEvidence.step.label}`} className="mt-3 max-h-[calc(100dvh-150px)] w-full rounded-[9px] object-contain" />}
+                    {selectedEvidence && (
+                        <div className="relative mt-3">
+                            <img src={artifactUrl(selectedEvidence.runId, selectedEvidence.step.file)} alt={`Evidence for step ${selectedEvidence.step.number}: ${selectedEvidence.step.label}`} className="max-h-[calc(100dvh-150px)] w-full rounded-[9px] object-contain" />
+                            {hasPrev && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => stepBy(-1)}
+                                    className="absolute top-1/2 left-2 -translate-y-1/2 rounded-full bg-surface/90 shadow-composer backdrop-blur-sm"
+                                    aria-label="Previous step"
+                                >
+                                    <ChevronLeft size={16} />
+                                </Button>
+                            )}
+                            {hasNext && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => stepBy(1)}
+                                    className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full bg-surface/90 shadow-composer backdrop-blur-sm"
+                                    aria-label="Next step"
+                                >
+                                    <ChevronRight size={16} />
+                                </Button>
+                            )}
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
         </div>
