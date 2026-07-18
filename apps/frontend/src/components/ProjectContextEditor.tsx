@@ -288,6 +288,7 @@ export function ProjectContextEditor({
                                         onChange={(event) => updateRow(key, index, { second: event.target.value })}
                                         placeholder={secondLabel}
                                         aria-label={`${title} ${index + 1}: ${secondLabel}`}
+                                        title={row.second || undefined}
                                     />
                                 </div>
                             )}
@@ -330,33 +331,32 @@ export function ProjectContextEditor({
                     {state.areas.map((area, index) => (
                         <div key={index} className={index > 0 ? "space-y-2 border-t border-line pt-5" : "space-y-2"}>
                             <div className="flex items-start gap-2">
-                                <div className="grid flex-1 items-start gap-2 sm:grid-cols-2">
-                                    <Input
-                                        data-focus={`areas-${index}-0`}
-                                        value={area.name}
-                                        onChange={(event) => updateRow("areas", index, { name: event.target.value })}
-                                        placeholder="Area name"
-                                        aria-label={`Area ${index + 1} name`}
-                                    />
-                                    <AutoTextarea
-                                        value={area.routes}
-                                        onChange={(event) => updateRow("areas", index, { routes: event.target.value })}
-                                        placeholder={"/route\n/route/:id"}
-                                        aria-label={`Area ${index + 1} routes`}
-                                        rows={2}
-                                    />
-                                </div>
+                                <Input
+                                    data-focus={`areas-${index}-0`}
+                                    value={area.name}
+                                    onChange={(event) => updateRow("areas", index, { name: event.target.value })}
+                                    placeholder="Area name"
+                                    aria-label={`Area ${index + 1} name`}
+                                    className="flex-1"
+                                />
                                 <Button
                                     type="button"
                                     variant="ghost"
                                     size="icon"
                                     onClick={() => removeRow("areas", index)}
                                     aria-label={`Remove area ${index + 1}`}
-                                    className="mt-0.5 shrink-0 text-ink-faint hover:text-ink"
+                                    className="shrink-0 text-ink-faint hover:text-ink"
                                 >
                                     <X size={14} />
                                 </Button>
                             </div>
+                            <AutoTextarea
+                                value={area.routes}
+                                onChange={(event) => updateRow("areas", index, { routes: event.target.value })}
+                                placeholder={"/route\n/route/:id"}
+                                aria-label={`Area ${index + 1} routes`}
+                                rows={2}
+                            />
                             <AutoTextarea
                                 value={area.description}
                                 onChange={(event) => updateRow("areas", index, { description: event.target.value })}
