@@ -49,7 +49,8 @@ export async function specHistory(spec: Spec): Promise<SpecHistoryEntry[]> {
                 .catch(() => null);
             if (markdown !== null) {
                 try {
-                    if (parseMarkdownIdentity(markdown).id !== spec.id) continue;
+                    const identity = parseMarkdownIdentity(markdown).id;
+                    if (identity !== null && identity !== spec.id) continue;
                 } catch {}
             }
             filtered.push({ sha: entry.sha, date: entry.date, message: entry.message });
