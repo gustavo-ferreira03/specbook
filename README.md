@@ -1,11 +1,5 @@
 # <img src="apps/frontend/public/specbook-chat-icon.svg" width="32" height="32" align="absmiddle" alt=""> Specbook
 
-[![Next.js](https://img.shields.io/badge/Next.js-black?style=flat-square&logo=next.js)](https://nextjs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Robot Framework](https://img.shields.io/badge/Robot%20Framework-000000?style=flat-square)](https://robotframework.org)
-[![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
-
 Specbook turns a conversation about a web application into a readable, executable Spec. You describe a flow in chat, watch the agent inspect the application in a visible browser, then review the YAML and Robot Framework files it writes.
 
 Every project gets its own Git repository. Specs, Features, and confirmed project context remain ordinary files that a team can inspect and edit; SQLite only indexes them for the application.
