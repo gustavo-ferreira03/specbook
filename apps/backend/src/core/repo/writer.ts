@@ -4,22 +4,25 @@ import path from "node:path";
 import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
-import { serializeContextMarkdown } from "./contextMarkdown";
 import { assertRepoWritableUnlocked, commitAll, repoDir, withRepoLock } from "./git";
-import { parseSpecMarkdown, serializeFeatureMarkdown, serializeSpecMarkdown } from "./markdown";
 import { schedulePush } from "./remote";
 import { uniqueSlug } from "./slug";
+import { parseSpecYaml, serializeContextYaml, serializeFeatureYaml, serializeSpecYaml } from "./yaml";
 
 export function robotHashOf(source: string): string {
     return crypto.createHash("sha256").update(source).digest("hex");
 }
 
-export function specMarkdownFile(specPath: string): string {
-    return `${specPath}/spec.md`;
+export function specYamlFile(specPath: string): string {
+    return `${specPath}/spec.yml`;
 }
 
 export function specRobotFile(specPath: string): string {
     return `${specPath}/spec.robot`;
+}
+
+export function featureYamlFile(featurePath: string): string {
+    return `${featurePath}/feature.yml`;
 }
 
 export function markdownHashOf(source: string): string {
@@ -37,7 +40,7 @@ async function siblingNames(projectId: string, dirRelative: string): Promise<Set
     const entries = await fs.readdir(absolute(projectId, dirRelative), { withFileTypes: true }).catch(() => []);
     const names = new Set<string>(["feature", "context"]);
     for (const entry of entries) {
-        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(md|robot)$/, ""));
+        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|md|robot)$/, ""));
     }
     return names;
 }
@@ -58,8 +61,8 @@ export async function createFeatureInRepo(
         const featurePath = `${parentPath}/${slug}`;
         await fs.mkdir(absolute(projectId, featurePath), { recursive: true });
         await fs.writeFile(
-            absolute(projectId, `${featurePath}/feature.md`),
-            serializeFeatureMarkdown({ id, title, description }),
+            absolute(projectId, featureYamlFile(featurePath)),
+            serializeFeatureYaml({ id, title, description }),
             "utf8",
         );
         await commitAll(projectId, `feature: create "${title}"`);
@@ -83,14 +86,14 @@ export async function createSpecInRepo(input: {
         const id = crypto.randomUUID();
         const slug = uniqueSlug(input.title, await siblingNames(input.projectId, feature.path), id);
         const specPath = `${feature.path}/${slug}`;
-        const markdown = serializeSpecMarkdown({
+        const markdown = serializeSpecYaml({
             id,
             title: input.title,
             description: input.description,
             humanSpec: input.humanSpec,
         });
         await fs.mkdir(absolute(input.projectId, specPath), { recursive: true });
-        await fs.writeFile(absolute(input.projectId, specMarkdownFile(specPath)), markdown, "utf8");
+        await fs.writeFile(absolute(input.projectId, specYamlFile(specPath)), markdown, "utf8");
         await fs.writeFile(absolute(input.projectId, specRobotFile(specPath)), input.robotSource, "utf8");
         const commitSha = await commitAll(input.projectId, `spec: create "${input.title}"`);
         schedulePush(input.projectId);
@@ -115,9 +118,9 @@ export async function createSpecInRepo(input: {
 }
 
 export async function readSpecFiles(spec: Spec): Promise<{ humanSpec: HumanSpec; robotSource: string }> {
-    const markdown = await fs.readFile(absolute(spec.projectId, specMarkdownFile(spec.path)), "utf8");
+    const markdown = await fs.readFile(absolute(spec.projectId, specYamlFile(spec.path)), "utf8");
     const robotSource = await fs.readFile(absolute(spec.projectId, specRobotFile(spec.path)), "utf8");
-    return { humanSpec: parseSpecMarkdown(markdown).humanSpec, robotSource };
+    return { humanSpec: parseSpecYaml(markdown).humanSpec, robotSource };
 }
 
 export async function updateSpecInRepo(
@@ -144,8 +147,8 @@ export async function updateSpecInRepo(
                 await fs.rename(absolute(spec.projectId, spec.path), absolute(spec.projectId, specPath));
             }
         }
-        const markdown = serializeSpecMarkdown({ id: spec.id, title, description, humanSpec });
-        await fs.writeFile(absolute(spec.projectId, specMarkdownFile(specPath)), markdown, "utf8");
+        const markdown = serializeSpecYaml({ id: spec.id, title, description, humanSpec });
+        await fs.writeFile(absolute(spec.projectId, specYamlFile(specPath)), markdown, "utf8");
         await fs.writeFile(absolute(spec.projectId, specRobotFile(specPath)), robotSource, "utf8");
         const commitSha = await commitAll(spec.projectId, `spec: update "${title}"`);
         schedulePush(spec.projectId);
@@ -186,7 +189,7 @@ export async function deleteFeatureDirectory(projectId: string, featurePath: str
 export async function writeContextToRepo(projectId: string, context: ProjectContext): Promise<void> {
     await withRepoLock(projectId, async () => {
         await assertRepoWritableUnlocked(projectId);
-        await fs.writeFile(absolute(projectId, "context.md"), serializeContextMarkdown(context), "utf8");
+        await fs.writeFile(absolute(projectId, "context.yml"), serializeContextYaml(context), "utf8");
         await commitAll(projectId, "context: update");
         schedulePush(projectId);
     });

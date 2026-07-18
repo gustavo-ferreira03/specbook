@@ -174,7 +174,7 @@ export function GitHubConnection({ projectId }: { projectId: string }) {
             {notice && <p className="mt-3 flex items-center gap-1.5 text-[0.65625rem] font-bold text-success" role="status"><Check size={12} /> {notice}</p>}
             {error && <Alert variant="destructive" className="mt-3" role="alert"><AlertTitle>Git operation failed</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
             {git?.pushError && <Alert variant="destructive" className="mt-3" role="alert"><AlertTitle>Push failed</AlertTitle><AlertDescription className="break-words">{git.pushError}</AlertDescription></Alert>}
-            {git?.contextSyncError && <Alert variant="warning" className="mt-3" role="alert"><AlertTitle>context.md is invalid</AlertTitle><AlertDescription>{git.contextSyncError}</AlertDescription></Alert>}
+            {git?.contextSyncError && <Alert variant="warning" className="mt-3" role="alert"><AlertTitle>context.yml is invalid</AlertTitle><AlertDescription>{git.contextSyncError}</AlertDescription></Alert>}
             {conflicts.length > 0 && (
                 <Alert variant="conflict" className="mt-3" role="alert">
                     <div className="flex items-start gap-2">

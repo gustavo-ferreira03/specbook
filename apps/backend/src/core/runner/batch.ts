@@ -16,7 +16,7 @@ import {
     repoDir,
     withRepoLock,
 } from "../repo/git";
-import { markdownHashOf, robotHashOf, specMarkdownFile, specRobotFile } from "../repo/writer";
+import { markdownHashOf, robotHashOf, specYamlFile, specRobotFile } from "../repo/writer";
 import { acquireSpecLocks } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 import { runRobotProcess } from "./robot";
@@ -195,7 +195,7 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
             await Promise.all([
                 fs.writeFile(path.join(suiteDir, `${entry.run.id}.robot`), instrumented.source, "utf8"),
                 fs.writeFile(path.join(runsDir, entry.run.id, "spec.robot"), instrumented.source, "utf8"),
-                fs.writeFile(path.join(runsDir, entry.run.id, "spec.md"), entry.markdown, "utf8"),
+                fs.writeFile(path.join(runsDir, entry.run.id, "spec.yml"), entry.markdown, "utf8"),
             ]);
         }
 
@@ -266,7 +266,7 @@ async function prepareSpecBatch(
                 throw new Error(`Spec "${spec.title}" has a git sync conflict`);
             }
             const [markdown, robotSource] = await Promise.all([
-                fs.readFile(path.join(repoDir(projectId), specMarkdownFile(spec.path)), "utf8"),
+                fs.readFile(path.join(repoDir(projectId), specYamlFile(spec.path)), "utf8"),
                 fs.readFile(path.join(repoDir(projectId), specRobotFile(spec.path)), "utf8"),
             ]);
             const robotHash = robotHashOf(robotSource);

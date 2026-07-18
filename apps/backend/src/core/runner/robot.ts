@@ -16,7 +16,7 @@ import {
     repoDir,
     withRepoLock,
 } from "../repo/git";
-import { markdownHashOf, specMarkdownFile, specRobotFile } from "../repo/writer";
+import { markdownHashOf, specYamlFile, specRobotFile } from "../repo/writer";
 import { withSpecLock } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 
@@ -154,7 +154,7 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
         }
         const [robotSource, markdown, commitSha] = await Promise.all([
             fs.readFile(path.join(repoDir(spec.projectId), specRobotFile(spec.path)), "utf8"),
-            fs.readFile(path.join(repoDir(spec.projectId), specMarkdownFile(spec.path)), "utf8"),
+            fs.readFile(path.join(repoDir(spec.projectId), specYamlFile(spec.path)), "utf8"),
             headSha(spec.projectId),
         ]);
         return { robotSource, markdown, commitSha };
@@ -186,7 +186,7 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
         plannedEvidence = instrumented.steps;
         await Promise.all([
             fs.writeFile(path.join(outputDir, "spec.robot"), instrumented.source, "utf8"),
-            fs.writeFile(path.join(outputDir, "spec.md"), markdown, "utf8"),
+            fs.writeFile(path.join(outputDir, "spec.yml"), markdown, "utf8"),
         ]);
         await fs.mkdir(path.join(outputDir, "evidence"), { recursive: true });
         const result = await runRobotProcess(outputDir, outputDir, project.baseUrl);

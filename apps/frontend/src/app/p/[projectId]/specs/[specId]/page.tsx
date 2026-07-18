@@ -244,7 +244,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         setActionError("");
         try {
             const { outcome } = await resolveProjectGit(projectId, [
-                { path: `${detail.spec.path}/spec.md`, keep },
+                { path: `${detail.spec.path}/spec.yml`, keep },
                 { path: `${detail.spec.path}/spec.robot`, keep },
             ]);
             if (outcome.status === "conflict") {

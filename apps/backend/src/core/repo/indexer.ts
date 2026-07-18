@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { HumanSpec } from "../../infra/db/schema";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { projectsRepository } from "../../infra/repositories/projects";
@@ -16,16 +17,20 @@ import {
     repoDir,
     withRepoLock,
 } from "./git";
-import {
-    MarkdownParseError,
-    parseFeatureMarkdown,
-    parseMarkdownIdentity,
-    parseSpecMarkdown,
-    serializeSpecMarkdown,
-} from "./markdown";
+import { parseFeatureMarkdown, parseMarkdownIdentity, parseSpecMarkdown } from "./markdown";
 import { schedulePush } from "./remote";
 import { humanizeSlug } from "./slug";
-import { markdownHashOf, robotHashOf, specMarkdownFile, specRobotFile } from "./writer";
+import { featureYamlFile, markdownHashOf, robotHashOf, specRobotFile, specYamlFile } from "./writer";
+import {
+    parseFeatureYaml,
+    parseSpecYaml,
+    parseContextYaml,
+    parseYamlIdentity,
+    serializeContextYaml,
+    serializeFeatureYaml,
+    serializeSpecYaml,
+    YamlParseError,
+} from "./yaml";
 
 export type RobotValidator = (source: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 
@@ -39,7 +44,7 @@ export interface ReindexResult {
 interface FoundSpec {
     path: string;
     dirPath: string;
-    markdown: string;
+    yaml: string;
 }
 
 function isUuid(value: string | null | undefined): value is string {
@@ -72,11 +77,44 @@ async function migrateFlatSpec(root: string, dirRelative: string, fileName: stri
         return null;
     }
     await fs.mkdir(path.join(root, specDir), { recursive: true });
-    await fs.rename(path.join(root, `${specDir}.md`), path.join(root, specMarkdownFile(specDir)));
+    await fs.rename(path.join(root, `${specDir}.md`), path.join(root, `${specDir}/spec.md`));
     const robotFlat = path.join(root, `${specDir}.robot`);
     const hasRobot = await fs.stat(robotFlat).then((stat) => stat.isFile()).catch(() => false);
     if (hasRobot) await fs.rename(robotFlat, path.join(root, specRobotFile(specDir)));
     return specDir;
+}
+
+async function convertLegacySpecMarkdown(root: string, specDir: string): Promise<boolean> {
+    const legacyPath = path.join(root, `${specDir}/spec.md`);
+    const legacy = await readOptionalFile(legacyPath);
+    if (legacy === null) return false;
+    let identity: { id: string | null; title: string | null } = { id: null, title: null };
+    try {
+        identity = parseMarkdownIdentity(legacy);
+    } catch {}
+    let doc: { id: string | null; title: string | null; description: string; humanSpec: HumanSpec };
+    try {
+        doc = parseSpecMarkdown(legacy);
+    } catch {
+        doc = {
+            id: identity.id,
+            title: identity.title,
+            description: legacy.trim(),
+            humanSpec: { preconditions: [], steps: [], expectedResult: "", postconditions: [] },
+        };
+    }
+    await fs.writeFile(
+        path.join(root, specYamlFile(specDir)),
+        serializeSpecYaml({
+            id: doc.id ?? "",
+            title: doc.title ?? "",
+            description: doc.description,
+            humanSpec: doc.humanSpec,
+        }),
+        "utf8",
+    );
+    await fs.rm(legacyPath, { force: true });
+    return true;
 }
 
 async function walk(
@@ -90,9 +128,13 @@ async function walk(
     for (const entry of entries) {
         const entryRelative = `${relative}/${entry.name}`;
         if (entry.isDirectory()) {
-            const specMarkdown = await readOptionalFile(path.join(root, specMarkdownFile(entryRelative)));
-            if (specMarkdown !== null) {
-                found.push({ path: entryRelative, dirPath: relative, markdown: specMarkdown });
+            let specYaml = await readOptionalFile(path.join(root, specYamlFile(entryRelative)));
+            if (specYaml === null && (await convertLegacySpecMarkdown(root, entryRelative))) {
+                migrated.count += 1;
+                specYaml = await readOptionalFile(path.join(root, specYamlFile(entryRelative)));
+            }
+            if (specYaml !== null) {
+                found.push({ path: entryRelative, dirPath: relative, yaml: specYaml });
             } else {
                 dirs.push(entryRelative);
                 await walk(root, entryRelative, dirs, found, migrated);
@@ -101,10 +143,11 @@ async function walk(
             const specDir = await migrateFlatSpec(root, relative, entry.name);
             if (specDir === null) continue;
             migrated.count += 1;
+            await convertLegacySpecMarkdown(root, specDir);
             found.push({
                 path: specDir,
                 dirPath: relative,
-                markdown: await fs.readFile(path.join(root, specMarkdownFile(specDir)), "utf8"),
+                yaml: await fs.readFile(path.join(root, specYamlFile(specDir)), "utf8"),
             });
         }
     }
@@ -113,6 +156,7 @@ async function walk(
 async function upsertFeatures(
     projectId: string,
     dirs: string[],
+    migrated: { count: number },
 ): Promise<{ byPath: Map<string, Feature>; unseen: Feature[] }> {
     const root = repoDir(projectId);
     const existing = await featuresRepository.listFeatures(projectId);
@@ -120,16 +164,34 @@ async function upsertFeatures(
     const byPath = new Map<string, Feature>();
     const seenIds = new Set<string>();
     const sortedDirs = [...dirs].sort();
-    const docs = new Map<string, ReturnType<typeof parseFeatureMarkdown> | null>();
+    const docs = new Map<string, ReturnType<typeof parseFeatureYaml> | null>();
     const pathsById = new Map<string, string[]>();
 
     for (const dir of sortedDirs) {
-        const source = await readOptionalFile(path.join(root, dir, "feature.md"));
-        let doc: ReturnType<typeof parseFeatureMarkdown> | null = null;
-        if (source !== null) {
+        let doc: ReturnType<typeof parseFeatureYaml> | null = null;
+        const yamlSource = await readOptionalFile(path.join(root, featureYamlFile(dir)));
+        if (yamlSource !== null) {
             try {
-                doc = parseFeatureMarkdown(source);
+                doc = parseFeatureYaml(yamlSource);
             } catch {}
+        } else {
+            const legacy = await readOptionalFile(path.join(root, dir, "feature.md"));
+            if (legacy !== null) {
+                try {
+                    doc = parseFeatureMarkdown(legacy);
+                } catch {}
+                await fs.writeFile(
+                    path.join(root, featureYamlFile(dir)),
+                    serializeFeatureYaml({
+                        id: doc?.id ?? "",
+                        title: doc?.title ?? humanizeSlug(path.posix.basename(dir)),
+                        description: doc?.description ?? "",
+                    }),
+                    "utf8",
+                );
+                await fs.rm(path.join(root, dir, "feature.md"), { force: true });
+                migrated.count += 1;
+            }
         }
         docs.set(dir, doc);
         if (isUuid(doc?.id)) pathsById.set(doc.id, [...(pathsById.get(doc.id) ?? []), dir]);
@@ -183,11 +245,31 @@ async function removeRunDirs(projectId: string, runIds: string[]): Promise<void>
     );
 }
 
+async function migrateContextMarkdown(projectId: string, migrated: { count: number }): Promise<void> {
+    const root = repoDir(projectId);
+    const legacy = await readOptionalFile(path.join(root, "context.md"));
+    if (legacy === null) return;
+    if ((await readOptionalFile(path.join(root, "context.yml"))) === null) {
+        try {
+            const context = parseContextMarkdown(legacy);
+            await fs.writeFile(path.join(root, "context.yml"), serializeContextYaml(context), "utf8");
+        } catch (error) {
+            await projectsRepository.setContextSyncError(
+                projectId,
+                `Could not convert context.md to yaml: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            return;
+        }
+    }
+    await fs.rm(path.join(root, "context.md"), { force: true });
+    migrated.count += 1;
+}
+
 async function reconcileContext(projectId: string): Promise<void> {
-    const source = await readOptionalFile(path.join(repoDir(projectId), "context.md"));
+    const source = await readOptionalFile(path.join(repoDir(projectId), "context.yml"));
     if (source === null) return;
     try {
-        const context = parseContextMarkdown(source);
+        const context = parseContextYaml(source);
         const latest = await projectContextsRepository.getLatestConfirmedProjectContext(projectId);
         if (!latest || JSON.stringify(latest.context) !== JSON.stringify(context)) {
             const project = await projectsRepository.getProject(projectId);
@@ -237,19 +319,17 @@ export async function reindexProjectUnlocked(
     const dirs: string[] = [];
     const found: FoundSpec[] = [];
     const migrated = { count: 0 };
+    await migrateContextMarkdown(projectId, migrated);
     const hasSpecsDir = await isDirectory(path.join(root, "specs"));
     if (hasSpecsDir) await walk(root, "specs", dirs, found, migrated);
 
     const existingSpecs = await specsRepository.listSpecs(projectId);
     const specsById = new Map(existingSpecs.map((spec) => [spec.id, spec]));
     const specsByPath = new Map(existingSpecs.map((spec) => [spec.path, spec]));
-    const identities = new Map<string, ReturnType<typeof parseMarkdownIdentity> | null>();
+    const identities = new Map<string, ReturnType<typeof parseYamlIdentity> | null>();
     const pathsById = new Map<string, string[]>();
     for (const item of found) {
-        let identity: ReturnType<typeof parseMarkdownIdentity> | null = null;
-        try {
-            identity = parseMarkdownIdentity(item.markdown);
-        } catch {}
+        const identity = parseYamlIdentity(item.yaml);
         identities.set(item.path, identity);
         if (isUuid(identity?.id)) pathsById.set(identity.id, [...(pathsById.get(identity.id) ?? []), item.path]);
     }
@@ -260,7 +340,7 @@ export async function reindexProjectUnlocked(
         for (const specPath of paths) if (specPath !== preferred) ignoredIds.add(specPath);
     }
 
-    const { byPath: featuresByPath, unseen: unseenFeatures } = await upsertFeatures(projectId, dirs);
+    const { byPath: featuresByPath, unseen: unseenFeatures } = await upsertFeatures(projectId, dirs, migrated);
     const seenIds = new Set<string>();
     const invalidSpecs: string[] = [];
     let needsMetadataCommit = false;
@@ -269,12 +349,12 @@ export async function reindexProjectUnlocked(
         const feature = featuresByPath.get(item.dirPath);
         if (!feature) continue;
 
-        let doc: ReturnType<typeof parseSpecMarkdown> | null = null;
+        let doc: ReturnType<typeof parseSpecYaml> | null = null;
         let parseError: string | null = null;
         try {
-            doc = parseSpecMarkdown(item.markdown);
+            doc = parseSpecYaml(item.yaml);
         } catch (error) {
-            parseError = error instanceof MarkdownParseError ? error.message : String(error);
+            parseError = error instanceof YamlParseError ? error.message : String(error);
         }
 
         const identity = identities.get(item.path) ?? null;
@@ -283,13 +363,13 @@ export async function reindexProjectUnlocked(
         const title = doc?.title ?? identity?.title ?? existing?.title ?? humanizeSlug(path.posix.basename(item.path));
         const robotSource = await readOptionalFile(path.join(root, specRobotFile(item.path)));
         const robotHash = robotSource === null ? "" : robotHashOf(robotSource);
-        const markdownHash = markdownHashOf(item.markdown);
+        const markdownHash = markdownHashOf(item.yaml);
         let status: Spec["status"] = "unverified";
         let invalidReason: string | null = null;
 
         if (parseError) {
             status = "invalid";
-            invalidReason = `Invalid spec markdown: ${parseError}`;
+            invalidReason = `Invalid spec.yml: ${parseError}`;
         } else if (robotSource === null) {
             status = "invalid";
             invalidReason = "Missing spec.robot file in the spec directory";
@@ -341,14 +421,14 @@ export async function reindexProjectUnlocked(
         if (status === "invalid") invalidSpecs.push(spec.id);
 
         if (doc && doc.id !== spec.id) {
-            const normalized = serializeSpecMarkdown({
+            const normalized = serializeSpecYaml({
                 id: spec.id,
                 title,
                 description: doc.description,
                 humanSpec: doc.humanSpec,
             });
             await fs.writeFile(
-                path.join(root, specMarkdownFile(item.path)),
+                path.join(root, specYamlFile(item.path)),
                 normalized,
                 "utf8",
             );
@@ -379,7 +459,7 @@ export async function reindexProjectUnlocked(
     const workingTreeChanged = !(await projectGit(projectId).status()).isClean();
     if (workingTreeChanged) {
         const message = migrated.count > 0
-            ? "specbook: move specs into per-spec directories"
+            ? "specbook: convert specs to yaml"
             : needsMetadataCommit
               ? "specbook: normalize metadata"
               : "specbook: import working tree changes";
