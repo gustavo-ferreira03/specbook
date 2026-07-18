@@ -6,6 +6,7 @@ dist/
 .cache/
 .playwright-cli/
 .impeccable/
+.claude/
 docs/superpowers/
 .venv/
 __pycache__/
