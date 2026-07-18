@@ -131,9 +131,8 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
         fill: `var(--color-${status})`,
     }));
 
-    const attention = specs
-        .filter((spec) => spec.status === "failed" || spec.status === "unverified")
-        .sort((a, b) => (a.status === b.status ? 0 : a.status === "failed" ? -1 : 1));
+    const listPriority: Record<SpecStatus, number> = { failed: 0, unverified: 1, draft: 2, passed: 3 };
+    const orderedSpecs = [...specs].sort((a, b) => listPriority[a.status] - listPriority[b.status]);
 
     const passRate = specs.length > 0 ? Math.round((counts.passed / specs.length) * 100) : 0;
 
@@ -175,32 +174,26 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     </div>
 
                     <div className="rounded-[13px] border border-line bg-surface p-4">
-                        <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Needs attention</p>
-                        {attention.length === 0 ? (
-                            <div className="flex flex-1 items-center gap-2 py-6 text-xs text-ink-soft">
-                                <Check size={14} className="text-success" /> Every Spec is passing or still a draft.
-                            </div>
-                        ) : (
-                            <ul className="mt-2 divide-y divide-line">
-                                {attention.map((spec) => {
-                                    const feature = featureById.get(spec.featureId);
-                                    return (
-                                        <li key={spec.id}>
-                                            <Link
-                                                href={`/p/${projectId}/specs/${spec.id}`}
-                                                className="flex items-center justify-between gap-3 py-2.5 hover:bg-surface-hover"
-                                            >
-                                                <span className="min-w-0 flex-1">
-                                                    <span className="block truncate text-xs font-semibold text-ink">{spec.title}</span>
-                                                    {feature && <span className="mt-0.5 block truncate text-[0.625rem] text-ink-faint">{feature.title}</span>}
-                                                </span>
-                                                <StatusPill status={spec.status} />
-                                            </Link>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
-                        )}
+                        <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">All Specs</p>
+                        <ul className="mt-2 divide-y divide-line">
+                            {orderedSpecs.map((spec) => {
+                                const feature = featureById.get(spec.featureId);
+                                return (
+                                    <li key={spec.id}>
+                                        <Link
+                                            href={`/p/${projectId}/specs/${spec.id}`}
+                                            className="flex items-center justify-between gap-3 py-2.5 hover:bg-surface-hover"
+                                        >
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block truncate text-xs font-semibold text-ink">{spec.title}</span>
+                                                {feature && <span className="mt-0.5 block truncate text-[0.625rem] text-ink-faint">{feature.title}</span>}
+                                            </span>
+                                            <StatusPill status={spec.status} />
+                                        </Link>
+                                    </li>
+                                );
+                            })}
+                        </ul>
                     </div>
                 </div>
             </div>
