@@ -13,10 +13,10 @@ Each Spec records its preconditions, steps, expected result, postconditions, ver
 
 - **Browser-assisted authoring.** Watch the agent navigate and inspect the application while you describe a behavior in chat.
 - **Readable Specs.** Keep the expected behavior in plain language while Robot Framework runs behind the interface.
-- **Guided project discovery.** Let the agent map an application's areas, terms, roles, rules, and open questions; review the draft before later conversations can use it.
+- **Guided project discovery.** Let the agent map an application's areas, terms, roles, rules, and open questions; review the draft before later chats can use it.
 - **Recorded verification.** Inspect status, duration, failure details, screenshots, logs, Robot reports, and failure video where available.
 - **Single or batch runs.** Run one Spec, a Feature subtree, or the whole project in one Robot suite and one shared report.
-- **Local ownership.** Store projects, conversations, browser profiles, provider credentials, Specs, and run artifacts on your own machine.
+- **Local ownership.** Store projects, chats, browser profiles, provider credentials, Specs, and run artifacts on your own machine.
 
 ## Quick start
 
@@ -40,13 +40,13 @@ Docker Compose keeps the database and generated files in the `specbook-storage` 
 > Specbook has no application-level authentication. Docker Compose publishes the frontend, API, and OAuth callback ports on every host interface, so run it only on a trusted network or place it behind a firewall, VPN, IP allowlist, or authenticated reverse proxy.
 
 > [!WARNING]
-> Conversation content is stored in Specbook's persistent storage and sent to the selected LLM provider. Never paste passwords, verification codes, private keys, or application tokens into chat.
+> Chat content is stored in Specbook's persistent storage and sent to the selected LLM provider. Never paste passwords, verification codes, private keys, or application tokens into chat.
 
 ## How it works
 
 1. **Create a project** with the application's name and base URL.
 2. **Choose whether to explore first.** Guided discovery browses the application and drafts reusable project context. You can also skip it and start immediately.
-3. **Describe one behavior** in a conversation while the agent operates the live browser.
+3. **Describe one behavior** in a chat while the agent operates the live browser.
 4. **Review the generated Spec.** Once the behavior is clear, the agent saves an immutable version and runs its Robot Framework executable.
 5. **Keep checking it.** Rerun the Spec from its page, run a Feature subtree, or execute the whole project; status and evidence remain attached to each Spec.
 
@@ -54,7 +54,7 @@ Docker Compose keeps the database and generated files in the `specbook-storage` 
 
 Discovery can navigate, read, and follow safe links within the project's origin. It can't type into forms, accept dialogs, create Features or Specs, or trigger actions that change application data. Authentication walls remain unknown until protected credential entry is available.
 
-The resulting context covers the application summary, areas, terminology, roles, business rules, UI patterns, execution notes, unknowns, and source pages. It remains a draft until you edit and confirm it; only the latest confirmed revision reaches future Spec conversations.
+The resulting context covers the application summary, areas, terminology, roles, business rules, UI patterns, execution notes, unknowns, and source pages. It remains a draft until you edit and confirm it; only the latest confirmed revision reaches future Spec chats.
 
 > [!NOTE]
 > Discovery's origin guard, action budget, deny list, and safety instructions reduce accidental actions, but they aren't a network sandbox. Use a disposable or staging environment when possible.
@@ -86,7 +86,7 @@ By default, local data lives in `apps/backend/storage`:
 storage/
 ├── specbook.db       # Application database
 ├── pi-auth.json      # LLM provider credentials
-├── chat/             # Conversation sessions and browser profiles
+├── chat/             # Chat sessions and browser profiles
 ├── specs/            # Immutable Robot Framework source versions
 └── runs/             # Reports, logs, screenshots, video, and batch state
 ```
@@ -153,7 +153,7 @@ After changing `apps/backend/src/infra/db/schema.ts`, generate a migration and c
 | `FRONTEND_ORIGIN` | `http://localhost:4001` | Frontend origin allowed by backend CORS and VNC WebSocket checks. |
 | `HOST` | `127.0.0.1` | Backend bind address. Docker Compose sets it to `0.0.0.0`. |
 | `PORT` | `4000` | Backend HTTP and WebSocket port. |
-| `SPECBOOK_STORAGE_DIR` | `apps/backend/storage` | Directory for the database, credentials, conversations, Specs, and run artifacts. |
+| `SPECBOOK_STORAGE_DIR` | `apps/backend/storage` | Directory for the database, credentials, chats, Specs, and run artifacts. |
 
 For a deployment with public URLs, pass both origins when building and starting Compose:
 
@@ -170,5 +170,5 @@ docker compose up --build
 
 - A single Spec run times out after 120 seconds.
 - Batch timeouts scale with the number of Specs and stop at 30 minutes.
-- Browser profiles persist per conversation, including cookies and authenticated state, until the conversation is deleted.
+- Browser profiles persist per chat, including cookies and authenticated state, until the chat is deleted.
 - The HTTP API is internal and unversioned; only the `/health` endpoint is intended as an operational check.

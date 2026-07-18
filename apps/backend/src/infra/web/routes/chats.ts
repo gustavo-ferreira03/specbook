@@ -2,53 +2,53 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { getConversationBrowser, getOrCreateConversationBrowser } from "../../../core/browser/sessions";
-import { deleteConversationData, ResourceBusyError } from "../../../core/deletion";
+import { getChatBrowser, getOrCreateChatBrowser } from "../../../core/browser/sessions";
+import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import {
-    createConversation,
-    getConversationMessages,
-    isConversationBusy,
-    isConversationDeleting,
-    listConversations,
-    runConversationTurn,
+    createChat,
+    getChatMessages,
+    isChatBusy,
+    isChatDeleting,
+    listChats,
+    runChatTurn,
 } from "../../../core/chat/session";
-import { conversationsRepository } from "../../repositories/conversations";
+import { chatsRepository } from "../../repositories/chats";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
 
 const messageSchema = z.object({ text: z.string().trim().min(1) });
 
-export function createConversationsRouter(): Hono {
+export function createChatsRouter(): Hono {
     const router = new Hono();
 
-    router.post("/projects/:id/conversations", async (c) => {
+    router.post("/projects/:id/chats", async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
-        return c.json({ conversation: await createConversation(project.id) });
+        return c.json({ chat: await createChat(project.id) });
     });
 
-    router.get("/projects/:id/conversations", async (c) => {
+    router.get("/projects/:id/chats", async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
-        return c.json({ conversations: await listConversations(project.id) });
+        return c.json({ chats: await listChats(project.id) });
     });
 
-    router.get("/conversations/:id", async (c) => {
+    router.get("/chats/:id", async (c) => {
         const id = c.req.param("id");
-        const [row, messages] = await Promise.all([conversationsRepository.getConversationRow(id), getConversationMessages(id)]);
-        if (!row || !messages) throw new HTTPException(404, { message: "Conversation not found" });
-        const conversation = (await listConversations(row.projectId)).find((item) => item.id === id);
-        const browser = await getConversationBrowser(id);
+        const [row, messages] = await Promise.all([chatsRepository.getChatRow(id), getChatMessages(id)]);
+        if (!row || !messages) throw new HTTPException(404, { message: "Chat not found" });
+        const chat = (await listChats(row.projectId)).find((item) => item.id === id);
+        const browser = await getChatBrowser(id);
         const revision = row.contextRevisionId
             ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
         return c.json({
-            title: conversation?.title ?? "Conversation",
+            title: chat?.title ?? "Chat",
             messages,
-            busy: isConversationBusy(id),
+            busy: isChatBusy(id),
             vncSessionId: browser?.vnc.id ?? null,
             projectId: row.projectId,
-            mode: conversationsRepository.conversationMode(row),
+            mode: chatsRepository.chatMode(row),
             contextRevision: revision
                 ? {
                       id: revision.id,
@@ -61,10 +61,10 @@ export function createConversationsRouter(): Hono {
         });
     });
 
-    router.delete("/conversations/:id", async (c) => {
+    router.delete("/chats/:id", async (c) => {
         try {
-            if (!(await deleteConversationData(c.req.param("id")))) {
-                throw new HTTPException(404, { message: "Conversation not found" });
+            if (!(await deleteChatData(c.req.param("id")))) {
+                throw new HTTPException(404, { message: "Chat not found" });
             }
             return c.body(null, 204);
         } catch (error) {
@@ -74,37 +74,37 @@ export function createConversationsRouter(): Hono {
         }
     });
 
-    router.post("/conversations/:id/browser", async (c) => {
+    router.post("/chats/:id/browser", async (c) => {
         const id = c.req.param("id");
-        const row = await conversationsRepository.getConversationRow(id);
-        if (!row) throw new HTTPException(404, { message: "Conversation not found" });
-        if (isConversationDeleting(id)) throw new HTTPException(409, { message: "Conversation is being deleted" });
+        const row = await chatsRepository.getChatRow(id);
+        if (!row) throw new HTTPException(404, { message: "Chat not found" });
+        if (isChatDeleting(id)) throw new HTTPException(409, { message: "Chat is being deleted" });
         const project = await projectsRepository.getProject(row.projectId);
         if (!project) throw new HTTPException(404, { message: "Project not found" });
-        if (!(await conversationsRepository.getConversationRow(id))) throw new HTTPException(404, { message: "Conversation not found" });
+        if (!(await chatsRepository.getChatRow(id))) throw new HTTPException(404, { message: "Chat not found" });
         const revision = row.contextRevisionId
             ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
         if (row.contextRevisionId && revision?.status !== "draft") {
             throw new HTTPException(409, { message: "This discovery is closed" });
         }
-        const browser = await getOrCreateConversationBrowser(id);
+        const browser = await getOrCreateChatBrowser(id);
         await browser.mcp.navigate(revision?.brief.startUrl ?? project.baseUrl);
         return c.json({ vncSessionId: browser.vnc.id });
     });
 
-    router.post("/conversations/:id/message", zValidator("json", messageSchema), async (c) => {
+    router.post("/chats/:id/message", zValidator("json", messageSchema), async (c) => {
         const id = c.req.param("id");
-        const row = await conversationsRepository.getConversationRow(id);
-        if (!row) throw new HTTPException(404, { message: "Conversation not found" });
+        const row = await chatsRepository.getChatRow(id);
+        if (!row) throw new HTTPException(404, { message: "Chat not found" });
         if (row.contextRevisionId) {
             const revision = await projectContextsRepository.getProjectContextRevision(row.contextRevisionId);
             if (revision?.status !== "draft") throw new HTTPException(409, { message: "This discovery is closed" });
         }
-        if (isConversationDeleting(id)) throw new HTTPException(409, { message: "Conversation is being deleted" });
-        if (isConversationBusy(id)) throw new HTTPException(409, { message: "The agent is still replying" });
+        if (isChatDeleting(id)) throw new HTTPException(409, { message: "Chat is being deleted" });
+        if (isChatBusy(id)) throw new HTTPException(409, { message: "The agent is still replying" });
         const { text } = c.req.valid("json");
-        void runConversationTurn(id, text).catch(console.error);
+        void runChatTurn(id, text).catch(console.error);
         return c.json({ ok: true });
     });
 

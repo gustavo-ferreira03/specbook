@@ -15,7 +15,7 @@ export interface LlmSettings {
     model: string;
 }
 
-export type ConversationMode = "standard" | "discovery";
+export type ChatMode = "standard" | "discovery";
 export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
 
 export interface DiscoveryBrief {
@@ -95,7 +95,7 @@ export const specVersions = sqliteTable("spec_versions", {
     createdAt: text("created_at").notNull(),
 });
 
-export const conversations = sqliteTable("conversations", {
+export const chats = sqliteTable("chats", {
     id: text("id").primaryKey(),
     projectId: text("project_id")
         .notNull()
@@ -109,7 +109,7 @@ export const projectContextRevisions = sqliteTable("project_context_revisions", 
     projectId: text("project_id")
         .notNull()
         .references(() => projects.id),
-    sourceConversationId: text("source_conversation_id"),
+    sourceChatId: text("source_chat_id"),
     status: text("status").$type<ProjectContextStatus>().notNull(),
     brief: text("brief", { mode: "json" }).$type<DiscoveryBrief>().notNull(),
     context: text("context", { mode: "json" }).$type<ProjectContext>().notNull(),

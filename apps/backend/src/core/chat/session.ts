@@ -8,7 +8,7 @@ import {
     SessionManager,
     type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
-import { getOrCreateConversationBrowser } from "../browser/sessions";
+import { getOrCreateChatBrowser } from "../browser/sessions";
 import {
     bridgeBrowserTools,
     getActiveTabUrl,
@@ -17,7 +17,7 @@ import {
 } from "../browser/mcp";
 import { modelRegistry } from "../llm/runtime";
 import { sessionsDir, storageRoot } from "../paths";
-import { conversationsRepository, type ConversationMetadata } from "../../infra/repositories/conversations";
+import { chatsRepository, type ChatMetadata } from "../../infra/repositories/chats";
 import {
     projectContextsRepository,
     type ProjectContextRevisionRow,
@@ -28,8 +28,8 @@ import { createContextTools, projectContextJsonSchema } from "./context-tools";
 import { createDomainTools } from "./tools";
 import type { ChatMessageRecord } from "./types";
 
-const busyConversations = new Set<string>();
-const deletingConversations = new Set<string>();
+const busyChats = new Set<string>();
+const deletingChats = new Set<string>();
 const ERROR_TYPE = "specbook-error";
 const WARNING_TYPE = "specbook-warning";
 const cwd = process.cwd();
@@ -166,7 +166,7 @@ export function createDiscoveryBrowserPolicy(
                 }
             }
             const budget = await projectContextsRepository.consumeDiscoveryAction(revision.id);
-            if (!budget) throw new Error("The discovery draft for this conversation no longer exists.");
+            if (!budget) throw new Error("The discovery draft for this chat no longer exists.");
             if (!budget.allowed) {
                 throw new Error(
                     `Discovery action limit reached (${budget.used}/${budget.max}). Stop browsing and call propose_project_context with your current findings.`,
@@ -253,25 +253,25 @@ async function createResourceLoader(promptText: string): Promise<DefaultResource
     return loader;
 }
 
-export function isConversationBusy(id: string): boolean {
-    return busyConversations.has(id);
+export function isChatBusy(id: string): boolean {
+    return busyChats.has(id);
 }
 
-export function isConversationDeleting(id: string): boolean {
-    return deletingConversations.has(id);
+export function isChatDeleting(id: string): boolean {
+    return deletingChats.has(id);
 }
 
-export function beginConversationDeletion(id: string): boolean {
-    if (busyConversations.has(id) || deletingConversations.has(id)) return false;
-    deletingConversations.add(id);
+export function beginChatDeletion(id: string): boolean {
+    if (busyChats.has(id) || deletingChats.has(id)) return false;
+    deletingChats.add(id);
     return true;
 }
 
-export function cancelConversationDeletion(id: string): void {
-    deletingConversations.delete(id);
+export function cancelChatDeletion(id: string): void {
+    deletingChats.delete(id);
 }
 
-export async function removeConversationSession(id: string): Promise<void> {
+export async function removeChatSession(id: string): Promise<void> {
     const infos = await listSessionInfos();
     const info = infos.find((session) => session.id === id);
     if (!info) return;
@@ -279,28 +279,28 @@ export async function removeConversationSession(id: string): Promise<void> {
     const sessionPath = path.resolve(info.path);
     const relative = path.relative(root, sessionPath);
     if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-        throw new Error("Invalid conversation session path");
+        throw new Error("Invalid chat session path");
     }
     await fs.rm(sessionPath, { force: true });
 }
 
-export async function createConversation(
+export async function createChat(
     projectId: string,
-    metadata: ConversationMetadata = {},
+    metadata: ChatMetadata = {},
 ): Promise<{ id: string }> {
     await fs.mkdir(sessionsDir, { recursive: true });
     const id = crypto.randomUUID();
     const sessionManager = SessionManager.create(cwd, sessionsDir, { id });
     flushSessionFile(sessionManager);
-    await conversationsRepository.insertConversation(sessionManager.getSessionId(), projectId, metadata);
+    await chatsRepository.insertChat(sessionManager.getSessionId(), projectId, metadata);
     return { id: sessionManager.getSessionId() };
 }
 
-export async function listConversations(
+export async function listChats(
     projectId: string,
 ): Promise<{ id: string; title: string; createdAt: string }[]> {
     const [rows, infos] = await Promise.all([
-        conversationsRepository.listConversationRows(projectId),
+        chatsRepository.listChatRows(projectId),
         listSessionInfos(),
     ]);
     return rows.map((row) => {
@@ -312,13 +312,13 @@ export async function listConversations(
                 : undefined;
         return {
             id: row.id,
-            title: piName || firstMessage || "New conversation",
+            title: piName || firstMessage || "New chat",
             createdAt: row.createdAt,
         };
     });
 }
 
-export async function getConversationMessages(id: string): Promise<ChatMessageRecord[] | null> {
+export async function getChatMessages(id: string): Promise<ChatMessageRecord[] | null> {
     const sessionManager = await openSession(id);
     if (!sessionManager) return null;
     const messages: ChatMessageRecord[] = [];
@@ -328,7 +328,7 @@ export async function getConversationMessages(id: string): Promise<ChatMessageRe
             if (content) {
                 messages.push({
                     id: entry.id,
-                    conversationId: id,
+                    chatId: id,
                     role: "agent",
                     content,
                     createdAt: entry.timestamp,
@@ -343,7 +343,7 @@ export async function getConversationMessages(id: string): Promise<ChatMessageRe
         if (!content) continue;
         messages.push({
             id: entry.id,
-            conversationId: id,
+            chatId: id,
             role: role === "user" ? "user" : "agent",
             content,
             createdAt: entry.timestamp,
@@ -352,20 +352,20 @@ export async function getConversationMessages(id: string): Promise<ChatMessageRe
     return messages;
 }
 
-export async function runConversationTurn(id: string, userText: string): Promise<void> {
-    if (busyConversations.has(id) || deletingConversations.has(id)) return;
-    busyConversations.add(id);
+export async function runChatTurn(id: string, userText: string): Promise<void> {
+    if (busyChats.has(id) || deletingChats.has(id)) return;
+    busyChats.add(id);
     let sessionManager: SessionManager | null = null;
     let previousUserCount = 0;
     try {
-        const row = await conversationsRepository.getConversationRow(id);
+        const row = await chatsRepository.getChatRow(id);
         sessionManager = await openSession(id);
         if (!row || !sessionManager) return;
         previousUserCount = userMessageCount(sessionManager);
         const project = await projectsRepository.getProject(row.projectId);
         if (!project) {
             ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(sessionManager, "The project for this conversation no longer exists.");
+            appendError(sessionManager, "The project for this chat no longer exists.");
             return;
         }
 
@@ -403,7 +403,7 @@ export async function runConversationTurn(id: string, userText: string): Promise
 
         let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
         try {
-            const browser = await getOrCreateConversationBrowser(id);
+            const browser = await getOrCreateChatBrowser(id);
             const policy = discoveryRevision
                 ? createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp)
                 : undefined;
@@ -469,12 +469,12 @@ export async function runConversationTurn(id: string, userText: string): Promise
             ensureUserMessage(sessionManager, userText, previousUserCount);
             appendError(
                 sessionManager,
-                `The conversation turn failed: ${error instanceof Error ? error.message : String(error)}`,
+                `The chat turn failed: ${error instanceof Error ? error.message : String(error)}`,
             );
         } else {
             console.error(error);
         }
     } finally {
-        busyConversations.delete(id);
+        busyChats.delete(id);
     }
 }

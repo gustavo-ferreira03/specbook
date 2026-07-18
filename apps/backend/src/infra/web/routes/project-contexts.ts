@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { projectContextSchema } from "../../../core/chat/context-tools";
-import { createConversation } from "../../../core/chat/session";
+import { createChat } from "../../../core/chat/session";
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
@@ -72,23 +72,23 @@ export function createProjectContextsRouter(): Hono {
                         {
                             error: "This project already has an active context draft",
                             draft: activeDraft,
-                            conversationId: activeDraft.sourceConversationId,
+                            chatId: activeDraft.sourceChatId,
                         },
                         409,
                     );
                 }
                 const brief = resolveDiscoveryBrief(project.baseUrl, c.req.valid("json"));
                 const revision = await projectContextsRepository.createProjectContextDraft(project.id, brief);
-                let conversation: { id: string };
+                let chat: { id: string };
                 try {
-                    conversation = await createConversation(project.id, { contextRevisionId: revision.id });
+                    chat = await createChat(project.id, { contextRevisionId: revision.id });
                 } catch (error) {
                     await projectContextsRepository.deleteProjectContextDraft(revision.id).catch(console.error);
                     throw error;
                 }
-                await projectContextsRepository.attachContextConversation(revision.id, conversation.id);
+                await projectContextsRepository.attachContextChat(revision.id, chat.id);
                 const attached = await projectContextsRepository.getProjectContextRevision(revision.id);
-                return c.json({ revision: attached ?? revision, conversation }, 201);
+                return c.json({ revision: attached ?? revision, chat }, 201);
             });
         },
     );

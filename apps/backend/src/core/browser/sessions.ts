@@ -6,7 +6,7 @@ import { getVncSession, startVncStack, stopVncStack, type VncSession } from "./v
 
 const BROWSER_IDLE_MS = 10 * 60 * 1000;
 
-interface ConversationBrowser {
+interface ChatBrowser {
     vnc: VncSession;
     mcp: BrowserMcp;
     workDir: string;
@@ -14,22 +14,22 @@ interface ConversationBrowser {
     lastHealthCheck: number;
 }
 
-const browsers = new Map<string, ConversationBrowser>();
-const pending = new Map<string, Promise<ConversationBrowser>>();
-const deletingConversations = new Set<string>();
+const browsers = new Map<string, ChatBrowser>();
+const pending = new Map<string, Promise<ChatBrowser>>();
+const deletingChats = new Set<string>();
 
-function touchConversationBrowser(conversationId: string, browser: ConversationBrowser): void {
+function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
     clearTimeout(browser.idleTimer);
-    browser.idleTimer = setTimeout(() => void closeConversationBrowser(conversationId), BROWSER_IDLE_MS);
+    browser.idleTimer = setTimeout(() => void closeChatBrowser(chatId), BROWSER_IDLE_MS);
     browser.idleTimer.unref();
 }
 
-export async function getConversationBrowser(conversationId: string): Promise<ConversationBrowser | null> {
-    if (deletingConversations.has(conversationId)) return null;
-    const browser = browsers.get(conversationId);
+export async function getChatBrowser(chatId: string): Promise<ChatBrowser | null> {
+    if (deletingChats.has(chatId)) return null;
+    const browser = browsers.get(chatId);
     if (!browser) return null;
     if (!getVncSession(browser.vnc.id)) {
-        void closeConversationBrowser(conversationId);
+        void closeChatBrowser(chatId);
         return null;
     }
     if (Date.now() - browser.lastHealthCheck >= 5000) {
@@ -37,65 +37,65 @@ export async function getConversationBrowser(conversationId: string): Promise<Co
             await browser.mcp.ensureBrowser();
             browser.lastHealthCheck = Date.now();
         } catch {
-            await closeConversationBrowser(conversationId);
+            await closeChatBrowser(chatId);
             return null;
         }
     }
-    touchConversationBrowser(conversationId, browser);
+    touchChatBrowser(chatId, browser);
     return browser;
 }
 
-export async function getOrCreateConversationBrowser(conversationId: string): Promise<ConversationBrowser> {
-    if (deletingConversations.has(conversationId)) throw new Error("Conversation is being deleted");
-    const existing = browsers.get(conversationId);
+export async function getOrCreateChatBrowser(chatId: string): Promise<ChatBrowser> {
+    if (deletingChats.has(chatId)) throw new Error("Chat is being deleted");
+    const existing = browsers.get(chatId);
     if (existing) {
         if (!getVncSession(existing.vnc.id)) {
-            await closeConversationBrowser(conversationId);
+            await closeChatBrowser(chatId);
         } else {
             try {
                 await existing.mcp.client.listTools();
-                touchConversationBrowser(conversationId, existing);
+                touchChatBrowser(chatId, existing);
                 return existing;
             } catch {
-                await closeConversationBrowser(conversationId);
+                await closeChatBrowser(chatId);
             }
         }
     }
-    const inFlight = pending.get(conversationId);
+    const inFlight = pending.get(chatId);
     if (inFlight) return inFlight;
     const promise = (async () => {
         const vnc = await startVncStack();
-        const workDir = path.join(storageRoot, "chat", "browser", conversationId);
+        const workDir = path.join(storageRoot, "chat", "browser", chatId);
         try {
             const mcp = await launchBrowserMcp({ workDir, display: vnc.display });
-            if (deletingConversations.has(conversationId)) {
+            if (deletingChats.has(chatId)) {
                 await mcp.close();
                 stopVncStack(vnc.id);
-                throw new Error("Conversation is being deleted");
+                throw new Error("Chat is being deleted");
             }
             const idleTimer = setTimeout(() => undefined, BROWSER_IDLE_MS);
             idleTimer.unref();
-            const record: ConversationBrowser = { vnc, mcp, workDir, idleTimer, lastHealthCheck: Date.now() };
-            browsers.set(conversationId, record);
-            touchConversationBrowser(conversationId, record);
+            const record: ChatBrowser = { vnc, mcp, workDir, idleTimer, lastHealthCheck: Date.now() };
+            browsers.set(chatId, record);
+            touchChatBrowser(chatId, record);
             return record;
         } catch (error) {
             stopVncStack(vnc.id);
             throw error;
         }
     })();
-    pending.set(conversationId, promise);
+    pending.set(chatId, promise);
     try {
         return await promise;
     } finally {
-        pending.delete(conversationId);
+        pending.delete(chatId);
     }
 }
 
-export async function closeConversationBrowser(conversationId: string): Promise<void> {
-    const record = browsers.get(conversationId);
+export async function closeChatBrowser(chatId: string): Promise<void> {
+    const record = browsers.get(chatId);
     if (!record) return;
-    browsers.delete(conversationId);
+    browsers.delete(chatId);
     clearTimeout(record.idleTimer);
     try {
         await record.mcp.close();
@@ -104,24 +104,24 @@ export async function closeConversationBrowser(conversationId: string): Promise<
     }
 }
 
-export async function blockConversationBrowser(conversationId: string): Promise<void> {
-    deletingConversations.add(conversationId);
-    await pending.get(conversationId)?.catch(() => undefined);
-    await closeConversationBrowser(conversationId);
+export async function blockChatBrowser(chatId: string): Promise<void> {
+    deletingChats.add(chatId);
+    await pending.get(chatId)?.catch(() => undefined);
+    await closeChatBrowser(chatId);
 }
 
-export function cancelConversationBrowserDeletion(conversationId: string): void {
-    deletingConversations.delete(conversationId);
+export function cancelChatBrowserDeletion(chatId: string): void {
+    deletingChats.delete(chatId);
 }
 
-export async function removeConversationBrowserData(conversationId: string): Promise<void> {
+export async function removeChatBrowserData(chatId: string): Promise<void> {
     const root = path.resolve(storageRoot, "chat", "browser");
-    const directory = path.resolve(root, conversationId);
-    if (path.dirname(directory) !== root) throw new Error("Invalid conversation browser directory");
+    const directory = path.resolve(root, chatId);
+    if (path.dirname(directory) !== root) throw new Error("Invalid chat browser directory");
     await fs.rm(directory, { recursive: true, force: true });
 }
 
-export async function closeAllConversationBrowsers(): Promise<void> {
+export async function closeAllChatBrowsers(): Promise<void> {
     await Promise.allSettled([...pending.values()]);
-    await Promise.all([...browsers.keys()].map(closeConversationBrowser));
+    await Promise.all([...browsers.keys()].map(closeChatBrowser));
 }

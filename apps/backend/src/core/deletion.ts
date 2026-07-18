@@ -1,11 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { blockConversationBrowser, cancelConversationBrowserDeletion, removeConversationBrowserData } from "./browser/sessions";
-import { beginConversationDeletion, cancelConversationDeletion, removeConversationSession } from "./chat/session";
+import { blockChatBrowser, cancelChatBrowserDeletion, removeChatBrowserData } from "./browser/sessions";
+import { beginChatDeletion, cancelChatDeletion, removeChatSession } from "./chat/session";
 import { runsDir, specsDir } from "./paths";
 import { getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
-import { conversationsRepository } from "../infra/repositories/conversations";
+import { chatsRepository } from "../infra/repositories/chats";
 import { projectContextsRepository } from "../infra/repositories/project-contexts";
 import { featuresRepository } from "../infra/repositories/features";
 import { specsRepository } from "../infra/repositories/specs";
@@ -45,27 +45,27 @@ async function removeSpecResources(specIds: string[], runIds: string[]): Promise
     }
 }
 
-export async function deleteConversationData(id: string): Promise<boolean> {
-    if (!(await conversationsRepository.getConversationRow(id))) return false;
-    if (!beginConversationDeletion(id)) throw new ResourceBusyError("Wait for the agent to finish before deleting this conversation");
+export async function deleteChatData(id: string): Promise<boolean> {
+    if (!(await chatsRepository.getChatRow(id))) return false;
+    if (!beginChatDeletion(id)) throw new ResourceBusyError("Wait for the agent to finish before deleting this chat");
     try {
-        await blockConversationBrowser(id);
-        await projectContextsRepository.discardDraftForConversation(id);
-        await conversationsRepository.deleteConversationRow(id);
+        await blockChatBrowser(id);
+        await projectContextsRepository.discardDraftForChat(id);
+        await chatsRepository.deleteChatRow(id);
     } catch (error) {
-        cancelConversationBrowserDeletion(id);
-        cancelConversationDeletion(id);
+        cancelChatBrowserDeletion(id);
+        cancelChatDeletion(id);
         throw error;
     }
     const cleanup = await Promise.allSettled([
-        removeConversationSession(id),
-        removeConversationBrowserData(id),
+        removeChatSession(id),
+        removeChatBrowserData(id),
     ]);
     for (const result of cleanup) {
         if (result.status === "rejected") console.error(result.reason);
     }
-    cancelConversationBrowserDeletion(id);
-    cancelConversationDeletion(id);
+    cancelChatBrowserDeletion(id);
+    cancelChatDeletion(id);
     return true;
 }
 

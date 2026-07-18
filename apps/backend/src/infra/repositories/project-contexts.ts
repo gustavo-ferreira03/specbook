@@ -32,7 +32,7 @@ class ProjectContextsRepository {
         const row: ProjectContextRevisionRow = {
             id: crypto.randomUUID(),
             projectId,
-            sourceConversationId: null,
+            sourceChatId: null,
             status: "draft",
             brief,
             context: EMPTY_PROJECT_CONTEXT,
@@ -45,10 +45,10 @@ class ProjectContextsRepository {
         return row;
     }
 
-    async attachContextConversation(revisionId: string, conversationId: string): Promise<void> {
+    async attachContextChat(revisionId: string, chatId: string): Promise<void> {
         await db
             .update(projectContextRevisions)
-            .set({ sourceConversationId: conversationId, updatedAt: new Date().toISOString() })
+            .set({ sourceChatId: chatId, updatedAt: new Date().toISOString() })
             .where(eq(projectContextRevisions.id, revisionId));
     }
 
@@ -60,13 +60,11 @@ class ProjectContextsRepository {
         return rows[0] ?? null;
     }
 
-    async getProjectContextForConversation(
-        conversationId: string,
-    ): Promise<ProjectContextRevisionRow | null> {
+    async getProjectContextForChat(chatId: string): Promise<ProjectContextRevisionRow | null> {
         const rows = await db
             .select()
             .from(projectContextRevisions)
-            .where(eq(projectContextRevisions.sourceConversationId, conversationId))
+            .where(eq(projectContextRevisions.sourceChatId, chatId))
             .orderBy(desc(projectContextRevisions.createdAt), desc(projectContextRevisions.id));
         return rows[0] ?? null;
     }
@@ -146,13 +144,13 @@ class ProjectContextsRepository {
         return this.getProjectContextRevision(revisionId);
     }
 
-    async discardDraftForConversation(conversationId: string): Promise<void> {
+    async discardDraftForChat(chatId: string): Promise<void> {
         await db
             .update(projectContextRevisions)
             .set({ status: "discarded", updatedAt: new Date().toISOString() })
             .where(
                 and(
-                    eq(projectContextRevisions.sourceConversationId, conversationId),
+                    eq(projectContextRevisions.sourceChatId, chatId),
                     eq(projectContextRevisions.status, "draft"),
                 ),
             );

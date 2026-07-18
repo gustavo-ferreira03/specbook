@@ -44,7 +44,7 @@ export function createContextTools(revisionId: string, projectId: string) {
             parameters: Type.Object({}),
             async execute() {
                 const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
-                if (!revision) return text("The discovery draft for this conversation no longer exists.");
+                if (!revision) return text("The discovery draft for this chat no longer exists.");
                 return text(
                     JSON.stringify({
                         revisionId: revision.id,
@@ -68,9 +68,9 @@ export function createContextTools(revisionId: string, projectId: string) {
                     return text(`The proposed context is invalid: ${parsed.error.issues[0]?.message ?? "schema mismatch"}. Provide the complete ProjectContext object.`);
                 }
                 const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
-                if (!revision) return text("The discovery draft for this conversation no longer exists.");
+                if (!revision) return text("The discovery draft for this chat no longer exists.");
                 if (revision.status !== "draft") {
-                    return text(`This context revision is already ${revision.status} and can no longer be changed from this conversation.`);
+                    return text(`This context revision is already ${revision.status} and can no longer be changed from this chat.`);
                 }
                 const updated = await projectContextsRepository.replaceProjectContextDraft(
                     revisionId,

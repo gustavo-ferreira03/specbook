@@ -15,6 +15,13 @@
       "when": 1784259172522,
       "tag": "0001_wide_gravity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784350000000,
+      "tag": "0002_rename_conversations_to_chats",
+      "breakpoints": true
     }
   ]
 }
