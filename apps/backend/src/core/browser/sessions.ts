@@ -67,6 +67,7 @@ export async function getOrCreateChatBrowser(chatId: string): Promise<ChatBrowse
         const vnc = await startVncStack();
         const workDir = path.join(storageRoot, "chat", "browser", chatId);
         try {
+            await fs.rm(path.join(workDir, "profile"), { recursive: true, force: true });
             const mcp = await launchBrowserMcp({ workDir, display: vnc.display });
             if (deletingChats.has(chatId)) {
                 await mcp.close();

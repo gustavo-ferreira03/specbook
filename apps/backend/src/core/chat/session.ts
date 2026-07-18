@@ -30,6 +30,7 @@ import type { ChatMessageRecord } from "./types";
 
 const busyChats = new Set<string>();
 const deletingChats = new Set<string>();
+const chatUpdateListeners = new Map<string, Set<() => void>>();
 const ERROR_TYPE = "specbook-error";
 const WARNING_TYPE = "specbook-warning";
 const cwd = process.cwd();
@@ -261,6 +262,20 @@ export function isChatDeleting(id: string): boolean {
     return deletingChats.has(id);
 }
 
+export function subscribeToChatUpdates(id: string, listener: () => void): () => void {
+    const listeners = chatUpdateListeners.get(id) ?? new Set<() => void>();
+    listeners.add(listener);
+    chatUpdateListeners.set(id, listeners);
+    return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) chatUpdateListeners.delete(id);
+    };
+}
+
+export function publishChatUpdate(id: string): void {
+    for (const listener of chatUpdateListeners.get(id) ?? []) listener();
+}
+
 export function beginChatDeletion(id: string): boolean {
     if (busyChats.has(id) || deletingChats.has(id)) return false;
     deletingChats.add(id);
@@ -355,6 +370,7 @@ export async function getChatMessages(id: string): Promise<ChatMessageRecord[] |
 export async function runChatTurn(id: string, userText: string): Promise<void> {
     if (busyChats.has(id) || deletingChats.has(id)) return;
     busyChats.add(id);
+    publishChatUpdate(id);
     let sessionManager: SessionManager | null = null;
     let previousUserCount = 0;
     try {
@@ -449,6 +465,7 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
                     modelError = message.errorMessage;
                 }
             }
+            if (value.type === "agent_end") publishChatUpdate(id);
         });
 
         try {
@@ -476,5 +493,6 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
         }
     } finally {
         busyChats.delete(id);
+        publishChatUpdate(id);
     }
 }

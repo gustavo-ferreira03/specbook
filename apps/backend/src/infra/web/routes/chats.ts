@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { getChatBrowser, getOrCreateChatBrowser } from "../../../core/browser/sessions";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
@@ -10,7 +11,9 @@ import {
     isChatBusy,
     isChatDeleting,
     listChats,
+    publishChatUpdate,
     runChatTurn,
+    subscribeToChatUpdates,
 } from "../../../core/chat/session";
 import { chatsRepository } from "../../repositories/chats";
 import { projectContextsRepository } from "../../repositories/project-contexts";
@@ -61,6 +64,18 @@ export function createChatsRouter(): Hono {
         });
     });
 
+    router.get("/chats/:id/events", async (c) => {
+        const id = c.req.param("id");
+        if (!(await chatsRepository.getChatRow(id))) throw new HTTPException(404, { message: "Chat not found" });
+        return streamSSE(c, async (stream) => {
+            const notify = () => void stream.writeSSE({ event: "updated", data: "" }).catch(() => undefined);
+            const unsubscribe = subscribeToChatUpdates(id, notify);
+            stream.onAbort(unsubscribe);
+            await stream.writeSSE({ event: "connected", data: "" });
+            await new Promise<void>((resolve) => stream.onAbort(resolve));
+        });
+    });
+
     router.delete("/chats/:id", async (c) => {
         try {
             if (!(await deleteChatData(c.req.param("id")))) {
@@ -90,6 +105,7 @@ export function createChatsRouter(): Hono {
         }
         const browser = await getOrCreateChatBrowser(id);
         await browser.mcp.navigate(revision?.brief.startUrl ?? project.baseUrl);
+        publishChatUpdate(id);
         return c.json({ vncSessionId: browser.vnc.id });
     });
 

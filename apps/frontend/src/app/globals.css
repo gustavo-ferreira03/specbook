@@ -142,6 +142,12 @@ summary:focus-visible {
     outline-color: var(--color-primary-foreground);
 }
 
+.chat-message-user::selection,
+.chat-message-user *::selection {
+    background: rgb(255 255 255 / 32%);
+    color: var(--color-primary-foreground);
+}
+
 .skip-link {
     position: fixed;
     top: 8px;

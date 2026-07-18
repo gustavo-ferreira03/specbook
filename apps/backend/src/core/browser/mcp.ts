@@ -42,7 +42,22 @@ export interface BrowserMcp {
 export async function launchBrowserMcp(opts: { workDir: string; display: string }): Promise<BrowserMcp> {
     await fs.mkdir(opts.workDir, { recursive: true });
     const userDataDir = path.join(opts.workDir, "profile");
-    await fs.mkdir(userDataDir, { recursive: true });
+    const defaultProfileDir = path.join(userDataDir, "Default");
+    await fs.mkdir(defaultProfileDir, { recursive: true });
+    await fs.writeFile(
+        path.join(defaultProfileDir, "Preferences"),
+        JSON.stringify({
+            browser: { check_default_browser: false, has_seen_welcome_page: true },
+            credentials_enable_service: false,
+            profile: {
+                default_content_setting_values: { notifications: 2 },
+                password_manager_enabled: false,
+                password_manager_leak_detection: false,
+            },
+            session: { restore_on_startup: 5, startup_urls: [] },
+        }),
+        "utf8",
+    );
     const config = {
         browser: {
             browserName: "chromium",
@@ -51,6 +66,11 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string 
                 headless: false,
                 args: [
                     "--disable-dev-shm-usage",
+                    "--disable-features=PasswordManagerOnboarding,PasswordManagerLeakDetection,PasswordManagerEnabled",
+                    "--disable-notifications",
+                    "--disable-session-crashed-bubble",
+                    "--no-default-browser-check",
+                    "--no-first-run",
                     "--window-position=0,0",
                     `--window-size=${SCREEN_WIDTH},${SCREEN_HEIGHT}`,
                 ],

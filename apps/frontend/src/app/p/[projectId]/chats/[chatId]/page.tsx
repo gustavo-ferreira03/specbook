@@ -17,7 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { API_URL, api } from "@/lib/api";
 import type { ChatState } from "@/lib/types";
 
 function MessageContent({ content, user }: { content: string; user: boolean }) {
@@ -48,6 +48,30 @@ function MessageContent({ content, user }: { content: string; user: boolean }) {
             {content}
         </ReactMarkdown>
     );
+}
+
+function sameChatState(left: ChatState, right: ChatState): boolean {
+    if (
+        left.title !== right.title ||
+        left.busy !== right.busy ||
+        left.vncSessionId !== right.vncSessionId ||
+        left.projectId !== right.projectId ||
+        left.mode !== right.mode ||
+        left.messages.length !== right.messages.length
+    ) {
+        return false;
+    }
+    if (JSON.stringify(left.contextRevision) !== JSON.stringify(right.contextRevision)) return false;
+    return left.messages.every((message, index) => {
+        const next = right.messages[index];
+        return (
+            message.id === next.id &&
+            message.chatId === next.chatId &&
+            message.role === next.role &&
+            message.content === next.content &&
+            message.createdAt === next.createdAt
+        );
+    });
 }
 
 function LiveBrowserCard({ sessionId }: { sessionId: string }) {
@@ -92,19 +116,16 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     useEffect(() => {
         let active = true;
         let loaded = false;
-        let polling = false;
         setState(null);
         setLoadError("");
         setPollError("");
 
         async function refresh() {
-            if (polling) return;
-            polling = true;
             try {
                 const result = await api<ChatState>(`/chats/${chatId}`);
                 if (!active) return;
                 loaded = true;
-                setState(result);
+                setState((current) => (current && sameChatState(current, result) ? current : result));
                 setLoadError("");
                 setPollError("");
             } catch (error) {
@@ -112,16 +133,15 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 const message = error instanceof Error ? error.message : String(error);
                 if (loaded) setPollError(message);
                 else setLoadError(message);
-            } finally {
-                polling = false;
             }
         }
 
         void refresh();
-        const interval = window.setInterval(refresh, 1500);
+        const events = new EventSource(`${API_URL}/chats/${encodeURIComponent(chatId)}/events`);
+        events.addEventListener("updated", () => void refresh());
         return () => {
             active = false;
-            window.clearInterval(interval);
+            events.close();
         };
     }, [chatId, retryKey]);
 
@@ -342,8 +362,8 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                         {!userMessage && (
                                             <LogoMark inverse className="size-6 shrink-0 rounded-md" />
                                         )}
-                                        <div className={`max-w-[calc(100%-2.5rem)] overflow-x-auto rounded-[13px] px-3.5 py-2.5 text-[0.75rem] leading-[1.6] break-words [overflow-wrap:anywhere] sm:max-w-[84%] ${
-                                            userMessage ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm border border-line bg-surface-soft text-ink"
+                                        <div className={`max-w-[calc(100%-2.5rem)] overflow-x-auto rounded-[13px] px-3.5 py-2.5 text-[0.75rem] leading-[1.6] break-words select-text [overflow-wrap:anywhere] sm:max-w-[84%] ${
+                                            userMessage ? "chat-message-user rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm border border-line bg-surface-soft text-ink"
                                         }`}>
                                             <p className={`mb-1 text-[0.5625rem] font-bold tracking-[0.05em] uppercase ${userMessage ? "text-white/60" : "text-ink-faint"}`}>
                                                 {userMessage ? "You" : "Specbook agent"}
@@ -367,7 +387,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                         {state.busy && (
                             <Badge variant="secondary" className="mt-4 flex gap-2 rounded-none bg-transparent p-0 pl-[38px] text-[0.6875rem] font-semibold whitespace-normal text-ink-faint" role="status">
                                 <span className="status-pulse size-1.5 rounded-full bg-primary" />
-                                Agent is browsing and updating this chat
+                                Agent is working...
                             </Badge>
                         )}
                     </div>
