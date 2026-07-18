@@ -18,11 +18,11 @@ import type { Feature, SpecStatus, SpecSummary } from "@/lib/types";
 const STATUS_ORDER: SpecStatus[] = ["passed", "failed", "invalid", "conflict", "unverified"];
 
 const STATUS_CHART_CONFIG: ChartConfig = {
-    passed: { label: "Passed", color: "var(--color-success)" },
-    failed: { label: "Failed", color: "var(--color-danger)" },
-    unverified: { label: "Unverified", color: "var(--color-pending)" },
-    invalid: { label: "Invalid", color: "var(--color-invalid)" },
-    conflict: { label: "Conflict", color: "var(--color-conflict)" },
+    passed: { label: "Passed", color: "var(--color-success-chart)" },
+    failed: { label: "Failed", color: "var(--color-danger-chart)" },
+    unverified: { label: "Unverified", color: "var(--color-pending-chart)" },
+    invalid: { label: "Invalid", color: "var(--color-invalid-chart)" },
+    conflict: { label: "Conflict", color: "var(--color-conflict-chart)" },
 };
 
 const STATUS_ICON: Record<SpecStatus, React.ComponentType<{ size?: number; className?: string }>> = {

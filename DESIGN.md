@@ -15,12 +15,12 @@ Specbook is a compact monochrome workbench for chats and executable Specs. The i
 - Muted text: `#60605b`
 - Border: `#e3e3df`
 - Primary: `#2b2b2b`
-- Success: `#2b8553`
-- Danger: `#ba5751`
-- Pending: `#aa6420`
+- Success: `#1f8559` for text and `#2c9b68` in charts
+- Danger: `#bd5149` for text and `#df6a61` in charts
+- Pending: `#9a6e00` for text and `#f4bd4f` in charts
 - Information: `#406b9f`
 
-Success, danger, and pending are a designed set (OKLCH, matched lightness/chroma band, hues 155°/25°/60°), not three colors picked independently, so they read as a coordinated family instead of clashing.
+Text states stay dark enough to read against white surfaces. Charts use brighter equivalents, so status proportions read at a glance without turning the pending slice brown.
 
 Color communicates selection, action, or system state. Inactive navigation and content remain neutral.
 
