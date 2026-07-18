@@ -186,19 +186,30 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
-            <PageHeader title="Specs" eyebrow="Project" />
+            <PageHeader
+                title="Specs"
+                eyebrow="Project"
+                actions={
+                    <div className="flex items-center gap-2">
+                        <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
+                        <NewSpecDialog projectId={projectId} features={features} />
+                    </div>
+                }
+            />
             <div className="mx-auto w-full max-w-[1040px] flex-1 px-5 py-8">
                 {syncWarning && <Alert variant="warning" className="mb-4" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
                 {project && (
-                    <div className="mb-5 flex items-start justify-between gap-4">
+                    <div className="mb-6 flex items-start justify-between gap-4 border-b border-line pb-4">
                         <div className="min-w-0 flex-1">
-                            <h2 className="truncate text-lg font-bold tracking-[-0.02em] text-ink">{project.name}</h2>
-                            <p className="mt-0.5 font-mono text-[0.65625rem] text-ink-faint [overflow-wrap:anywhere]">{project.baseUrl}</p>
+                            <div className="flex items-baseline gap-2">
+                                <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">{project.name}</h2>
+                                <a href={project.baseUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-[0.625rem] text-ink-faint underline-offset-2 hover:underline [overflow-wrap:anywhere]">{project.baseUrl}</a>
+                            </div>
                             {(() => {
                                 const confirmed = contextState?.confirmed;
                                 if (!confirmed) {
                                     return (
-                                        <p className="mt-2 text-xs text-ink-faint">
+                                        <p className="mt-1 text-xs text-ink-faint">
                                             No project context yet.{" "}
                                             <Link href={`/p/${projectId}`} className="underline underline-offset-2 hover:text-ink">Set up context</Link>
                                         </p>
@@ -213,21 +224,17 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                 ].filter(Boolean);
                                 return (
                                     <>
-                                        {ctx.summary && <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-ink-soft">{ctx.summary}</p>}
-                                        {stats.length > 0 && <p className="mt-2 text-[0.625rem] text-ink-faint">{stats.join(" · ")}</p>}
+                                        {ctx.summary && <p className="mt-1 line-clamp-1 text-xs leading-5 text-ink-soft">{ctx.summary}</p>}
+                                        {stats.length > 0 && <p className="mt-1.5 text-[0.625rem] text-ink-faint">{stats.join(" · ")}</p>}
                                     </>
                                 );
                             })()}
                         </div>
-                        <Button asChild variant="ghost" size="icon-sm" className="mt-1 shrink-0">
-                            <Link href={`/p/${projectId}`}><ArrowRight size={14} /></Link>
-                        </Button>
+                        <Link href={`/p/${projectId}`} className="mt-0.5 shrink-0 text-ink-faint transition-colors hover:text-ink" aria-label="Project overview">
+                            <ArrowRight size={14} />
+                        </Link>
                     </div>
                 )}
-                <div className="mb-4 flex justify-end gap-2">
-                    <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
-                    <NewSpecDialog projectId={projectId} features={features} />
-                </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <StatTile label="Total Specs" value={specs.length} />
                     <StatTile label="Passed" value={counts.passed} tone="success" />
