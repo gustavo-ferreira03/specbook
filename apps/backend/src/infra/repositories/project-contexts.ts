@@ -123,6 +123,28 @@ class ProjectContextsRepository {
         return this.getProjectContextRevision(revisionId);
     }
 
+    async insertConfirmedRevision(
+        projectId: string,
+        brief: DiscoveryBrief,
+        context: ProjectContext,
+    ): Promise<ProjectContextRevisionRow> {
+        const now = new Date().toISOString();
+        const row: ProjectContextRevisionRow = {
+            id: crypto.randomUUID(),
+            projectId,
+            sourceChatId: null,
+            status: "confirmed",
+            brief,
+            context,
+            actionsUsed: 0,
+            createdAt: now,
+            updatedAt: now,
+            confirmedAt: now,
+        };
+        await db.insert(projectContextRevisions).values(row);
+        return row;
+    }
+
     async confirmProjectContextRevision(revisionId: string): Promise<ProjectContextRevisionRow | null> {
         const now = new Date().toISOString();
         await db

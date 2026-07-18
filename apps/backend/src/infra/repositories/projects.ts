@@ -11,10 +11,34 @@ class ProjectsRepository {
             id: crypto.randomUUID(),
             name,
             baseUrl,
+            gitRemoteUrl: null,
+            gitToken: null,
+            gitPushError: null,
+            gitConflictPaths: null,
+            contextSyncError: null,
             createdAt: new Date().toISOString(),
         };
         await db.insert(projects).values(row);
         return row;
+    }
+
+    async updateGitConnection(id: string, remoteUrl: string | null, token: string | null): Promise<void> {
+        await db
+            .update(projects)
+            .set({ gitRemoteUrl: remoteUrl, gitToken: token, gitPushError: null, gitConflictPaths: null })
+            .where(eq(projects.id, id));
+    }
+
+    async setGitPushError(id: string, error: string | null): Promise<void> {
+        await db.update(projects).set({ gitPushError: error }).where(eq(projects.id, id));
+    }
+
+    async setGitConflictPaths(id: string, paths: string[] | null): Promise<void> {
+        await db.update(projects).set({ gitConflictPaths: paths }).where(eq(projects.id, id));
+    }
+
+    async setContextSyncError(id: string, error: string | null): Promise<void> {
+        await db.update(projects).set({ contextSyncError: error }).where(eq(projects.id, id));
     }
 
     async listProjects(): Promise<Project[]> {

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3a0811f0-6e49-403e-ae5e-48bfce3e0e29",
+  "id": "b059f321-e268-4de9-b966-0e1af05a142a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "app_settings": {
@@ -35,8 +35,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "conversations": {
-      "name": "conversations",
+    "chats": {
+      "name": "chats",
       "columns": {
         "id": {
           "name": "id",
@@ -52,6 +52,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "context_revision_id": {
+          "name": "context_revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -62,9 +69,9 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "conversations_project_id_projects_id_fk": {
-          "name": "conversations_project_id_projects_id_fk",
-          "tableFrom": "conversations",
+        "chats_project_id_projects_id_fk": {
+          "name": "chats_project_id_projects_id_fk",
+          "tableFrom": "chats",
           "tableTo": "projects",
           "columnsFrom": [
             "project_id"
@@ -119,6 +126,13 @@
           "autoincrement": false,
           "default": "''"
         },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -132,6 +146,101 @@
         "features_project_id_projects_id_fk": {
           "name": "features_project_id_projects_id_fk",
           "tableFrom": "features",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "project_context_revisions": {
+      "name": "project_context_revisions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_chat_id": {
+          "name": "source_chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "brief": {
+          "name": "brief",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "context": {
+          "name": "context",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actions_used": {
+          "name": "actions_used",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "project_context_revisions_project_id_projects_id_fk": {
+          "name": "project_context_revisions_project_id_projects_id_fk",
+          "tableFrom": "project_context_revisions",
           "tableTo": "projects",
           "columnsFrom": [
             "project_id"
@@ -171,6 +280,41 @@
           "notNull": true,
           "autoincrement": false
         },
+        "git_remote_url": {
+          "name": "git_remote_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "git_token": {
+          "name": "git_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "git_push_error": {
+          "name": "git_push_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "git_conflict_paths": {
+          "name": "git_conflict_paths",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "context_sync_error": {
+          "name": "context_sync_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -202,8 +346,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "spec_version_id": {
-          "name": "spec_version_id",
+        "commit_sha": {
+          "name": "commit_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "robot_hash": {
+          "name": "robot_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -243,92 +394,6 @@
         "runs_spec_id_specs_id_fk": {
           "name": "runs_spec_id_specs_id_fk",
           "tableFrom": "runs",
-          "tableTo": "specs",
-          "columnsFrom": [
-            "spec_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "runs_spec_version_id_spec_versions_id_fk": {
-          "name": "runs_spec_version_id_spec_versions_id_fk",
-          "tableFrom": "runs",
-          "tableTo": "spec_versions",
-          "columnsFrom": [
-            "spec_version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "spec_versions": {
-      "name": "spec_versions",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "spec_id": {
-          "name": "spec_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "human_spec": {
-          "name": "human_spec",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "executable_path": {
-          "name": "executable_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "executable_hash": {
-          "name": "executable_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "spec_versions_spec_id_specs_id_fk": {
-          "name": "spec_versions_spec_id_specs_id_fk",
-          "tableFrom": "spec_versions",
           "tableTo": "specs",
           "columnsFrom": [
             "spec_id"
@@ -389,10 +454,24 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'draft'"
+          "default": "'unverified'"
         },
-        "current_version_id": {
-          "name": "current_version_id",
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "robot_hash": {
+          "name": "robot_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invalid_reason": {
+          "name": "invalid_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

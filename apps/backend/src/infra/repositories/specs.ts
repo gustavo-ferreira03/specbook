@@ -1,36 +1,50 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db/client";
-import { runs, specs, specVersions, type HumanSpec, type SpecStatus } from "../db/schema";
+import { runs, specs, type SpecStatus } from "../db/schema";
 
 export type Spec = typeof specs.$inferSelect;
-export type SpecVersion = typeof specVersions.$inferSelect;
 export type DeleteSpecResult =
     | { status: "not_found" }
     | { status: "busy" }
     | { status: "deleted"; runIds: string[] };
 
+export type SpecPatch = Partial<
+    Pick<Spec, "title" | "description" | "path" | "robotHash" | "status" | "invalidReason" | "featureId">
+>;
+
 class SpecsRepository {
     async createSpecRecord(input: {
+        id?: string;
         projectId: string;
         featureId: string;
         title: string;
         description: string;
+        path: string;
+        robotHash: string;
+        status?: SpecStatus;
+        invalidReason?: string | null;
     }): Promise<Spec> {
         const now = new Date().toISOString();
         const row: Spec = {
-            id: crypto.randomUUID(),
+            id: input.id ?? crypto.randomUUID(),
             projectId: input.projectId,
             featureId: input.featureId,
             title: input.title,
             description: input.description,
-            status: "draft",
-            currentVersionId: null,
+            status: input.status ?? "unverified",
+            path: input.path,
+            robotHash: input.robotHash,
+            invalidReason: input.invalidReason ?? null,
             createdAt: now,
             updatedAt: now,
         };
         await db.insert(specs).values(row);
         return row;
+    }
+
+    async createSpecRecordRow(row: Spec): Promise<void> {
+        await db.insert(specs).values(row);
     }
 
     async listSpecs(projectId: string): Promise<Spec[]> {
@@ -46,42 +60,30 @@ class SpecsRepository {
         return rows[0] ?? null;
     }
 
-    async updateSpecStatus(id: string, status: SpecStatus, currentVersionId?: string): Promise<void> {
-        const patch: Partial<Spec> = {
-            status,
-            updatedAt: new Date().toISOString(),
-        };
-        if (currentVersionId !== undefined) patch.currentVersionId = currentVersionId;
-        await db.update(specs).set(patch).where(eq(specs.id, id));
+    async getSpecByPath(projectId: string, path: string): Promise<Spec | null> {
+        const rows = await db
+            .select()
+            .from(specs)
+            .where(and(eq(specs.projectId, projectId), eq(specs.path, path)));
+        return rows[0] ?? null;
     }
 
-    async updateSpecStatusForVersion(
-        id: string,
-        currentVersionId: string,
-        status: SpecStatus,
-    ): Promise<void> {
+    async updateSpecRecord(id: string, patch: SpecPatch): Promise<void> {
+        await db
+            .update(specs)
+            .set({ ...patch, updatedAt: new Date().toISOString() })
+            .where(eq(specs.id, id));
+    }
+
+    async updateSpecStatus(id: string, status: SpecStatus, invalidReason: string | null = null): Promise<void> {
+        await this.updateSpecRecord(id, { status, invalidReason });
+    }
+
+    async updateSpecStatusForHash(id: string, robotHash: string, status: SpecStatus): Promise<void> {
         await db
             .update(specs)
             .set({ status, updatedAt: new Date().toISOString() })
-            .where(and(eq(specs.id, id), eq(specs.currentVersionId, currentVersionId)));
-    }
-
-    async publishSpecVersion(
-        id: string,
-        currentVersionId: string,
-        metadata: { title?: string; description?: string } = {},
-    ): Promise<void> {
-        const patch: Partial<Spec> = {
-            status: "unverified",
-            currentVersionId,
-            updatedAt: new Date().toISOString(),
-        };
-        if (metadata.title !== undefined) patch.title = metadata.title;
-        if (metadata.description !== undefined) patch.description = metadata.description;
-        await db
-            .update(specs)
-            .set(patch)
-            .where(eq(specs.id, id));
+            .where(and(eq(specs.id, id), eq(specs.robotHash, robotHash)));
     }
 
     async deleteSpecRecord(id: string): Promise<void> {
@@ -98,49 +100,9 @@ class SpecsRepository {
                 .where(eq(runs.specId, id));
             if (runRows.some((run) => run.status === "running")) return { status: "busy" };
             await tx.delete(runs).where(eq(runs.specId, id));
-            await tx.delete(specVersions).where(eq(specVersions.specId, id));
             await tx.delete(specs).where(eq(specs.id, id));
             return { status: "deleted", runIds: runRows.map((run) => run.id) };
         });
-    }
-
-    async addSpecVersion(input: {
-        specId: string;
-        version: number;
-        humanSpec: HumanSpec;
-        executablePath: string;
-        executableHash: string;
-    }): Promise<SpecVersion> {
-        const row: SpecVersion = {
-            id: crypto.randomUUID(),
-            specId: input.specId,
-            version: input.version,
-            humanSpec: input.humanSpec,
-            executablePath: input.executablePath,
-            executableHash: input.executableHash,
-            createdAt: new Date().toISOString(),
-        };
-        await db.insert(specVersions).values(row);
-        return row;
-    }
-
-    async getSpecVersion(id: string): Promise<SpecVersion | null> {
-        const rows = await db.select().from(specVersions).where(eq(specVersions.id, id));
-        return rows[0] ?? null;
-    }
-
-    async deleteSpecVersion(id: string): Promise<void> {
-        await db.delete(specVersions).where(eq(specVersions.id, id));
-    }
-
-    async latestVersionNumber(specId: string): Promise<number> {
-        const rows = await db
-            .select()
-            .from(specVersions)
-            .where(eq(specVersions.specId, specId))
-            .orderBy(desc(specVersions.version), desc(specVersions.createdAt), desc(specVersions.id))
-            .limit(1);
-        return rows[0]?.version ?? 0;
     }
 }
 

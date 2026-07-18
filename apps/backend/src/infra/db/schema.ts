@@ -7,7 +7,7 @@ export interface HumanSpec {
     postconditions: string[];
 }
 
-export type SpecStatus = "draft" | "unverified" | "passed" | "failed";
+export type SpecStatus = "unverified" | "passed" | "failed" | "invalid" | "conflict";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface LlmSettings {
@@ -53,6 +53,11 @@ export const projects = sqliteTable("projects", {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
+    gitRemoteUrl: text("git_remote_url"),
+    gitToken: text("git_token"),
+    gitPushError: text("git_push_error"),
+    gitConflictPaths: text("git_conflict_paths", { mode: "json" }).$type<string[] | null>(),
+    contextSyncError: text("context_sync_error"),
     createdAt: text("created_at").notNull(),
 });
 
@@ -64,6 +69,7 @@ export const features = sqliteTable("features", {
     parentId: text("parent_id"),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
+    path: text("path").notNull(),
     createdAt: text("created_at").notNull(),
 });
 
@@ -77,22 +83,12 @@ export const specs = sqliteTable("specs", {
         .references(() => features.id),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
-    status: text("status").$type<SpecStatus>().notNull().default("draft"),
-    currentVersionId: text("current_version_id"),
+    status: text("status").$type<SpecStatus>().notNull().default("unverified"),
+    path: text("path").notNull(),
+    robotHash: text("robot_hash").notNull(),
+    invalidReason: text("invalid_reason"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
-});
-
-export const specVersions = sqliteTable("spec_versions", {
-    id: text("id").primaryKey(),
-    specId: text("spec_id")
-        .notNull()
-        .references(() => specs.id),
-    version: integer("version").notNull(),
-    humanSpec: text("human_spec", { mode: "json" }).$type<HumanSpec>().notNull(),
-    executablePath: text("executable_path").notNull(),
-    executableHash: text("executable_hash").notNull(),
-    createdAt: text("created_at").notNull(),
 });
 
 export const chats = sqliteTable("chats", {
@@ -124,9 +120,8 @@ export const runs = sqliteTable("runs", {
     specId: text("spec_id")
         .notNull()
         .references(() => specs.id),
-    specVersionId: text("spec_version_id")
-        .notNull()
-        .references(() => specVersions.id),
+    commitSha: text("commit_sha").notNull(),
+    robotHash: text("robot_hash").notNull(),
     status: text("status").$type<RunStatus>().notNull(),
     startedAt: text("started_at").notNull(),
     durationMs: integer("duration_ms"),

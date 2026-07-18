@@ -6,11 +6,12 @@ import { runs, type RunStatus } from "../db/schema";
 export type Run = typeof runs.$inferSelect;
 
 class RunsRepository {
-    async createRun(input: { specId: string; specVersionId: string }): Promise<Run> {
+    async createRun(input: { specId: string; commitSha: string; robotHash: string }): Promise<Run> {
         const row: Run = {
             id: crypto.randomUUID(),
             specId: input.specId,
-            specVersionId: input.specVersionId,
+            commitSha: input.commitSha,
+            robotHash: input.robotHash,
             status: "running",
             startedAt: new Date().toISOString(),
             durationMs: null,

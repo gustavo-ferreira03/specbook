@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1784255894157,
-      "tag": "0000_fat_warlock",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1784259172522,
-      "tag": "0001_wide_gravity",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1784350000000,
-      "tag": "0002_rename_conversations_to_chats",
+      "when": 1784357491465,
+      "tag": "0000_flaky_stryfe",
       "breakpoints": true
     }
   ]

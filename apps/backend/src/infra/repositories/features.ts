@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client";
-import { features, runs, specs, specVersions } from "../db/schema";
+import { features, runs, specs } from "../db/schema";
 
 export type Feature = typeof features.$inferSelect;
 export type DeleteFeatureResult =
@@ -30,6 +30,7 @@ class FeaturesRepository {
         parentId: string | null,
         title: string,
         description: string,
+        path: string,
     ): Promise<Feature> {
         const row: Feature = {
             id: crypto.randomUUID(),
@@ -37,10 +38,26 @@ class FeaturesRepository {
             parentId,
             title,
             description,
+            path,
             createdAt: new Date().toISOString(),
         };
         await db.insert(features).values(row);
         return row;
+    }
+
+    async getFeatureByPath(projectId: string, path: string): Promise<Feature | null> {
+        const rows = await db
+            .select()
+            .from(features)
+            .where(and(eq(features.projectId, projectId), eq(features.path, path)));
+        return rows[0] ?? null;
+    }
+
+    async updateFeatureRecord(
+        id: string,
+        patch: Partial<Pick<Feature, "title" | "description" | "path" | "parentId">>,
+    ): Promise<void> {
+        await db.update(features).set(patch).where(eq(features.id, id));
     }
 
     async listFeatures(projectId: string): Promise<Feature[]> {
@@ -91,7 +108,6 @@ class FeaturesRepository {
             if (runRows.some((run) => run.status === "running")) return { status: "busy" };
             if (specIds.length) {
                 await tx.delete(runs).where(inArray(runs.specId, specIds));
-                await tx.delete(specVersions).where(inArray(specVersions.specId, specIds));
                 await tx.delete(specs).where(inArray(specs.id, specIds));
             }
             await tx.delete(features).where(inArray(features.id, featureIds));
