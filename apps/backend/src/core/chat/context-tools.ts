@@ -2,10 +2,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 import type { ProjectContext } from "../../db/schema";
-import {
-    getProjectContextRevision,
-    replaceProjectContextDraft,
-} from "../../repositories/project-contexts";
+import { projectContextsRepository } from "../../repositories/project-contexts";
 
 export const projectContextSchema = z.object({
     summary: z.string(),
@@ -60,7 +57,7 @@ export function createContextTools(revisionId: string, projectId: string) {
                 "Read the current project-context draft for this discovery, including the brief, the saved context, and the action usage.",
             parameters: Type.Object({}),
             async execute() {
-                const revision = await getProjectContextRevision(revisionId);
+                const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
                 if (!revision) return text("The discovery draft for this conversation no longer exists.");
                 return text(
                     JSON.stringify({
@@ -84,12 +81,15 @@ export function createContextTools(revisionId: string, projectId: string) {
                 if (!parsed.success) {
                     return text(`The proposed context is invalid: ${parsed.error.issues[0]?.message ?? "schema mismatch"}. Provide the complete ProjectContext object.`);
                 }
-                const revision = await getProjectContextRevision(revisionId);
+                const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
                 if (!revision) return text("The discovery draft for this conversation no longer exists.");
                 if (revision.status !== "draft") {
                     return text(`This context revision is already ${revision.status} and can no longer be changed from this conversation.`);
                 }
-                const updated = await replaceProjectContextDraft(revisionId, parsed.data as ProjectContext);
+                const updated = await projectContextsRepository.replaceProjectContextDraft(
+                    revisionId,
+                    parsed.data as ProjectContext,
+                );
                 return text(
                     JSON.stringify({
                         revisionId: updated?.id ?? revisionId,

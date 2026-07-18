@@ -9,7 +9,7 @@ import { closeAllConversationBrowsers } from "./core/browser/sessions";
 import { getVncSession } from "./core/browser/vnc";
 import { markInterruptedBatches } from "./core/runner/batch";
 import { stopActiveRobotProcesses } from "./core/runner/robot";
-import { markInterruptedRuns } from "./repositories/runs";
+import { runsRepository } from "./repositories/runs";
 import { createConversationsRouter } from "./routes/conversations";
 import { createFeaturesRouter } from "./routes/features";
 import { createProjectContextsRouter } from "./routes/project-contexts";
@@ -38,7 +38,7 @@ app.route("/", createSettingsRouter());
 
 const port = Number(process.env.PORT ?? 4000);
 const hostname = process.env.HOST ?? "127.0.0.1";
-await markInterruptedRuns();
+await runsRepository.markInterruptedRuns();
 await markInterruptedBatches();
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     console.log(`[specbook] backend listening on :${port}`);

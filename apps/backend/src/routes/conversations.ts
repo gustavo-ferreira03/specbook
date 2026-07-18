@@ -12,9 +12,9 @@ import {
     listConversations,
     runConversationTurn,
 } from "../core/chat/session";
-import { conversationMode, getConversationRow } from "../repositories/conversations";
-import { getProjectContextRevision } from "../repositories/project-contexts";
-import { getProject } from "../repositories/projects";
+import { conversationsRepository } from "../repositories/conversations";
+import { projectContextsRepository } from "../repositories/project-contexts";
+import { projectsRepository } from "../repositories/projects";
 
 const messageSchema = z.object({ text: z.string().trim().min(1) });
 
@@ -22,25 +22,25 @@ export function createConversationsRouter(): Hono {
     const router = new Hono();
 
     router.post("/projects/:id/conversations", async (c) => {
-        const project = await getProject(c.req.param("id"));
+        const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ conversation: await createConversation(project.id) });
     });
 
     router.get("/projects/:id/conversations", async (c) => {
-        const project = await getProject(c.req.param("id"));
+        const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ conversations: await listConversations(project.id) });
     });
 
     router.get("/conversations/:id", async (c) => {
         const id = c.req.param("id");
-        const [row, messages] = await Promise.all([getConversationRow(id), getConversationMessages(id)]);
+        const [row, messages] = await Promise.all([conversationsRepository.getConversationRow(id), getConversationMessages(id)]);
         if (!row || !messages) throw new HTTPException(404, { message: "Conversation not found" });
         const conversation = (await listConversations(row.projectId)).find((item) => item.id === id);
         const browser = await getConversationBrowser(id);
         const revision = row.contextRevisionId
-            ? await getProjectContextRevision(row.contextRevisionId)
+            ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
         return c.json({
             title: conversation?.title ?? "Conversation",
@@ -48,7 +48,7 @@ export function createConversationsRouter(): Hono {
             busy: isConversationBusy(id),
             vncSessionId: browser?.vnc.id ?? null,
             projectId: row.projectId,
-            mode: conversationMode(row),
+            mode: conversationsRepository.conversationMode(row),
             contextRevision: revision
                 ? {
                       id: revision.id,
@@ -76,14 +76,14 @@ export function createConversationsRouter(): Hono {
 
     router.post("/conversations/:id/browser", async (c) => {
         const id = c.req.param("id");
-        const row = await getConversationRow(id);
+        const row = await conversationsRepository.getConversationRow(id);
         if (!row) throw new HTTPException(404, { message: "Conversation not found" });
         if (isConversationDeleting(id)) throw new HTTPException(409, { message: "Conversation is being deleted" });
-        const project = await getProject(row.projectId);
+        const project = await projectsRepository.getProject(row.projectId);
         if (!project) throw new HTTPException(404, { message: "Project not found" });
-        if (!(await getConversationRow(id))) throw new HTTPException(404, { message: "Conversation not found" });
+        if (!(await conversationsRepository.getConversationRow(id))) throw new HTTPException(404, { message: "Conversation not found" });
         const revision = row.contextRevisionId
-            ? await getProjectContextRevision(row.contextRevisionId)
+            ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
         if (row.contextRevisionId && revision?.status !== "draft") {
             throw new HTTPException(409, { message: "This discovery is closed" });
@@ -95,10 +95,10 @@ export function createConversationsRouter(): Hono {
 
     router.post("/conversations/:id/message", zValidator("json", messageSchema), async (c) => {
         const id = c.req.param("id");
-        const row = await getConversationRow(id);
+        const row = await conversationsRepository.getConversationRow(id);
         if (!row) throw new HTTPException(404, { message: "Conversation not found" });
         if (row.contextRevisionId) {
-            const revision = await getProjectContextRevision(row.contextRevisionId);
+            const revision = await projectContextsRepository.getProjectContextRevision(row.contextRevisionId);
             if (revision?.status !== "draft") throw new HTTPException(409, { message: "This discovery is closed" });
         }
         if (isConversationDeleting(id)) throw new HTTPException(409, { message: "Conversation is being deleted" });

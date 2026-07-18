@@ -1,18 +1,8 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { HumanSpec } from "../../db/schema";
-import { createFeature, getFeature, listFeatures } from "../../repositories/features";
-import {
-    addSpecVersion,
-    createSpecRecord,
-    deleteSpecRecord,
-    deleteSpecVersion,
-    getSpec,
-    getSpecVersion,
-    latestVersionNumber,
-    listSpecs,
-    publishSpecVersion,
-} from "../../repositories/specs";
+import { featuresRepository } from "../../repositories/features";
+import { specsRepository } from "../../repositories/specs";
 import { executeSpec } from "../runner/robot";
 import { namedRobotStepsError } from "../runner/evidence";
 import { validateRobotSource } from "../runner/validate";
@@ -42,7 +32,7 @@ export function createDomainTools(projectId: string) {
             description: "List all features of the current project with their ids, parent ids, titles and descriptions.",
             parameters: Type.Object({}),
             async execute() {
-                const rows = await listFeatures(projectId);
+                const rows = await featuresRepository.listFeatures(projectId);
                 return text(
                     JSON.stringify(
                         rows.map((feature) => ({
@@ -61,7 +51,7 @@ export function createDomainTools(projectId: string) {
             description: "List all specs of the current project with id, featureId, title, description and status.",
             parameters: Type.Object({}),
             async execute() {
-                const rows = await listSpecs(projectId);
+                const rows = await specsRepository.listSpecs(projectId);
                 return text(
                     JSON.stringify(
                         rows.map((spec) => ({
@@ -81,10 +71,10 @@ export function createDomainTools(projectId: string) {
             description: "Read the current human-readable and Robot Framework forms of a Spec before changing it.",
             parameters: Type.Object({ specId: Type.String() }),
             async execute(_id, params) {
-                const spec = await getSpec(params.specId);
+                const spec = await specsRepository.getSpec(params.specId);
                 if (!spec || spec.projectId !== projectId) return text(`Spec ${params.specId} not found in this project.`);
                 if (!spec.currentVersionId) return text(JSON.stringify({ spec, version: null }));
-                const version = await getSpecVersion(spec.currentVersionId);
+                const version = await specsRepository.getSpecVersion(spec.currentVersionId);
                 if (!version) return text(JSON.stringify({ spec, version: null }));
                 const robotSource = await readSpecExecutable(version.executablePath);
                 return text(
@@ -111,12 +101,12 @@ export function createDomainTools(projectId: string) {
             }),
             async execute(_id, params) {
                 if (params.parentId) {
-                    const parent = await getFeature(params.parentId);
+                    const parent = await featuresRepository.getFeature(params.parentId);
                     if (!parent || parent.projectId !== projectId) {
                         return text(`Parent feature ${params.parentId} not found in this project.`);
                     }
                 }
-                const feature = await createFeature(
+                const feature = await featuresRepository.createFeature(
                     projectId,
                     params.parentId ?? null,
                     params.title,
@@ -137,7 +127,7 @@ export function createDomainTools(projectId: string) {
                 robotSource: Type.String(),
             }),
             async execute(_id, params) {
-                const feature = await getFeature(params.featureId);
+                const feature = await featuresRepository.getFeature(params.featureId);
                 if (!feature || feature.projectId !== projectId) {
                     return text(`Feature ${params.featureId} not found in this project.`);
                 }
@@ -147,7 +137,7 @@ export function createDomainTools(projectId: string) {
                 if (!validation.ok) {
                     return text(`The Robot source was rejected: ${validation.error}\nFix the file and call create_spec again.`);
                 }
-                const spec = await createSpecRecord({
+                const spec = await specsRepository.createSpecRecord({
                     projectId,
                     featureId: feature.id,
                     title: params.title,
@@ -158,7 +148,7 @@ export function createDomainTools(projectId: string) {
                 try {
                     const file = await writeSpecExecutable(spec.id, 1, params.robotSource);
                     executablePath = file.executablePath;
-                    const version = await addSpecVersion({
+                    const version = await specsRepository.addSpecVersion({
                         specId: spec.id,
                         version: 1,
                         humanSpec: params.humanSpec as HumanSpec,
@@ -166,12 +156,12 @@ export function createDomainTools(projectId: string) {
                         executableHash: file.executableHash,
                     });
                     versionId = version.id;
-                    await publishSpecVersion(spec.id, version.id);
+                    await specsRepository.publishSpecVersion(spec.id, version.id);
                     return text(JSON.stringify({ specId: spec.id, version: 1 }));
                 } catch (error) {
-                    if (versionId) await deleteSpecVersion(versionId).catch(() => undefined);
+                    if (versionId) await specsRepository.deleteSpecVersion(versionId).catch(() => undefined);
                     if (executablePath) await removeSpecExecutable(executablePath).catch(() => undefined);
-                    await deleteSpecRecord(spec.id).catch(() => undefined);
+                    await specsRepository.deleteSpecRecord(spec.id).catch(() => undefined);
                     throw error;
                 }
             },
@@ -189,12 +179,12 @@ export function createDomainTools(projectId: string) {
             }),
             async execute(_id, params) {
                 return withSpecLock(params.specId, async () => {
-                    const spec = await getSpec(params.specId);
+                    const spec = await specsRepository.getSpec(params.specId);
                     if (!spec || spec.projectId !== projectId) {
                         return text(`Spec ${params.specId} not found in this project.`);
                     }
                     if (!spec.currentVersionId) return text(`Spec ${params.specId} has no version to update.`);
-                    const currentVersion = await getSpecVersion(spec.currentVersionId);
+                    const currentVersion = await specsRepository.getSpecVersion(spec.currentVersionId);
                     if (!currentVersion) return text(`Spec ${params.specId} has no current version to update.`);
                     const humanSpec = (params.humanSpec as HumanSpec | undefined) ?? currentVersion.humanSpec;
                     const robotSource = params.robotSource ?? (await readSpecExecutable(currentVersion.executablePath));
@@ -206,13 +196,13 @@ export function createDomainTools(projectId: string) {
                     if (!validation.ok) {
                         return text(`The Robot source was rejected: ${validation.error}\nFix the file and call update_spec again.`);
                     }
-                    const nextVersion = (await latestVersionNumber(spec.id)) + 1;
+                    const nextVersion = (await specsRepository.latestVersionNumber(spec.id)) + 1;
                     let executablePath: string | null = null;
                     let versionId: string | null = null;
                     try {
                         const file = await writeSpecExecutable(spec.id, nextVersion, robotSource);
                         executablePath = file.executablePath;
-                        const version = await addSpecVersion({
+                        const version = await specsRepository.addSpecVersion({
                             specId: spec.id,
                             version: nextVersion,
                             humanSpec,
@@ -220,13 +210,13 @@ export function createDomainTools(projectId: string) {
                             executableHash: file.executableHash,
                         });
                         versionId = version.id;
-                        await publishSpecVersion(spec.id, version.id, {
+                        await specsRepository.publishSpecVersion(spec.id, version.id, {
                             title: params.title,
                             description: params.description,
                         });
                         return text(JSON.stringify({ specId: spec.id, version: nextVersion }));
                     } catch (error) {
-                        if (versionId) await deleteSpecVersion(versionId).catch(() => undefined);
+                        if (versionId) await specsRepository.deleteSpecVersion(versionId).catch(() => undefined);
                         if (executablePath) await removeSpecExecutable(executablePath).catch(() => undefined);
                         throw error;
                     }
@@ -239,7 +229,7 @@ export function createDomainTools(projectId: string) {
             description: "Execute a Spec through Robot Framework and return its status, duration and failure reason.",
             parameters: Type.Object({ specId: Type.String() }),
             async execute(_id, params) {
-                const spec = await getSpec(params.specId);
+                const spec = await specsRepository.getSpec(params.specId);
                 if (!spec || spec.projectId !== projectId) {
                     return text(`Spec ${params.specId} not found in this project.`);
                 }

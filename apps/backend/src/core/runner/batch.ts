@@ -4,9 +4,9 @@ import type { Dirent } from "node:fs";
 import path from "node:path";
 import { XMLParser } from "fast-xml-parser";
 import type { RunStatus } from "../../db/schema";
-import { createRun, deleteRun, finishRun, type Run } from "../../repositories/runs";
-import { getSpec, getSpecVersion, updateSpecStatusForVersion, type SpecVersion } from "../../repositories/specs";
-import { getProject } from "../../repositories/projects";
+import { runsRepository, type Run } from "../../repositories/runs";
+import { specsRepository, type SpecVersion } from "../../repositories/specs";
+import { projectsRepository } from "../../repositories/projects";
 import { runBatchesDir, runsDir } from "../paths";
 import { readSpecExecutable } from "../specs/files";
 import { withSpecLocks } from "../specs/lifecycle";
@@ -154,9 +154,9 @@ async function finishPreparedSpec(
         fs.writeFile(path.join(runDir, "batch.json"), JSON.stringify({ batchId }), "utf8"),
     ]);
     await finalizeRunEvidence(runDir, result.status, prepared.plannedEvidence);
-    await finishRun(prepared.run.id, result.status, result.durationMs, result.failReason);
+    await runsRepository.finishRun(prepared.run.id, result.status, result.durationMs, result.failReason);
     if (result.status === "passed" || result.status === "failed") {
-        await updateSpecStatusForVersion(prepared.item.specId, prepared.version.id, result.status);
+        await specsRepository.updateSpecStatusForVersion(prepared.item.specId, prepared.version.id, result.status);
     }
     prepared.item.status = result.status;
     prepared.item.durationMs = result.durationMs;
@@ -224,16 +224,16 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
 }
 
 export async function startSpecBatch(projectId: string, specIds: string[], label: string): Promise<RunBatch> {
-    const project = await getProject(projectId);
+    const project = await projectsRepository.getProject(projectId);
     if (!project) throw new Error("Project not found");
     const ids = [...new Set(specIds)];
     if (ids.length === 0) throw new Error("Select at least one Spec");
     const definitions: { specId: string; title: string; version: SpecVersion }[] = [];
     for (const id of ids) {
-        const spec = await getSpec(id);
+        const spec = await specsRepository.getSpec(id);
         if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
         if (!spec.currentVersionId) throw new Error(`Spec "${spec.title}" has no executable version`);
-        const version = await getSpecVersion(spec.currentVersionId);
+        const version = await specsRepository.getSpecVersion(spec.currentVersionId);
         if (!version) throw new Error(`Current version for Spec "${spec.title}" was not found`);
         definitions.push({ specId: spec.id, title: spec.title, version });
     }
@@ -241,10 +241,10 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     const createdRuns: Run[] = [];
     try {
         for (const definition of definitions) {
-            createdRuns.push(await createRun({ specId: definition.specId, specVersionId: definition.version.id }));
+            createdRuns.push(await runsRepository.createRun({ specId: definition.specId, specVersionId: definition.version.id }));
         }
     } catch (error) {
-        await Promise.all(createdRuns.map((run) => deleteRun(run.id).catch(() => undefined)));
+        await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
         throw error;
     }
 
@@ -269,7 +269,7 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     try {
         await writeBatch(batch);
     } catch (error) {
-        await Promise.all(createdRuns.map((run) => deleteRun(run.id).catch(() => undefined)));
+        await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
         throw error;
     }
     const prepared = definitions.map((definition, index): PreparedSpec => ({

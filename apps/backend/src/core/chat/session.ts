@@ -16,20 +16,13 @@ import {
 } from "../browser/mcp";
 import { modelRegistry } from "../llm/runtime";
 import { sessionsDir, storageRoot } from "../paths";
+import { conversationsRepository, type ConversationMetadata } from "../../repositories/conversations";
 import {
-    getConversationRow,
-    insertConversation,
-    listConversationRows,
-    type ConversationMetadata,
-} from "../../repositories/conversations";
-import {
-    consumeDiscoveryAction,
-    getLatestConfirmedProjectContext,
-    getProjectContextRevision,
+    projectContextsRepository,
     type ProjectContextRevisionRow,
 } from "../../repositories/project-contexts";
-import { getProject, type Project } from "../../repositories/projects";
-import { getLlmSettings } from "../../repositories/settings";
+import { projectsRepository, type Project } from "../../repositories/projects";
+import { settingsRepository } from "../../repositories/settings";
 import { createContextTools } from "./context-tools";
 import { createDomainTools } from "./tools";
 import type { ChatMessageRecord } from "./types";
@@ -190,7 +183,7 @@ export function createDiscoveryBrowserPolicy(
                     );
                 }
             }
-            const budget = await consumeDiscoveryAction(revision.id);
+            const budget = await projectContextsRepository.consumeDiscoveryAction(revision.id);
             if (!budget) throw new Error("The discovery draft for this conversation no longer exists.");
             if (!budget.allowed) {
                 throw new Error(
@@ -317,14 +310,17 @@ export async function createConversation(
     const id = crypto.randomUUID();
     const sessionManager = SessionManager.create(cwd, sessionsDir, { id });
     flushSessionFile(sessionManager);
-    await insertConversation(sessionManager.getSessionId(), projectId, metadata);
+    await conversationsRepository.insertConversation(sessionManager.getSessionId(), projectId, metadata);
     return { id: sessionManager.getSessionId() };
 }
 
 export async function listConversations(
     projectId: string,
 ): Promise<{ id: string; title: string; createdAt: string }[]> {
-    const [rows, infos] = await Promise.all([listConversationRows(projectId), listSessionInfos()]);
+    const [rows, infos] = await Promise.all([
+        conversationsRepository.listConversationRows(projectId),
+        listSessionInfos(),
+    ]);
     return rows.map((row) => {
         const info = infos.find((session) => session.id === row.id);
         const piName = info?.name && info.name !== "New chat" ? info.name : undefined;
@@ -380,18 +376,18 @@ export async function runConversationTurn(id: string, userText: string): Promise
     let sessionManager: SessionManager | null = null;
     let previousUserCount = 0;
     try {
-        const row = await getConversationRow(id);
+        const row = await conversationsRepository.getConversationRow(id);
         sessionManager = await openSession(id);
         if (!row || !sessionManager) return;
         previousUserCount = userMessageCount(sessionManager);
-        const project = await getProject(row.projectId);
+        const project = await projectsRepository.getProject(row.projectId);
         if (!project) {
             ensureUserMessage(sessionManager, userText, previousUserCount);
             appendError(sessionManager, "The project for this conversation no longer exists.");
             return;
         }
 
-        const { provider, model: modelName } = await getLlmSettings();
+        const { provider, model: modelName } = await settingsRepository.getLlmSettings();
         const model = provider && modelName ? modelRegistry.find(provider, modelName) : null;
         if (!model) {
             ensureUserMessage(sessionManager, userText, previousUserCount);
@@ -413,7 +409,7 @@ export async function runConversationTurn(id: string, userText: string): Promise
         }
 
         const contextRevision = row.contextRevisionId
-            ? await getProjectContextRevision(row.contextRevisionId)
+            ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
         const discoveryRevision = contextRevision?.status === "draft" ? contextRevision : null;
 
@@ -444,7 +440,7 @@ export async function runConversationTurn(id: string, userText: string): Promise
             : [...browserTools, ...createDomainTools(row.projectId)];
         const confirmedContext = discoveryRevision
             ? null
-            : await getLatestConfirmedProjectContext(row.projectId);
+            : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
         const resourceLoader = await createResourceLoader(
             buildSystemPrompt(project, discoveryRevision, confirmedContext),
         );

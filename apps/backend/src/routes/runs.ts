@@ -7,8 +7,8 @@ import { z } from "zod";
 import { runsDir } from "../core/paths";
 import { getRunBatch, getRunBatchDirectory, startSpecBatch } from "../core/runner/batch";
 import { executeSpec } from "../core/runner/robot";
-import { getRun } from "../repositories/runs";
-import { getSpecVersion } from "../repositories/specs";
+import { runsRepository } from "../repositories/runs";
+import { specsRepository } from "../repositories/specs";
 
 const CONTENT_TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
@@ -63,7 +63,7 @@ async function listArtifactFiles(directory: string, relative = ""): Promise<stri
 }
 
 async function requireRun(runId: string): Promise<void> {
-    if (!(await getRun(runId))) throw new HTTPException(404, { message: "Run not found" });
+    if (!(await runsRepository.getRun(runId))) throw new HTTPException(404, { message: "Run not found" });
 }
 
 async function realBatchDirectory(batchId: string): Promise<string | null> {
@@ -119,7 +119,7 @@ export function createRunsRouter(): Hono {
     });
 
     router.get("/runs/:id", async (c) => {
-        const run = await getRun(c.req.param("id"));
+        const run = await runsRepository.getRun(c.req.param("id"));
         if (!run) throw new HTTPException(404, { message: "Run not found" });
         return c.json({ run });
     });
@@ -133,10 +133,10 @@ export function createRunsRouter(): Hono {
 
     router.get("/runs/:id/evidence", async (c) => {
         const runId = c.req.param("id");
-        const run = await getRun(runId);
+        const run = await runsRepository.getRun(runId);
         if (!run) throw new HTTPException(404, { message: "Run not found" });
         const [version, directory] = await Promise.all([
-            getSpecVersion(run.specVersionId),
+            specsRepository.getSpecVersion(run.specVersionId),
             realRunDirectory(runId),
         ]);
         const files = directory ? await listArtifactFiles(directory) : [];

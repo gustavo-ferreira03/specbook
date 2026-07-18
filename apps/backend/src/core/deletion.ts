@@ -5,10 +5,10 @@ import { beginConversationDeletion, cancelConversationDeletion, removeConversati
 import { runsDir, specsDir } from "./paths";
 import { getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
-import { deleteConversationRow, getConversationRow } from "../repositories/conversations";
-import { discardDraftForConversation } from "../repositories/project-contexts";
-import { deleteFeatureWithRelations, getFeatureDeletionSpecIds } from "../repositories/features";
-import { deleteSpecWithRelations } from "../repositories/specs";
+import { conversationsRepository } from "../repositories/conversations";
+import { projectContextsRepository } from "../repositories/project-contexts";
+import { featuresRepository } from "../repositories/features";
+import { specsRepository } from "../repositories/specs";
 
 export class ResourceBusyError extends Error {}
 
@@ -46,12 +46,12 @@ async function removeSpecResources(specIds: string[], runIds: string[]): Promise
 }
 
 export async function deleteConversationData(id: string): Promise<boolean> {
-    if (!(await getConversationRow(id))) return false;
+    if (!(await conversationsRepository.getConversationRow(id))) return false;
     if (!beginConversationDeletion(id)) throw new ResourceBusyError("Wait for the agent to finish before deleting this conversation");
     try {
         await blockConversationBrowser(id);
-        await discardDraftForConversation(id);
-        await deleteConversationRow(id);
+        await projectContextsRepository.discardDraftForConversation(id);
+        await conversationsRepository.deleteConversationRow(id);
     } catch (error) {
         cancelConversationBrowserDeletion(id);
         cancelConversationDeletion(id);
@@ -72,7 +72,7 @@ export async function deleteConversationData(id: string): Promise<boolean> {
 export async function deleteSpecData(id: string): Promise<boolean> {
     if (areSpecsLocked([id])) throw new ResourceBusyError("Wait for the current Spec operation to finish before deleting it");
     return withSpecLock(id, async () => {
-        const result = await deleteSpecWithRelations(id);
+        const result = await specsRepository.deleteSpecWithRelations(id);
         if (result.status === "not_found") return false;
         if (result.status === "busy") {
             throw new ResourceBusyError("Wait for the current Spec run to finish before deleting it");
@@ -83,13 +83,13 @@ export async function deleteSpecData(id: string): Promise<boolean> {
 }
 
 export async function deleteFeatureData(id: string): Promise<boolean> {
-    const specIds = await getFeatureDeletionSpecIds(id);
+    const specIds = await featuresRepository.getFeatureDeletionSpecIds(id);
     if (!specIds) return false;
     if (areSpecsLocked(specIds)) {
         throw new ResourceBusyError("Wait for active Spec operations in this Feature to finish before deleting it");
     }
     return withSpecLocks(specIds, async () => {
-        const result = await deleteFeatureWithRelations(id);
+        const result = await featuresRepository.deleteFeatureWithRelations(id);
         if (result.status === "not_found") return false;
         if (result.status === "busy") {
             throw new ResourceBusyError("Wait for active Spec runs in this Feature to finish before deleting it");

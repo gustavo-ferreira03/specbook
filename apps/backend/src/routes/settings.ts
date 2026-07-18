@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { llmAuth, modelRegistry } from "../core/llm/runtime";
-import { getLlmSettings, updateLlmSettings } from "../repositories/settings";
+import { settingsRepository } from "../repositories/settings";
 
 type OAuthProvider = "anthropic" | "openai-codex" | "github-copilot";
 type OAuthStatus = "pending" | "done" | "error";
@@ -215,7 +215,7 @@ export function createSettingsRouter(): Hono {
     const router = new Hono();
 
     router.get("/settings/llm/status", async (c) => {
-        const current = await getLlmSettings();
+        const current = await settingsRepository.getLlmSettings();
         const model = current.provider && current.model ? modelRegistry.find(current.provider, current.model) : null;
         return c.json({
             ready: Boolean(model && modelRegistry.hasConfiguredAuth(model)),
@@ -225,20 +225,22 @@ export function createSettingsRouter(): Hono {
     });
 
     router.get("/settings/llm", async (c) => {
-        return c.json({ providers: listProviders(), current: await getLlmSettings() });
+        return c.json({ providers: listProviders(), current: await settingsRepository.getLlmSettings() });
     });
 
     router.patch("/settings/llm", async (c) => {
         const body = llmPatchSchema.safeParse(await c.req.json().catch(() => null));
         if (!body.success) throw new HTTPException(400, { message: "Invalid LLM settings" });
-        const current = await getLlmSettings();
+        const current = await settingsRepository.getLlmSettings();
         const updated = { ...current, ...body.data };
-        if (!updated.provider && !updated.model) return c.json(await updateLlmSettings(updated));
+        if (!updated.provider && !updated.model) {
+            return c.json(await settingsRepository.updateLlmSettings(updated));
+        }
         requireProvider(updated.provider);
         if (!modelRegistry.find(updated.provider, updated.model)) {
             throw new HTTPException(400, { message: "Unknown model for this provider" });
         }
-        return c.json(await updateLlmSettings(updated));
+        return c.json(await settingsRepository.updateLlmSettings(updated));
     });
 
     router.put("/settings/llm/providers/:provider", async (c) => {

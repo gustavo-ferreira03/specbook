@@ -3,9 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { XMLParser } from "fast-xml-parser";
 import type { RunStatus } from "../../db/schema";
-import { getProject } from "../../repositories/projects";
-import { createRun, deleteRun, finishRun, getRun, type Run } from "../../repositories/runs";
-import { getSpec, getSpecVersion, updateSpecStatusForVersion } from "../../repositories/specs";
+import { projectsRepository } from "../../repositories/projects";
+import { runsRepository, type Run } from "../../repositories/runs";
+import { specsRepository } from "../../repositories/specs";
 import { runsDir } from "../paths";
 import { readSpecExecutable } from "../specs/files";
 import { withSpecLock } from "../specs/lifecycle";
@@ -133,15 +133,15 @@ function errorMessage(error: unknown): string {
 }
 
 async function executeSpecLocked(specId: string, options: { persistFailures?: boolean }): Promise<Run> {
-    const spec = await getSpec(specId);
+    const spec = await specsRepository.getSpec(specId);
     if (!spec) throw new Error("Spec not found");
     if (!spec.currentVersionId) throw new Error("Spec has no executable version yet");
-    const version = await getSpecVersion(spec.currentVersionId);
+    const version = await specsRepository.getSpecVersion(spec.currentVersionId);
     if (!version) throw new Error("Spec version not found");
-    const project = await getProject(spec.projectId);
+    const project = await projectsRepository.getProject(spec.projectId);
     if (!project) throw new Error("Project not found");
 
-    const run = await createRun({ specId: spec.id, specVersionId: version.id });
+    const run = await runsRepository.createRun({ specId: spec.id, specVersionId: version.id });
     const started = Date.now();
     let status: FinalRunStatus = "error";
     let failReason: string | null = "Run did not complete";
@@ -174,18 +174,18 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
         failReason = errorMessage(error);
     } finally {
         await finalizeRunEvidence(path.join(runsDir, run.id), status, plannedEvidence).catch(console.error);
-        await finishRun(run.id, status, Date.now() - started, failReason);
+        await runsRepository.finishRun(run.id, status, Date.now() - started, failReason);
     }
 
-    const finished = await getRun(run.id);
+    const finished = await runsRepository.getRun(run.id);
     if (!finished) throw new Error("Run disappeared");
     if (options.persistFailures === false && finished.status !== "passed") {
         await fs.rm(path.join(runsDir, finished.id), { recursive: true, force: true });
-        await deleteRun(finished.id);
+        await runsRepository.deleteRun(finished.id);
         return finished;
     }
     if (finished.status === "passed" || finished.status === "failed") {
-        await updateSpecStatusForVersion(spec.id, version.id, finished.status);
+        await specsRepository.updateSpecStatusForVersion(spec.id, version.id, finished.status);
     }
     return finished;
 }
