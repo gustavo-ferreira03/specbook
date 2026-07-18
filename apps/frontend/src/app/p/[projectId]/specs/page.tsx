@@ -205,9 +205,9 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                         )}
                     </div>
 
-                    <div className="rounded-[13px] border border-line bg-surface p-4">
-                        <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">All Specs</p>
-                        <ul className="mt-2 -mx-2.5 space-y-0.5">
+                    <div className="rounded-[13px] border border-line bg-surface p-4 md:flex md:h-[min(34rem,calc(100dvh-12rem))] md:flex-col">
+                        <p className="shrink-0 text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">All Specs</p>
+                        <ul aria-label="All Specs" className="mt-2 -mx-2.5 space-y-0.5 md:min-h-0 md:flex-1 md:overflow-y-auto md:overscroll-contain md:px-2.5">
                             {orderedSpecs.map((spec) => {
                                 const feature = featureById.get(spec.featureId);
                                 return (
