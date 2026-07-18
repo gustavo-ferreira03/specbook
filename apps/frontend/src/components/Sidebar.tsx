@@ -527,10 +527,10 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     className="min-h-0 flex-1"
                 >
                     <TabsList className="grid grid-cols-2 gap-1.5 px-[13px] pt-1 pb-[13px]" aria-label="Project content">
-                        <TabsTrigger value="chats" className="min-h-10 px-2 md:min-h-[34px]">
+                        <TabsTrigger value="chats" className="min-h-10 px-2 md:min-h-[34px]" onClick={() => router.push(`/p/${projectId}/chats`)}>
                             <MessageSquare size={15} /> Chats
                         </TabsTrigger>
-                        <TabsTrigger value="specs" className="min-h-10 px-2 md:min-h-[34px]">
+                        <TabsTrigger value="specs" className="min-h-10 px-2 md:min-h-[34px]" onClick={() => router.push(`/p/${projectId}/specs`)}>
                             <FileCheck2 size={15} /> Specs
                         </TabsTrigger>
                     </TabsList>
