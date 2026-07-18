@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmProjectContext, discardProjectContext, patchProjectContext } from "@/lib/api";
 import type { ProjectContext, ProjectContextRevision } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface AreaDraft {
     name: string;
@@ -92,6 +93,31 @@ function toProjectContext(state: EditorState): ProjectContext {
             .filter((source) => source.first.trim() || source.second.trim())
             .map((source) => ({ url: source.first.trim(), note: source.second.trim() })),
     };
+}
+
+function AutoTextarea({ className, value, ...props }: React.ComponentProps<"textarea">) {
+    const ref = useRef<HTMLTextAreaElement>(null);
+
+    useEffect(() => {
+        const element = ref.current;
+        if (!element) return;
+        element.style.height = "auto";
+        element.style.height = `${element.scrollHeight}px`;
+    }, [value]);
+
+    return (
+        <Textarea
+            ref={ref}
+            value={value}
+            onInput={(event) => {
+                const element = event.currentTarget;
+                element.style.height = "auto";
+                element.style.height = `${element.scrollHeight}px`;
+            }}
+            className={cn("resize-none overflow-hidden", className)}
+            {...props}
+        />
+    );
 }
 
 function SectionLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
@@ -230,31 +256,41 @@ export function ProjectContextEditor({
                 <div className="space-y-2">
                     {state[key].map((row, index) => (
                         <div key={index} className="flex items-start gap-2">
-                            <div className="grid flex-1 gap-2 sm:grid-cols-2">
-                                <Input
-                                    data-focus={`${key}-${index}-0`}
-                                    value={row.first}
-                                    onChange={(event) => updateRow(key, index, { first: event.target.value })}
-                                    placeholder={firstLabel}
-                                    aria-label={`${title} ${index + 1}: ${firstLabel}`}
-                                />
-                                {key === "roles" ? (
-                                    <Textarea
+                            {key === "roles" ? (
+                                <div className="flex-1 space-y-2">
+                                    <Input
+                                        data-focus={`${key}-${index}-0`}
+                                        value={row.first}
+                                        onChange={(event) => updateRow(key, index, { first: event.target.value })}
+                                        placeholder={firstLabel}
+                                        aria-label={`${title} ${index + 1}: ${firstLabel}`}
+                                    />
+                                    <AutoTextarea
                                         value={row.second}
                                         onChange={(event) => updateRow(key, index, { second: event.target.value })}
                                         placeholder={secondLabel}
                                         aria-label={`${title} ${index + 1}: ${secondLabel}`}
                                         rows={2}
                                     />
-                                ) : (
+                                </div>
+                            ) : (
+                                <div className="grid flex-1 items-start gap-2 sm:grid-cols-2">
+                                    <Input
+                                        data-focus={`${key}-${index}-0`}
+                                        value={row.first}
+                                        onChange={(event) => updateRow(key, index, { first: event.target.value })}
+                                        placeholder={firstLabel}
+                                        aria-label={`${title} ${index + 1}: ${firstLabel}`}
+                                        title={row.first || undefined}
+                                    />
                                     <Input
                                         value={row.second}
                                         onChange={(event) => updateRow(key, index, { second: event.target.value })}
                                         placeholder={secondLabel}
                                         aria-label={`${title} ${index + 1}: ${secondLabel}`}
                                     />
-                                )}
-                            </div>
+                                </div>
+                            )}
                             <Button
                                 type="button"
                                 variant="ghost"
@@ -279,7 +315,7 @@ export function ProjectContextEditor({
         <div ref={containerRef} className="space-y-6">
             <div>
                 <Label className="mb-1.5" htmlFor="context-summary">Summary</Label>
-                <Textarea
+                <AutoTextarea
                     id="context-summary"
                     value={state.summary}
                     onChange={(event) => setState((current) => ({ ...current, summary: event.target.value }))}
@@ -290,11 +326,11 @@ export function ProjectContextEditor({
 
             <div>
                 <SectionLabel hint="One route per line">Areas</SectionLabel>
-                <div className="space-y-3">
+                <div className="space-y-5">
                     {state.areas.map((area, index) => (
-                        <div key={index} className="rounded-md border border-line bg-canvas p-3">
+                        <div key={index} className={index > 0 ? "space-y-2 border-t border-line pt-5" : "space-y-2"}>
                             <div className="flex items-start gap-2">
-                                <div className="grid flex-1 gap-2 sm:grid-cols-2">
+                                <div className="grid flex-1 items-start gap-2 sm:grid-cols-2">
                                     <Input
                                         data-focus={`areas-${index}-0`}
                                         value={area.name}
@@ -302,7 +338,7 @@ export function ProjectContextEditor({
                                         placeholder="Area name"
                                         aria-label={`Area ${index + 1} name`}
                                     />
-                                    <Textarea
+                                    <AutoTextarea
                                         value={area.routes}
                                         onChange={(event) => updateRow("areas", index, { routes: event.target.value })}
                                         placeholder={"/route\n/route/:id"}
@@ -321,13 +357,12 @@ export function ProjectContextEditor({
                                     <X size={14} />
                                 </Button>
                             </div>
-                            <Textarea
+                            <AutoTextarea
                                 value={area.description}
                                 onChange={(event) => updateRow("areas", index, { description: event.target.value })}
                                 rows={2}
                                 placeholder="What happens in this area"
                                 aria-label={`Area ${index + 1} description`}
-                                className="mt-2"
                             />
                         </div>
                     ))}
@@ -343,19 +378,19 @@ export function ProjectContextEditor({
             <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                     <Label className="mb-1.5" htmlFor="context-rules">Business rules</Label>
-                    <Textarea id="context-rules" value={state.businessRules} onChange={(event) => setState((current) => ({ ...current, businessRules: event.target.value }))} rows={4} placeholder="One rule per line" />
+                    <AutoTextarea id="context-rules" value={state.businessRules} onChange={(event) => setState((current) => ({ ...current, businessRules: event.target.value }))} rows={4} placeholder="One rule per line" />
                 </div>
                 <div>
                     <Label className="mb-1.5" htmlFor="context-patterns">UI patterns</Label>
-                    <Textarea id="context-patterns" value={state.uiPatterns} onChange={(event) => setState((current) => ({ ...current, uiPatterns: event.target.value }))} rows={4} placeholder="One pattern per line" />
+                    <AutoTextarea id="context-patterns" value={state.uiPatterns} onChange={(event) => setState((current) => ({ ...current, uiPatterns: event.target.value }))} rows={4} placeholder="One pattern per line" />
                 </div>
                 <div>
                     <Label className="mb-1.5" htmlFor="context-notes">Execution notes</Label>
-                    <Textarea id="context-notes" value={state.executionNotes} onChange={(event) => setState((current) => ({ ...current, executionNotes: event.target.value }))} rows={4} placeholder="One note per line" />
+                    <AutoTextarea id="context-notes" value={state.executionNotes} onChange={(event) => setState((current) => ({ ...current, executionNotes: event.target.value }))} rows={4} placeholder="One note per line" />
                 </div>
                 <div>
                     <Label className="mb-1.5" htmlFor="context-unknowns">Unknowns</Label>
-                    <Textarea id="context-unknowns" value={state.unknowns} onChange={(event) => setState((current) => ({ ...current, unknowns: event.target.value }))} rows={4} placeholder="One open question per line" />
+                    <AutoTextarea id="context-unknowns" value={state.unknowns} onChange={(event) => setState((current) => ({ ...current, unknowns: event.target.value }))} rows={4} placeholder="One open question per line" />
                 </div>
             </div>
 
