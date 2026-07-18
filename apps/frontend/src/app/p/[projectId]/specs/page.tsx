@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { Pie, PieChart } from "recharts";
-import { AlertTriangle, Check, CircleDashed, FileCheck2, GitMerge, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, FileCheck2, GitMerge, Play, RefreshCw, X } from "lucide-react";
 import { NewFeatureDialog, NewSpecDialog } from "@/components/CreateStructureDialogs";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, startRunBatch } from "@/lib/api";
 import type { Feature, SpecStatus, SpecSummary } from "@/lib/types";
 
 const STATUS_ORDER: SpecStatus[] = ["passed", "failed", "invalid", "conflict", "unverified"];
@@ -50,6 +51,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const [syncWarning, setSyncWarning] = useState("");
     const [loadError, setLoadError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
+    const [isRunning, setIsRunning] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -159,6 +161,21 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
           ? "text-pending"
           : "text-success";
 
+    const unverifiedSpecs = specs.filter((s) => s.status === "unverified");
+
+    async function handleRun(specIds: string[], label: string) {
+        if (specIds.length === 0 || isRunning) return;
+        setIsRunning(true);
+        try {
+            await startRunBatch(projectId, specIds, label);
+            setRetryKey((k) => k + 1);
+        } catch {
+            // batch errors surface via the tree fetch
+        } finally {
+            setIsRunning(false);
+        }
+    }
+
     return (
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader title="Specs" eyebrow="Project" />
@@ -176,7 +193,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
-                    <div className="rounded-[13px] border border-line bg-surface p-4">
+                    <div className="rounded-[13px] border border-line bg-surface p-4 md:h-[min(34rem,calc(100dvh-12rem))]">
                         <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Status breakdown</p>
                         <p className="mt-1 text-xs text-ink-soft">
                             <span className={`font-bold ${passRateTone}`}>{passRate}%</span> of Specs are passing
@@ -206,7 +223,27 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     </div>
 
                     <div className="rounded-[13px] border border-line bg-surface p-4 md:flex md:h-[min(34rem,calc(100dvh-12rem))] md:flex-col">
-                        <p className="shrink-0 text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">All Specs</p>
+                        <div className="shrink-0 flex items-center justify-between">
+                            <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">All Specs</p>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" disabled={isRunning}>
+                                        <Play size={12} /> Run
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleRun(specs.map((s) => s.id), "Run all")}>
+                                        Run all
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        onClick={() => handleRun(unverifiedSpecs.map((s) => s.id), "Run unverified")}
+                                        disabled={unverifiedSpecs.length === 0}
+                                    >
+                                        Run unverified{unverifiedSpecs.length > 0 ? ` (${unverifiedSpecs.length})` : ""}
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
                         <ul aria-label="All Specs" className="mt-2 -mx-2.5 space-y-0.5 md:min-h-0 md:flex-1 md:overflow-y-auto md:overscroll-contain md:px-2.5">
                             {orderedSpecs.map((spec) => {
                                 const feature = featureById.get(spec.featureId);
