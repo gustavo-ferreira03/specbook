@@ -24,7 +24,7 @@ import {
 } from "../../repositories/project-contexts";
 import { projectsRepository, type Project } from "../../repositories/projects";
 import { settingsRepository } from "../../repositories/settings";
-import { createContextTools } from "./context-tools";
+import { createContextTools, projectContextJsonSchema } from "./context-tools";
 import { createDomainTools } from "./tools";
 import type { ChatMessageRecord } from "./types";
 
@@ -49,13 +49,13 @@ function loadPrompt(name: string): string {
 }
 
 function fillTemplate(template: string, values: Record<string, string>): string {
-    return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
+    return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
         if (!(key in values)) throw new Error(`Missing template value: ${key}`);
         return values[key];
     });
 }
 
-const PROJECT_CONTEXT_SCHEMA_TEXT = loadPrompt("project-context-schema.txt");
+const PROJECT_CONTEXT_SCHEMA_TEXT = JSON.stringify(projectContextJsonSchema, null, 2);
 const STANDARD_SYSTEM_PROMPT_TEMPLATE = loadPrompt("standard-system-prompt.txt");
 const DISCOVERY_SYSTEM_PROMPT_TEMPLATE = loadPrompt("discovery-system-prompt.txt");
 

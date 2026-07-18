@@ -22,23 +22,9 @@ export const projectContextSchema = z.object({
     sources: z.array(z.object({ url: z.string(), note: z.string() })),
 });
 
-const projectContextType = Type.Object({
-    summary: Type.String(),
-    areas: Type.Array(
-        Type.Object({
-            name: Type.String(),
-            routes: Type.Array(Type.String()),
-            description: Type.String(),
-        }),
-    ),
-    terminology: Type.Array(Type.Object({ term: Type.String(), meaning: Type.String() })),
-    roles: Type.Array(Type.Object({ name: Type.String(), capabilities: Type.Array(Type.String()) })),
-    businessRules: Type.Array(Type.String()),
-    uiPatterns: Type.Array(Type.String()),
-    executionNotes: Type.Array(Type.String()),
-    unknowns: Type.Array(Type.String()),
-    sources: Type.Array(Type.Object({ url: Type.String(), note: Type.String() })),
-});
+export const projectContextJsonSchema = projectContextSchema.toJSONSchema();
+
+const projectContextType = Type.Unsafe(projectContextJsonSchema);
 
 function text(value: string) {
     return {
