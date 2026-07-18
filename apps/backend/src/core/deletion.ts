@@ -5,10 +5,10 @@ import { beginConversationDeletion, cancelConversationDeletion, removeConversati
 import { runsDir, specsDir } from "./paths";
 import { getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
-import { conversationsRepository } from "../repositories/conversations";
-import { projectContextsRepository } from "../repositories/project-contexts";
-import { featuresRepository } from "../repositories/features";
-import { specsRepository } from "../repositories/specs";
+import { conversationsRepository } from "../infra/repositories/conversations";
+import { projectContextsRepository } from "../infra/repositories/project-contexts";
+import { featuresRepository } from "../infra/repositories/features";
+import { specsRepository } from "../infra/repositories/specs";
 
 export class ResourceBusyError extends Error {}
 

@@ -2,8 +2,8 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { getConversationBrowser, getOrCreateConversationBrowser } from "../core/browser/sessions";
-import { deleteConversationData, ResourceBusyError } from "../core/deletion";
+import { getConversationBrowser, getOrCreateConversationBrowser } from "../../../core/browser/sessions";
+import { deleteConversationData, ResourceBusyError } from "../../../core/deletion";
 import {
     createConversation,
     getConversationMessages,
@@ -11,10 +11,10 @@ import {
     isConversationDeleting,
     listConversations,
     runConversationTurn,
-} from "../core/chat/session";
-import { conversationsRepository } from "../repositories/conversations";
-import { projectContextsRepository } from "../repositories/project-contexts";
-import { projectsRepository } from "../repositories/projects";
+} from "../../../core/chat/session";
+import { conversationsRepository } from "../../repositories/conversations";
+import { projectContextsRepository } from "../../repositories/project-contexts";
+import { projectsRepository } from "../../repositories/projects";
 
 const messageSchema = z.object({ text: z.string().trim().min(1) });
 

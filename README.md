@@ -143,7 +143,7 @@ The backend starts on port `4000`; the frontend starts on port `4001`. Keep the 
 | Generate a database migration | `pnpm --filter backend db:generate` |
 | Apply database migrations | `pnpm --filter backend db:migrate` |
 
-After changing `apps/backend/src/db/schema.ts`, generate a migration and commit the resulting files under `apps/backend/drizzle`.
+After changing `apps/backend/src/infra/db/schema.ts`, generate a migration and commit the resulting files under `apps/backend/drizzle`.
 
 ## Configuration
 

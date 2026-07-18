@@ -9,8 +9,8 @@ import {
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { llmAuth, modelRegistry } from "../core/llm/runtime";
-import { settingsRepository } from "../repositories/settings";
+import { llmAuth, modelRegistry } from "../../../core/llm/runtime";
+import { settingsRepository } from "../../repositories/settings";
 
 type OAuthProvider = "anthropic" | "openai-codex" | "github-copilot";
 type OAuthStatus = "pending" | "done" | "error";

@@ -2,9 +2,9 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { featuresRepository } from "../repositories/features";
-import { projectsRepository } from "../repositories/projects";
-import { specsRepository } from "../repositories/specs";
+import { featuresRepository } from "../../repositories/features";
+import { projectsRepository } from "../../repositories/projects";
+import { specsRepository } from "../../repositories/specs";
 
 const createProjectSchema = z.object({
     name: z.string().min(1),

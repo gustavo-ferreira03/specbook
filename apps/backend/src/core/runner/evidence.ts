@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import type { RunStatus } from "../../db/schema";
+import type { RunStatus } from "../../infra/db/schema";
 
 interface EvidenceManifest {
     steps: PlannedEvidenceStep[];

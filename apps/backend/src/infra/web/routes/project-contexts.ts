@@ -2,11 +2,11 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { projectContextSchema } from "../core/chat/context-tools";
-import { createConversation } from "../core/chat/session";
-import type { DiscoveryBrief } from "../db/schema";
-import { projectContextsRepository } from "../repositories/project-contexts";
-import { projectsRepository } from "../repositories/projects";
+import { projectContextSchema } from "../../../core/chat/context-tools";
+import { createConversation } from "../../../core/chat/session";
+import type { DiscoveryBrief } from "../../db/schema";
+import { projectContextsRepository } from "../../repositories/project-contexts";
+import { projectsRepository } from "../../repositories/projects";
 
 export const DEFAULT_DISCOVERY_GOAL =
     "Autonomously explore the application and map its areas, terminology, roles, business rules, and UI patterns. Record anything inaccessible or unclear as unknowns and ask the user for help only when blocked.";

@@ -1,8 +1,8 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { HumanSpec } from "../../db/schema";
-import { featuresRepository } from "../../repositories/features";
-import { specsRepository } from "../../repositories/specs";
+import type { HumanSpec } from "../../infra/db/schema";
+import { featuresRepository } from "../../infra/repositories/features";
+import { specsRepository } from "../../infra/repositories/specs";
 import { executeSpec } from "../runner/robot";
 import { namedRobotStepsError } from "../runner/evidence";
 import { validateRobotSource } from "../runner/validate";

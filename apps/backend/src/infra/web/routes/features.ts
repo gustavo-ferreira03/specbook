@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { deleteFeatureData, ResourceBusyError } from "../core/deletion";
+import { deleteFeatureData, ResourceBusyError } from "../../../core/deletion";
 
 export function createFeaturesRouter(): Hono {
     const router = new Hono();

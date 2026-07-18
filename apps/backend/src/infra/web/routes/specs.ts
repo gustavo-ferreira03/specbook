@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { deleteSpecData, ResourceBusyError } from "../core/deletion";
-import { readSpecExecutable } from "../core/specs/files";
-import { featuresRepository } from "../repositories/features";
-import { runsRepository } from "../repositories/runs";
-import { specsRepository } from "../repositories/specs";
+import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
+import { readSpecExecutable } from "../../../core/specs/files";
+import { featuresRepository } from "../../repositories/features";
+import { runsRepository } from "../../repositories/runs";
+import { specsRepository } from "../../repositories/specs";
 
 export function createSpecsRouter(): Hono {
     const router = new Hono();

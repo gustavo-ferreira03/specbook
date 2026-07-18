@@ -1,8 +1,8 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
-import type { ProjectContext } from "../../db/schema";
-import { projectContextsRepository } from "../../repositories/project-contexts";
+import type { ProjectContext } from "../../infra/db/schema";
+import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 
 export const projectContextSchema = z.object({
     summary: z.string(),

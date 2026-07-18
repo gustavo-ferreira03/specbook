@@ -4,11 +4,11 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { runsDir } from "../core/paths";
-import { getRunBatch, getRunBatchDirectory, startSpecBatch } from "../core/runner/batch";
-import { executeSpec } from "../core/runner/robot";
-import { runsRepository } from "../repositories/runs";
-import { specsRepository } from "../repositories/specs";
+import { runsDir } from "../../../core/paths";
+import { getRunBatch, getRunBatchDirectory, startSpecBatch } from "../../../core/runner/batch";
+import { executeSpec } from "../../../core/runner/robot";
+import { runsRepository } from "../../repositories/runs";
+import { specsRepository } from "../../repositories/specs";
 
 const CONTENT_TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",

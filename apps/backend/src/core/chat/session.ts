@@ -17,13 +17,13 @@ import {
 } from "../browser/mcp";
 import { modelRegistry } from "../llm/runtime";
 import { sessionsDir, storageRoot } from "../paths";
-import { conversationsRepository, type ConversationMetadata } from "../../repositories/conversations";
+import { conversationsRepository, type ConversationMetadata } from "../../infra/repositories/conversations";
 import {
     projectContextsRepository,
     type ProjectContextRevisionRow,
-} from "../../repositories/project-contexts";
-import { projectsRepository, type Project } from "../../repositories/projects";
-import { settingsRepository } from "../../repositories/settings";
+} from "../../infra/repositories/project-contexts";
+import { projectsRepository, type Project } from "../../infra/repositories/projects";
+import { settingsRepository } from "../../infra/repositories/settings";
 import { createContextTools, projectContextJsonSchema } from "./context-tools";
 import { createDomainTools } from "./tools";
 import type { ChatMessageRecord } from "./types";
