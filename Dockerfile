@@ -1,4 +1,4 @@
-FROM node:22.19.0-slim
+FROM node:22-trixie-slim
 
 RUN npm install -g pnpm@10.30.1
 
