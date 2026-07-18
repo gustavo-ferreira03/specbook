@@ -189,6 +189,41 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             <PageHeader title="Specs" eyebrow="Project" />
             <div className="mx-auto w-full max-w-[1040px] flex-1 px-5 py-8">
                 {syncWarning && <Alert variant="warning" className="mb-4" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
+                {project && (
+                    <div className="mb-5 flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                            <h2 className="truncate text-lg font-bold tracking-[-0.02em] text-ink">{project.name}</h2>
+                            <p className="mt-0.5 font-mono text-[0.65625rem] text-ink-faint [overflow-wrap:anywhere]">{project.baseUrl}</p>
+                            {(() => {
+                                const confirmed = contextState?.confirmed;
+                                if (!confirmed) {
+                                    return (
+                                        <p className="mt-2 text-xs text-ink-faint">
+                                            No project context yet.{" "}
+                                            <Link href={`/p/${projectId}`} className="underline underline-offset-2 hover:text-ink">Set up context</Link>
+                                        </p>
+                                    );
+                                }
+                                const ctx = confirmed.context;
+                                const stats = [
+                                    ctx.areas.length > 0 && `${ctx.areas.length} ${ctx.areas.length === 1 ? "area" : "areas"}`,
+                                    ctx.terminology.length > 0 && `${ctx.terminology.length} ${ctx.terminology.length === 1 ? "term" : "terms"}`,
+                                    ctx.roles.length > 0 && `${ctx.roles.length} ${ctx.roles.length === 1 ? "role" : "roles"}`,
+                                    ctx.businessRules.length > 0 && `${ctx.businessRules.length} ${ctx.businessRules.length === 1 ? "rule" : "rules"}`,
+                                ].filter(Boolean);
+                                return (
+                                    <>
+                                        {ctx.summary && <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-ink-soft">{ctx.summary}</p>}
+                                        {stats.length > 0 && <p className="mt-2 text-[0.625rem] text-ink-faint">{stats.join(" · ")}</p>}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                        <Button asChild variant="ghost" size="icon-sm" className="mt-1 shrink-0">
+                            <Link href={`/p/${projectId}`}><ArrowRight size={14} /></Link>
+                        </Button>
+                    </div>
+                )}
                 <div className="mb-4 flex justify-end gap-2">
                     <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
                     <NewSpecDialog projectId={projectId} features={features} />
@@ -199,47 +234,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     <StatTile label="Failed" value={counts.failed} tone="danger" />
                     <StatTile label="Unverified" value={counts.unverified} tone="pending" />
                 </div>
-
-                {project && (
-                    <div className="mt-4 rounded-[13px] border border-line bg-surface p-4">
-                        <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0 flex-1">
-                                <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Project</p>
-                                <div className="mt-2 flex items-baseline gap-2">
-                                    <h3 className="truncate text-sm font-bold text-ink">{project.name}</h3>
-                                    <span className="shrink-0 font-mono text-[0.625rem] text-ink-faint [overflow-wrap:anywhere]">{project.baseUrl}</span>
-                                </div>
-                                {(() => {
-                                    const confirmed = contextState?.confirmed;
-                                    if (!confirmed) {
-                                        return (
-                                            <p className="mt-1.5 text-xs text-ink-faint">
-                                                No project context yet.{" "}
-                                                <Link href={`/p/${projectId}`} className="underline underline-offset-2 hover:text-ink">Set up context</Link>
-                                            </p>
-                                        );
-                                    }
-                                    const ctx = confirmed.context;
-                                    const stats = [
-                                        ctx.areas.length > 0 && `${ctx.areas.length} ${ctx.areas.length === 1 ? "area" : "areas"}`,
-                                        ctx.terminology.length > 0 && `${ctx.terminology.length} ${ctx.terminology.length === 1 ? "term" : "terms"}`,
-                                        ctx.roles.length > 0 && `${ctx.roles.length} ${ctx.roles.length === 1 ? "role" : "roles"}`,
-                                        ctx.businessRules.length > 0 && `${ctx.businessRules.length} ${ctx.businessRules.length === 1 ? "rule" : "rules"}`,
-                                    ].filter(Boolean);
-                                    return (
-                                        <>
-                                            {ctx.summary && <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-ink-soft">{ctx.summary}</p>}
-                                            {stats.length > 0 && <p className="mt-2 text-[0.625rem] text-ink-faint">{stats.join(" · ")}</p>}
-                                        </>
-                                    );
-                                })()}
-                            </div>
-                            <Button asChild variant="ghost" size="icon-sm" className="mt-0.5 shrink-0">
-                                <Link href={`/p/${projectId}`}><ArrowRight size={14} /></Link>
-                            </Button>
-                        </div>
-                    </div>
-                )}
 
                 <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
                     <div className="rounded-[13px] border border-line bg-surface p-4">
