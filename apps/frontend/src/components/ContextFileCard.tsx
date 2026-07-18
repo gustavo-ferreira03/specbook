@@ -5,6 +5,7 @@ import { AlertCircle, FileCog } from "lucide-react";
 import { RawFileEditor } from "@/components/RawFileEditor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getContextFile, updateContextFile } from "@/lib/api";
 
 export function ContextFileCard({ projectId }: { projectId: string }) {
@@ -12,13 +13,20 @@ export function ContextFileCard({ projectId }: { projectId: string }) {
     const [draft, setDraft] = useState("");
     const [syncError, setSyncError] = useState<string | null>(null);
     const [editing, setEditing] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
     const refresh = useCallback(async () => {
-        const result = await getContextFile(projectId);
-        setYaml(result.yaml);
-        setSyncError(result.contextSyncError);
+        setLoading(true);
+        setError("");
+        try {
+            const result = await getContextFile(projectId);
+            setYaml(result.yaml);
+            setSyncError(result.contextSyncError);
+        } finally {
+            setLoading(false);
+        }
     }, [projectId]);
 
     useEffect(() => {
@@ -41,21 +49,20 @@ export function ContextFileCard({ projectId }: { projectId: string }) {
     }
 
     return (
-        <section className="space-y-3">
+        <section className="mt-7 space-y-3" aria-labelledby="context-file-heading">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <FileCog className="size-4" aria-hidden />
-                    <h2 className="text-sm font-medium">Project context file</h2>
+                    <h2 id="context-file-heading" className="text-[0.8125rem] font-bold">Project context file</h2>
                 </div>
                 {yaml !== null && !editing && (
                     <Button type="button" size="sm" variant="outline" onClick={() => { setDraft(yaml); setEditing(true); }}>
-                        Edit context.yml
+                        Edit file
                     </Button>
                 )}
             </div>
-            <p className="text-xs text-muted-foreground">
-                The confirmed project context lives in the repo as context.yml. Editing it here commits the raw file,
-                exactly like editing it on GitHub.
+            <p className="max-w-[68ch] text-[0.65625rem] leading-5 text-ink-faint">
+                The confirmed project context lives in the repository as context.yml. Edits are committed exactly as entered.
             </p>
             {error && (
                 <Alert variant="destructive">
@@ -65,21 +72,27 @@ export function ContextFileCard({ projectId }: { projectId: string }) {
                 </Alert>
             )}
             {syncError && (
-                <Alert>
+                <Alert variant="warning">
                     <AlertCircle className="size-4" aria-hidden />
                     <AlertTitle>context.yml could not be parsed</AlertTitle>
                     <AlertDescription>{syncError}</AlertDescription>
                 </Alert>
             )}
-            {yaml === null && !error && (
-                <p className="text-xs text-muted-foreground">No context.yml yet — confirm a discovery to create it.</p>
+            {loading && (
+                <div className="space-y-2" aria-label="Loading context.yml" aria-busy="true">
+                    <Skeleton className="h-3 w-32" />
+                    <Skeleton className="h-16 rounded-lg" />
+                </div>
+            )}
+            {!loading && yaml === null && !error && (
+                <p className="text-[0.6875rem] text-ink-faint">No context.yml yet. Confirm a discovery to create it.</p>
             )}
             {editing && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                     <RawFileEditor id="context-yaml" label="context.yml" language="yaml" value={draft} onChange={setDraft} disabled={busy} rows={18} />
-                    <div className="flex gap-2">
-                        <Button type="button" size="sm" onClick={save} disabled={busy}>{busy ? "Saving..." : "Save"}</Button>
+                    <div className="flex flex-wrap justify-end gap-2">
                         <Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
+                        <Button type="button" size="sm" onClick={save} disabled={busy || !draft.trim() || draft === yaml}>{busy ? "Saving..." : "Save changes"}</Button>
                     </div>
                 </div>
             )}

@@ -7,7 +7,12 @@ import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { assertRepoWritableUnlocked, commitAll, repoDir, withRepoLock } from "./git";
 import { schedulePush } from "./remote";
 import { uniqueSlug } from "./slug";
-import { parseSpecYaml, serializeContextYaml, serializeFeatureYaml, serializeSpecYaml } from "./yaml";
+import {
+    parseSpecYaml,
+    serializeContextYaml,
+    serializeFeatureYaml,
+    serializeSpecYaml,
+} from "./yaml";
 
 export function robotHashOf(source: string): string {
     return crypto.createHash("sha256").update(source).digest("hex");
@@ -40,7 +45,7 @@ async function siblingNames(projectId: string, dirRelative: string): Promise<Set
     const entries = await fs.readdir(absolute(projectId, dirRelative), { withFileTypes: true }).catch(() => []);
     const names = new Set<string>(["feature", "context"]);
     for (const entry of entries) {
-        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|md|robot)$/, ""));
+        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|robot)$/, ""));
     }
     return names;
 }
@@ -62,7 +67,7 @@ export async function createFeatureInRepo(
         await fs.mkdir(absolute(projectId, featurePath), { recursive: true });
         await fs.writeFile(
             absolute(projectId, featureYamlFile(featurePath)),
-            serializeFeatureYaml({ id, title, description }),
+            serializeFeatureYaml({ title, description }),
             "utf8",
         );
         await commitAll(projectId, `feature: create "${title}"`);
@@ -87,7 +92,6 @@ export async function createSpecInRepo(input: {
         const slug = uniqueSlug(input.title, await siblingNames(input.projectId, feature.path), id);
         const specPath = `${feature.path}/${slug}`;
         const markdown = serializeSpecYaml({
-            id,
             title: input.title,
             description: input.description,
             humanSpec: input.humanSpec,
@@ -147,7 +151,7 @@ export async function updateSpecInRepo(
                 await fs.rename(absolute(spec.projectId, spec.path), absolute(spec.projectId, specPath));
             }
         }
-        const markdown = serializeSpecYaml({ id: spec.id, title, description, humanSpec });
+        const markdown = serializeSpecYaml({ title, description, humanSpec });
         await fs.writeFile(absolute(spec.projectId, specYamlFile(specPath)), markdown, "utf8");
         await fs.writeFile(absolute(spec.projectId, specRobotFile(specPath)), robotSource, "utf8");
         const commitSha = await commitAll(spec.projectId, `spec: update "${title}"`);

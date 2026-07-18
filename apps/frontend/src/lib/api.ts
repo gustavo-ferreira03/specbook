@@ -127,7 +127,7 @@ export function getSpecHistory(specId: string): Promise<{
 export function getSpecAtCommit(
     specId: string,
     sha: string,
-): Promise<{ markdown: string | null; robot: string | null }> {
+): Promise<{ yaml: string | null; robot: string | null }> {
     return api(`/specs/${encodeURIComponent(specId)}/history/${encodeURIComponent(sha)}`);
 }
 
@@ -182,13 +182,6 @@ export function updateSpecFiles(specId: string, input: { yaml?: string; robot?: 
     return api(`/specs/${encodeURIComponent(specId)}/files`, {
         method: "PUT",
         body: JSON.stringify(input),
-    });
-}
-
-export function moveSpecToFeature(specId: string, featureId: string): Promise<SpecDetail> {
-    return api(`/specs/${encodeURIComponent(specId)}/move`, {
-        method: "POST",
-        body: JSON.stringify({ featureId }),
     });
 }
 

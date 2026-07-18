@@ -387,23 +387,24 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                         <h2 id="specification-heading" className="text-[0.78125rem] font-bold">Specification</h2>
                         {editing && (
                             <Button type="button" size="sm" onClick={saveFiles} disabled={saving}>
-                                {saving ? "Saving..." : "Save files"}
+                                {saving ? "Saving..." : "Save changes"}
                             </Button>
                         )}
                     </div>
                     {editing && content ? (
-                        <div className="space-y-4 rounded-[13px] border border-line p-4 sm:p-5">
-                            <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={yamlDraft} onChange={setYamlDraft} disabled={saving} />
-                            <RawFileEditor id="spec-robot" label="spec.robot" language="robotframework" value={robotDraft} onChange={setRobotDraft} disabled={saving} rows={16} />
-                            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-                                <p className="text-[0.625rem] leading-4 text-ink-faint">Saving commits exactly what you typed. Invalid content is accepted and the Spec is marked invalid with the reason.</p>
+                        <div className="space-y-5">
+                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-soft px-3 py-2.5">
+                                <p className="text-[0.65625rem] text-ink-soft">Prefer to describe the change instead?</p>
                                 <Button asChild variant="ghost" size="sm" className="text-ink-soft">
-                                    <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={12} /> Edit with AI instead</Link>
+                                    <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={12} /> Edit with AI</Link>
                                 </Button>
                             </div>
+                            <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={yamlDraft} onChange={setYamlDraft} disabled={saving} />
+                            <RawFileEditor id="spec-robot" label="spec.robot" language="robotframework" value={robotDraft} onChange={setRobotDraft} disabled={saving} rows={16} />
+                            <p className="max-w-[68ch] text-[0.625rem] leading-4 text-ink-faint">Changes are committed exactly as entered. Invalid files are saved and marked for correction.</p>
                         </div>
                     ) : content && !content.humanSpec ? (
-                        <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">spec.yml could not be parsed</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Use “Edit files” to fix the YAML by hand.</p></div>
+                        <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">spec.yml could not be parsed</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Use Edit to fix the YAML by hand.</p></div>
                     ) : content && content.humanSpec ? (
                         <div className="overflow-hidden rounded-[13px] border border-line">
                             <section className="px-4 py-3.5 sm:px-5">

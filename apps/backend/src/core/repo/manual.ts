@@ -70,32 +70,6 @@ export async function editSpecFiles(spec: Spec, input: { yaml?: string; robot?: 
     );
 }
 
-export async function moveSpec(spec: Spec, targetFeatureId: string): Promise<Spec> {
-    return withSpecLock(spec.id, () =>
-        withRepoLock(spec.projectId, async () => {
-            await assertNoSyncConflict(spec.projectId);
-            await assertRepoWritableUnlocked(spec.projectId);
-            const target = await featuresRepository.getFeature(targetFeatureId);
-            if (!target || target.projectId !== spec.projectId) throw new Error("Target feature not found in this project");
-            if (target.path === path.posix.dirname(spec.path)) return spec;
-            const root = repoDir(spec.projectId);
-            const slugBase = path.posix.basename(spec.path);
-            const siblings = new Set(
-                (await fs.readdir(path.join(root, target.path)).catch(() => [] as string[])).map((name) =>
-                    name.replace(/\.(yml|md|robot)$/, ""),
-                ),
-            );
-            const slug = siblings.has(slugBase) ? `${slugBase}-${spec.id.slice(0, 6)}` : slugBase;
-            const newPath = `${target.path}/${slug}`;
-            await fs.rename(path.join(root, spec.path), path.join(root, newPath));
-            await commitAndReindex(spec.projectId, `spec: move "${spec.title}"`);
-            const updated = await specsRepository.getSpec(spec.id);
-            if (!updated) throw new Error("Spec was removed during reindex");
-            return updated;
-        }),
-    );
-}
-
 export async function createManualSpec(projectId: string, featureId: string, title: string): Promise<Spec> {
     const robotSource = [
         "*** Settings ***",

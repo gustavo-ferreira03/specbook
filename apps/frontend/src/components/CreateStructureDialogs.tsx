@@ -36,6 +36,12 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
+    function changeOpen(nextOpen: boolean) {
+        if (busy) return;
+        setOpen(nextOpen);
+        if (!nextOpen) setError("");
+    }
+
     async function create() {
         setBusy(true);
         setError("");
@@ -57,25 +63,25 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
 
     return (
         <>
-            <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+            <Button type="button" variant="outline" size="sm" onClick={() => changeOpen(true)}>
                 <FolderPlus size={13} /> New Feature
             </Button>
-            <Dialog open={open} onOpenChange={setOpen}>
-                <DialogContent className="max-w-sm">
-                    <DialogHeader>
+            <Dialog open={open} onOpenChange={changeOpen}>
+                <DialogContent className="max-w-[400px]">
+                    <DialogHeader className="pr-8">
                         <DialogTitle>New Feature</DialogTitle>
-                        <DialogDescription>Creates a directory with a feature.yml and commits it.</DialogDescription>
+                        <DialogDescription>Create a repository directory and its feature.yml file.</DialogDescription>
                     </DialogHeader>
-                    {error && <Alert variant="destructive" className="text-xs" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
-                    <div className="space-y-3">
-                        <div className="space-y-1">
+                    {error && <Alert variant="destructive" className="mt-4" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+                    <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+                        <div className="space-y-1.5">
                             <Label htmlFor="new-feature-title">Title</Label>
-                            <Input id="new-feature-title" value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy} />
+                            <Input id="new-feature-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Checkout" disabled={busy} />
                         </div>
-                        <div className="space-y-1">
-                            <Label>Parent feature</Label>
+                        <div className="space-y-1.5">
+                            <Label htmlFor="new-feature-parent">Parent Feature</Label>
                             <Select value={parentId} onValueChange={setParentId}>
-                                <SelectTrigger className="w-full" aria-label="Parent feature">
+                                <SelectTrigger id="new-feature-parent" className="w-full" aria-label="Parent Feature">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -86,11 +92,11 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
                                 </SelectContent>
                             </Select>
                         </div>
-                    </div>
-                    <DialogFooter className="mt-4">
-                        <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
-                        <Button type="button" onClick={create} disabled={busy || !title.trim()}>{busy ? "Creating..." : "Create"}</Button>
-                    </DialogFooter>
+                        <DialogFooter className="pt-1">
+                            <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={busy}>Cancel</Button>
+                            <Button type="submit" disabled={busy || !title.trim()}>{busy ? "Creating..." : "Create Feature"}</Button>
+                        </DialogFooter>
+                    </form>
                 </DialogContent>
             </Dialog>
         </>
@@ -104,6 +110,12 @@ export function NewSpecDialog({ projectId, features }: { projectId: string; feat
     const [featureId, setFeatureId] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
+
+    function changeOpen(nextOpen: boolean) {
+        if (busy) return;
+        setOpen(nextOpen);
+        if (!nextOpen) setError("");
+    }
 
     async function create() {
         setBusy(true);
@@ -121,25 +133,25 @@ export function NewSpecDialog({ projectId, features }: { projectId: string; feat
 
     return (
         <>
-            <Button type="button" size="sm" onClick={() => setOpen(true)} disabled={features.length === 0}>
+            <Button type="button" size="sm" onClick={() => changeOpen(true)} disabled={features.length === 0}>
                 <FilePlus2 size={13} /> New Spec
             </Button>
-            <Dialog open={open} onOpenChange={setOpen}>
-                <DialogContent className="max-w-sm">
-                    <DialogHeader>
+            <Dialog open={open} onOpenChange={changeOpen}>
+                <DialogContent className="max-w-[400px]">
+                    <DialogHeader className="pr-8">
                         <DialogTitle>New Spec</DialogTitle>
-                        <DialogDescription>Creates a spec.yml + spec.robot skeleton you can edit by hand.</DialogDescription>
+                        <DialogDescription>Create spec.yml and spec.robot files inside the selected Feature.</DialogDescription>
                     </DialogHeader>
-                    {error && <Alert variant="destructive" className="text-xs" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
-                    <div className="space-y-3">
-                        <div className="space-y-1">
+                    {error && <Alert variant="destructive" className="mt-4" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+                    <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+                        <div className="space-y-1.5">
                             <Label htmlFor="new-spec-title">Title</Label>
-                            <Input id="new-spec-title" value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy} />
+                            <Input id="new-spec-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Guest checkout" disabled={busy} />
                         </div>
-                        <div className="space-y-1">
-                            <Label>Feature</Label>
+                        <div className="space-y-1.5">
+                            <Label htmlFor="new-spec-feature">Feature</Label>
                             <Select value={featureId} onValueChange={setFeatureId}>
-                                <SelectTrigger className="w-full" aria-label="Feature">
+                                <SelectTrigger id="new-spec-feature" className="w-full" aria-label="Feature">
                                     <SelectValue placeholder="Choose a feature" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -149,11 +161,11 @@ export function NewSpecDialog({ projectId, features }: { projectId: string; feat
                                 </SelectContent>
                             </Select>
                         </div>
-                    </div>
-                    <DialogFooter className="mt-4">
-                        <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
-                        <Button type="button" onClick={create} disabled={busy || !title.trim() || !featureId}>{busy ? "Creating..." : "Create"}</Button>
-                    </DialogFooter>
+                        <DialogFooter className="pt-1">
+                            <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={busy}>Cancel</Button>
+                            <Button type="submit" disabled={busy || !title.trim() || !featureId}>{busy ? "Creating..." : "Create Spec"}</Button>
+                        </DialogFooter>
+                    </form>
                 </DialogContent>
             </Dialog>
         </>

@@ -4,14 +4,12 @@ import { EMPTY_PROJECT_CONTEXT, type HumanSpec, type ProjectContext } from "../.
 export class YamlParseError extends Error {}
 
 export interface SpecYaml {
-    id: string | null;
     title: string | null;
     description: string;
     humanSpec: HumanSpec;
 }
 
 export interface FeatureYaml {
-    id: string | null;
     title: string | null;
     description: string;
 }
@@ -76,16 +74,14 @@ function recordArray(data: Record<string, unknown>, key: string): Record<string,
     });
 }
 
-const SPEC_KEYS = ["id", "title", "description", "preconditions", "steps", "expectedResult", "postconditions"];
+const SPEC_KEYS = ["title", "description", "preconditions", "steps", "expectedResult", "postconditions"];
 
 export function serializeSpecYaml(doc: {
-    id: string;
     title: string;
     description: string;
     humanSpec: HumanSpec;
 }): string {
     return stringify({
-        id: doc.id,
         title: doc.title,
         description: doc.description,
         preconditions: doc.humanSpec.preconditions,
@@ -99,7 +95,6 @@ export function parseSpecYaml(source: string): SpecYaml {
     const data = parseDocument(source);
     rejectUnknownKeys(data, SPEC_KEYS, "spec.yml");
     return {
-        id: optionalString(data, "id"),
         title: optionalString(data, "title"),
         description: stringWithDefault(data, "description"),
         humanSpec: {
@@ -111,17 +106,16 @@ export function parseSpecYaml(source: string): SpecYaml {
     };
 }
 
-const FEATURE_KEYS = ["id", "title", "description"];
+const FEATURE_KEYS = ["title", "description"];
 
-export function serializeFeatureYaml(doc: { id: string; title: string; description: string }): string {
-    return stringify({ id: doc.id, title: doc.title, description: doc.description });
+export function serializeFeatureYaml(doc: { title: string; description: string }): string {
+    return stringify({ title: doc.title, description: doc.description });
 }
 
 export function parseFeatureYaml(source: string): FeatureYaml {
     const data = parseDocument(source);
     rejectUnknownKeys(data, FEATURE_KEYS, "feature.yml");
     return {
-        id: optionalString(data, "id"),
         title: optionalString(data, "title"),
         description: stringWithDefault(data, "description"),
     };
@@ -190,14 +184,11 @@ export function parseContextYaml(source: string): ProjectContext {
     };
 }
 
-export function parseYamlIdentity(source: string): { id: string | null; title: string | null } {
+export function parseYamlTitle(source: string): string | null {
     try {
         const data = parseDocument(source);
-        return {
-            id: typeof data.id === "string" && data.id.trim() ? data.id.trim() : null,
-            title: typeof data.title === "string" && data.title.trim() ? data.title.trim() : null,
-        };
+        return typeof data.title === "string" && data.title.trim() ? data.title.trim() : null;
     } catch {
-        return { id: null, title: null };
+        return null;
     }
 }

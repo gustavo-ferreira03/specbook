@@ -54,6 +54,14 @@
     --color-overlay: rgb(24 24 22 / 42%);
     --color-overlay-soft: rgb(0 0 0 / 35%);
     --color-browser: #11110f;
+    --color-code-canvas: #f7f7f8;
+    --color-syntax-comment: #6d6d67;
+    --color-syntax-key: #315f87;
+    --color-syntax-string: #3f6b53;
+    --color-syntax-number: #8a4d27;
+    --color-syntax-keyword: #714f87;
+    --color-syntax-variable: #8a4d27;
+    --color-syntax-punctuation: #686862;
     --shadow-composer: 0 4px 14px rgb(20 20 18 / 4%);
     --font-sans: var(--font-inter);
     --radius-sm: 6px;
@@ -192,30 +200,56 @@ summary:focus-visible {
     }
 }
 
-.code-editor .token.comment {
-    color: var(--color-ink-faint);
+.syntax-code .token.comment {
+    color: var(--color-syntax-comment);
     font-style: italic;
 }
-.code-editor .token.key,
-.code-editor .token.atrule,
-.code-editor .token.keyword,
-.code-editor .token.section {
-    color: var(--color-pending);
+
+.syntax-code .token.section {
+    color: inherit;
+    font-weight: inherit;
+}
+
+.syntax-code .token.key,
+.syntax-code .token.atrule,
+.syntax-code .token.property {
+    color: var(--color-syntax-key);
     font-weight: 600;
 }
-.code-editor .token.string,
-.code-editor .token.attr-value {
-    color: var(--color-success);
+
+.syntax-code .token.keyword,
+.syntax-code .token.section-header {
+    color: var(--color-syntax-keyword);
+    font-weight: 700;
 }
-.code-editor .token.number,
-.code-editor .token.boolean,
-.code-editor .token.variable {
-    color: var(--color-danger);
+
+.syntax-code .token.function,
+.syntax-code .token.keyword-name,
+.syntax-code .token.test-name {
+    color: var(--color-syntax-key);
+    font-weight: 600;
 }
-.code-editor .token.punctuation,
-.code-editor .token.operator {
-    color: var(--color-ink-soft);
+
+.syntax-code .token.string,
+.syntax-code .token.attr-value {
+    color: var(--color-syntax-string);
 }
-.code-editor textarea {
+
+.syntax-code .token.number,
+.syntax-code .token.boolean {
+    color: var(--color-syntax-number);
+}
+
+.syntax-code .token.variable,
+.syntax-code .token.builtin {
+    color: var(--color-syntax-variable);
+}
+
+.syntax-code .token.punctuation,
+.syntax-code .token.operator {
+    color: var(--color-syntax-punctuation);
+}
+
+.syntax-code textarea {
     outline: none;
 }

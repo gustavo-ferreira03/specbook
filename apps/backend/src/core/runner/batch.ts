@@ -52,6 +52,7 @@ interface PreparedSpec {
     markdown: string;
     robotSource: string;
     item: RunBatchItem;
+    suiteKey: string;
     plannedEvidence: PlannedEvidenceStep[];
 }
 
@@ -121,6 +122,15 @@ function batchDirectory(id: string): string {
     return directory;
 }
 
+function robotSuiteFileStem(title: string): string {
+    const stem = title
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return stem.slice(0, 120).replace(/_+$/g, "") || "Spec";
+}
+
 async function writeBatch(batch: RunBatch): Promise<void> {
     const directory = batchDirectory(batch.id);
     await fs.mkdir(directory, { recursive: true });
@@ -185,7 +195,14 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
     const suiteDir = path.join(batchDir, "suite");
     await fs.mkdir(suiteDir, { recursive: true });
     try {
+        const usedSuiteKeys = new Set<string>();
         for (const entry of prepared) {
+            const baseSuiteKey = robotSuiteFileStem(entry.item.title);
+            let suiteKey = baseSuiteKey;
+            let suffix = 2;
+            while (usedSuiteKeys.has(suiteKey.toLowerCase())) suiteKey = `${baseSuiteKey}_${suffix++}`;
+            usedSuiteKeys.add(suiteKey.toLowerCase());
+            entry.suiteKey = suiteKey;
             const instrumented = instrumentRobotSource(entry.robotSource, {
                 evidence: `spec-evidence/${entry.run.id}`,
                 video: `spec-video/${entry.run.id}`,
@@ -193,14 +210,17 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
             entry.plannedEvidence = instrumented.steps;
             await fs.mkdir(path.join(runsDir, entry.run.id), { recursive: true });
             await Promise.all([
-                fs.writeFile(path.join(suiteDir, `${entry.run.id}.robot`), instrumented.source, "utf8"),
+                fs.writeFile(path.join(suiteDir, `${entry.suiteKey}.robot`), instrumented.source, "utf8"),
                 fs.writeFile(path.join(runsDir, entry.run.id, "spec.robot"), instrumented.source, "utf8"),
                 fs.writeFile(path.join(runsDir, entry.run.id, "spec.yml"), entry.markdown, "utf8"),
             ]);
         }
 
         const timeout = Math.min(30 * 60 * 1000, Math.max(120_000, prepared.length * 120_000));
-        const processResult = await runRobotProcess(batchDir, batchDir, baseUrl, "suite", timeout);
+        const singleSpec = prepared.length === 1 ? prepared[0] : null;
+        const target = singleSpec ? `suite/${singleSpec.suiteKey}.robot` : "suite";
+        const suiteName = singleSpec?.item.title ?? batch.label;
+        const processResult = await runRobotProcess(batchDir, batchDir, baseUrl, target, timeout, suiteName);
         const outputXml = await fs.readFile(path.join(batchDir, "output.xml"), "utf8").catch(() => null);
         let processFailure: string | null = null;
         if (processResult.timedOut) processFailure = `Batch timed out after ${Math.round(timeout / 1000)}s`;
@@ -212,7 +232,7 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
 
         const suiteResults = outputXml ? parseBatchOutput(outputXml) : new Map<string, ParsedSuiteResult>();
         for (const entry of prepared) {
-            const parsed = suiteResults.get(entry.run.id);
+            const parsed = suiteResults.get(entry.suiteKey);
             await finishPreparedSpec(batch.id, batchDir, entry, parsed
                 ? parsed
                 : { status: "error", durationMs: null, failReason: processFailure ?? "Robot produced no result for this Spec" });
@@ -334,6 +354,7 @@ async function prepareSpecBatch(
         markdown: definition.markdown,
         robotSource: definition.robotSource,
         item: batch.specs[index],
+        suiteKey: "",
         plannedEvidence: [],
     }));
     return { batch, prepared };

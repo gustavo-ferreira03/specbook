@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { HighlightedCode, type EditorLanguage } from "@/components/RawFileEditor";
 import { getSpecAtCommit, getSpecHistory } from "@/lib/api";
 
 interface HistoryEntry {
@@ -27,7 +28,7 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
     const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
     const [entriesLoading, setEntriesLoading] = useState(false);
     const [selected, setSelected] = useState<HistoryEntry | null>(null);
-    const [contents, setContents] = useState<{ markdown: string | null; robot: string | null } | null>(null);
+    const [contents, setContents] = useState<{ yaml: string | null; robot: string | null } | null>(null);
     const [contentsLoading, setContentsLoading] = useState(false);
     const [error, setError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
@@ -88,7 +89,7 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
             <DialogContent className="flex h-[min(720px,calc(100dvh-24px))] max-w-[920px] flex-col overflow-hidden p-0">
                 <DialogHeader className="shrink-0 px-4 pt-4 pr-12 pb-3 sm:px-5 sm:pt-5 sm:pr-12">
                     <DialogTitle>Spec history</DialogTitle>
-                    <DialogDescription>Committed changes to the Markdown specification and Robot executable.</DialogDescription>
+                    <DialogDescription>Committed changes to spec.yml and spec.robot.</DialogDescription>
                 </DialogHeader>
                 {error && (
                     <Alert variant="destructive" className="mx-4 mb-3 flex w-auto items-center justify-between gap-3 sm:mx-5" role="alert">
@@ -97,7 +98,7 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
                     </Alert>
                 )}
                 <div className="grid min-h-0 flex-1 grid-rows-[minmax(7rem,0.35fr)_minmax(0,1fr)] border-t border-line md:grid-cols-[240px_minmax(0,1fr)] md:grid-rows-1">
-                    <ScrollArea className="min-h-0 border-b border-line md:border-r md:border-b-0">
+                    <ScrollArea className="min-h-0 bg-surface-soft">
                         {entriesLoading ? (
                             <div className="space-y-2 p-3"><Skeleton className="h-11" /><Skeleton className="h-11" /><Skeleton className="h-11" /></div>
                         ) : !entries ? null : entries.length === 0 ? (
@@ -127,8 +128,8 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
                         {selected && contentsLoading && <div className="space-y-3 p-4 sm:p-5"><Skeleton className="h-4 w-32" /><Skeleton className="h-32" /></div>}
                         {selected && contents && (
                             <div className="min-w-0 p-4 sm:p-5">
-                                <FileContent label="Specification (.md)" source={contents.markdown} />
-                                <FileContent label="Executable (.robot)" source={contents.robot} className="mt-5 border-t border-line pt-5" />
+                                <FileContent label="spec.yml" language="yaml" source={contents.yaml} />
+                                <FileContent label="spec.robot" language="robotframework" source={contents.robot} className="mt-6" />
                             </div>
                         )}
                     </ScrollArea>
@@ -138,11 +139,25 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
     );
 }
 
-function FileContent({ label, source, className = "" }: { label: string; source: string | null; className?: string }) {
+function FileContent({
+    label,
+    language,
+    source,
+    className = "",
+}: {
+    label: string;
+    language: EditorLanguage;
+    source: string | null;
+    className?: string;
+}) {
     return (
         <section className={className}>
             <h3 className="flex items-center gap-1.5 text-[0.625rem] font-bold text-ink-soft"><FileCode2 size={12} /> {label}</h3>
-            <pre className="mt-2 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-[8px] bg-surface-soft p-3 font-mono text-[0.65625rem] leading-5 text-ink">{source ?? "File absent in this commit."}</pre>
+            {source === null ? (
+                <p className="mt-2 rounded-lg bg-surface-soft px-3 py-4 text-[0.6875rem] text-ink-faint">File absent in this commit.</p>
+            ) : (
+                <HighlightedCode label={`${label} at selected commit`} language={language} source={source} className="mt-2" />
+            )}
         </section>
     );
 }

@@ -101,9 +101,13 @@ export async function runRobotProcess(
     baseUrl: string,
     target = "spec.robot",
     timeoutMs = RUN_TIMEOUT_MS,
+    suiteName?: string,
 ): Promise<{ code: number | null; output: string; timedOut: boolean }> {
     return new Promise((resolve, reject) => {
-        const proc = spawn("robot", ["--outputdir", outputDir, "--variable", `BASE_URL:${baseUrl}`, target], {
+        const args = ["--outputdir", outputDir, "--variable", `BASE_URL:${baseUrl}`];
+        if (suiteName) args.push("--name", suiteName);
+        args.push(target);
+        const proc = spawn("robot", args, {
             cwd: workDir,
             detached: process.platform === "linux",
             stdio: ["ignore", "pipe", "pipe"],
@@ -189,7 +193,7 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
             fs.writeFile(path.join(outputDir, "spec.yml"), markdown, "utf8"),
         ]);
         await fs.mkdir(path.join(outputDir, "evidence"), { recursive: true });
-        const result = await runRobotProcess(outputDir, outputDir, project.baseUrl);
+        const result = await runRobotProcess(outputDir, outputDir, project.baseUrl, "spec.robot", RUN_TIMEOUT_MS, spec.title);
         if (result.timedOut) {
             failReason = `Run timed out after ${RUN_TIMEOUT_MS / 1000}s`;
         } else if (result.code === null || result.code >= 251) {

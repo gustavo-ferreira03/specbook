@@ -5,7 +5,6 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { runsDir } from "../../../core/paths";
-import { parseSpecMarkdown } from "../../../core/repo/markdown";
 import { parseSpecYaml } from "../../../core/repo/yaml";
 import { getRunBatch, getRunBatchDirectory, startSpecBatch } from "../../../core/runner/batch";
 import { executeSpec } from "../../../core/runner/robot";
@@ -142,9 +141,7 @@ export function createRunsRouter(): Hono {
         const available = new Set(files);
         const humanSpec = directory && available.has("spec.yml")
             ? await fs.readFile(path.join(directory, "spec.yml"), "utf8").then((source) => parseSpecYaml(source).humanSpec).catch(() => null)
-            : directory && available.has("spec.md")
-              ? await fs.readFile(path.join(directory, "spec.md"), "utf8").then((source) => parseSpecMarkdown(source).humanSpec).catch(() => null)
-              : null;
+            : null;
         let manifest: { steps?: { number?: number; label?: string; file?: string }[]; video?: string | null } = {};
         if (directory && available.has("evidence.json")) {
             try {
