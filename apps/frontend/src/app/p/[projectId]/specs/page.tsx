@@ -193,7 +193,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
-                    <div className="rounded-[13px] border border-line bg-surface p-4 md:h-[min(34rem,calc(100dvh-12rem))]">
+                    <div className="rounded-[13px] border border-line bg-surface p-4">
                         <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Status breakdown</p>
                         <p className="mt-1 text-xs text-ink-soft">
                             <span className={`font-bold ${passRateTone}`}>{passRate}%</span> of Specs are passing
@@ -222,7 +222,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                         )}
                     </div>
 
-                    <div className="rounded-[13px] border border-line bg-surface p-4 md:flex md:h-[min(34rem,calc(100dvh-12rem))] md:flex-col">
+                    <div className="rounded-[13px] border border-line bg-surface p-4 md:flex md:max-h-80 md:flex-col">
                         <div className="shrink-0 flex items-center justify-between">
                             <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">All Specs</p>
                             <DropdownMenu>
