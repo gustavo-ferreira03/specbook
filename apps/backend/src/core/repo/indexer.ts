@@ -25,7 +25,7 @@ import {
 } from "./markdown";
 import { schedulePush } from "./remote";
 import { humanizeSlug } from "./slug";
-import { markdownHashOf, robotHashOf } from "./writer";
+import { markdownHashOf, robotHashOf, specMarkdownFile, specRobotFile } from "./writer";
 
 export type RobotValidator = (source: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 
@@ -64,18 +64,47 @@ async function readOptionalFile(target: string): Promise<string | null> {
     }
 }
 
-async function walk(root: string, relative: string, dirs: string[], found: FoundSpec[]): Promise<void> {
+async function migrateFlatSpec(root: string, dirRelative: string, fileName: string): Promise<string | null> {
+    const base = fileName.slice(0, -3);
+    const specDir = `${dirRelative}/${base}`;
+    if (await isDirectory(path.join(root, specDir))) {
+        console.error(`[specbook] cannot migrate flat spec "${dirRelative}/${fileName}": directory "${specDir}" already exists`);
+        return null;
+    }
+    await fs.mkdir(path.join(root, specDir), { recursive: true });
+    await fs.rename(path.join(root, `${specDir}.md`), path.join(root, specMarkdownFile(specDir)));
+    const robotFlat = path.join(root, `${specDir}.robot`);
+    const hasRobot = await fs.stat(robotFlat).then((stat) => stat.isFile()).catch(() => false);
+    if (hasRobot) await fs.rename(robotFlat, path.join(root, specRobotFile(specDir)));
+    return specDir;
+}
+
+async function walk(
+    root: string,
+    relative: string,
+    dirs: string[],
+    found: FoundSpec[],
+    migrated: { count: number },
+): Promise<void> {
     const entries = await fs.readdir(path.join(root, relative), { withFileTypes: true });
     for (const entry of entries) {
         const entryRelative = `${relative}/${entry.name}`;
         if (entry.isDirectory()) {
-            dirs.push(entryRelative);
-            await walk(root, entryRelative, dirs, found);
+            const specMarkdown = await readOptionalFile(path.join(root, specMarkdownFile(entryRelative)));
+            if (specMarkdown !== null) {
+                found.push({ path: entryRelative, dirPath: relative, markdown: specMarkdown });
+            } else {
+                dirs.push(entryRelative);
+                await walk(root, entryRelative, dirs, found, migrated);
+            }
         } else if (entry.isFile() && entry.name.endsWith(".md") && entry.name !== "feature.md") {
+            const specDir = await migrateFlatSpec(root, relative, entry.name);
+            if (specDir === null) continue;
+            migrated.count += 1;
             found.push({
-                path: entryRelative.slice(0, -3),
+                path: specDir,
                 dirPath: relative,
-                markdown: await fs.readFile(path.join(root, entryRelative), "utf8"),
+                markdown: await fs.readFile(path.join(root, specMarkdownFile(specDir)), "utf8"),
             });
         }
     }
@@ -207,8 +236,9 @@ export async function reindexProjectUnlocked(
     }
     const dirs: string[] = [];
     const found: FoundSpec[] = [];
+    const migrated = { count: 0 };
     const hasSpecsDir = await isDirectory(path.join(root, "specs"));
-    if (hasSpecsDir) await walk(root, "specs", dirs, found);
+    if (hasSpecsDir) await walk(root, "specs", dirs, found, migrated);
 
     const existingSpecs = await specsRepository.listSpecs(projectId);
     const specsById = new Map(existingSpecs.map((spec) => [spec.id, spec]));
@@ -251,7 +281,7 @@ export async function reindexProjectUnlocked(
         const docId = isUuid(identity?.id) && !ignoredIds.has(item.path) ? identity.id : null;
         const existing = (docId ? specsById.get(docId) : undefined) ?? specsByPath.get(item.path);
         const title = doc?.title ?? identity?.title ?? existing?.title ?? humanizeSlug(path.posix.basename(item.path));
-        const robotSource = await readOptionalFile(path.join(root, `${item.path}.robot`));
+        const robotSource = await readOptionalFile(path.join(root, specRobotFile(item.path)));
         const robotHash = robotSource === null ? "" : robotHashOf(robotSource);
         const markdownHash = markdownHashOf(item.markdown);
         let status: Spec["status"] = "unverified";
@@ -262,7 +292,7 @@ export async function reindexProjectUnlocked(
             invalidReason = `Invalid spec markdown: ${parseError}`;
         } else if (robotSource === null) {
             status = "invalid";
-            invalidReason = "Missing .robot file next to the spec markdown";
+            invalidReason = "Missing spec.robot file in the spec directory";
         } else if (
             existing &&
             existing.robotHash === robotHash &&
@@ -318,7 +348,7 @@ export async function reindexProjectUnlocked(
                 humanSpec: doc.humanSpec,
             });
             await fs.writeFile(
-                path.join(root, `${item.path}.md`),
+                path.join(root, specMarkdownFile(item.path)),
                 normalized,
                 "utf8",
             );
@@ -348,10 +378,12 @@ export async function reindexProjectUnlocked(
 
     const workingTreeChanged = !(await projectGit(projectId).status()).isClean();
     if (workingTreeChanged) {
-        await commitAll(
-            projectId,
-            needsMetadataCommit ? "specbook: normalize metadata" : "specbook: import working tree changes",
-        );
+        const message = migrated.count > 0
+            ? "specbook: move specs into per-spec directories"
+            : needsMetadataCommit
+              ? "specbook: normalize metadata"
+              : "specbook: import working tree changes";
+        await commitAll(projectId, message);
         schedulePush(projectId);
     }
 

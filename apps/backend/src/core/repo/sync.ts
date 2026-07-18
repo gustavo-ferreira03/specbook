@@ -21,7 +21,9 @@ async function conflictedPaths(git: SimpleGit): Promise<string[]> {
 
 async function markConflicts(projectId: string, paths: string[]): Promise<void> {
     for (const conflicted of paths) {
-        const specPath = conflicted.replace(/\.(md|robot)$/, "");
+        const specPath = /\/spec\.(md|robot)$/.test(conflicted)
+            ? conflicted.replace(/\/spec\.(md|robot)$/, "")
+            : conflicted.replace(/\.(md|robot)$/, "");
         const spec = await specsRepository.getSpecByPath(projectId, specPath);
         if (spec) await specsRepository.updateSpecStatus(spec.id, "conflict");
     }

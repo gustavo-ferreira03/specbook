@@ -244,8 +244,8 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         setActionError("");
         try {
             const { outcome } = await resolveProjectGit(projectId, [
-                { path: `${detail.spec.path}.md`, keep },
-                { path: `${detail.spec.path}.robot`, keep },
+                { path: `${detail.spec.path}/spec.md`, keep },
+                { path: `${detail.spec.path}/spec.robot`, keep },
             ]);
             if (outcome.status === "conflict") {
                 throw new Error("Other conflicting files still need an explicit choice in project settings.");

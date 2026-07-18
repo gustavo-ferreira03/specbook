@@ -1,6 +1,7 @@
 import type { Spec } from "../../infra/repositories/specs";
 import { projectGit, withRepoLock } from "./git";
 import { parseMarkdownIdentity } from "./markdown";
+import { specMarkdownFile, specRobotFile } from "./writer";
 
 export interface SpecHistoryEntry {
     sha: string;
@@ -35,8 +36,8 @@ async function historyForPath(spec: Spec, relativePath: string): Promise<History
 export async function specHistory(spec: Spec): Promise<SpecHistoryEntry[]> {
     return withRepoLock(spec.projectId, async () => {
         const entries = await Promise.all([
-            historyForPath(spec, `${spec.path}.md`),
-            historyForPath(spec, `${spec.path}.robot`),
+            historyForPath(spec, specMarkdownFile(spec.path)),
+            historyForPath(spec, specRobotFile(spec.path)),
         ]);
         const unique = new Map<string, HistoryRecord>();
         for (const entry of entries.flat()) if (!unique.has(entry.sha)) unique.set(entry.sha, entry);
@@ -62,8 +63,8 @@ export async function specHistory(spec: Spec): Promise<SpecHistoryEntry[]> {
 async function pathAtCommit(spec: Spec, sha: string): Promise<string | null> {
     const git = projectGit(spec.projectId);
     const records = await Promise.all([
-        historyForPath(spec, `${spec.path}.md`),
-        historyForPath(spec, `${spec.path}.robot`),
+        historyForPath(spec, specMarkdownFile(spec.path)),
+        historyForPath(spec, specRobotFile(spec.path)),
     ]);
     const historical = records.flat().find((entry) => entry.sha === sha)?.path;
     if (historical) return historical.replace(/\.(md|robot)$/, "");

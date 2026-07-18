@@ -16,7 +16,7 @@ import {
     repoDir,
     withRepoLock,
 } from "../repo/git";
-import { markdownHashOf, robotHashOf } from "../repo/writer";
+import { markdownHashOf, robotHashOf, specMarkdownFile, specRobotFile } from "../repo/writer";
 import { acquireSpecLocks } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 import { runRobotProcess } from "./robot";
@@ -266,8 +266,8 @@ async function prepareSpecBatch(
                 throw new Error(`Spec "${spec.title}" has a git sync conflict`);
             }
             const [markdown, robotSource] = await Promise.all([
-                fs.readFile(path.join(repoDir(projectId), `${spec.path}.md`), "utf8"),
-                fs.readFile(path.join(repoDir(projectId), `${spec.path}.robot`), "utf8"),
+                fs.readFile(path.join(repoDir(projectId), specMarkdownFile(spec.path)), "utf8"),
+                fs.readFile(path.join(repoDir(projectId), specRobotFile(spec.path)), "utf8"),
             ]);
             const robotHash = robotHashOf(robotSource);
             const markdownHash = markdownHashOf(markdown);

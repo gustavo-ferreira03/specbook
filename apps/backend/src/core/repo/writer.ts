@@ -14,6 +14,14 @@ export function robotHashOf(source: string): string {
     return crypto.createHash("sha256").update(source).digest("hex");
 }
 
+export function specMarkdownFile(specPath: string): string {
+    return `${specPath}/spec.md`;
+}
+
+export function specRobotFile(specPath: string): string {
+    return `${specPath}/spec.robot`;
+}
+
 export function markdownHashOf(source: string): string {
     return crypto.createHash("sha256").update(source).digest("hex");
 }
@@ -81,9 +89,9 @@ export async function createSpecInRepo(input: {
             description: input.description,
             humanSpec: input.humanSpec,
         });
-        await fs.mkdir(absolute(input.projectId, feature.path), { recursive: true });
-        await fs.writeFile(absolute(input.projectId, `${specPath}.md`), markdown, "utf8");
-        await fs.writeFile(absolute(input.projectId, `${specPath}.robot`), input.robotSource, "utf8");
+        await fs.mkdir(absolute(input.projectId, specPath), { recursive: true });
+        await fs.writeFile(absolute(input.projectId, specMarkdownFile(specPath)), markdown, "utf8");
+        await fs.writeFile(absolute(input.projectId, specRobotFile(specPath)), input.robotSource, "utf8");
         const commitSha = await commitAll(input.projectId, `spec: create "${input.title}"`);
         schedulePush(input.projectId);
         const now = new Date().toISOString();
@@ -107,8 +115,8 @@ export async function createSpecInRepo(input: {
 }
 
 export async function readSpecFiles(spec: Spec): Promise<{ humanSpec: HumanSpec; robotSource: string }> {
-    const markdown = await fs.readFile(absolute(spec.projectId, `${spec.path}.md`), "utf8");
-    const robotSource = await fs.readFile(absolute(spec.projectId, `${spec.path}.robot`), "utf8");
+    const markdown = await fs.readFile(absolute(spec.projectId, specMarkdownFile(spec.path)), "utf8");
+    const robotSource = await fs.readFile(absolute(spec.projectId, specRobotFile(spec.path)), "utf8");
     return { humanSpec: parseSpecMarkdown(markdown).humanSpec, robotSource };
 }
 
@@ -133,16 +141,12 @@ export async function updateSpecInRepo(
             const slug = uniqueSlug(title, taken, spec.id);
             if (slug !== currentSlug) {
                 specPath = `${dir}/${slug}`;
-                await fs.rename(absolute(spec.projectId, `${spec.path}.md`), absolute(spec.projectId, `${specPath}.md`));
-                await fs.rename(
-                    absolute(spec.projectId, `${spec.path}.robot`),
-                    absolute(spec.projectId, `${specPath}.robot`),
-                );
+                await fs.rename(absolute(spec.projectId, spec.path), absolute(spec.projectId, specPath));
             }
         }
         const markdown = serializeSpecMarkdown({ id: spec.id, title, description, humanSpec });
-        await fs.writeFile(absolute(spec.projectId, `${specPath}.md`), markdown, "utf8");
-        await fs.writeFile(absolute(spec.projectId, `${specPath}.robot`), robotSource, "utf8");
+        await fs.writeFile(absolute(spec.projectId, specMarkdownFile(specPath)), markdown, "utf8");
+        await fs.writeFile(absolute(spec.projectId, specRobotFile(specPath)), robotSource, "utf8");
         const commitSha = await commitAll(spec.projectId, `spec: update "${title}"`);
         schedulePush(spec.projectId);
         const robotHash = robotHashOf(robotSource);
@@ -164,8 +168,7 @@ export async function updateSpecInRepo(
 export async function deleteSpecFiles(spec: Spec): Promise<void> {
     await withRepoLock(spec.projectId, async () => {
         await assertRepoWritableUnlocked(spec.projectId);
-        await fs.rm(absolute(spec.projectId, `${spec.path}.md`), { force: true });
-        await fs.rm(absolute(spec.projectId, `${spec.path}.robot`), { force: true });
+        await fs.rm(absolute(spec.projectId, spec.path), { recursive: true, force: true });
         await commitAll(spec.projectId, `spec: delete "${spec.title}"`);
         schedulePush(spec.projectId);
     });

@@ -16,7 +16,7 @@ import {
     repoDir,
     withRepoLock,
 } from "../repo/git";
-import { markdownHashOf } from "../repo/writer";
+import { markdownHashOf, specMarkdownFile, specRobotFile } from "../repo/writer";
 import { withSpecLock } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 
@@ -153,8 +153,8 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
             throw new Error("The project repository has uncommitted changes; sync or commit them before running");
         }
         const [robotSource, markdown, commitSha] = await Promise.all([
-            fs.readFile(path.join(repoDir(spec.projectId), `${spec.path}.robot`), "utf8"),
-            fs.readFile(path.join(repoDir(spec.projectId), `${spec.path}.md`), "utf8"),
+            fs.readFile(path.join(repoDir(spec.projectId), specRobotFile(spec.path)), "utf8"),
+            fs.readFile(path.join(repoDir(spec.projectId), specMarkdownFile(spec.path)), "utf8"),
             headSha(spec.projectId),
         ]);
         return { robotSource, markdown, commitSha };
