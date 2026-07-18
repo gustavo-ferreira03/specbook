@@ -1,6 +1,18 @@
 name: Prepare release
 
 on:
+    push:
+        branches: [main]
+        paths:
+            - apps/**
+            - Dockerfile
+            - entrypoint.sh
+            - package.json
+            - pnpm-lock.yaml
+            - pnpm-workspace.yaml
+            - requirements.txt
+            - version.txt
+            - CHANGELOG.md
     workflow_dispatch:
 
 permissions:
