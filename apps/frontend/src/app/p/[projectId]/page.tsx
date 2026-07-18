@@ -85,7 +85,7 @@ function DiscoveryStartForm({
                     throw error;
                 }
             }
-            router.push(`/p/${projectId}/conversations/${discovery.conversation.id}`);
+            router.push(`/p/${projectId}/chats/${discovery.chat.id}`);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
             setSubmitting(false);
@@ -324,8 +324,8 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
 
     const { confirmed, draft } = contextState;
     const draftHasProposal = draft ? draft.context.summary.trim().length > 0 : false;
-    const draftConversationHref = draft?.sourceConversationId
-        ? `/p/${projectId}/conversations/${draft.sourceConversationId}`
+    const draftChatHref = draft?.sourceChatId
+        ? `/p/${projectId}/chats/${draft.sourceChatId}`
         : null;
 
     return (
@@ -338,8 +338,8 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                         <p className="mt-0.5 font-mono text-[0.65625rem] text-ink-faint [overflow-wrap:anywhere]">{project.baseUrl}</p>
                     </div>
                     <Button asChild variant="outline" size="sm">
-                        <Link href={`/p/${projectId}/conversations/new`}>
-                            <MessageSquareText size={13} /> Start conversation
+                        <Link href={`/p/${projectId}/chats/new`}>
+                            <MessageSquareText size={13} /> Start chat
                         </Link>
                     </Button>
                 </div>
@@ -368,9 +368,9 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                             </ul>
                         )}
                         <div className="mt-4 flex flex-wrap gap-2">
-                            {draftConversationHref && (
+                            {draftChatHref && (
                                 <Button asChild size="sm">
-                                    <Link href={draftConversationHref}><Compass size={13} /> Continue discovery</Link>
+                                    <Link href={draftChatHref}><Compass size={13} /> Continue discovery</Link>
                                 </Button>
                             )}
                             <Button
@@ -387,7 +387,7 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                             <ConfirmDeleteDialog
                                 open={discardDiscoveryOpen}
                                 title="Discard this discovery?"
-                                description="The discovery draft is discarded. The conversation stays in your history, and any confirmed context stays active."
+                                description="The discovery draft is discarded. The chat stays in your history, and any confirmed context stays active."
                                 confirmLabel="Discard discovery"
                                 busyLabel="Discarding..."
                                 busy={discardingDiscovery}
@@ -414,7 +414,7 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                         <div className="p-4">
                             <ProjectContextEditor
                                 revision={draft}
-                                conversationHref={draftConversationHref}
+                                chatHref={draftChatHref}
                                 onSaved={() => undefined}
                                 onConfirmed={() => {
                                     setUpdateMode(false);
@@ -432,7 +432,7 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                             <div>
                                 <h3 className="text-[0.8125rem] font-bold">Project context</h3>
                                 <p className="mt-0.5 text-[0.65625rem] text-ink-faint">
-                                    Confirmed {confirmed.confirmedAt ? new Date(confirmed.confirmedAt).toLocaleString() : ""} · supplied to every new conversation
+                                    Confirmed {confirmed.confirmedAt ? new Date(confirmed.confirmedAt).toLocaleString() : ""} · supplied to every new chat
                                 </p>
                             </div>
                             <Button type="button" variant="outline" size="sm" onClick={() => setUpdateMode((value) => !value)}>
@@ -459,7 +459,7 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                             <LogoMark className="size-10" />
                             <h2 className="mt-5 text-xl font-bold tracking-[-0.025em]">Teach Specbook this application</h2>
                             <p className="mt-3 max-w-[62ch] text-xs leading-5 text-ink-soft">
-                                Run a guided discovery: the agent explores the app in a bounded browser, drafts a structured project context, and you review and confirm it. Confirmed context is supplied to every future conversation.
+                                Run a guided discovery: the agent explores the app in a bounded browser, drafts a structured project context, and you review and confirm it. Confirmed context is supplied to every future chat.
                             </p>
                         </div>
                         <div className="mt-5">
@@ -467,11 +467,11 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                         </div>
                         <div className="mt-8 max-w-[560px]">
                             <Separator className="mb-4" />
-                            <div className="flex items-center gap-3 py-2 text-[0.6875rem] text-ink-soft"><MessageSquareText size={14} className="text-ink-faint" /> Or skip ahead and describe a behavior in a conversation</div>
+                            <div className="flex items-center gap-3 py-2 text-[0.6875rem] text-ink-soft"><MessageSquareText size={14} className="text-ink-faint" /> Or skip ahead and describe a behavior in a chat</div>
                             <div className="flex items-center gap-3 py-2 text-[0.6875rem] text-ink-soft"><BookOpenCheck size={14} className="text-ink-faint" /> Keep the readable behavior, verification, and evidence together</div>
                             <Button asChild variant="outline" size="sm" className="mt-2">
-                                <Link href={`/p/${projectId}/conversations/new`}>
-                                    Start conversation <ArrowRight size={13} />
+                                <Link href={`/p/${projectId}/chats/new`}>
+                                    Start chat <ArrowRight size={13} />
                                 </Link>
                             </Button>
                         </div>

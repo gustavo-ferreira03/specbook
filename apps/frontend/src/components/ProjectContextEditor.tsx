@@ -105,13 +105,13 @@ function SectionLabel({ children, hint }: { children: React.ReactNode; hint?: st
 
 export function ProjectContextEditor({
     revision,
-    conversationHref,
+    chatHref,
     onSaved,
     onConfirmed,
     onDiscarded,
 }: {
     revision: ProjectContextRevision;
-    conversationHref: string | null;
+    chatHref: string | null;
     onSaved: (revision: ProjectContextRevision) => void;
     onConfirmed: (revision: ProjectContextRevision) => void;
     onDiscarded: (revision: ProjectContextRevision) => void;
@@ -377,9 +377,9 @@ export function ProjectContextEditor({
                 <Button type="button" onClick={() => void saveDraft()} disabled={saving} variant="outline">
                     <Save size={14} /> {saving ? "Saving..." : "Save draft"}
                 </Button>
-                {conversationHref && (
+                {chatHref && (
                     <Button asChild variant="outline">
-                        <Link href={conversationHref}><Compass size={14} /> Continue exploring</Link>
+                        <Link href={chatHref}><Compass size={14} /> Continue exploring</Link>
                     </Button>
                 )}
                 <Button
@@ -422,7 +422,7 @@ export function ProjectContextEditor({
                         <div className="min-w-0 flex-1">
                             <AlertDialogTitle>Confirm this project context?</AlertDialogTitle>
                             <AlertDialogDescription className="mt-1.5">
-                                Every future conversation in this project receives it as reviewed background knowledge. Update it later with a new discovery.
+                                Every future chat in this project receives it as reviewed background knowledge. Update it later with a new discovery.
                             </AlertDialogDescription>
                         </div>
                         <AlertDialogCancel

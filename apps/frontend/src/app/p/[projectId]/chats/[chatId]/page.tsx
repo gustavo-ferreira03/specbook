@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { ConversationState } from "@/lib/types";
+import type { ChatState } from "@/lib/types";
 
 function MessageContent({ content, user }: { content: string; user: boolean }) {
     return (
@@ -66,10 +66,10 @@ function LiveBrowserCard({ sessionId }: { sessionId: string }) {
     );
 }
 
-function ConversationContent({ projectId, conversationId }: { projectId: string; conversationId: string }) {
+function ChatContent({ projectId, chatId }: { projectId: string; chatId: string }) {
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
-    const [state, setState] = useState<ConversationState | null>(null);
+    const [state, setState] = useState<ChatState | null>(null);
     const [text, setText] = useState("");
     const [loadError, setLoadError] = useState("");
     const [pollError, setPollError] = useState("");
@@ -87,7 +87,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
 
     useEffect(() => {
         setText(specId ? `I want to change the Spec ${specId}. ` : "");
-    }, [conversationId, specId]);
+    }, [chatId, specId]);
 
     useEffect(() => {
         let active = true;
@@ -101,7 +101,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
             if (polling) return;
             polling = true;
             try {
-                const result = await api<ConversationState>(`/conversations/${conversationId}`);
+                const result = await api<ChatState>(`/chats/${chatId}`);
                 if (!active) return;
                 loaded = true;
                 setState(result);
@@ -123,7 +123,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
             active = false;
             window.clearInterval(interval);
         };
-    }, [conversationId, retryKey]);
+    }, [chatId, retryKey]);
 
     useEffect(() => {
         const container = scrollRef.current?.querySelector<HTMLElement>("[data-slot=scroll-area-viewport]");
@@ -153,12 +153,12 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
     useEffect(() => {
         if (!state || state.vncSessionId) return;
         if (state.mode === "discovery" && state.messages.length === 0 && !state.busy) return;
-        const key = `${conversationId}:${browserAttempt}`;
+        const key = `${chatId}:${browserAttempt}`;
         if (browserStartRef.current === key) return;
         browserStartRef.current = key;
         let active = true;
         setBrowserError("");
-        api<{ vncSessionId: string }>(`/conversations/${conversationId}/browser`, { method: "POST" })
+        api<{ vncSessionId: string }>(`/chats/${chatId}/browser`, { method: "POST" })
             .then((result) => {
                 if (!active) return;
                 setState((current) => current ? { ...current, vncSessionId: result.vncSessionId } : current);
@@ -169,17 +169,17 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
         return () => {
             active = false;
         };
-    }, [browserAttempt, conversationId, state]);
+    }, [browserAttempt, chatId, state]);
 
     async function beginDiscovery() {
         if (beginning) return;
         setBeginning(true);
         setBeginError("");
         try {
-            const browser = await api<{ vncSessionId: string }>(`/conversations/${conversationId}/browser`, {
+            const browser = await api<{ vncSessionId: string }>(`/chats/${chatId}/browser`, {
                 method: "POST",
             });
-            await api<{ ok: true }>(`/conversations/${conversationId}/message`, {
+            await api<{ ok: true }>(`/chats/${chatId}/message`, {
                 method: "POST",
                 body: JSON.stringify({
                     text: "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes and the action budget, then propose the project context.",
@@ -205,7 +205,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
         setText("");
         stickToBottomRef.current = true;
         try {
-            await api<{ ok: true }>(`/conversations/${conversationId}/message`, {
+            await api<{ ok: true }>(`/chats/${chatId}/message`, {
                 method: "POST",
                 body: JSON.stringify({ text: value }),
             });
@@ -223,11 +223,11 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
     if (loadError && !state) {
         return (
             <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="Conversation" eyebrow="Conversations" />
+                <PageHeader title="Chat" eyebrow="Chats" />
                 <div className="flex flex-1 items-center justify-center px-5 py-12">
                     <Alert variant="destructive" className="w-full max-w-sm bg-transparent p-0 text-center" role="alert">
                         <span className="mx-auto flex size-9 items-center justify-center rounded-lg bg-danger-soft text-danger"><AlertCircle size={18} /></span>
-                        <h2 className="mt-4 text-sm font-bold text-ink">Conversation could not load</h2>
+                        <h2 className="mt-4 text-sm font-bold text-ink">Chat could not load</h2>
                         <AlertDescription className="mt-2 text-xs leading-5">{loadError}</AlertDescription>
                         <Button type="button" onClick={() => setRetryKey((key) => key + 1)} className="mt-5">
                             <RefreshCw size={14} /> Try again
@@ -240,7 +240,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
 
     if (!state) {
         return (
-            <div className="flex h-full min-h-0 flex-col bg-surface" aria-label="Loading conversation" aria-busy="true" role="status">
+            <div className="flex h-full min-h-0 flex-col bg-surface" aria-label="Loading chat" aria-busy="true" role="status">
                 <div className="relative h-16 shrink-0 md:h-[72px]"><Separator className="absolute inset-x-0 bottom-0" /></div>
                 <div className="min-h-0 flex-1 overflow-hidden px-5 py-7">
                     <div className="mx-auto w-full max-w-[780px] space-y-4">
@@ -258,7 +258,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
         <div className="flex h-full min-h-0 flex-col bg-surface">
             <PageHeader
                 title={state.title}
-                eyebrow="Conversation"
+                eyebrow="Chat"
                 actions={
                     <Badge variant="outline" className="gap-1.5 px-2.5 py-1.5 text-[0.65625rem]">
                         <span className={`size-1.5 rounded-full ${state.busy ? "status-pulse bg-pending" : "bg-success"}`} />
@@ -316,7 +316,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
 
                         {!discovery && state.messages.length === 0 && !state.busy && (
                             <div className="py-6 sm:py-10">
-                                <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">New conversation</p>
+                                <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">New chat</p>
                                 <h2 className="mt-2 text-xl font-bold tracking-[-0.025em] text-balance">What should this application do?</h2>
                                 <p className="mt-3 max-w-[58ch] text-[0.75rem] leading-5 text-ink-soft">
                                     Describe a flow or point the agent to an area of the application. It will browse, clarify the behavior, and save the verified result as a Spec.
@@ -367,7 +367,7 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
                         {state.busy && (
                             <Badge variant="secondary" className="mt-4 flex gap-2 rounded-none bg-transparent p-0 pl-[38px] text-[0.6875rem] font-semibold whitespace-normal text-ink-faint" role="status">
                                 <span className="status-pulse size-1.5 rounded-full bg-primary" />
-                                Agent is browsing and updating this conversation
+                                Agent is browsing and updating this chat
                             </Badge>
                         )}
                     </div>
@@ -458,11 +458,11 @@ function ConversationContent({ projectId, conversationId }: { projectId: string;
     );
 }
 
-export default function ConversationPage({ params }: { params: Promise<{ projectId: string; conversationId: string }> }) {
-    const { projectId, conversationId } = use(params);
+export default function ChatPage({ params }: { params: Promise<{ projectId: string; chatId: string }> }) {
+    const { projectId, chatId } = use(params);
     return (
-        <Suspense fallback={<span className="sr-only" role="status">Loading conversation</span>}>
-            <ConversationContent projectId={projectId} conversationId={conversationId} />
+        <Suspense fallback={<span className="sr-only" role="status">Loading chat</span>}>
+            <ChatContent projectId={projectId} chatId={chatId} />
         </Suspense>
     );
 }

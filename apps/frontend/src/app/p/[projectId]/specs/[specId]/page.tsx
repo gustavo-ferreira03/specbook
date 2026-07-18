@@ -239,7 +239,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                         <div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill status={spec.status} />{version && <Badge variant="secondary">Version {version.version}</Badge>}<span className="text-[0.625rem] text-ink-faint">Updated {new Date(spec.updatedAt).toLocaleDateString()}</span></div>
                     </div>
                     <div className="flex shrink-0 gap-2">
-                        <Button asChild variant="outline" className="flex-1 sm:flex-none"><Link href={`/p/${projectId}/conversations/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={13} /> Edit Spec</Link></Button>
+                        <Button asChild variant="outline" className="flex-1 sm:flex-none"><Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={13} /> Edit Spec</Link></Button>
                         <Button type="button" onClick={runNow} disabled={running || !version} className="flex-1 sm:flex-none"><Play size={12} fill="currentColor" /> {running ? "Running..." : "Run Spec"}</Button>
                     </div>
                 </div>
@@ -270,7 +270,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                 {version.humanSpec.postconditions.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 marker:text-ink-faint">{version.humanSpec.postconditions.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul> : <p className="mt-2 text-xs leading-5 text-ink-faint">No postconditions recorded.</p>}
                             </section>
                         </div>
-                    ) : <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">No executable version</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Edit this Spec through a conversation to finish the behavior.</p></div>}
+                    ) : <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">No executable version</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Edit this Spec through a chat to finish the behavior.</p></div>}
                 </section>
 
                 <section className="mt-8" aria-labelledby="verification-heading">

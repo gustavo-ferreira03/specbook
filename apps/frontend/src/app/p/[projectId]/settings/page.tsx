@@ -342,7 +342,7 @@ export default function SettingsPage() {
                         <div className="flex items-end justify-between gap-4">
                             <div>
                                 <h2 id="agent-model-heading" className="text-[0.8125rem] font-bold">Agent model</h2>
-                                <p className="mt-1 text-[0.65625rem] text-ink-faint">Provider and model used for every conversation.</p>
+                                <p className="mt-1 text-[0.65625rem] text-ink-faint">Provider and model used for every chat.</p>
                             </div>
                             <Badge variant={selectedProvider?.configured ? "success" : "pending"} className="gap-1.5 rounded-none bg-transparent p-0">
                                 <span className={`size-1.5 rounded-full ${selectedProvider?.configured ? "bg-success" : "bg-pending"}`} />

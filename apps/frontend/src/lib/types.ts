@@ -59,13 +59,13 @@ export interface SpecDetail {
 
 export interface ChatMessage {
     id: string;
-    conversationId: string;
+    chatId: string;
     role: "user" | "agent";
     content: string;
     createdAt: string;
 }
 
-export type ConversationMode = "standard" | "discovery";
+export type ChatMode = "standard" | "discovery";
 export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
 
 export interface DiscoveryBrief {
@@ -90,7 +90,7 @@ export interface ProjectContext {
 export interface ProjectContextRevision {
     id: string;
     projectId: string;
-    sourceConversationId: string | null;
+    sourceChatId: string | null;
     status: ProjectContextStatus;
     brief: DiscoveryBrief;
     context: ProjectContext;
@@ -105,7 +105,7 @@ export interface ProjectContextState {
     draft: ProjectContextRevision | null;
 }
 
-export interface ConversationContextRevision {
+export interface ChatContextRevision {
     id: string;
     status: ProjectContextStatus;
     brief: DiscoveryBrief;
@@ -113,20 +113,20 @@ export interface ConversationContextRevision {
     hasProposal: boolean;
 }
 
-export interface Conversation {
+export interface Chat {
     id: string;
     title: string;
     createdAt: string;
 }
 
-export interface ConversationState {
+export interface ChatState {
     title: string;
     messages: ChatMessage[];
     busy: boolean;
     vncSessionId: string | null;
     projectId: string;
-    mode: ConversationMode;
-    contextRevision: ConversationContextRevision | null;
+    mode: ChatMode;
+    contextRevision: ChatContextRevision | null;
 }
 
 export interface ArtifactListing {

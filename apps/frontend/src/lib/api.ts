@@ -41,7 +41,7 @@ export interface DiscoveryBriefInput {
 export function createContextDiscovery(
     projectId: string,
     brief: DiscoveryBriefInput,
-): Promise<{ revision: ProjectContextRevision; conversation: { id: string } }> {
+): Promise<{ revision: ProjectContextRevision; chat: { id: string } }> {
     return api(`/projects/${encodeURIComponent(projectId)}/context-discoveries`, {
         method: "POST",
         body: JSON.stringify(brief),

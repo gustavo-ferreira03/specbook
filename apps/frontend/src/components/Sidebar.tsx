@@ -21,7 +21,7 @@ import {
     X,
 } from "lucide-react";
 import { API_URL, api, getLlmRuntimeStatus, getRunBatch, startRunBatch } from "@/lib/api";
-import type { Conversation, Feature, Project, RunBatch, SpecSummary } from "@/lib/types";
+import type { Chat, Feature, Project, RunBatch, SpecSummary } from "@/lib/types";
 import { ConfirmDeleteDialog } from "./ConfirmDeleteDialog";
 import { LogoMark } from "./LogoMark";
 import { SpecRunDialog, type SpecBatchItem } from "./SpecRunDialog";
@@ -46,14 +46,14 @@ import { Skeleton } from "./ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-type SidebarTab = "conversations" | "specs";
+type SidebarTab = "chats" | "specs";
 type RuntimeState = "checking" | "online" | "setup" | "offline";
 type DeleteTarget =
-    | { kind: "conversation"; item: Conversation }
+    | { kind: "chat"; item: Chat }
     | { kind: "spec"; item: SpecSummary }
     | { kind: "feature"; item: Feature };
 
-function conversationDate(value: string) {
+function chatDate(value: string) {
     const date = new Date(value);
     const today = new Date();
     const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
@@ -64,14 +64,20 @@ function conversationDate(value: string) {
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function sectionFromPathname(pathname: string, projectId: string): SidebarTab | null {
+    if (pathname === `/p/${projectId}/specs` || pathname.startsWith(`/p/${projectId}/specs/`)) return "specs";
+    if (pathname === `/p/${projectId}/chats` || pathname.startsWith(`/p/${projectId}/chats/`)) return "chats";
+    return null;
+}
+
 export function Sidebar({ projectId }: { projectId: string }) {
     const router = useRouter();
     const pathname = usePathname();
     const [projects, setProjects] = useState<Project[]>([]);
     const [features, setFeatures] = useState<Feature[]>([]);
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
-    const [conversations, setConversations] = useState<Conversation[]>([]);
-    const [activeTab, setActiveTab] = useState<SidebarTab>(pathname.includes("/specs/") ? "specs" : "conversations");
+    const [chats, setChats] = useState<Chat[]>([]);
+    const [activeTab, setActiveTab] = useState<SidebarTab>(sectionFromPathname(pathname, projectId) ?? "chats");
     const [loaded, setLoaded] = useState(false);
     const [loadError, setLoadError] = useState("");
     const [runtime, setRuntime] = useState<RuntimeState>("checking");
@@ -100,9 +106,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
         setDrawerOpen(false);
         setDesktopProjectMenuOpen(false);
         setMobileProjectMenuOpen(false);
-        if (pathname.includes("/specs/")) setActiveTab("specs");
-        if (pathname.includes("/conversations/")) setActiveTab("conversations");
-    }, [pathname]);
+        const section = sectionFromPathname(pathname, projectId);
+        if (section) setActiveTab(section);
+    }, [pathname, projectId]);
 
     useEffect(() => {
         const query = window.matchMedia("(min-width: 768px)");
@@ -117,16 +123,16 @@ export function Sidebar({ projectId }: { projectId: string }) {
         let active = true;
         async function refresh() {
             try {
-                const [projectsResult, treeResult, conversationsResult] = await Promise.all([
+                const [projectsResult, treeResult, chatsResult] = await Promise.all([
                     api<{ projects: Project[] }>("/projects"),
                     api<{ features: Feature[]; specs: SpecSummary[] }>(`/projects/${projectId}/tree`),
-                    api<{ conversations: Conversation[] }>(`/projects/${projectId}/conversations`),
+                    api<{ chats: Chat[] }>(`/projects/${projectId}/chats`),
                 ]);
                 if (!active) return;
                 setProjects(projectsResult.projects);
                 setFeatures(treeResult.features);
                 setSpecs(treeResult.specs);
-                setConversations(conversationsResult.conversations);
+                setChats(chatsResult.chats);
                 setLoadError("");
                 setLoaded(true);
             } catch (error) {
@@ -225,17 +231,17 @@ export function Sidebar({ projectId }: { projectId: string }) {
         setDeletingItem(true);
         setDeleteError("");
         try {
-            if (deleteTarget.kind === "conversation") {
-                await api<void>(`/conversations/${deleteTarget.item.id}`, { method: "DELETE" });
-                setConversations((current) => current.filter((item) => item.id !== deleteTarget.item.id));
-                if (pathname === `/p/${projectId}/conversations/${deleteTarget.item.id}`) {
-                    router.replace(`/p/${projectId}`);
+            if (deleteTarget.kind === "chat") {
+                await api<void>(`/chats/${deleteTarget.item.id}`, { method: "DELETE" });
+                setChats((current) => current.filter((item) => item.id !== deleteTarget.item.id));
+                if (pathname === `/p/${projectId}/chats/${deleteTarget.item.id}`) {
+                    router.replace(`/p/${projectId}/chats`);
                 }
             } else if (deleteTarget.kind === "spec") {
                 await api<void>(`/specs/${deleteTarget.item.id}`, { method: "DELETE" });
                 setSpecs((current) => current.filter((item) => item.id !== deleteTarget.item.id));
                 if (pathname === `/p/${projectId}/specs/${deleteTarget.item.id}`) {
-                    router.replace(`/p/${projectId}`);
+                    router.replace(`/p/${projectId}/specs`);
                 }
             } else {
                 const deletedFeatureIds = featureDeletionIds(deleteTarget.item.id);
@@ -247,7 +253,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 setSpecs((current) => current.filter((spec) => !deletedSpecIds.has(spec.id)));
                 setExpandedFeatures((current) => new Set([...current].filter((id) => !deletedFeatureIds.has(id))));
                 const activeSpecId = pathname.match(/\/specs\/([^/]+)/)?.[1];
-                if (activeSpecId && deletedSpecIds.has(activeSpecId)) router.replace(`/p/${projectId}`);
+                if (activeSpecId && deletedSpecIds.has(activeSpecId)) router.replace(`/p/${projectId}/specs`);
             }
             setDeleteTarget(null);
             setDeletingItem(false);
@@ -511,10 +517,18 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </DropdownMenu>
                 </div>
 
-                <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as SidebarTab)} className="min-h-0 flex-1">
+                <Tabs
+                    value={activeTab}
+                    onValueChange={(value) => {
+                        const tab = value as SidebarTab;
+                        setActiveTab(tab);
+                        router.push(`/p/${projectId}/${tab}`);
+                    }}
+                    className="min-h-0 flex-1"
+                >
                     <TabsList className="grid grid-cols-2 gap-1.5 px-[13px] pt-1 pb-[13px]" aria-label="Project content">
-                        <TabsTrigger value="conversations" className="min-h-10 px-2 md:min-h-[34px]">
-                            <MessageSquare size={15} /> Conversations
+                        <TabsTrigger value="chats" className="min-h-10 px-2 md:min-h-[34px]">
+                            <MessageSquare size={15} /> Chats
                         </TabsTrigger>
                         <TabsTrigger value="specs" className="min-h-10 px-2 md:min-h-[34px]">
                             <FileCheck2 size={15} /> Specs
@@ -522,29 +536,29 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </TabsList>
                     <Separator />
 
-                    <TabsContent value="conversations" className="data-[state=active]:flex data-[state=active]:flex-col">
+                    <TabsContent value="chats" className="data-[state=active]:flex data-[state=active]:flex-col">
                         {renderLoadError()}
                         <div className="flex h-12 shrink-0 items-center justify-between px-[14px]">
-                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Conversations</span>
-                            <Button asChild variant="ghost" size="icon" className="text-ink-faint" aria-label="Start conversation">
-                                <Link href={`/p/${projectId}/conversations/new`}><Plus size={14} /></Link>
+                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Chats</span>
+                            <Button asChild variant="ghost" size="icon" className="text-ink-faint" aria-label="Start chat">
+                                <Link href={`/p/${projectId}/chats/new`}><Plus size={14} /></Link>
                             </Button>
                         </div>
                         <ScrollArea className="min-h-0 flex-1">
                             <div className="w-full min-w-0 overflow-hidden px-[9px] pb-3">
                                 {renderLoading()}
-                                {loaded && conversations.map((conversation) => {
-                                    const href = `/p/${projectId}/conversations/${conversation.id}`;
+                                {loaded && chats.map((chat) => {
+                                    const href = `/p/${projectId}/chats/${chat.id}`;
                                     const selected = pathname === href;
                                     return (
-                                        <div key={conversation.id} className={`group mb-0.5 flex items-center rounded-[9px] transition-colors ${selected ? "bg-surface-selected" : "hover:bg-surface-hover"}`}>
+                                        <div key={chat.id} className={`group mb-0.5 flex items-center rounded-[9px] transition-colors ${selected ? "bg-surface-selected" : "hover:bg-surface-hover"}`}>
                                             <Button asChild variant="ghost" className="block h-auto min-w-0 flex-1 overflow-hidden whitespace-normal rounded-[9px] px-2.5 py-2.5 text-left hover:bg-transparent">
                                                 <Link href={href} aria-current={selected ? "page" : undefined}>
                                                     <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                                                         <span className={`size-2 shrink-0 rounded-full ${selected ? "bg-primary" : "bg-ink-disabled"}`} />
-                                                        <span className={`block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] ${selected ? "font-bold text-ink" : "font-semibold text-ink-soft"}`}>{conversation.title}</span>
+                                                        <span className={`block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] ${selected ? "font-bold text-ink" : "font-semibold text-ink-soft"}`}>{chat.title}</span>
                                                     </span>
-                                                    <span className="mt-1 block truncate pl-4 text-[0.625rem] font-normal text-ink-faint">Created {conversationDate(conversation.createdAt)}</span>
+                                                    <span className="mt-1 block truncate pl-4 text-[0.625rem] font-normal text-ink-faint">Created {chatDate(chat.createdAt)}</span>
                                                 </Link>
                                             </Button>
                                             <Tooltip>
@@ -553,21 +567,21 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                                         type="button"
                                                         variant="ghost"
                                                         size="icon-sm"
-                                                        onClick={() => openDelete({ kind: "conversation", item: conversation })}
+                                                        onClick={() => openDelete({ kind: "chat", item: chat })}
                                                         className="mr-1 text-ink-faint opacity-70 hover:bg-danger-soft hover:text-danger group-hover:opacity-100 focus:opacity-100"
-                                                        aria-label={`Delete conversation ${conversation.title}`}
+                                                        aria-label={`Delete chat ${chat.title}`}
                                                     >
                                                         <Trash2 size={12} />
                                                     </Button>
                                                 </TooltipTrigger>
-                                                <TooltipContent>Delete conversation</TooltipContent>
+                                                <TooltipContent>Delete chat</TooltipContent>
                                             </Tooltip>
                                         </div>
                                     );
                                 })}
-                                {loaded && conversations.length === 0 && !loadError && (
+                                {loaded && chats.length === 0 && !loadError && (
                                     <div className="px-2.5 py-4">
-                                        <p className="text-[0.75rem] font-bold">No conversations yet</p>
+                                        <p className="text-[0.75rem] font-bold">No chats yet</p>
                                         <p className="mt-1 text-[0.6875rem] leading-5 text-ink-faint">Start one to document a behavior.</p>
                                     </div>
                                 )}
@@ -658,10 +672,10 @@ export function Sidebar({ projectId }: { projectId: string }) {
             </aside>
             <ConfirmDeleteDialog
                 open={deleteTarget !== null}
-                title={deleteTarget?.kind === "conversation" ? "Delete conversation?" : deleteTarget?.kind === "spec" ? "Delete Spec?" : "Delete feature?"}
+                title={deleteTarget?.kind === "chat" ? "Delete chat?" : deleteTarget?.kind === "spec" ? "Delete Spec?" : "Delete feature?"}
                 description={deleteTarget ? (() => {
-                    if (deleteTarget.kind === "conversation") {
-                        return <>The conversation <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, its messages, and browser session will be permanently removed. Specs created from it will remain.</>;
+                    if (deleteTarget.kind === "chat") {
+                        return <>The chat <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, its messages, and browser session will be permanently removed. Specs created from it will remain.</>;
                     }
                     if (deleteTarget.kind === "spec") {
                         return <>The Spec <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, every version, its verification history, and all evidence will be permanently removed.</>;
@@ -673,7 +687,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         <strong className="font-bold text-ink">{deleteTarget.item.title}</strong> will be permanently removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {specCount} {specCount === 1 ? "Spec" : "Specs"}, every version, run history, and evidence inside it.
                     </>;
                 })() : null}
-                confirmLabel={deleteTarget?.kind === "conversation" ? "Delete conversation" : deleteTarget?.kind === "spec" ? "Delete Spec" : "Delete feature"}
+                confirmLabel={deleteTarget?.kind === "chat" ? "Delete chat" : deleteTarget?.kind === "spec" ? "Delete Spec" : "Delete feature"}
                 busy={deletingItem}
                 error={deleteError}
                 returnFocusRef={deleteTriggerRef}

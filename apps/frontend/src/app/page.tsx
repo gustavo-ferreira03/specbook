@@ -113,7 +113,7 @@ function HomeContent() {
                 maxActions: Number(maxActions),
                 safetyNotes: parseSafetyNotes(safetyNotes),
             });
-            router.push(`/p/${project.id}/conversations/${discovery.conversation.id}`);
+            router.push(`/p/${project.id}/chats/${discovery.chat.id}`);
         } catch {
             router.push(`/p/${project.id}?discovery=failed`);
         }
@@ -184,7 +184,7 @@ function HomeContent() {
                         {returnProject ? "Add another application" : "Connect your first application"}
                     </h1>
                     <p className="mt-3 max-w-[44ch] text-xs leading-5 text-ink-soft">
-                        Give Specbook an application URL. Conversations, browser sessions, and Specs stay grouped inside the project.
+                        Give Specbook an application URL. Chats, browser sessions, and Specs stay grouped inside the project.
                     </p>
                 </div>
 
