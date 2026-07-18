@@ -86,11 +86,14 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             <div className="flex min-h-full flex-col bg-surface" aria-busy="true" role="status">
                 <span className="sr-only">Loading Specs dashboard</span>
                 <PageHeader title="Specs" eyebrow="Project" />
-                <div className="mx-auto w-full max-w-[760px] space-y-4 px-5 py-8">
+                <div className="mx-auto w-full max-w-[1040px] space-y-4 px-5 py-8">
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                         {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-20 rounded-[13px]" />)}
                     </div>
-                    <Skeleton className="h-64 rounded-[13px]" />
+                    <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+                        <Skeleton className="h-64 rounded-[13px]" />
+                        <Skeleton className="h-64 rounded-[13px]" />
+                    </div>
                 </div>
             </div>
         );
@@ -139,7 +142,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     return (
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader title="Specs" eyebrow="Project" />
-            <div className="mx-auto w-full max-w-[760px] flex-1 px-5 py-8">
+            <div className="mx-auto w-full max-w-[1040px] flex-1 px-5 py-8">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <StatTile label="Total Specs" value={specs.length} />
                     <StatTile label="Passed" value={counts.passed} tone="success" />
@@ -147,30 +150,32 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     <StatTile label="Unverified" value={counts.unverified} tone="pending" />
                 </div>
 
-                <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,220px)_1fr]">
+                <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
                     <div className="rounded-[13px] border border-line bg-surface p-4">
                         <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Status breakdown</p>
                         <p className="mt-1 text-xs text-ink-soft">{passRate}% of Specs are passing</p>
-                        <ChartContainer config={STATUS_CHART_CONFIG} className="mx-auto mt-2 aspect-square max-h-[180px]">
+                        <ChartContainer config={STATUS_CHART_CONFIG} className="mx-auto mt-3 aspect-square max-h-[170px]">
                             <PieChart>
                                 <ChartTooltip content={<ChartTooltipContent nameKey="status" hideLabel />} />
                                 <Pie data={chartData} dataKey="count" nameKey="status" innerRadius="55%" outerRadius="85%" strokeWidth={2} stroke="var(--color-surface)" />
                             </PieChart>
                         </ChartContainer>
-                        <ul className="mt-3 space-y-1.5">
-                            {STATUS_ORDER.filter((status) => counts[status] > 0).map((status) => {
-                                const Icon = STATUS_ICON[status];
-                                return (
-                                    <li key={status} className="flex items-center justify-between gap-2 text-[0.6875rem]">
-                                        <span className="flex items-center gap-1.5 text-ink-soft">
-                                            <Icon size={11} className="text-ink-faint" />
-                                            {STATUS_CHART_CONFIG[status].label}
-                                        </span>
-                                        <span className="font-bold text-ink">{counts[status]}</span>
-                                    </li>
-                                );
-                            })}
-                        </ul>
+                        {chartData.length > 1 && (
+                            <ul className="mt-4 space-y-1.5 border-t border-line pt-3">
+                                {STATUS_ORDER.filter((status) => counts[status] > 0).map((status) => {
+                                    const Icon = STATUS_ICON[status];
+                                    return (
+                                        <li key={status} className="flex items-center justify-between gap-2 text-[0.6875rem]">
+                                            <span className="flex items-center gap-1.5 text-ink-soft">
+                                                <Icon size={11} className="text-ink-faint" />
+                                                {STATUS_CHART_CONFIG[status].label}
+                                            </span>
+                                            <span className="font-bold text-ink">{counts[status]}</span>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
                     </div>
 
                     <div className="rounded-[13px] border border-line bg-surface p-4">
