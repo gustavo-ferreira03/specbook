@@ -29,7 +29,7 @@ export interface BrowserToolPolicy {
     allowedTools?: ReadonlySet<string>;
     beforeCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>;
     afterCall?: (toolName: string, args: Record<string, unknown>, result: string) => Promise<void>;
-    sanitizeResult?: (text: string) => string;
+    sanitizeResult?: (text: string) => Promise<string> | string;
 }
 
 export interface BrowserMcp {
@@ -190,9 +190,10 @@ export function bridgeBrowserTools(
                 ),
                 async execute(_id, params) {
                     const args = (params ?? {}) as Record<string, unknown>;
-                    const clean = (value: string) => (policy?.sanitizeResult ? policy.sanitizeResult(value) : value);
-                    const toolError = (text: string) => ({
-                        content: [{ type: "text" as const, text: clean(text) }],
+                    const clean = async (value: string) =>
+                        policy?.sanitizeResult ? await policy.sanitizeResult(value) : value;
+                    const toolError = async (text: string) => ({
+                        content: [{ type: "text" as const, text: await clean(text) }],
                         details: undefined,
                         terminate: false,
                     });
@@ -214,7 +215,7 @@ export function bridgeBrowserTools(
                             }
                         }
                         return {
-                            content: [{ type: "text" as const, text: clean(text) || "(no output)" }],
+                            content: [{ type: "text" as const, text: (await clean(text)) || "(no output)" }],
                             details: undefined,
                             terminate: false,
                         };

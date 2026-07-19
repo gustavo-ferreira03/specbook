@@ -19,7 +19,7 @@ export interface CredentialToolOptions {
     chatId: string;
     mcp: BrowserMcp | null;
     workDir: string | null;
-    scrub: (value: string) => string;
+    scrub: (value: string) => Promise<string>;
     notify: () => void;
 }
 
@@ -76,9 +76,10 @@ export function createCredentialTools(options: CredentialToolOptions) {
                         arguments: { element: params.element, target: params.target, text: decryptSecret(field.value) },
                     });
                     const rendered = await renderMcpResult(result as { content?: unknown }, options.workDir);
-                    return text(options.scrub(rendered) || `Filled ${params.profile}.${params.field} into ${params.element}.`);
+                    const cleaned = await options.scrub(rendered);
+                    return text(cleaned || `Filled ${params.profile}.${params.field} into ${params.element}.`);
                 } catch (error) {
-                    return text(options.scrub(`fill_secret failed: ${error instanceof Error ? error.message : String(error)}`));
+                    return text(await options.scrub(`fill_secret failed: ${error instanceof Error ? error.message : String(error)}`));
                 }
             },
         }),

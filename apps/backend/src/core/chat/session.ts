@@ -421,7 +421,7 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
 
         let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
         let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null = null;
-        const scrub = await createProjectScrubber(row.projectId);
+        const scrub = createProjectScrubber(row.projectId);
         try {
             chatBrowser = await getOrCreateChatBrowser(id);
             const policy: BrowserToolPolicy = discoveryRevision
