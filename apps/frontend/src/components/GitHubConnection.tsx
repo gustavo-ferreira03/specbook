@@ -64,7 +64,7 @@ export function GitHubConnection({ projectId }: { projectId: string }) {
 
     if (!git && !error) {
         return (
-            <section className="mt-7" aria-labelledby="github-heading" aria-busy="true">
+            <section aria-labelledby="github-heading" aria-busy="true">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="mt-3 h-20 rounded-[9px]" />
             </section>
@@ -76,7 +76,7 @@ export function GitHubConnection({ projectId }: { projectId: string }) {
     const reusingSavedToken = Boolean(git?.hasToken && remoteUrl.trim() === git.remoteUrl);
 
     return (
-        <section className="mt-7" aria-labelledby="github-heading">
+        <section aria-labelledby="github-heading">
             <div className="flex items-end justify-between gap-4">
                 <div>
                     <h2 id="github-heading" className="flex items-center gap-1.5 text-[0.8125rem] font-bold">

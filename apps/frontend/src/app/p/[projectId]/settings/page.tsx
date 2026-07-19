@@ -342,121 +342,147 @@ export default function SettingsPage() {
         <Dialog open={providersOpen} onOpenChange={handleProvidersOpenChange}>
             <div className="min-h-full bg-surface">
                 <PageHeader title="Agent settings" eyebrow="Settings" />
-                <div className="mx-auto w-full max-w-[720px] px-4 py-7 sm:px-6 sm:py-8">
-                    <section aria-labelledby="agent-model-heading">
-                        <div className="flex items-end justify-between gap-4">
-                            <div>
-                                <h2 id="agent-model-heading" className="text-[0.8125rem] font-bold">Agent model</h2>
-                                <p className="mt-1 text-[0.65625rem] text-ink-faint">Provider and model used for every chat.</p>
-                            </div>
-                            <Badge variant={selectedProvider?.configured ? "success" : "pending"} className="gap-1.5 rounded-none bg-transparent p-0">
-                                <span className={`size-1.5 rounded-full ${selectedProvider?.configured ? "bg-success" : "bg-pending"}`} />
-                                {selectedProvider?.configured ? "Ready" : "Setup needed"}
-                            </Badge>
-                        </div>
-                        <Separator className="mt-3" />
-                        <form onSubmit={saveCurrentSettings} className="py-4">
-                            {configuredProviders.length === 0 && (
-                                <Alert variant="warning" className="mb-3 flex items-center gap-2 py-2">
-                                    <KeyRound size={13} />
-                                    <AlertDescription>Connect a provider before selecting a model.</AlertDescription>
-                                </Alert>
-                            )}
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                <div>
-                                    <Label htmlFor="current-provider" className="mb-1.5">Provider</Label>
-                                    <Select
-                                        value={selectableProviders.some((provider) => provider.id === draft.provider) ? draft.provider : ""}
-                                        onValueChange={selectProvider}
-                                        disabled={savingSettings || selectableProviders.length === 0}
-                                    >
-                                        <SelectTrigger id="current-provider">
-                                            <SelectValue placeholder={selectableProviders.length ? "Select provider" : "No provider connected"} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {selectableProviders.map((provider) => (
-                                                <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <Label htmlFor="current-model" className="mb-1.5">Model</Label>
-                                    <Select
-                                        value={selectedProvider?.models.some((model) => model.id === draft.model) ? draft.model : ""}
-                                        onValueChange={(model) => {
-                                            setDraft((current) => current ? { ...current, model } : current);
-                                            setSettingsFeedback(null);
-                                        }}
-                                        disabled={savingSettings || !selectedProvider?.models.length}
-                                    >
-                                        <SelectTrigger id="current-model">
-                                            <SelectValue placeholder={selectedProvider?.models.length ? "Select model" : "No models available"} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {selectedProvider?.models.map((model) => (
-                                                <SelectItem key={model.id} value={model.id}>{model.label}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                            <div className="mt-3 flex min-h-8 items-center justify-between gap-3">
-                                <div className="min-w-0 flex-1">
-                                    {settingsFeedback && (
-                                        <Alert
-                                            variant={settingsFeedback.type === "error" ? "destructive" : "default"}
-                                            className={`bg-transparent p-0 text-[0.65625rem] ${settingsFeedback.type === "success" ? "text-success" : ""}`}
-                                            role={settingsFeedback.type === "error" ? "alert" : "status"}
-                                        >
-                                            <AlertDescription className="flex items-center gap-1.5">
-                                                {settingsFeedback.type === "success" ? <Check size={12} /> : <AlertCircle size={12} />}
-                                                {settingsFeedback.text}
-                                            </AlertDescription>
-                                        </Alert>
-                                    )}
-                                </div>
-                                <Button type="submit" disabled={savingSettings || !hasChanges || !draft.provider || !draft.model}>
-                                    {savingSettings ? "Saving..." : "Save model"}
-                                </Button>
-                            </div>
-                        </form>
-                        <Separator />
-                    </section>
+                <Tabs defaultValue="model" className="mx-auto w-full max-w-[720px] px-4 py-7 sm:px-6 sm:py-8">
+                    <TabsList className="w-full justify-start gap-0 border-b border-line">
+                        <TabsTrigger value="model" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
+                            Model
+                        </TabsTrigger>
+                        <TabsTrigger value="github" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
+                            GitHub
+                        </TabsTrigger>
+                        <TabsTrigger value="context" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
+                            Context
+                        </TabsTrigger>
+                        <TabsTrigger value="credentials" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
+                            Credentials
+                        </TabsTrigger>
+                    </TabsList>
 
-                    <section className="mt-7" aria-labelledby="providers-heading">
-                        <div className="flex items-end justify-between gap-4">
-                            <div>
-                                <h2 id="providers-heading" className="text-[0.8125rem] font-bold">Connected providers</h2>
-                                <p className="mt-1 text-[0.65625rem] text-ink-faint">Credentials stay in the self-hosted runtime.</p>
-                            </div>
-                            <Button ref={manageProvidersRef} type="button" variant="outline" onClick={openProviders} className="shrink-0">
-                                <Settings2 size={13} />
-                                <span className="sm:hidden">Manage</span>
-                                <span className="hidden sm:inline">Manage providers</span>
-                            </Button>
-                        </div>
-                        <div className="mt-3 border-y border-line">
-                            {configuredProviders.length ? configuredProviders.map((provider) => (
-                                <div key={provider.id} className="flex min-h-11 items-center gap-3 border-b border-line px-1 last:border-0">
-                                    <span className="size-2 rounded-full bg-success" />
-                                    <span className="min-w-0 flex-1 truncate text-[0.71875rem] font-bold">{provider.name}</span>
-                                    <span className="text-[0.625rem] text-ink-faint">{modelCountLabel(provider.models.length)}</span>
+                    <TabsContent value="model" className="mt-6 flex-none">
+                        <section aria-labelledby="agent-model-heading">
+                            <div className="flex items-end justify-between gap-4">
+                                <div>
+                                    <h2 id="agent-model-heading" className="text-[0.8125rem] font-bold">Agent model</h2>
+                                    <p className="mt-1 text-[0.65625rem] text-ink-faint">Provider and model used for every chat.</p>
                                 </div>
-                            )) : (
-                                <div className="py-5 text-center">
-                                    <p className="text-[0.71875rem] font-bold">No provider connected</p>
-                                    <Button type="button" variant="link" size="sm" onClick={openProviders} className="mt-1 h-auto p-0 text-[0.65625rem] text-ink-soft">
-                                        Open provider manager
+                                <Badge variant={selectedProvider?.configured ? "success" : "pending"} className="gap-1.5 rounded-none bg-transparent p-0">
+                                    <span className={`size-1.5 rounded-full ${selectedProvider?.configured ? "bg-success" : "bg-pending"}`} />
+                                    {selectedProvider?.configured ? "Ready" : "Setup needed"}
+                                </Badge>
+                            </div>
+                            <Separator className="mt-3" />
+                            <form onSubmit={saveCurrentSettings} className="py-4">
+                                {configuredProviders.length === 0 && (
+                                    <Alert variant="warning" className="mb-3 flex items-center gap-2 py-2">
+                                        <KeyRound size={13} />
+                                        <AlertDescription>Connect a provider before selecting a model.</AlertDescription>
+                                    </Alert>
+                                )}
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <div>
+                                        <Label htmlFor="current-provider" className="mb-1.5">Provider</Label>
+                                        <Select
+                                            value={selectableProviders.some((provider) => provider.id === draft.provider) ? draft.provider : ""}
+                                            onValueChange={selectProvider}
+                                            disabled={savingSettings || selectableProviders.length === 0}
+                                        >
+                                            <SelectTrigger id="current-provider">
+                                                <SelectValue placeholder={selectableProviders.length ? "Select provider" : "No provider connected"} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {selectableProviders.map((provider) => (
+                                                    <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="current-model" className="mb-1.5">Model</Label>
+                                        <Select
+                                            value={selectedProvider?.models.some((model) => model.id === draft.model) ? draft.model : ""}
+                                            onValueChange={(model) => {
+                                                setDraft((current) => current ? { ...current, model } : current);
+                                                setSettingsFeedback(null);
+                                            }}
+                                            disabled={savingSettings || !selectedProvider?.models.length}
+                                        >
+                                            <SelectTrigger id="current-model">
+                                                <SelectValue placeholder={selectedProvider?.models.length ? "Select model" : "No models available"} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {selectedProvider?.models.map((model) => (
+                                                    <SelectItem key={model.id} value={model.id}>{model.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <div className="mt-3 flex min-h-8 items-center justify-between gap-3">
+                                    <div className="min-w-0 flex-1">
+                                        {settingsFeedback && (
+                                            <Alert
+                                                variant={settingsFeedback.type === "error" ? "destructive" : "default"}
+                                                className={`bg-transparent p-0 text-[0.65625rem] ${settingsFeedback.type === "success" ? "text-success" : ""}`}
+                                                role={settingsFeedback.type === "error" ? "alert" : "status"}
+                                            >
+                                                <AlertDescription className="flex items-center gap-1.5">
+                                                    {settingsFeedback.type === "success" ? <Check size={12} /> : <AlertCircle size={12} />}
+                                                    {settingsFeedback.text}
+                                                </AlertDescription>
+                                            </Alert>
+                                        )}
+                                    </div>
+                                    <Button type="submit" disabled={savingSettings || !hasChanges || !draft.provider || !draft.model}>
+                                        {savingSettings ? "Saving..." : "Save model"}
                                     </Button>
                                 </div>
-                            )}
-                        </div>
-                    </section>
-                    <GitHubConnection projectId={projectId} />
-                    <ContextFileCard projectId={projectId} />
-                    <CredentialProfilesCard projectId={projectId} />
-                </div>
+                            </form>
+                            <Separator />
+                        </section>
+
+                        <section className="mt-7" aria-labelledby="providers-heading">
+                            <div className="flex items-end justify-between gap-4">
+                                <div>
+                                    <h2 id="providers-heading" className="text-[0.8125rem] font-bold">Connected providers</h2>
+                                    <p className="mt-1 text-[0.65625rem] text-ink-faint">Credentials stay in the self-hosted runtime.</p>
+                                </div>
+                                <Button ref={manageProvidersRef} type="button" variant="outline" onClick={openProviders} className="shrink-0">
+                                    <Settings2 size={13} />
+                                    <span className="sm:hidden">Manage</span>
+                                    <span className="hidden sm:inline">Manage providers</span>
+                                </Button>
+                            </div>
+                            <div className="mt-3 border-y border-line">
+                                {configuredProviders.length ? configuredProviders.map((provider) => (
+                                    <div key={provider.id} className="flex min-h-11 items-center gap-3 border-b border-line px-1 last:border-0">
+                                        <span className="size-2 rounded-full bg-success" />
+                                        <span className="min-w-0 flex-1 truncate text-[0.71875rem] font-bold">{provider.name}</span>
+                                        <span className="text-[0.625rem] text-ink-faint">{modelCountLabel(provider.models.length)}</span>
+                                    </div>
+                                )) : (
+                                    <div className="py-5 text-center">
+                                        <p className="text-[0.71875rem] font-bold">No provider connected</p>
+                                        <Button type="button" variant="link" size="sm" onClick={openProviders} className="mt-1 h-auto p-0 text-[0.65625rem] text-ink-soft">
+                                            Open provider manager
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        </section>
+                    </TabsContent>
+
+                    <TabsContent value="github" className="mt-6 flex-none">
+                        <GitHubConnection projectId={projectId} />
+                    </TabsContent>
+
+                    <TabsContent value="context" className="mt-6 flex-none">
+                        <ContextFileCard projectId={projectId} />
+                    </TabsContent>
+
+                    <TabsContent value="credentials" className="mt-6 flex-none">
+                        <CredentialProfilesCard projectId={projectId} />
+                    </TabsContent>
+                </Tabs>
             </div>
 
             <DialogContent

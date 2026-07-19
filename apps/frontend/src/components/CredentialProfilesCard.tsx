@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, KeyRound, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, KeyRound, Lock, Plus, Trash2, Unlock, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +69,10 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
     }
 
     async function save() {
+        if (!name.trim()) {
+            setError("Profile name is required.");
+            return;
+        }
         setSaving(true);
         setError("");
         const inputs: CredentialFieldInput[] = fields
@@ -84,7 +88,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             setOpenId(null);
             await refresh();
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            setError(err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err));
         } finally {
             setSaving(false);
         }
@@ -101,7 +105,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
     }
 
     return (
-        <section className="mt-7 space-y-3" aria-labelledby="credentials-heading">
+        <section className="space-y-3" aria-labelledby="credentials-heading">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <KeyRound className="size-4" aria-hidden />
@@ -126,30 +130,41 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             {!loading && profiles.length === 0 && openId === null && (
                 <p className="text-[0.6875rem] text-ink-faint">No credential profiles yet.</p>
             )}
-            <ul className="divide-y divide-line border-y border-line empty:border-none">
+            <div className="grid gap-2 empty:hidden">
                 {profiles.map((profile) => (
-                    <li key={profile.id} className="flex items-center justify-between gap-3 py-2">
-                        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openEdit(profile)}>
-                            <p className="text-[0.71875rem] font-bold">{profile.name}</p>
-                            <p className="truncate text-[0.625rem] text-ink-faint">
+                    <div
+                        key={profile.id}
+                        className="group flex items-start gap-3 rounded-[9px] border border-line-strong bg-surface p-3 transition-colors hover:bg-surface-hover cursor-pointer"
+                        onClick={() => openEdit(profile)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openEdit(profile); } }}
+                    >
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                                <span className="size-2 rounded-full bg-success shrink-0" />
+                                <p className="truncate text-[0.71875rem] font-bold">{profile.name}</p>
+                            </div>
+                            <p className="mt-1 truncate text-[0.625rem] text-ink-faint">
                                 {profile.fields.map((field) => (field.secret ? `${field.key}: ••••` : `${field.key}: ${field.value}`)).join("  ·  ")}
                             </p>
-                        </button>
+                        </div>
                         <Button
                             type="button"
                             size="sm"
                             variant="ghost"
                             aria-label={`Delete ${profile.name}`}
-                            onClick={() => void remove(profile.id)}
+                            onClick={(e) => { e.stopPropagation(); void remove(profile.id); }}
+                            className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                         >
                             <Trash2 size={13} />
                         </Button>
-                    </li>
+                    </div>
                 ))}
-            </ul>
+            </div>
             {openId && (
                 <form
-                    className="space-y-3 rounded-lg border border-line bg-surface-soft p-3"
+                    className="space-y-3 rounded-[9px] border border-line-strong bg-surface-soft p-4"
                     onSubmit={(event) => {
                         event.preventDefault();
                         void save();
@@ -167,8 +182,8 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                     </div>
                     {fields.map((field, index) => (
                         <div key={index} className="flex items-end gap-2">
-                            <div className="w-36">
-                                <Label>Field</Label>
+                            <div className="w-40">
+                                <Label className="text-[0.625rem]">Field</Label>
                                 <Input
                                     value={field.key}
                                     onChange={(event) =>
@@ -177,27 +192,36 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                 />
                             </div>
                             <div className="flex-1">
-                                <Label>{field.secret ? "Secret value" : "Value"}</Label>
-                                <Input
-                                    type={field.secret ? "password" : "text"}
-                                    autoComplete="off"
-                                    value={field.value}
-                                    placeholder={field.secret && field.hasValue ? "•••• (keep current)" : ""}
-                                    onChange={(event) =>
-                                        setFields(fields.map((f, i) => (i === index ? { ...f, value: event.target.value } : f)))
-                                    }
-                                />
+                                <Label className="text-[0.625rem]">{field.secret ? "Secret" : "Value"}</Label>
+                                <div className="relative">
+                                    <Input
+                                        type={field.secret ? "password" : "text"}
+                                        autoComplete="off"
+                                        value={field.value}
+                                        placeholder={field.secret && field.hasValue ? "•••• (keep current)" : ""}
+                                        onChange={(event) =>
+                                            setFields(fields.map((f, i) => (i === index ? { ...f, value: event.target.value } : f)))
+                                        }
+                                        className="pr-9"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setFields(fields.map((f, i) => (i === index ? { ...f, secret: !f.secret } : f)))}
+                                        className="absolute inset-y-0 right-0 flex items-center px-2 text-ink-faint hover:text-ink transition-colors"
+                                        aria-label={field.secret ? "Make plain text" : "Make secret"}
+                                    >
+                                        {field.secret ? <Lock size={13} /> : <Unlock size={13} />}
+                                    </button>
+                                </div>
                             </div>
-                            <label className="flex items-center gap-1 pb-2 text-[0.625rem] text-ink-faint">
-                                <input
-                                    type="checkbox"
-                                    checked={field.secret}
-                                    onChange={(event) =>
-                                        setFields(fields.map((f, i) => (i === index ? { ...f, secret: event.target.checked } : f)))
-                                    }
-                                />
-                                secret
-                            </label>
+                            <button
+                                type="button"
+                                onClick={() => setFields(fields.filter((_, i) => i !== index))}
+                                className="flex h-[34px] w-[34px] items-center justify-center rounded-md text-ink-faint hover:text-danger hover:bg-danger-soft transition-colors"
+                                aria-label={`Remove ${field.key || "field"}`}
+                            >
+                                <X size={13} />
+                            </button>
                         </div>
                     ))}
                     <div className="flex items-center gap-2">
