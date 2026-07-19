@@ -39,12 +39,12 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "fill_secret",
             label: "fill_secret",
             description:
-                "Type a secret credential field into the page without exposing it. Provide the element description and ref from the latest browser_snapshot. Only works on the project origin or the profile's allowed origins.",
+                "Type a secret credential field into the page without exposing it. Provide the element description and target (the exact element reference) from the latest browser_snapshot, same as browser_type. Only works on the project origin or the profile's allowed origins.",
             parameters: Type.Object({
                 profile: Type.String(),
                 field: Type.String(),
                 element: Type.String(),
-                ref: Type.String(),
+                target: Type.String(),
             }),
             async execute(_id, params) {
                 if (!options.mcp || !options.workDir) {
@@ -73,7 +73,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 try {
                     const result = await options.mcp.client.callTool({
                         name: "browser_type",
-                        arguments: { element: params.element, ref: params.ref, text: decryptSecret(field.value) },
+                        arguments: { element: params.element, target: params.target, text: decryptSecret(field.value) },
                     });
                     const rendered = await renderMcpResult(result as { content?: unknown }, options.workDir);
                     return text(options.scrub(rendered) || `Filled ${params.profile}.${params.field} into ${params.element}.`);
