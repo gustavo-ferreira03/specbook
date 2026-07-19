@@ -53,7 +53,7 @@ export function SpecRunDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="flex max-h-[calc(100dvh-24px)] max-w-xl flex-col overflow-hidden p-0" showCloseButton={!running}>
+            <DialogContent className="flex h-[min(32rem,calc(100dvh-24px))] max-w-xl flex-col overflow-hidden p-0" showCloseButton={!running}>
                 <DialogHeader className="border-b border-line px-4 py-4 pr-12">
                     <DialogTitle>{title}</DialogTitle>
                     <DialogDescription>

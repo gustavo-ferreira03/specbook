@@ -169,7 +169,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
           ? "text-pending"
           : "text-success";
 
-    const unverifiedSpecs = specs.filter((s) => s.status === "unverified");
 
     async function handleRun(specIds: string[], label: string) {
         if (specIds.length === 0 || isRunning) return;
@@ -281,16 +280,22 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                         <Play size={12} /> Run
                                     </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
+                                <DropdownMenuContent align="end" className="min-w-36">
                                     <DropdownMenuItem onClick={() => handleRun(specs.map((s) => s.id), "Run all")}>
-                                        Run all
+                                        Run All
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        onClick={() => handleRun(unverifiedSpecs.map((s) => s.id), "Run unverified")}
-                                        disabled={unverifiedSpecs.length === 0}
-                                    >
-                                        Run unverified{unverifiedSpecs.length > 0 ? ` (${unverifiedSpecs.length})` : ""}
-                                    </DropdownMenuItem>
+                                    {STATUS_ORDER.filter((status) => status !== "passed").map((status) => {
+                                        const count = specs.filter((s) => s.status === status).length;
+                                        if (count === 0) return null;
+                                        return (
+                                            <DropdownMenuItem
+                                                key={status}
+                                                onClick={() => handleRun(specs.filter((s) => s.status === status).map((s) => s.id), `Run ${status}`)}
+                                            >
+                                                Run {STATUS_CHART_CONFIG[status].label}
+                                            </DropdownMenuItem>
+                                        );
+                                    })}
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </div>
