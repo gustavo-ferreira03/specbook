@@ -26,6 +26,7 @@ import {
 import { projectsRepository, type Project } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
 import { createContextTools, projectContextJsonSchema } from "./context-tools";
+import { createCredentialTools } from "./credential-tools";
 import { createDomainTools } from "./tools";
 import type { ChatMessageRecord } from "./types";
 
@@ -419,13 +420,14 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
         }
 
         let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
+        let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null = null;
+        const scrub = await createProjectScrubber(row.projectId);
         try {
-            const browser = await getOrCreateChatBrowser(id);
-            const scrub = await createProjectScrubber(row.projectId);
+            chatBrowser = await getOrCreateChatBrowser(id);
             const policy: BrowserToolPolicy = discoveryRevision
-                ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp), sanitizeResult: scrub }
+                ? { ...createDiscoveryBrowserPolicy(discoveryRevision, chatBrowser.mcp), sanitizeResult: scrub }
                 : { sanitizeResult: scrub };
-            browserTools = bridgeBrowserTools(browser.mcp, browser.workDir, policy);
+            browserTools = bridgeBrowserTools(chatBrowser.mcp, chatBrowser.workDir, policy);
         } catch (error) {
             sessionManager.appendCustomMessageEntry(
                 WARNING_TYPE,
@@ -435,9 +437,20 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
             flushSessionFile(sessionManager);
         }
 
+        const credentialTools = discoveryRevision
+            ? []
+            : createCredentialTools({
+                  projectId: row.projectId,
+                  baseUrl: project.baseUrl,
+                  chatId: id,
+                  mcp: chatBrowser?.mcp ?? null,
+                  workDir: chatBrowser?.workDir ?? null,
+                  scrub,
+                  notify: () => publishChatUpdate(id),
+              });
         const customTools = discoveryRevision
             ? [...browserTools, ...createContextTools(discoveryRevision.id, row.projectId)]
-            : [...browserTools, ...createDomainTools(row.projectId)];
+            : [...browserTools, ...createDomainTools(row.projectId), ...credentialTools];
         const confirmedContext = discoveryRevision
             ? null
             : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
