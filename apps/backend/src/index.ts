@@ -13,6 +13,7 @@ import { markInterruptedBatches } from "./core/runner/batch";
 import { stopActiveRobotProcesses } from "./core/runner/robot";
 import { runsRepository } from "./infra/repositories/runs";
 import { createChatsRouter } from "./infra/web/routes/chats";
+import { createCredentialsRouter } from "./infra/web/routes/credentials";
 import { createFeaturesRouter } from "./infra/web/routes/features";
 import { createGitRouter } from "./infra/web/routes/git";
 import { createProjectContextsRouter } from "./infra/web/routes/project-contexts";
@@ -50,6 +51,7 @@ app.route("/", createProjectContextsRouter());
 app.route("/", createFeaturesRouter());
 app.route("/", createGitRouter());
 app.route("/", createSettingsRouter());
+app.route("/", createCredentialsRouter());
 
 const port = Number(process.env.PORT ?? 4000);
 const hostname = process.env.HOST ?? "127.0.0.1";

@@ -1,4 +1,6 @@
 import type {
+    CredentialFieldInput,
+    CredentialProfile,
     Feature,
     GitStatus,
     GitSyncOutcome,
@@ -229,4 +231,32 @@ export function updateContextFile(
         method: "PUT",
         body: JSON.stringify({ yaml }),
     });
+}
+
+export function listCredentialProfiles(projectId: string): Promise<{ profiles: CredentialProfile[] }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/credentials`);
+}
+
+export function createCredentialProfile(
+    projectId: string,
+    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[] },
+): Promise<{ profile: CredentialProfile }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/credentials`, {
+        method: "POST",
+        body: JSON.stringify(input),
+    });
+}
+
+export function updateCredentialProfile(
+    profileId: string,
+    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[] },
+): Promise<{ profile: CredentialProfile }> {
+    return api(`/credentials/${encodeURIComponent(profileId)}`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+    });
+}
+
+export function deleteCredentialProfile(profileId: string): Promise<void> {
+    return api(`/credentials/${encodeURIComponent(profileId)}`, { method: "DELETE" });
 }

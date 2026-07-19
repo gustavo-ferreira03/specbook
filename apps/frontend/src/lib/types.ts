@@ -226,3 +226,24 @@ export interface LlmOAuthPoll {
     verificationUri?: string;
     error?: string;
 }
+
+export interface CredentialFieldPublic {
+    key: string;
+    secret: boolean;
+    value?: string;
+    hasValue: boolean;
+}
+
+export interface CredentialProfile {
+    id: string;
+    name: string;
+    allowedOrigins: string[];
+    fields: CredentialFieldPublic[];
+    createdAt: string;
+}
+
+export interface CredentialFieldInput {
+    key: string;
+    secret: boolean;
+    value?: string;
+}
