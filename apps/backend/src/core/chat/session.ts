@@ -17,6 +17,7 @@ import {
 } from "../browser/mcp";
 import { modelRegistry } from "../llm/runtime";
 import { sessionsDir, storageRoot } from "../paths";
+import { createProjectScrubber } from "../credentials/scrub";
 import { chatsRepository, type ChatMetadata } from "../../infra/repositories/chats";
 import {
     projectContextsRepository,
@@ -420,9 +421,10 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
         let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
         try {
             const browser = await getOrCreateChatBrowser(id);
-            const policy = discoveryRevision
-                ? createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp)
-                : undefined;
+            const scrub = await createProjectScrubber(row.projectId);
+            const policy: BrowserToolPolicy = discoveryRevision
+                ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp), sanitizeResult: scrub }
+                : { sanitizeResult: scrub };
             browserTools = bridgeBrowserTools(browser.mcp, browser.workDir, policy);
         } catch (error) {
             sessionManager.appendCustomMessageEntry(

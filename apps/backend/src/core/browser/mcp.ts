@@ -29,6 +29,7 @@ export interface BrowserToolPolicy {
     allowedTools?: ReadonlySet<string>;
     beforeCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>;
     afterCall?: (toolName: string, args: Record<string, unknown>, result: string) => Promise<void>;
+    sanitizeResult?: (text: string) => string;
 }
 
 export interface BrowserMcp {
@@ -153,7 +154,7 @@ function extractMcpText(result: { content?: unknown }): string {
         .trim();
 }
 
-async function renderMcpResult(result: { content?: unknown }, workDir: string): Promise<string> {
+export async function renderMcpResult(result: { content?: unknown }, workDir: string): Promise<string> {
     return inlineSnapshots(extractMcpText(result), workDir);
 }
 
@@ -189,8 +190,9 @@ export function bridgeBrowserTools(
                 ),
                 async execute(_id, params) {
                     const args = (params ?? {}) as Record<string, unknown>;
+                    const clean = (value: string) => (policy?.sanitizeResult ? policy.sanitizeResult(value) : value);
                     const toolError = (text: string) => ({
-                        content: [{ type: "text" as const, text }],
+                        content: [{ type: "text" as const, text: clean(text) }],
                         details: undefined,
                         terminate: false,
                     });
@@ -212,7 +214,7 @@ export function bridgeBrowserTools(
                             }
                         }
                         return {
-                            content: [{ type: "text" as const, text: text || "(no output)" }],
+                            content: [{ type: "text" as const, text: clean(text) || "(no output)" }],
                             details: undefined,
                             terminate: false,
                         };
