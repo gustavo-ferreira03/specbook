@@ -17,9 +17,11 @@ import {
     withRepoLock,
 } from "../repo/git";
 import { markdownHashOf, robotHashOf, specYamlFile, specRobotFile } from "../repo/writer";
+import { resolveSecretEnv } from "../credentials/profiles";
 import { acquireSpecLocks } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
 import { runRobotProcess } from "./robot";
+import { secretEnvRefs } from "./validate";
 
 type XmlNode = Record<string, unknown>;
 type FinalRunStatus = Exclude<RunStatus, "running">;
@@ -189,7 +191,12 @@ async function finishPreparedSpec(
     prepared.item.failReason = result.failReason;
 }
 
-async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: string): Promise<void> {
+async function executeBatch(
+    batch: RunBatch,
+    prepared: PreparedSpec[],
+    baseUrl: string,
+    secretEnv: Record<string, string>,
+): Promise<void> {
     const started = Date.now();
     const batchDir = batchDirectory(batch.id);
     const suiteDir = path.join(batchDir, "suite");
@@ -220,7 +227,7 @@ async function executeBatch(batch: RunBatch, prepared: PreparedSpec[], baseUrl: 
         const singleSpec = prepared.length === 1 ? prepared[0] : null;
         const target = singleSpec ? `suite/${singleSpec.suiteKey}.robot` : "suite";
         const suiteName = singleSpec?.item.title ?? batch.label;
-        const processResult = await runRobotProcess(batchDir, batchDir, baseUrl, target, timeout, suiteName);
+        const processResult = await runRobotProcess(batchDir, batchDir, baseUrl, target, timeout, suiteName, secretEnv);
         const outputXml = await fs.readFile(path.join(batchDir, "output.xml"), "utf8").catch(() => null);
         let processFailure: string | null = null;
         if (processResult.timedOut) processFailure = `Batch timed out after ${Math.round(timeout / 1000)}s`;
@@ -263,7 +270,7 @@ async function prepareSpecBatch(
     projectId: string,
     ids: string[],
     label: string,
-): Promise<{ batch: RunBatch; prepared: PreparedSpec[] }> {
+): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secretEnv: Record<string, string> }> {
     const { commitSha, definitions } = await withRepoLock(projectId, async () => {
         if (!(await projectGit(projectId).status()).isClean()) {
             throw new Error("The project repository has uncommitted changes; sync or commit them before running");
@@ -304,6 +311,17 @@ async function prepareSpecBatch(
         }
         return { commitSha, definitions };
     });
+
+    const refs = [...new Set(definitions.flatMap((definition) => secretEnvRefs(definition.robotSource)))];
+    const { env: secretEnv, missing } = await resolveSecretEnv(projectId, refs);
+    if (missing.length > 0) {
+        const titles = definitions
+            .filter((definition) => secretEnvRefs(definition.robotSource).some((ref) => missing.includes(ref)))
+            .map((definition) => `"${definition.spec.title}"`);
+        throw new Error(
+            `Specs ${titles.join(", ")} reference credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
+        );
+    }
 
     const createdRuns: Run[] = [];
     try {
@@ -357,7 +375,7 @@ async function prepareSpecBatch(
         suiteKey: "",
         plannedEvidence: [],
     }));
-    return { batch, prepared };
+    return { batch, prepared, secretEnv };
 }
 
 export async function startSpecBatch(projectId: string, specIds: string[], label: string): Promise<RunBatch> {
@@ -368,13 +386,14 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     const releaseSpecLocks = await acquireSpecLocks(ids);
     let batch: RunBatch;
     let prepared: PreparedSpec[];
+    let secretEnv: Record<string, string>;
     try {
-        ({ batch, prepared } = await prepareSpecBatch(projectId, ids, label));
+        ({ batch, prepared, secretEnv } = await prepareSpecBatch(projectId, ids, label));
     } catch (error) {
         await releaseSpecLocks();
         throw error;
     }
-    const task = executeBatch(batch, prepared, project.baseUrl).finally(releaseSpecLocks);
+    const task = executeBatch(batch, prepared, project.baseUrl, secretEnv).finally(releaseSpecLocks);
     activeBatches.set(batch.id, task);
     void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
     return batch;

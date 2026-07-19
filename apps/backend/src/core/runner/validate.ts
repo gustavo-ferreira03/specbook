@@ -36,6 +36,7 @@ const ALLOWED_KEYWORDS = new Set([
     "closebrowser",
     "closecontext",
     "closepage",
+    "fillsecret",
     "filltext",
     "focus",
     "getattribute",
@@ -69,12 +70,19 @@ const ALLOWED_KEYWORDS = new Set([
     "shouldnotmatch",
     "shouldnotmatchregexp",
     "shouldstartwith",
+    "typesecret",
     "typetext",
     "uncheckcheckbox",
     "waitforelementsstate",
 ]);
 const ALLOWED_TEST_SETTINGS = new Set(["[documentation]", "[tags]", "[timeout]"]);
 const ALLOWED_KEYWORD_SETTINGS = new Set(["[arguments]", "[documentation]", "[return]", "[tags]", "[timeout]"]);
+const SECRET_TOKEN = /%SPECBOOK_SECRET_[A-Z0-9_]+/g;
+const SECRET_TOKEN_EXACT = /^%SPECBOOK_SECRET_[A-Z0-9_]+$/;
+
+export function secretEnvRefs(source: string): string[] {
+    return [...new Set([...source.matchAll(SECRET_TOKEN)].map((match) => match[0].slice(1)))];
+}
 
 type Section = "settings" | "variables" | "tests" | "keywords" | "other";
 
@@ -165,8 +173,11 @@ function isAssignment(value: string): boolean {
 }
 
 function inspectSource(source: string): string | null {
-    if (source.includes("${{") || source.includes("%{")) {
-        return "Inline Python expressions and environment variables are not allowed.";
+    if (source.includes("${{")) {
+        return "Inline Python expressions are not allowed.";
+    }
+    if (source.includes("%{")) {
+        return "Environment variables are not allowed. For secrets, use Fill Secret with a brace-less %SPECBOOK_SECRET_... reference.";
     }
     if (/\$\{[^}\n]*(?:\.|\[|\(|\))[^}\n]*\}/.test(source)) {
         return "Extended variable expressions are not allowed.";
@@ -203,6 +214,11 @@ function inspectSource(source: string): string | null {
         const firstIndex = row.cells.findIndex(Boolean);
         if (firstIndex < 0) continue;
         const first = row.cells[firstIndex];
+        if ((row.section !== "tests" && row.section !== "keywords") || firstIndex === 0) {
+            if (row.cells.some((cell) => robotValue(cell).includes("%SPECBOOK_SECRET_"))) {
+                return "Secret references are only allowed as Fill Secret / Type Secret arguments.";
+            }
+        }
         if (row.section === "variables") {
             return "Variables sections are not allowed.";
         }
@@ -243,6 +259,17 @@ function inspectSource(source: string): string | null {
                 return `Keyword "${robotValue(keyword)}" is not allowed.`;
             }
             const args = row.cells.slice(keywordIndex + 1).filter(Boolean);
+            const secretKeyword = name === "fillsecret" || name === "typesecret";
+            for (const arg of args) {
+                const value = robotValue(arg);
+                if (!value.includes("%SPECBOOK_SECRET_")) continue;
+                if (!secretKeyword) {
+                    return `Secret references are only allowed as Fill Secret / Type Secret arguments (found in "${robotValue(keyword)}").`;
+                }
+                if (!SECRET_TOKEN_EXACT.test(value)) {
+                    return `Secret argument "${value}" must be exactly one %SPECBOOK_SECRET_... reference.`;
+                }
+            }
             if (name === "newbrowser") {
                 const normalizedArgs = args.map(normalizedName).sort();
                 const validArgs =

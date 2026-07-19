@@ -17,8 +17,10 @@ import {
     withRepoLock,
 } from "../repo/git";
 import { markdownHashOf, specYamlFile, specRobotFile } from "../repo/writer";
+import { resolveSecretEnv } from "../credentials/profiles";
 import { withSpecLock } from "../specs/lifecycle";
 import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
+import { secretEnvRefs } from "./validate";
 
 const RUN_TIMEOUT_MS = 120_000;
 const activeRobotProcesses = new Set<ChildProcess>();
@@ -102,6 +104,7 @@ export async function runRobotProcess(
     target = "spec.robot",
     timeoutMs = RUN_TIMEOUT_MS,
     suiteName?: string,
+    extraEnv?: Record<string, string>,
 ): Promise<{ code: number | null; output: string; timedOut: boolean }> {
     return new Promise((resolve, reject) => {
         const args = ["--outputdir", outputDir, "--variable", `BASE_URL:${baseUrl}`];
@@ -109,6 +112,7 @@ export async function runRobotProcess(
         args.push(target);
         const proc = spawn("robot", args, {
             cwd: workDir,
+            env: { ...process.env, ...extraEnv },
             detached: process.platform === "linux",
             stdio: ["ignore", "pipe", "pipe"],
         });
@@ -170,6 +174,14 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
         throw new Error("Spec files changed without being reindexed");
     }
 
+    const refs = secretEnvRefs(robotSource);
+    const { env: secretEnv, missing } = await resolveSecretEnv(spec.projectId, refs);
+    if (missing.length > 0) {
+        throw new Error(
+            `Spec "${spec.title}" references credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
+        );
+    }
+
     const run = await runsRepository.createRun({ specId: spec.id, commitSha, robotHash });
     try {
         await withRepoLock(spec.projectId, () => pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
@@ -193,7 +205,15 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
             fs.writeFile(path.join(outputDir, "spec.yml"), markdown, "utf8"),
         ]);
         await fs.mkdir(path.join(outputDir, "evidence"), { recursive: true });
-        const result = await runRobotProcess(outputDir, outputDir, project.baseUrl, "spec.robot", RUN_TIMEOUT_MS, spec.title);
+        const result = await runRobotProcess(
+            outputDir,
+            outputDir,
+            project.baseUrl,
+            "spec.robot",
+            RUN_TIMEOUT_MS,
+            spec.title,
+            secretEnv,
+        );
         if (result.timedOut) {
             failReason = `Run timed out after ${RUN_TIMEOUT_MS / 1000}s`;
         } else if (result.code === null || result.code >= 251) {
