@@ -7,7 +7,7 @@ export function createProjectScrubber(projectId: string): (text: string) => Prom
         const entries = (await listSecretValues(projectId))
             .filter((secret) => secret.value.length >= MIN_SECRET_LENGTH)
             .flatMap((secret) => {
-                const label = `[REDACTED:${secret.profile}.${secret.field}]`;
+                const label = "••••";
                 const encoded = encodeURIComponent(secret.value);
                 const pairs: [string, string][] = [[secret.value, label]];
                 if (encoded !== secret.value) pairs.push([encoded, label]);
