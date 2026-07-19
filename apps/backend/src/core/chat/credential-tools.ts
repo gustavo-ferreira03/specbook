@@ -1,6 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { getActiveTabUrl, renderMcpResult, type BrowserMcp } from "../browser/mcp";
+import { registerCredentialRequest, waitForCredentialRequest } from "./credential-requests";
 import { decryptSecret } from "../credentials/crypto";
 import { getProfileByName, listPublicProfiles } from "../credentials/profiles";
 
@@ -79,6 +80,43 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 } catch (error) {
                     return text(options.scrub(`fill_secret failed: ${error instanceof Error ? error.message : String(error)}`));
                 }
+            },
+        }),
+        defineTool({
+            name: "request_credential",
+            label: "request_credential",
+            description:
+                'Ask the user for a credential through a secure form outside the chat. Never ask the user to paste secrets into the conversation. Blocks until the user submits (or 10 minutes). Field keys and the profile name must be lowercase slugs like "admin" / "password".',
+            parameters: Type.Object({
+                profileName: Type.String(),
+                fields: Type.Array(
+                    Type.Object({
+                        key: Type.String(),
+                        secret: Type.Boolean(),
+                        label: Type.Optional(Type.String()),
+                    }),
+                ),
+            }),
+            async execute(_id, params) {
+                if (params.fields.length === 0) return text("request_credential failed: request at least one field.");
+                const request = registerCredentialRequest(
+                    options.chatId,
+                    options.projectId,
+                    params.profileName,
+                    params.fields,
+                );
+                options.notify();
+                const outcome = await waitForCredentialRequest(options.chatId, request.id, 10 * 60 * 1000);
+                options.notify();
+                if (outcome === "saved") {
+                    return text(
+                        `Credential profile "${params.profileName}" saved with fields: ${params.fields.map((f) => f.key).join(", ")}. Use list_credential_profiles / fill_secret to use it.`,
+                    );
+                }
+                if (outcome === "dismissed") return text("The user dismissed the credential form without saving.");
+                return text(
+                    "The user has not submitted the credential form yet. Ask them to fill it, or call request_credential again when they are ready.",
+                );
             },
         }),
     ];

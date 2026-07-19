@@ -260,3 +260,14 @@ export function updateCredentialProfile(
 export function deleteCredentialProfile(profileId: string): Promise<void> {
     return api(`/credentials/${encodeURIComponent(profileId)}`, { method: "DELETE" });
 }
+
+export function resolveChatCredentialRequest(
+    chatId: string,
+    requestId: string,
+    body: { action: "dismiss" } | { action: "submit"; values: Record<string, string> },
+): Promise<{ ok: boolean }> {
+    return api(`/chats/${encodeURIComponent(chatId)}/credential-requests/${encodeURIComponent(requestId)}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}

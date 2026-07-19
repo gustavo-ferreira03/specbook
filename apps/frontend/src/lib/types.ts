@@ -138,6 +138,12 @@ export interface Chat {
     createdAt: string;
 }
 
+export interface ChatCredentialRequest {
+    id: string;
+    profileName: string;
+    fields: { key: string; secret: boolean; label?: string }[];
+}
+
 export interface ChatState {
     title: string;
     messages: ChatMessage[];
@@ -146,6 +152,7 @@ export interface ChatState {
     projectId: string;
     mode: ChatMode;
     contextRevision: ChatContextRevision | null;
+    credentialRequest: ChatCredentialRequest | null;
 }
 
 export interface ArtifactListing {

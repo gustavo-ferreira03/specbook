@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { getChatBrowser, getOrCreateChatBrowser } from "../../../core/browser/sessions";
+import { getPendingCredentialRequest } from "../../../core/chat/credential-requests";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import {
     createChat,
@@ -45,6 +46,7 @@ export function createChatsRouter(): Hono {
         const revision = row.contextRevisionId
             ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
+        const pendingCredential = getPendingCredentialRequest(id);
         return c.json({
             title: chat?.title ?? "Chat",
             messages,
@@ -60,6 +62,9 @@ export function createChatsRouter(): Hono {
                       actionsUsed: revision.actionsUsed,
                       hasProposal: revision.context.summary.trim().length > 0,
                   }
+                : null,
+            credentialRequest: pendingCredential
+                ? { id: pendingCredential.id, profileName: pendingCredential.profileName, fields: pendingCredential.fields }
                 : null,
         });
     });

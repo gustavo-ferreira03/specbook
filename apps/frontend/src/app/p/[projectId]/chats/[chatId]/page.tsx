@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowUp, Compass, ExternalLink, Monitor, RefreshCw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CredentialRequestCard } from "@/components/CredentialRequestCard";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
 import { VncViewer } from "@/components/VncViewer";
@@ -62,6 +63,7 @@ function sameChatState(left: ChatState, right: ChatState): boolean {
         return false;
     }
     if (JSON.stringify(left.contextRevision) !== JSON.stringify(right.contextRevision)) return false;
+    if (JSON.stringify(left.credentialRequest) !== JSON.stringify(right.credentialRequest)) return false;
     return left.messages.every((message, index) => {
         const next = right.messages[index];
         return (
@@ -376,6 +378,16 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                         </div>
 
                         {state.vncSessionId && <LiveBrowserCard sessionId={state.vncSessionId} />}
+
+                        {state.credentialRequest && (
+                            <CredentialRequestCard
+                                chatId={chatId}
+                                request={state.credentialRequest}
+                                onResolved={() =>
+                                    setState((prev) => (prev ? { ...prev, credentialRequest: null } : prev))
+                                }
+                            />
+                        )}
 
                         {!state.vncSessionId && browserError && (
                             <Alert variant="destructive" className="my-5 flex w-auto items-center justify-between gap-3 md:ml-[38px]" role="alert">
