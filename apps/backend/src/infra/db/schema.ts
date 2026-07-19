@@ -129,6 +129,24 @@ export const runs = sqliteTable("runs", {
     failReason: text("fail_reason"),
 });
 
+export interface CredentialField {
+    key: string;
+    secret: boolean;
+    value: string;
+}
+
+export const credentialProfiles = sqliteTable("credential_profiles", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+        .notNull()
+        .references(() => projects.id),
+    name: text("name").notNull(),
+    allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull(),
+    fields: text("fields", { mode: "json" }).$type<CredentialField[]>().notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+});
+
 export const appSettings = sqliteTable("app_settings", {
     id: integer("id").primaryKey(),
     llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),

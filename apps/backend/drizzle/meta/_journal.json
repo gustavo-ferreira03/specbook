@@ -15,6 +15,13 @@
       "when": 1784360439315,
       "tag": "0001_pink_moon_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784423915928,
+      "tag": "0002_gigantic_patch",
+      "breakpoints": true
     }
   ]
 }
