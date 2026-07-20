@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export interface HumanSpec {
     preconditions: string[];
@@ -146,6 +146,22 @@ export const credentialProfiles = sqliteTable("credential_profiles", {
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 });
+
+export const chatSessions = sqliteTable(
+    "chat_sessions",
+    {
+        id: text("id").primaryKey(),
+        projectId: text("project_id")
+            .notNull()
+            .references(() => projects.id),
+        profileId: text("profile_id")
+            .notNull()
+            .references(() => credentialProfiles.id),
+        state: text("state").notNull(),
+        savedAt: text("saved_at").notNull(),
+    },
+    (table) => [uniqueIndex("chat_sessions_profile_unique").on(table.projectId, table.profileId)],
+);
 
 export const appSettings = sqliteTable("app_settings", {
     id: integer("id").primaryKey(),
