@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { CredentialField } from "../../infra/db/schema";
+import { chatSessionsRepository } from "../../infra/repositories/chat-sessions";
 import {
     credentialsRepository,
     type CredentialProfileRow,
@@ -159,6 +160,11 @@ export async function updateProfile(
     const patch = { allowedOrigins, fields, updatedAt: new Date().toISOString() };
     await credentialsRepository.updateProfile(row.id, patch);
     return publicProfile({ ...row, ...patch });
+}
+
+export async function deleteProfile(row: CredentialProfileRow): Promise<void> {
+    await chatSessionsRepository.deleteByProfileId(row.id);
+    await credentialsRepository.deleteProfile(row.id);
 }
 
 export async function listPublicProfiles(projectId: string): Promise<PublicCredentialProfile[]> {

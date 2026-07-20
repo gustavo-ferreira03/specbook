@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getPendingCredentialRequest, resolveCredentialRequest } from "../../../core/chat/credential-requests";
 import {
     createProfile,
+    deleteProfile,
     getProfileByName,
     listPublicProfiles,
     updateProfile,
@@ -71,7 +72,7 @@ export function createCredentialsRouter(): Hono {
     router.delete("/credentials/:id", async (c) => {
         const row = await credentialsRepository.getProfile(c.req.param("id"));
         if (!row) throw new HTTPException(404, { message: "Credential profile not found" });
-        await credentialsRepository.deleteProfile(row.id);
+        await deleteProfile(row);
         return c.body(null, 204);
     });
 
