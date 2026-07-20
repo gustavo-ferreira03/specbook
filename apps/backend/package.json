@@ -11,7 +11,7 @@
         "start": "node dist/index.js"
     },
     "dependencies": {
-        "@earendil-works/pi-ai": "0.80.7",
+        "@earendil-works/pi-ai": "0.80.10",
         "@earendil-works/pi-coding-agent": "0.80.10",
         "@hono/node-server": "^1.19.14",
         "@hono/zod-validator": "^0.8.0",
