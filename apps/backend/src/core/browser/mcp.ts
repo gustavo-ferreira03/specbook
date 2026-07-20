@@ -77,6 +77,7 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string 
                 ],
             },
         },
+        capabilities: ["core", "storage"],
     };
     const configPath = path.join(opts.workDir, "mcp-config.json");
     await fs.writeFile(configPath, JSON.stringify(config), "utf8");
