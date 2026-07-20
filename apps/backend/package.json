@@ -17,7 +17,7 @@
         "@hono/zod-validator": "^0.8.0",
         "@libsql/client": "^0.17.3",
         "@modelcontextprotocol/sdk": "^1.29.0",
-        "@playwright/mcp": "^0.0.76",
+        "@playwright/mcp": "^0.0.78",
         "dotenv": "^17.4.2",
         "drizzle-orm": "^0.45.2",
         "fast-xml-parser": "^5.2.0",
