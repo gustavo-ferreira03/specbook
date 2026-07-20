@@ -27,6 +27,7 @@ import { projectsRepository, type Project } from "../../infra/repositories/proje
 import { settingsRepository } from "../../infra/repositories/settings";
 import { createContextTools, projectContextJsonSchema } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
+import { createSessionTools } from "./session-tools";
 import { createDomainTools } from "./tools";
 import type { ChatMessageRecord } from "./types";
 
@@ -448,9 +449,17 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
                   scrub,
                   notify: () => publishChatUpdate(id),
               });
+        const sessionTools = discoveryRevision
+            ? []
+            : createSessionTools({
+                  projectId: row.projectId,
+                  baseUrl: project.baseUrl,
+                  mcp: chatBrowser?.mcp ?? null,
+                  workDir: chatBrowser?.workDir ?? null,
+              });
         const customTools = discoveryRevision
             ? [...browserTools, ...createContextTools(discoveryRevision.id, row.projectId)]
-            : [...browserTools, ...createDomainTools(row.projectId), ...credentialTools];
+            : [...browserTools, ...createDomainTools(row.projectId), ...credentialTools, ...sessionTools];
         const confirmedContext = discoveryRevision
             ? null
             : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
