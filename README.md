@@ -1,20 +1,28 @@
-# <img src="apps/frontend/public/specbook-chat-icon.svg" width="32" height="32" align="absmiddle" alt=""> Specbook
+# Specbook
 
-Specbook turns a conversation about a web application into a readable, executable Spec. You describe a flow in chat, watch the agent inspect the application in a visible browser, then review the YAML and Robot Framework files it writes.
+Specbook turns a conversation about a web application into an executable Spec.
+You describe a behavior in chat.
+The agent inspects the application in a visible browser.
+Specbook writes the YAML files and the Robot Framework files.
 
-Every project gets its own Git repository. Specs, Features, and confirmed project context remain ordinary files that a team can inspect and edit; SQLite only indexes them for the application.
-
-## Why use Specbook?
-
-- **Keep behavior near the code.** Each project has a Git repository with a real commit history rather than opaque test records in a database.
-- **Watch the agent work.** Chromium runs headed and appears in the interface while the agent investigates the application.
-- **Read the check before running it.** `spec.yml` holds the behavior in plain language and `spec.robot` holds its executable counterpart.
-- **Leave with evidence.** Runs retain status, duration, logs, Robot reports, screenshots, and failure video where available.
-- **Start with the product you have.** Guided discovery maps areas, terms, roles, rules, and unknowns before a Spec chat begins.
+Each project has its own Git repository.
+Specs, features, and project context are files.
+The team can inspect and edit these files.
+SQLite indexes the files for the application.
 
 ## Quick start
 
-You need [Docker](https://docs.docker.com/get-docker/). The image includes Chromium, Playwright MCP, Robot Framework, Browser Library, Xvfb, and x11vnc.
+You must have Docker.
+The image includes these tools:
+
+- Chromium
+- Playwright MCP
+- Robot Framework
+- Browser Library
+- Xvfb
+- x11vnc
+
+Run this command:
 
 ```bash
 docker run --detach \
@@ -32,7 +40,9 @@ docker run --detach \
   ghcr.io/gustavo-ferreira03/specbook:latest
 ```
 
-Open [http://localhost:4001](http://localhost:4001), then select an LLM provider and model in **Settings**. Specbook accepts API keys from its model registry plus OAuth connections for Anthropic, OpenAI Codex, and GitHub Copilot.
+Open [http://localhost:4001](http://localhost:4001).
+Select an LLM provider and a model in **Settings**.
+Specbook accepts API keys and OAuth connections for Anthropic, OpenAI Codex, and GitHub Copilot.
 
 ```bash
 curl http://localhost:4000/health
@@ -40,53 +50,68 @@ docker logs -f specbook
 ```
 
 > [!TIP]
-> `specbook-storage` is a named Docker volume. You can remove and recreate the container without deleting projects, provider credentials, chat sessions, or run evidence.
+> `specbook-storage` is a named Docker volume.
+> You can remove the container and create a new container.
+> The projects, credentials, chat sessions, and run evidence stay in the volume.
 
 > [!WARNING]
-> Specbook has no application-level authentication. The command above exposes the frontend, API, and OAuth callback ports on every host interface. Run it on a trusted network, or use a firewall, VPN, IP allowlist, or authenticated reverse proxy.
+> Specbook does not have application-level authentication.
+> The command connects the frontend, API, and OAuth ports to all host interfaces.
+> Use the application on a trusted network.
+> Use a firewall, VPN, IP allowlist, or authenticated reverse proxy.
+
+## Why use Specbook
+
+- **Behavior near the code.** Each project has a Git repository with commit history.
+- **Watch the agent work.** You can see the Chromium session while the agent inspects the application.
+- **Read the Spec.** `spec.yml` has the behavior in plain language. `spec.robot` has the executable test.
+- **Evidence.** Each run has status, duration, logs, Robot reports, screenshots, and video.
+- **Guided discovery.** The system maps areas, terms, roles, rules, and unknowns before you start a Spec chat.
 
 ## Your first Spec
 
-1. Create a project with the application's base URL.
-2. Run guided discovery, or start a Spec chat immediately.
-3. Describe one behavior while the agent uses the visible browser and asks for missing details.
-4. Review the files and their Git history, then run the Spec whenever the application changes.
+1. Create a project with the application URL.
+2. Run guided discovery. You can also start a Spec chat immediately.
+3. Describe a behavior. The agent uses the browser and asks for missing information.
+4. Review the files and the Git history.
+5. Run the Spec when the application changes.
 
 > [!NOTE]
-> Discovery stays within the project origin and uses read-oriented browser actions. Its origin guard and safety rules are not a network sandbox, so use a disposable or staging application when possible. Never paste passwords, private keys, one-time codes, or production tokens into chat.
+> The discovery tool stays on the project origin.
+> It uses read-oriented browser actions.
+> The discovery tool is not a network sandbox.
+> Use a staging or disposable application.
+> Do not paste passwords, private keys, one-time codes, or production tokens into chat.
 
 ## Features
 
-<details open>
-<summary><strong>Authoring and project context</strong></summary>
+### Authoring and project context
 
-- A visible, headed Chromium session for agent exploration and authoring
-- Guided discovery that drafts project context for later chats
+- A visible Chromium session for agent exploration
+- Guided discovery that creates project context
 - Direct editing of YAML and Robot files with syntax highlighting
-- SSE updates for live chat activity without polling
-</details>
+- SSE updates for live chat activity
 
-<details>
-<summary><strong>Git-backed project files</strong></summary>
+### Git-backed project files
 
-- One repository per project under `storage/repos/<project-id>`
-- Path and slug identify a Spec; YAML files contain no database IDs
-- Standard Git history for generated and manual changes
-- SQLite reindexing keeps the UI in sync with files and external Git updates
-</details>
+- One repository per project at `storage/repos/<project-id>`
+- The path and slug identify a Spec
+- YAML files do not contain database IDs
+- Standard Git history for all changes
+- SQLite keeps the UI in sync with files and external Git updates
 
-<details>
-<summary><strong>Verification and evidence</strong></summary>
+### Verification and evidence
 
-- Run one Spec, a Feature subtree, or an entire project
+- Run one Spec, a feature subtree, or the entire project
 - Robot Framework execution through Browser Library
-- Status, timing, logs, reports, screenshots, and failure video retained with each run
-- Single runs time out after 120 seconds; batch runs scale by Spec count and stop at 30 minutes
-</details>
+- Each run has status, timing, logs, reports, screenshots, and video
+- Single runs stop after 120 seconds
+- Batch runs stop after 30 minutes
 
 ## Project layout
 
-Specbook stores application data in `apps/backend/storage` locally, or `/app/apps/backend/storage` inside the container.
+Specbook stores data at `apps/backend/storage`.
+Inside the container, the path is `/app/apps/backend/storage`.
 
 ```text
 storage/
@@ -97,7 +122,7 @@ storage/
 └── runs/             # Reports, logs, screenshots, video, and batch state
 ```
 
-A project repository looks like this:
+A project repository has this structure:
 
 ```text
 context.yml
@@ -106,20 +131,20 @@ specs/<feature>/<spec>/spec.yml
 specs/<feature>/<spec>/spec.robot
 ```
 
-`spec.yml` holds the human-facing behavior and `spec.robot` executes it.
+`spec.yml` has the behavior in plain language.
+`spec.robot` runs the behavior.
 
-<details>
-<summary><strong>Configuration and public deployments</strong></summary>
+### Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | Public API URL embedded in the frontend at image build time |
-| `FRONTEND_ORIGIN` | `http://localhost:4001` | Frontend origin accepted by CORS and VNC WebSocket checks |
-| `HOST` | `127.0.0.1` | Backend bind address; the Docker command sets `0.0.0.0` |
-| `PORT` | `4000` | Backend HTTP and WebSocket port |
-| `SPECBOOK_STORAGE_DIR` | `apps/backend/storage` | Data, credentials, project repositories, and run artifacts |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | Public API URL. Set this value at image build time. |
+| `FRONTEND_ORIGIN` | `http://localhost:4001` | Frontend origin. CORS and VNC use this value. |
+| `HOST` | `127.0.0.1` | Backend bind address. The Docker command sets `0.0.0.0`. |
+| `PORT` | `4000` | Backend HTTP and WebSocket port. |
+| `SPECBOOK_STORAGE_DIR` | `apps/backend/storage` | Data, credentials, project repositories, and run artifacts. |
 
-For separate public frontend and API URLs, build the image with the public API URL, then set the frontend origin at runtime:
+To use separate URLs for the frontend and API:
 
 ```bash
 docker build \
@@ -140,12 +165,12 @@ docker run --detach \
   -v specbook-storage:/app/apps/backend/storage \
   specbook:public
 ```
-</details>
 
-<details>
-<summary><strong>Development</strong></summary>
+### Development
 
-Local development targets Linux because browser sessions need Xvfb and x11vnc. Install Node.js 26, pnpm 10.30.1, Python 3 with virtual environments, Xvfb, and x11vnc.
+Development runs on Linux.
+Browser sessions need Xvfb and x11vnc.
+You must have Node.js 26, pnpm 10.30.1, Python 3 with virtual environments, Xvfb, and x11vnc.
 
 ```bash
 pnpm install
@@ -160,7 +185,10 @@ pnpm --filter backend db:migrate
 pnpm dev
 ```
 
-The backend listens on `4000` and the frontend on `4001`. Keep the Python environment active so the backend can find the `robot` executable.
+The backend uses port 4000.
+The frontend uses port 4001.
+Keep the Python environment active.
+The backend must find the `robot` executable.
 
 | Task | Command |
 | --- | --- |
@@ -170,6 +198,5 @@ The backend listens on `4000` and the frontend on `4001`. Keep the Python enviro
 | Install the MCP browser | `pnpm --filter backend browser:install` |
 | Create a database migration | `pnpm --filter backend db:generate` |
 | Apply database migrations | `pnpm --filter backend db:migrate` |
-</details>
 
-Questions, ideas, and bug reports belong in [GitHub Discussions](https://github.com/gustavo-ferreira03/specbook/discussions) and [Issues](https://github.com/gustavo-ferreira03/specbook/issues).
+Questions, ideas, and bug reports go to [GitHub Discussions](https://github.com/gustavo-ferreira03/specbook/discussions) and [Issues](https://github.com/gustavo-ferreira03/specbook/issues).
