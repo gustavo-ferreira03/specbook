@@ -176,9 +176,11 @@ export function Sidebar({ projectId }: { projectId: string }) {
 
     useEffect(() => {
         const activeSpec = specs.find((spec) => pathname === `/p/${projectId}/specs/${spec.id}`);
-        if (!activeSpec) return;
+        const activeFeature = features.find((item) => pathname === `/p/${projectId}/features/${item.id}`);
+        const startId = activeSpec?.featureId ?? activeFeature?.id;
+        if (!startId) return;
         const ids = new Set<string>();
-        let feature = features.find((item) => item.id === activeSpec.featureId);
+        let feature = features.find((item) => item.id === startId);
         while (feature) {
             ids.add(feature.id);
             feature = feature.parentId ? features.find((item) => item.id === feature?.parentId) : undefined;
@@ -255,7 +257,13 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 setSpecs((current) => current.filter((spec) => !deletedSpecIds.has(spec.id)));
                 setExpandedFeatures((current) => new Set([...current].filter((id) => !deletedFeatureIds.has(id))));
                 const activeSpecId = pathname.match(/\/specs\/([^/]+)/)?.[1];
-                if (activeSpecId && deletedSpecIds.has(activeSpecId)) router.replace(`/p/${projectId}/specs`);
+                const activeFeatureId = pathname.match(/\/features\/([^/]+)/)?.[1];
+                if (
+                    (activeSpecId && deletedSpecIds.has(activeSpecId)) ||
+                    (activeFeatureId && deletedFeatureIds.has(activeFeatureId))
+                ) {
+                    router.replace(`/p/${projectId}/specs`);
+                }
             }
             setDeleteTarget(null);
             setDeletingItem(false);
@@ -377,20 +385,38 @@ export function Sidebar({ projectId }: { projectId: string }) {
     function renderFeature(feature: Feature, depth: number): React.ReactNode {
         const expanded = expandedFeatures.has(feature.id);
         const count = featureSpecCount(feature.id);
+        const href = `/p/${projectId}/features/${feature.id}`;
+        const selected = pathname === href;
         return (
             <Collapsible key={feature.id} open={expanded} onOpenChange={(open) => setFeatureExpanded(feature.id, open)} className="w-full min-w-0 overflow-hidden">
                 <div
-                    className="group flex min-h-10 items-center rounded-[8px] pr-1 text-ink-soft hover:bg-surface-hover hover:text-ink focus-within:bg-surface-hover md:min-h-[34px]"
+                    className={`group flex min-h-10 items-center rounded-[8px] pr-1 transition-colors md:min-h-[34px] ${
+                        selected ? "bg-surface-selected text-ink" : "text-ink-soft hover:bg-surface-hover hover:text-ink focus-within:bg-surface-hover"
+                    }`}
                     style={{ paddingLeft: 6 + depth * 12 }}
                 >
                     <CollapsibleTrigger asChild>
-                        <Button variant="ghost" className="h-auto min-h-10 min-w-0 flex-1 justify-start gap-1.5 rounded-[8px] px-0 text-left text-[0.6875rem] text-ink-soft hover:bg-transparent hover:text-ink md:min-h-[34px]">
-                            {expanded ? <ChevronDown size={12} className="text-ink-faint" /> : <ChevronRight size={12} className="text-ink-faint" />}
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0 text-ink-faint hover:bg-transparent hover:text-ink"
+                            aria-label={expanded ? `Collapse ${feature.title}` : `Expand ${feature.title}`}
+                        >
+                            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </Button>
+                    </CollapsibleTrigger>
+                    <Button
+                        asChild
+                        variant="ghost"
+                        className={`h-auto min-h-10 min-w-0 flex-1 justify-start gap-1.5 rounded-[8px] px-0 text-left text-[0.6875rem] hover:bg-transparent hover:text-ink md:min-h-[34px] ${selected ? "font-bold text-ink" : "font-normal text-ink-soft"}`}
+                    >
+                        <Link href={href} aria-current={selected ? "page" : undefined}>
                             {expanded ? <FolderOpen size={13} className="text-ink-faint" /> : <Folder size={13} className="text-ink-faint" />}
                             <span className="min-w-0 flex-1 truncate">{feature.title}</span>
                             <Badge variant="secondary" className="px-1.5 py-0.5 text-[0.5625rem] text-ink-faint">{count}</Badge>
-                        </Button>
-                    </CollapsibleTrigger>
+                        </Link>
+                    </Button>
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
