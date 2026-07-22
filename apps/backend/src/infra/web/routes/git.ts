@@ -2,10 +2,10 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { withRepoLock } from "../../../core/repo/git";
+import { repoGit } from "../../../core/repo/git";
 import { specAtCommit, specHistory } from "../../../core/repo/history";
 import { reindexProjectUnlocked } from "../../../core/repo/indexer";
-import { cancelScheduledPush, flushPush, testRemote } from "../../../core/repo/remote";
+import { repoRemote } from "../../../core/repo/remote";
 import { resolveConflicts, syncProject } from "../../../core/repo/sync";
 import { projectsRepository, type Project } from "../../repositories/projects";
 import { specsRepository } from "../../repositories/specs";
@@ -67,17 +67,17 @@ export function createGitRouter(): Hono {
         validateRemote(remoteUrl, effectiveToken);
         const clearingSavedToken = token === null && remoteUrl === project.gitRemoteUrl;
         if (clearingSavedToken) {
-            await withRepoLock(project.id, async () => {
-                cancelScheduledPush(project.id);
+            await repoGit.withRepoLock(project.id, async () => {
+                repoRemote.cancelScheduledPush(project.id);
                 await projectsRepository.updateGitConnection(project.id, remoteUrl, null);
                 await reindexProjectUnlocked(project.id);
             });
             return c.json({ git: gitStatusOf(await loadProject(project.id)) });
         }
-        const test = await testRemote(remoteUrl, effectiveToken);
+        const test = await repoRemote.testRemote(remoteUrl, effectiveToken);
         if (!test.ok) throw new HTTPException(400, { message: test.error });
-        await withRepoLock(project.id, async () => {
-            cancelScheduledPush(project.id);
+        await repoGit.withRepoLock(project.id, async () => {
+            repoRemote.cancelScheduledPush(project.id);
             await projectsRepository.updateGitConnection(project.id, remoteUrl, effectiveToken);
             await reindexProjectUnlocked(project.id);
         });
@@ -85,8 +85,8 @@ export function createGitRouter(): Hono {
         try {
             outcome = await syncProject(project.id);
         } catch (error) {
-            await withRepoLock(project.id, async () => {
-                cancelScheduledPush(project.id);
+            await repoGit.withRepoLock(project.id, async () => {
+                repoRemote.cancelScheduledPush(project.id);
                 await projectsRepository.updateGitConnection(project.id, project.gitRemoteUrl, project.gitToken);
                 await projectsRepository.setGitPushError(project.id, project.gitPushError);
                 await projectsRepository.setGitConflictPaths(project.id, project.gitConflictPaths);
@@ -94,14 +94,14 @@ export function createGitRouter(): Hono {
             });
             throw error;
         }
-        if (outcome.status !== "conflict") await flushPush(project.id);
+        if (outcome.status !== "conflict") await repoRemote.flushPush(project.id);
         return c.json({ git: gitStatusOf(await loadProject(project.id)) });
     });
 
     router.delete("/projects/:id/git", async (c) => {
         const project = await loadProject(c.req.param("id"));
-        await withRepoLock(project.id, async () => {
-            cancelScheduledPush(project.id);
+        await repoGit.withRepoLock(project.id, async () => {
+            repoRemote.cancelScheduledPush(project.id);
             await projectsRepository.updateGitConnection(project.id, null, null);
             await reindexProjectUnlocked(project.id);
         });
@@ -111,7 +111,7 @@ export function createGitRouter(): Hono {
     router.post("/projects/:id/git/sync", async (c) => {
         const project = await loadProject(c.req.param("id"));
         const outcome = await syncProject(project.id);
-        if (outcome.status !== "conflict") await flushPush(project.id);
+        if (outcome.status !== "conflict") await repoRemote.flushPush(project.id);
         return c.json({ outcome });
     });
 

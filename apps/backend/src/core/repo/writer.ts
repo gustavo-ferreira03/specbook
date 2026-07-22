@@ -4,8 +4,8 @@ import path from "node:path";
 import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
-import { assertRepoWritableUnlocked, commitAll, repoDir, withRepoLock } from "./git";
-import { schedulePush } from "./remote";
+import { repoGit } from "./git";
+import { repoRemote } from "./remote";
 import { uniqueSlug } from "./slug";
 import {
     parseSpecYaml,
@@ -35,7 +35,7 @@ export function markdownHashOf(source: string): string {
 }
 
 function absolute(projectId: string, relative: string): string {
-    const root = repoDir(projectId);
+    const root = repoGit.getRepoDir(projectId);
     const resolved = path.resolve(root, relative);
     if (!resolved.startsWith(root + path.sep) && resolved !== root) throw new Error("Path escapes project repo");
     return resolved;
@@ -56,8 +56,8 @@ export async function createFeatureInRepo(
     title: string,
     description: string,
 ): Promise<Feature> {
-    return withRepoLock(projectId, async () => {
-        await assertRepoWritableUnlocked(projectId);
+    return repoGit.withRepoLock(projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(projectId);
         const parent = parentId ? await featuresRepository.getFeature(parentId) : null;
         if (parentId && (!parent || parent.projectId !== projectId)) throw new Error("Parent feature not found");
         const parentPath = parent ? parent.path : "specs";
@@ -70,8 +70,8 @@ export async function createFeatureInRepo(
             serializeFeatureYaml({ title, description }),
             "utf8",
         );
-        await commitAll(projectId, `feature: create "${title}"`);
-        schedulePush(projectId);
+        await repoGit.commitAll(projectId, `feature: create "${title}"`);
+        repoRemote.schedulePush(projectId);
         return featuresRepository.createFeature(projectId, parentId, title, description, featurePath, id);
     });
 }
@@ -84,8 +84,8 @@ export async function createSpecInRepo(input: {
     humanSpec: HumanSpec;
     robotSource: string;
 }): Promise<{ spec: Spec; commitSha: string }> {
-    return withRepoLock(input.projectId, async () => {
-        await assertRepoWritableUnlocked(input.projectId);
+    return repoGit.withRepoLock(input.projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(input.projectId);
         const feature = await featuresRepository.getFeature(input.featureId);
         if (!feature || feature.projectId !== input.projectId) throw new Error("Feature not found");
         const id = crypto.randomUUID();
@@ -99,8 +99,8 @@ export async function createSpecInRepo(input: {
         await fs.mkdir(absolute(input.projectId, specPath), { recursive: true });
         await fs.writeFile(absolute(input.projectId, specYamlFile(specPath)), markdown, "utf8");
         await fs.writeFile(absolute(input.projectId, specRobotFile(specPath)), input.robotSource, "utf8");
-        const commitSha = await commitAll(input.projectId, `spec: create "${input.title}"`);
-        schedulePush(input.projectId);
+        const commitSha = await repoGit.commitAll(input.projectId, `spec: create "${input.title}"`);
+        repoRemote.schedulePush(input.projectId);
         const now = new Date().toISOString();
         const spec: Spec = {
             id,
@@ -125,8 +125,8 @@ export async function updateFeatureInRepo(
     feature: Feature,
     patch: { title?: string; description?: string },
 ): Promise<Feature> {
-    return withRepoLock(feature.projectId, async () => {
-        await assertRepoWritableUnlocked(feature.projectId);
+    return repoGit.withRepoLock(feature.projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(feature.projectId);
         const title = patch.title ?? feature.title;
         const description = patch.description ?? feature.description;
 
@@ -147,8 +147,8 @@ export async function updateFeatureInRepo(
             serializeFeatureYaml({ title, description }),
             "utf8",
         );
-        await commitAll(feature.projectId, `feature: update "${title}"`);
-        schedulePush(feature.projectId);
+        await repoGit.commitAll(feature.projectId, `feature: update "${title}"`);
+        repoRemote.schedulePush(feature.projectId);
         await featuresRepository.updateFeatureRecord(feature.id, { title, description, path: featurePath });
         const updated = await featuresRepository.getFeature(feature.id);
         if (!updated) throw new Error("Feature disappeared during update");
@@ -166,8 +166,8 @@ export async function updateSpecInRepo(
     spec: Spec,
     patch: { title?: string; description?: string; humanSpec?: HumanSpec; robotSource?: string },
 ): Promise<{ spec: Spec; commitSha: string }> {
-    return withRepoLock(spec.projectId, async () => {
-        await assertRepoWritableUnlocked(spec.projectId);
+    return repoGit.withRepoLock(spec.projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(spec.projectId);
         const current = await readSpecFiles(spec);
         const title = patch.title ?? spec.title;
         const description = patch.description ?? spec.description;
@@ -189,8 +189,8 @@ export async function updateSpecInRepo(
         const markdown = serializeSpecYaml({ title, description, humanSpec });
         await fs.writeFile(absolute(spec.projectId, specYamlFile(specPath)), markdown, "utf8");
         await fs.writeFile(absolute(spec.projectId, specRobotFile(specPath)), robotSource, "utf8");
-        const commitSha = await commitAll(spec.projectId, `spec: update "${title}"`);
-        schedulePush(spec.projectId);
+        const commitSha = await repoGit.commitAll(spec.projectId, `spec: update "${title}"`);
+        repoRemote.schedulePush(spec.projectId);
         const robotHash = robotHashOf(robotSource);
         await specsRepository.updateSpecRecord(spec.id, {
             title,
@@ -208,28 +208,28 @@ export async function updateSpecInRepo(
 }
 
 export async function deleteSpecFiles(spec: Spec): Promise<void> {
-    await withRepoLock(spec.projectId, async () => {
-        await assertRepoWritableUnlocked(spec.projectId);
+    await repoGit.withRepoLock(spec.projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(spec.projectId);
         await fs.rm(absolute(spec.projectId, spec.path), { recursive: true, force: true });
-        await commitAll(spec.projectId, `spec: delete "${spec.title}"`);
-        schedulePush(spec.projectId);
+        await repoGit.commitAll(spec.projectId, `spec: delete "${spec.title}"`);
+        repoRemote.schedulePush(spec.projectId);
     });
 }
 
 export async function deleteFeatureDirectory(projectId: string, featurePath: string, title: string): Promise<void> {
-    await withRepoLock(projectId, async () => {
-        await assertRepoWritableUnlocked(projectId);
+    await repoGit.withRepoLock(projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(projectId);
         await fs.rm(absolute(projectId, featurePath), { recursive: true, force: true });
-        await commitAll(projectId, `feature: delete "${title}"`);
-        schedulePush(projectId);
+        await repoGit.commitAll(projectId, `feature: delete "${title}"`);
+        repoRemote.schedulePush(projectId);
     });
 }
 
 export async function writeContextToRepo(projectId: string, context: ProjectContext): Promise<void> {
-    await withRepoLock(projectId, async () => {
-        await assertRepoWritableUnlocked(projectId);
+    await repoGit.withRepoLock(projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(projectId);
         await fs.writeFile(absolute(projectId, "context.yml"), serializeContextYaml(context), "utf8");
-        await commitAll(projectId, "context: update");
-        schedulePush(projectId);
+        await repoGit.commitAll(projectId, "context: update");
+        repoRemote.schedulePush(projectId);
     });
 }

@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteProjectData, ResourceBusyError } from "../../../core/deletion";
-import { ensureProjectRepo } from "../../../core/repo/git";
+import { repoGit } from "../../../core/repo/git";
 import { createManualSpec, editContextFile, readContextRaw, RepoConflictError } from "../../../core/repo/manual";
 import { syncProject } from "../../../core/repo/sync";
 import { featuresRepository } from "../../repositories/features";
@@ -55,7 +55,7 @@ export function createProjectsRouter(): Hono {
         const { name, baseUrl } = c.req.valid("json");
         const project = await projectsRepository.createProject(name, baseUrl);
         try {
-            await ensureProjectRepo(project.id, { create: true });
+            await repoGit.ensureProjectRepo(project.id, { create: true });
         } catch (error) {
             await projectsRepository.deleteProject(project.id);
             throw error;

@@ -1,9 +1,9 @@
 import { simpleGit, type SimpleGit } from "simple-git";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
-import { authedRemoteUrl, projectGit, repoDir, sanitizeGitError, withRepoLock } from "./git";
+import { repoGit } from "./git";
 import { reindexProjectUnlocked, type RobotValidator } from "./indexer";
-import { schedulePush } from "./remote";
+import { repoRemote } from "./remote";
 
 export type SyncOutcome = {
     status: "no-remote" | "clean" | "updated" | "conflict";
@@ -36,7 +36,7 @@ async function integrate(
     resolver?: Map<string, "local" | "remote">,
 ): Promise<SyncOutcome> {
     const git = simpleGit({
-        baseDir: repoDir(projectId),
+        baseDir: repoGit.getRepoDir(projectId),
         timeout: { block: 30_000 },
         unsafe: { allowUnsafeEditor: true },
     }).env({ GIT_EDITOR: "true", GIT_TERMINAL_PROMPT: "0" });
@@ -50,7 +50,7 @@ async function integrate(
     const base = await git.raw(["merge-base", "HEAD", ORIGIN_MAIN]).then((value) => value.trim()).catch(() => "");
     if (base === remote) {
         await reindexProjectUnlocked(projectId, validate ? { validate } : {});
-        schedulePush(projectId);
+        repoRemote.schedulePush(projectId);
         return { status: "clean", conflictedPaths: [] };
     }
 
@@ -131,7 +131,7 @@ async function integrate(
     }
 
     await reindexProjectUnlocked(projectId, validate ? { validate } : {});
-    schedulePush(projectId);
+    repoRemote.schedulePush(projectId);
     return { status: "updated", conflictedPaths: [] };
 }
 
@@ -139,27 +139,27 @@ export async function syncProject(
     projectId: string,
     options: { validate?: RobotValidator } = {},
 ): Promise<SyncOutcome> {
-    return withRepoLock(projectId, async () => {
+    return repoGit.withRepoLock(projectId, async () => {
         const project = await projectsRepository.getProject(projectId);
         if (!project) return { status: "no-remote", conflictedPaths: [] };
         if (!project.gitRemoteUrl) {
             await reindexProjectUnlocked(projectId, options.validate ? { validate: options.validate } : {});
             return { status: "no-remote", conflictedPaths: [] };
         }
-        const url = authedRemoteUrl(project.gitRemoteUrl, project.gitToken);
-        const git = projectGit(projectId);
+        const url = repoGit.getAuthedRemoteUrl(project.gitRemoteUrl, project.gitToken);
+        const git = repoGit.getProjectGit(projectId);
         try {
             await git.fetch(url, `+main:${ORIGIN_MAIN}`);
         } catch (error) {
-            const message = sanitizeGitError(error, project.gitToken);
+            const message = repoGit.sanitizeGitError(error, project.gitToken);
             if (/couldn't find remote ref|no matching remote head/i.test(message)) {
-                const heads = await git.listRemote(["--heads", url]).catch((headError) => {
-                    throw new Error(sanitizeGitError(headError, project.gitToken));
+                const heads = await git.listRemote(["--heads", url]).catch((headError: unknown) => {
+                    throw new Error(repoGit.sanitizeGitError(headError, project.gitToken));
                 });
                 if (heads.trim()) throw new Error("The remote repository must use a main branch");
                 await reindexProjectUnlocked(projectId, options.validate ? { validate: options.validate } : {});
                 await projectsRepository.setGitConflictPaths(projectId, null);
-                schedulePush(projectId);
+                repoRemote.schedulePush(projectId);
                 return { status: "clean", conflictedPaths: [] };
             }
             throw new Error(message);
@@ -176,18 +176,18 @@ export async function resolveConflicts(
     options: { validate?: RobotValidator } = {},
 ): Promise<SyncOutcome> {
     const resolver = new Map(choices.map((choice) => [choice.path, choice.keep]));
-    return withRepoLock(projectId, async () => {
+    return repoGit.withRepoLock(projectId, async () => {
         const project = await projectsRepository.getProject(projectId);
         if (!project?.gitRemoteUrl) return { status: "no-remote", conflictedPaths: [] };
         const recordedConflicts = project.gitConflictPaths ?? [];
         if (recordedConflicts.some((conflicted) => !resolver.has(conflicted))) {
             return { status: "conflict", conflictedPaths: recordedConflicts };
         }
-        const url = authedRemoteUrl(project.gitRemoteUrl, project.gitToken);
+        const url = repoGit.getAuthedRemoteUrl(project.gitRemoteUrl, project.gitToken);
         try {
-            await projectGit(projectId).fetch(url, `+main:${ORIGIN_MAIN}`);
+            await repoGit.getProjectGit(projectId).fetch(url, `+main:${ORIGIN_MAIN}`);
         } catch (error) {
-            throw new Error(sanitizeGitError(error, project.gitToken));
+            throw new Error(repoGit.sanitizeGitError(error, project.gitToken));
         }
         const outcome = await integrate(projectId, options.validate, resolver);
         if (outcome.status === "updated" || outcome.status === "clean") {

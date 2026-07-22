@@ -7,15 +7,8 @@ import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
 import { namedRobotStepsError } from "../runner/evidence";
 import { validateRobotSource } from "../runner/validate";
-import {
-    commitAll,
-    deleteRunCommitRefsUnlocked,
-    ensureProjectRepo,
-    projectGit,
-    repoDir,
-    withRepoLock,
-} from "./git";
-import { schedulePush } from "./remote";
+import { repoGit } from "./git";
+import { repoRemote } from "./remote";
 import { humanizeSlug } from "./slug";
 import { featureYamlFile, markdownHashOf, robotHashOf, specRobotFile, specYamlFile } from "./writer";
 import {
@@ -84,7 +77,7 @@ async function upsertFeatures(
     projectId: string,
     dirs: string[],
 ): Promise<{ byPath: Map<string, Feature>; unseen: Feature[] }> {
-    const root = repoDir(projectId);
+    const root = repoGit.getRepoDir(projectId);
     const existing = await featuresRepository.listFeatures(projectId);
     const byPath = new Map<string, Feature>();
     const seenIds = new Set<string>();
@@ -135,14 +128,14 @@ async function upsertFeatures(
 }
 
 async function removeRunDirs(projectId: string, runIds: string[]): Promise<void> {
-    await deleteRunCommitRefsUnlocked(projectId, runIds);
+    await repoGit.deleteRunCommitRefsUnlocked(projectId, runIds);
     await Promise.allSettled(
         runIds.map((runId) => fs.rm(path.join(runsDir, runId), { recursive: true, force: true })),
     );
 }
 
 async function reconcileContext(projectId: string): Promise<void> {
-    const source = await readOptionalFile(path.join(repoDir(projectId), "context.yml"));
+    const source = await readOptionalFile(path.join(repoGit.getRepoDir(projectId), "context.yml"));
     if (source === null) return;
     try {
         const context = parseContextYaml(source);
@@ -170,7 +163,7 @@ export async function reindexProject(
     projectId: string,
     options: { validate?: RobotValidator; allowDirty?: boolean } = {},
 ): Promise<ReindexResult> {
-    return withRepoLock(projectId, () => reindexProjectUnlocked(projectId, options));
+    return repoGit.withRepoLock(projectId, () => reindexProjectUnlocked(projectId, options));
 }
 
 export async function reindexProjectUnlocked(
@@ -178,14 +171,14 @@ export async function reindexProjectUnlocked(
     options: { validate?: RobotValidator; allowDirty?: boolean } = {},
 ): Promise<ReindexResult> {
     const validate = options.validate ?? validateRobotSource;
-    const root = repoDir(projectId);
+    const root = repoGit.getRepoDir(projectId);
     if (
         await isDirectory(path.join(root, ".git", "rebase-merge")) ||
         await isDirectory(path.join(root, ".git", "rebase-apply"))
     ) {
         throw new Error("Cannot reindex while a git rebase is in progress");
     }
-    const initialStatus = await projectGit(projectId).status();
+    const initialStatus = await repoGit.getProjectGit(projectId).status();
     if (initialStatus.conflicted.length > 0) {
         throw new Error("Cannot reindex a working tree with unresolved git conflicts");
     }
@@ -301,10 +294,10 @@ export async function reindexProjectUnlocked(
         }
     }
 
-    const workingTreeChanged = !(await projectGit(projectId).status()).isClean();
+    const workingTreeChanged = !(await repoGit.getProjectGit(projectId).status()).isClean();
     if (workingTreeChanged) {
-        await commitAll(projectId, "specbook: import working tree changes");
-        schedulePush(projectId);
+        await repoGit.commitAll(projectId, "specbook: import working tree changes");
+        repoRemote.schedulePush(projectId);
     }
 
     await reconcileContext(projectId);
@@ -314,7 +307,7 @@ export async function reindexProjectUnlocked(
 export async function reindexAllProjects(): Promise<void> {
     for (const project of await projectsRepository.listProjects()) {
         try {
-            await ensureProjectRepo(project.id);
+            await repoGit.ensureProjectRepo(project.id);
             await reindexProject(project.id, { allowDirty: false });
         } catch (error) {
             console.error(`[specbook] reindex failed for project ${project.id}:`, error);

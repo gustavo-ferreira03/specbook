@@ -8,14 +8,7 @@ import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runBatchesDir, runsDir } from "../paths";
-import {
-    deleteRunCommitRefsUnlocked,
-    headSha,
-    pinRunCommitUnlocked,
-    projectGit,
-    repoDir,
-    withRepoLock,
-} from "../repo/git";
+import { repoGit } from "../repo/git";
 import { markdownHashOf, robotHashOf, specYamlFile, specRobotFile } from "../repo/writer";
 import { resolveSecretEnv } from "../credentials/profiles";
 import { acquireSpecLocks } from "../specs/lifecycle";
@@ -271,11 +264,11 @@ async function prepareSpecBatch(
     ids: string[],
     label: string,
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secretEnv: Record<string, string> }> {
-    const { commitSha, definitions } = await withRepoLock(projectId, async () => {
-        if (!(await projectGit(projectId).status()).isClean()) {
+    const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
+        if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
             throw new Error("The project repository has uncommitted changes; sync or commit them before running");
         }
-        const commitSha = await headSha(projectId);
+        const commitSha = await repoGit.getHeadSha(projectId);
         const definitions: {
             spec: Spec;
             markdown: string;
@@ -293,8 +286,8 @@ async function prepareSpecBatch(
                 throw new Error(`Spec "${spec.title}" has a git sync conflict`);
             }
             const [markdown, robotSource] = await Promise.all([
-                fs.readFile(path.join(repoDir(projectId), specYamlFile(spec.path)), "utf8"),
-                fs.readFile(path.join(repoDir(projectId), specRobotFile(spec.path)), "utf8"),
+                fs.readFile(path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)), "utf8"),
+                fs.readFile(path.join(repoGit.getRepoDir(projectId), specRobotFile(spec.path)), "utf8"),
             ]);
             const robotHash = robotHashOf(robotSource);
             const markdownHash = markdownHashOf(markdown);
@@ -332,11 +325,11 @@ async function prepareSpecBatch(
                 robotHash: definition.robotHash,
             });
             createdRuns.push(run);
-            await withRepoLock(projectId, () => pinRunCommitUnlocked(projectId, run.id, commitSha));
+            await repoGit.withRepoLock(projectId, () => repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha));
         }
     } catch (error) {
         await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
-        await withRepoLock(projectId, () => deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
+        await repoGit.withRepoLock(projectId, () => repoGit.deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
         throw error;
     }
 
@@ -364,7 +357,7 @@ async function prepareSpecBatch(
         await writeBatch(batch);
     } catch (error) {
         await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
-        await withRepoLock(projectId, () => deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
+        await repoGit.withRepoLock(projectId, () => repoGit.deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
         throw error;
     }
     const prepared = definitions.map((definition, index): PreparedSpec => ({

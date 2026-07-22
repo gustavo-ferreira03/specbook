@@ -1,6 +1,6 @@
 import type { SimpleGit } from "simple-git";
 import type { Spec } from "../../infra/repositories/specs";
-import { projectGit, withRepoLock } from "./git";
+import { repoGit } from "./git";
 import { specRobotFile, specYamlFile } from "./writer";
 
 export interface SpecHistoryEntry {
@@ -26,7 +26,7 @@ async function documentAt(git: SimpleGit, sha: string, base: string): Promise<st
 }
 
 async function historyForPath(spec: Spec, relativePath: string): Promise<HistoryRecord[]> {
-    const raw = await projectGit(spec.projectId).raw([
+    const raw = await repoGit.getProjectGit(spec.projectId).raw([
         "log",
         "--follow",
         "--format=%x1e%H%x09%cI%x09%s",
@@ -46,7 +46,7 @@ async function historyForPath(spec: Spec, relativePath: string): Promise<History
 }
 
 export async function specHistory(spec: Spec): Promise<SpecHistoryEntry[]> {
-    return withRepoLock(spec.projectId, async () => {
+    return repoGit.withRepoLock(spec.projectId, async () => {
         const entries = await Promise.all([
             historyForPath(spec, specYamlFile(spec.path)),
             historyForPath(spec, specRobotFile(spec.path)),
@@ -75,10 +75,10 @@ export async function specAtCommit(
     sha: string,
 ): Promise<{ yaml: string | null; robot: string | null }> {
     if (!/^[0-9a-f]{40}$/i.test(sha)) throw new Error("Invalid commit sha");
-    return withRepoLock(spec.projectId, async () => {
+    return repoGit.withRepoLock(spec.projectId, async () => {
         const base = await pathAtCommit(spec, sha);
         if (!base) return { yaml: null, robot: null };
-        const git = projectGit(spec.projectId);
+        const git = repoGit.getProjectGit(spec.projectId);
         const [document, robot] = await Promise.all([
             documentAt(git, sha, base),
             showAt(git, sha, `${base}.robot`),

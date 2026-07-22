@@ -4,7 +4,7 @@ import { blockChatBrowser, cancelChatBrowserDeletion, removeChatBrowserData } fr
 import { beginChatDeletion, cancelChatDeletion, isChatBusy, isChatDeleting, removeChatSession } from "./chat/session";
 import { deleteProfile } from "./credentials/profiles";
 import { runsDir } from "./paths";
-import { deleteRunCommitRefsUnlocked, repoDir, withRepoLock } from "./repo/git";
+import { repoGit } from "./repo/git";
 import { deleteFeatureDirectory, deleteSpecFiles } from "./repo/writer";
 import { getRunBatch, getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
@@ -35,7 +35,7 @@ async function removeEntityDirectories(root: string, ids: string[]): Promise<voi
 }
 
 async function removeRunResources(projectId: string, runIds: string[]): Promise<void> {
-    await withRepoLock(projectId, () => deleteRunCommitRefsUnlocked(projectId, runIds));
+    await repoGit.withRepoLock(projectId, () => repoGit.deleteRunCommitRefsUnlocked(projectId, runIds));
     const batchIds = new Set<string>();
     for (const runId of runIds) {
         try {
@@ -157,8 +157,8 @@ export async function deleteProjectData(id: string): Promise<boolean> {
 
     await projectContextsRepository.deleteAllForProject(id);
 
-    await withRepoLock(id, async () => {
-        await fs.rm(repoDir(id), { recursive: true, force: true });
+    await repoGit.withRepoLock(id, async () => {
+        await fs.rm(repoGit.getRepoDir(id), { recursive: true, force: true });
     });
 
     await projectsRepository.deleteProject(id);

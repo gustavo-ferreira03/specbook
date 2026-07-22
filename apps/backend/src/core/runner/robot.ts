@@ -8,14 +8,7 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
-import {
-    deleteRunCommitRefsUnlocked,
-    headSha,
-    pinRunCommitUnlocked,
-    projectGit,
-    repoDir,
-    withRepoLock,
-} from "../repo/git";
+import { repoGit } from "../repo/git";
 import { markdownHashOf, specYamlFile, specRobotFile } from "../repo/writer";
 import { resolveSecretEnv } from "../credentials/profiles";
 import { withSpecLock } from "../specs/lifecycle";
@@ -156,14 +149,14 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     if (spec.status === "conflict") throw new Error("Spec has a git sync conflict; resolve it before running");
     const project = await projectsRepository.getProject(spec.projectId);
     if (!project) throw new Error("Project not found");
-    const snapshot = await withRepoLock(spec.projectId, async () => {
-        if (!(await projectGit(spec.projectId).status()).isClean()) {
+    const snapshot = await repoGit.withRepoLock(spec.projectId, async () => {
+        if (!(await repoGit.getProjectGit(spec.projectId).status()).isClean()) {
             throw new Error("The project repository has uncommitted changes; sync or commit them before running");
         }
         const [robotSource, markdown, commitSha] = await Promise.all([
-            fs.readFile(path.join(repoDir(spec.projectId), specRobotFile(spec.path)), "utf8"),
-            fs.readFile(path.join(repoDir(spec.projectId), specYamlFile(spec.path)), "utf8"),
-            headSha(spec.projectId),
+            fs.readFile(path.join(repoGit.getRepoDir(spec.projectId), specRobotFile(spec.path)), "utf8"),
+            fs.readFile(path.join(repoGit.getRepoDir(spec.projectId), specYamlFile(spec.path)), "utf8"),
+            repoGit.getHeadSha(spec.projectId),
         ]);
         return { robotSource, markdown, commitSha };
     });
@@ -184,10 +177,10 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
 
     const run = await runsRepository.createRun({ specId: spec.id, commitSha, robotHash });
     try {
-        await withRepoLock(spec.projectId, () => pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
+        await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
     } catch (error) {
         await runsRepository.deleteRun(run.id);
-        await withRepoLock(spec.projectId, () => deleteRunCommitRefsUnlocked(spec.projectId, [run.id])).catch(() => undefined);
+        await repoGit.withRepoLock(spec.projectId, () => repoGit.deleteRunCommitRefsUnlocked(spec.projectId, [run.id])).catch(() => undefined);
         throw error;
     }
     const started = Date.now();
@@ -241,7 +234,7 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     if (options.persistFailures === false && finished.status !== "passed") {
         await fs.rm(path.join(runsDir, finished.id), { recursive: true, force: true });
         await runsRepository.deleteRun(finished.id);
-        await withRepoLock(spec.projectId, () => deleteRunCommitRefsUnlocked(spec.projectId, [finished.id]));
+        await repoGit.withRepoLock(spec.projectId, () => repoGit.deleteRunCommitRefsUnlocked(spec.projectId, [finished.id]));
         return finished;
     }
     if (finished.status === "passed" || finished.status === "failed") {
