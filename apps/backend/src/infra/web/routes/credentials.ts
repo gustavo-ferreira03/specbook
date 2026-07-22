@@ -15,7 +15,6 @@ import { projectsRepository } from "../../repositories/projects";
 
 const fieldSchema = z.object({
     key: z.string().min(1),
-    secret: z.boolean(),
     value: z.string().optional(),
 });
 
@@ -93,7 +92,6 @@ export function createCredentialsRouter(): Hono {
             }
             const inputs = pending.fields.map((field) => ({
                 key: field.key,
-                secret: field.secret,
                 value: body.values[field.key] ?? "",
             }));
             if (inputs.some((input) => input.value === "")) {

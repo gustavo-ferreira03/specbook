@@ -62,7 +62,7 @@ export function CredentialRequestCard({
                         <Label htmlFor={`credential-${field.key}`}>{field.label ?? field.key}</Label>
                         <Input
                             id={`credential-${field.key}`}
-                            type={field.secret ? "password" : "text"}
+                            type="password"
                             autoComplete="off"
                             value={values[field.key] ?? ""}
                             onChange={(event) => setValues({ ...values, [field.key]: event.target.value })}

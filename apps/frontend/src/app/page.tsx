@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api, createContextDiscovery, getLlmRuntimeStatus } from "@/lib/api";
@@ -40,7 +39,6 @@ function HomeContent() {
     const [goal, setGoal] = useState("");
     const [startUrl, setStartUrl] = useState("");
     const [startUrlEdited, setStartUrlEdited] = useState(false);
-    const [maxActions, setMaxActions] = useState("40");
     const [safetyNotes, setSafetyNotes] = useState("");
     const [advancedOpen, setAdvancedOpen] = useState(false);
     const [llmReady, setLlmReady] = useState(true);
@@ -110,7 +108,6 @@ function HomeContent() {
             const discovery = await createContextDiscovery(project.id, {
                 ...(trimmedGoal ? { goal: trimmedGoal } : {}),
                 ...(startUrlEdited && trimmedStart ? { startUrl: trimmedStart } : {}),
-                maxActions: Number(maxActions),
                 safetyNotes: parseSafetyNotes(safetyNotes),
             });
             router.push(`/p/${project.id}/chats/${discovery.chat.id}`);
@@ -239,17 +236,6 @@ function HomeContent() {
                                         placeholder={baseUrl || "Same as base URL"}
                                     />
                                     <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">Must stay on the base URL origin.</p>
-                                </div>
-                                <div>
-                                    <Label className="mb-1.5" htmlFor="max-actions">Maximum browser actions</Label>
-                                    <Select value={maxActions} onValueChange={setMaxActions}>
-                                        <SelectTrigger id="max-actions" className="w-full"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="20">20 actions · quick pass</SelectItem>
-                                            <SelectItem value="40">40 actions · balanced</SelectItem>
-                                            <SelectItem value="60">60 actions · deeper exploration</SelectItem>
-                                        </SelectContent>
-                                    </Select>
                                 </div>
                                 <div>
                                     <Label className="mb-1.5" htmlFor="safety-notes">Additional safety notes</Label>

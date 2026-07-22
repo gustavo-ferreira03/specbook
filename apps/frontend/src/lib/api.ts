@@ -42,7 +42,6 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export interface DiscoveryBriefInput {
     goal?: string;
     startUrl?: string;
-    maxActions?: number;
     safetyNotes?: string[];
 }
 
@@ -62,7 +61,7 @@ export function getProjectContext(projectId: string): Promise<ProjectContextStat
 
 export function patchProjectContext(
     revisionId: string,
-    patch: { context?: ProjectContext; maxActions?: number },
+    patch: { context?: ProjectContext },
 ): Promise<{ revision: ProjectContextRevision }> {
     return api(`/project-contexts/${encodeURIComponent(revisionId)}`, {
         method: "PATCH",

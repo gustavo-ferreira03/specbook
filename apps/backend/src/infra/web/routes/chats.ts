@@ -59,7 +59,6 @@ export function createChatsRouter(): Hono {
                       id: revision.id,
                       status: revision.status,
                       brief: revision.brief,
-                      actionsUsed: revision.actionsUsed,
                       hasProposal: revision.context.summary.trim().length > 0,
                   }
                 : null,

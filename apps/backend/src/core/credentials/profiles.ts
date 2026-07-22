@@ -12,14 +12,11 @@ const MAX_NAME_LENGTH = 40;
 
 export interface CredentialFieldInput {
     key: string;
-    secret: boolean;
     value?: string;
 }
 
 export interface PublicCredentialField {
     key: string;
-    secret: boolean;
-    value?: string;
     hasValue: boolean;
 }
 
@@ -75,14 +72,11 @@ function buildFields(inputs: CredentialFieldInput[], previous?: CredentialField[
         assertValidName("field key", input.key);
         if (seen.has(input.key)) throw new Error(`Duplicate field key "${input.key}".`);
         seen.add(input.key);
-        if (!input.secret) {
-            return { key: input.key, secret: false, value: input.value ?? "" };
-        }
         if (input.value !== undefined && input.value !== "") {
-            return { key: input.key, secret: true, value: encryptSecret(input.value) };
+            return { key: input.key, value: encryptSecret(input.value) };
         }
-        const kept = previous?.find((field) => field.key === input.key && field.secret);
-        if (!kept) throw new Error(`Secret field "${input.key}" needs a value.`);
+        const kept = previous?.find((field) => field.key === input.key);
+        if (!kept) throw new Error(`Field "${input.key}" needs a value.`);
         return kept;
     });
 }
@@ -93,15 +87,14 @@ async function assertNoEnvCollision(
     fields: CredentialField[],
     ignoreProfileId?: string,
 ): Promise<void> {
-    const secretFields = fields.filter((field) => field.secret);
-    const names = new Set(secretFields.map((field) => secretEnvName(profileName, field.key)));
-    if (names.size !== secretFields.length) {
-        throw new Error("Two secret fields map to the same environment name; rename one.");
+    const names = new Set(fields.map((field) => secretEnvName(profileName, field.key)));
+    if (names.size !== fields.length) {
+        throw new Error("Two fields map to the same environment name; rename one.");
     }
     for (const row of await credentialsRepository.listProfiles(projectId)) {
         if (row.id === ignoreProfileId) continue;
         if (row.name === profileName) throw new Error(`A profile named "${profileName}" already exists.`);
-        for (const field of row.fields.filter((f) => f.secret)) {
+        for (const field of row.fields) {
             const envName = secretEnvName(row.name, field.key);
             if (names.has(envName)) {
                 throw new Error(
@@ -118,11 +111,7 @@ export function publicProfile(row: CredentialProfileRow): PublicCredentialProfil
         name: row.name,
         allowedOrigins: row.allowedOrigins,
         createdAt: row.createdAt,
-        fields: row.fields.map((field) =>
-            field.secret
-                ? { key: field.key, secret: true, hasValue: field.value !== "" }
-                : { key: field.key, secret: false, value: field.value, hasValue: field.value !== "" },
-        ),
+        fields: row.fields.map((field) => ({ key: field.key, hasValue: field.value !== "" })),
     };
 }
 
@@ -182,7 +171,7 @@ export async function listSecretValues(projectId: string): Promise<SecretValue[]
     const rows = await credentialsRepository.listProfiles(projectId);
     return rows.flatMap((row) =>
         row.fields
-            .filter((field) => field.secret && field.value !== "")
+            .filter((field) => field.value !== "")
             .map((field) => ({
                 profile: row.name,
                 field: field.key,

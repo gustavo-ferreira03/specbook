@@ -16,7 +16,6 @@ export const DEFAULT_DISCOVERY_GOAL =
 const discoveryBriefSchema = z.object({
     goal: z.string().trim().min(1).max(500).optional(),
     startUrl: z.string().trim().url().optional(),
-    maxActions: z.number().int().min(10).max(80).default(40),
     safetyNotes: z
         .array(z.string().trim().min(1).max(200))
         .max(20)
@@ -25,7 +24,6 @@ const discoveryBriefSchema = z.object({
 
 const draftPatchSchema = z.object({
     context: projectContextSchema.optional(),
-    maxActions: z.number().int().min(10).max(80).optional(),
 });
 
 function parseOrigin(url: string): string | null {
@@ -53,7 +51,6 @@ export function resolveDiscoveryBrief(
     return {
         goal: input.goal ?? DEFAULT_DISCOVERY_GOAL,
         startUrl,
-        maxActions: input.maxActions,
         safetyNotes: input.safetyNotes,
     };
 }
@@ -121,13 +118,6 @@ export function createProjectContextsRouter(): Hono {
         let updated = revision;
         if (patch.context) {
             updated = (await projectContextsRepository.replaceProjectContextDraft(revision.id, patch.context)) ?? updated;
-        }
-        if (patch.maxActions !== undefined) {
-            updated =
-                (await projectContextsRepository.updateProjectContextDraftBrief(revision.id, {
-                    ...updated.brief,
-                    maxActions: patch.maxActions,
-                })) ?? updated;
         }
         return c.json({ revision: updated });
     });

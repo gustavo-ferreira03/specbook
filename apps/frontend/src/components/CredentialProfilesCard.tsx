@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, KeyRound, Lock, Plus, Trash2, Unlock, X } from "lucide-react";
+import { AlertCircle, KeyRound, Plus, Trash2, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,6 @@ import type { CredentialFieldInput, CredentialProfile } from "@/lib/types";
 
 interface DraftField {
     key: string;
-    secret: boolean;
     value: string;
     hasValue: boolean;
 }
@@ -24,8 +23,7 @@ interface DraftField {
 function draftFromProfile(profile: CredentialProfile): DraftField[] {
     return profile.fields.map((field) => ({
         key: field.key,
-        secret: field.secret,
-        value: field.secret ? "" : (field.value ?? ""),
+        value: "",
         hasValue: field.hasValue,
     }));
 }
@@ -57,8 +55,8 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
         setOpenId("new");
         setName("");
         setFields([
-            { key: "email", secret: false, value: "", hasValue: false },
-            { key: "password", secret: true, value: "", hasValue: false },
+            { key: "email", value: "", hasValue: false },
+            { key: "password", value: "", hasValue: false },
         ]);
     }
 
@@ -79,8 +77,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             .filter((field) => field.key.trim())
             .map((field) => ({
                 key: field.key.trim(),
-                secret: field.secret,
-                value: field.secret && field.value === "" && field.hasValue ? undefined : field.value,
+                value: field.value === "" && field.hasValue ? undefined : field.value,
             }));
         try {
             if (openId === "new") await createCredentialProfile(projectId, { name: name.trim(), fields: inputs });
@@ -118,7 +115,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                 )}
             </div>
             <p className="max-w-[68ch] text-[0.65625rem] leading-5 text-ink-faint">
-                Login profiles the agent can use. Secret values are encrypted and never shown again once saved.
+                Login profiles the agent can use. Every field is encrypted and never shown again once saved.
             </p>
             {error && (
                 <Alert variant="destructive">
@@ -146,7 +143,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                 <p className="truncate text-[0.71875rem] font-bold">{profile.name}</p>
                             </div>
                             <p className="mt-1 truncate text-[0.625rem] text-ink-faint">
-                                {profile.fields.map((field) => (field.secret ? `${field.key}: ••••` : `${field.key}: ${field.value}`)).join("  ·  ")}
+                                {profile.fields.map((field) => `${field.key}: ••••`).join("  ·  ")}
                             </p>
                         </div>
                         <Button
@@ -192,27 +189,16 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                 />
                             </div>
                             <div className="flex-1">
-                                <Label className="text-[0.625rem]">{field.secret ? "Secret" : "Value"}</Label>
-                                <div className="relative">
-                                    <Input
-                                        type={field.secret ? "password" : "text"}
-                                        autoComplete="off"
-                                        value={field.value}
-                                        placeholder={field.secret && field.hasValue ? "•••• (keep current)" : ""}
-                                        onChange={(event) =>
-                                            setFields(fields.map((f, i) => (i === index ? { ...f, value: event.target.value } : f)))
-                                        }
-                                        className="pr-9"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setFields(fields.map((f, i) => (i === index ? { ...f, secret: !f.secret } : f)))}
-                                        className="absolute inset-y-0 right-0 flex items-center px-2 text-ink-faint hover:text-ink transition-colors"
-                                        aria-label={field.secret ? "Make plain text" : "Make secret"}
-                                    >
-                                        {field.secret ? <Lock size={13} /> : <Unlock size={13} />}
-                                    </button>
-                                </div>
+                                <Label className="text-[0.625rem]">Value</Label>
+                                <Input
+                                    type="password"
+                                    autoComplete="off"
+                                    value={field.value}
+                                    placeholder={field.hasValue ? "•••• (keep current)" : ""}
+                                    onChange={(event) =>
+                                        setFields(fields.map((f, i) => (i === index ? { ...f, value: event.target.value } : f)))
+                                    }
+                                />
                             </div>
                             <button
                                 type="button"
@@ -229,7 +215,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                             type="button"
                             size="sm"
                             variant="ghost"
-                            onClick={() => setFields([...fields, { key: "", secret: false, value: "", hasValue: false }])}
+                            onClick={() => setFields([...fields, { key: "", value: "", hasValue: false }])}
                         >
                             <Plus size={13} /> Add field
                         </Button>

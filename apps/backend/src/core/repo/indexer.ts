@@ -145,7 +145,6 @@ async function reconcileContext(projectId: string): Promise<void> {
             const brief = latest?.brief ?? {
                 goal: "",
                 startUrl: project?.baseUrl ?? "",
-                maxActions: 0,
                 safetyNotes: [],
             };
             await projectContextsRepository.insertConfirmedRevision(projectId, brief, context);

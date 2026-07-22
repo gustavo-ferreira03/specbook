@@ -29,7 +29,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "list_credential_profiles",
             label: "list_credential_profiles",
             description:
-                "List the project's credential profiles. Non-secret fields include their values; secret fields only report hasValue and must be entered with fill_secret (browser) or Fill Secret (specs).",
+                "List the project's credential profiles. Field values are never included, only whether each field has a value (hasValue). Every field — including email/username — must be entered with fill_secret (browser) or Fill Secret (specs); never type or paste a credential value yourself.",
             parameters: Type.Object({}),
             async execute() {
                 return text(JSON.stringify(await listPublicProfiles(options.projectId)));
@@ -39,7 +39,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "fill_secret",
             label: "fill_secret",
             description:
-                "Type a secret credential field into the page without exposing it. Provide the element description and target (the exact element reference) from the latest browser_snapshot, same as browser_type. Only works on the project origin or the profile's allowed origins.",
+                "Type a credential profile field into the page, sourced exactly from the stored profile — never from memory or a guess. Use this for EVERY field, including email/username. Provide the element description and target (the exact element reference) from the latest browser_snapshot, same as browser_type. Only works on the project origin or the profile's allowed origins.",
             parameters: Type.Object({
                 profile: Type.String(),
                 field: Type.String(),
@@ -52,9 +52,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 }
                 const profile = await getProfileByName(options.projectId, params.profile);
                 if (!profile) return text(`fill_secret failed: no credential profile named "${params.profile}".`);
-                const field = profile.fields.find((f) => f.key === params.field && f.secret);
+                const field = profile.fields.find((f) => f.key === params.field);
                 if (!field || field.value === "") {
-                    return text(`fill_secret failed: profile "${params.profile}" has no secret field "${params.field}" with a value.`);
+                    return text(`fill_secret failed: profile "${params.profile}" has no field "${params.field}" with a value.`);
                 }
                 const activeUrl = await getActiveTabUrl(options.mcp);
                 if (!activeUrl) return text("fill_secret failed: could not determine the active page URL.");
@@ -71,9 +71,10 @@ export function createCredentialTools(options: CredentialToolOptions) {
                     );
                 }
                 try {
+                    const value = decryptSecret(field.value);
                     const result = await options.mcp.client.callTool({
                         name: "browser_type",
-                        arguments: { element: params.element, target: params.target, text: decryptSecret(field.value) },
+                        arguments: { element: params.element, target: params.target, text: value },
                     });
                     const rendered = await renderMcpResult(result as { content?: unknown }, options.workDir);
                     const cleaned = await options.scrub(rendered);
@@ -87,13 +88,12 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "request_credential",
             label: "request_credential",
             description:
-                'Ask the user for a credential through a secure form outside the chat. Never ask the user to paste secrets into the conversation. Blocks until the user submits (or 10 minutes). Field keys and the profile name must be lowercase slugs like "admin" / "password".',
+                'Ask the user for a credential through a secure form outside the chat. Every field of the credential (email/username included, not just the password) is stored encrypted and never shown back to you — only usable via fill_secret / Fill Secret. Never ask the user to paste any of it into the conversation. Blocks until the user submits (or 10 minutes). Field keys and the profile name must be lowercase slugs like "admin" / "password".',
             parameters: Type.Object({
                 profileName: Type.String(),
                 fields: Type.Array(
                     Type.Object({
                         key: Type.String(),
-                        secret: Type.Boolean(),
                         label: Type.Optional(Type.String()),
                     }),
                 ),

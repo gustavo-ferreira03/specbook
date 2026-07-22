@@ -21,7 +21,6 @@ export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
 export interface DiscoveryBrief {
     goal: string;
     startUrl: string;
-    maxActions: number;
     safetyNotes: string[];
 }
 
@@ -110,7 +109,6 @@ export const projectContextRevisions = sqliteTable("project_context_revisions", 
     status: text("status").$type<ProjectContextStatus>().notNull(),
     brief: text("brief", { mode: "json" }).$type<DiscoveryBrief>().notNull(),
     context: text("context", { mode: "json" }).$type<ProjectContext>().notNull(),
-    actionsUsed: integer("actions_used").notNull().default(0),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
     confirmedAt: text("confirmed_at"),
@@ -131,7 +129,6 @@ export const runs = sqliteTable("runs", {
 
 export interface CredentialField {
     key: string;
-    secret: boolean;
     value: string;
 }
 

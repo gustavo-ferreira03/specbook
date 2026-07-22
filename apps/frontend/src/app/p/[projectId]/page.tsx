@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,7 +58,6 @@ function DiscoveryStartForm({
     const router = useRouter();
     const [goal, setGoal] = useState(seedContext ? "Update the confirmed project context" : "");
     const [startUrl, setStartUrl] = useState("");
-    const [maxActions, setMaxActions] = useState("40");
     const [safetyNotes, setSafetyNotes] = useState("");
     const [advancedOpen, setAdvancedOpen] = useState(false);
     const [error, setError] = useState(initialError ?? "");
@@ -75,7 +73,6 @@ function DiscoveryStartForm({
             const discovery = await createContextDiscovery(projectId, {
                 ...(trimmedGoal ? { goal: trimmedGoal } : {}),
                 ...(trimmedStart ? { startUrl: trimmedStart } : {}),
-                maxActions: Number(maxActions),
                 safetyNotes: parseSafetyNotes(safetyNotes),
             });
             if (seedContext) {
@@ -114,17 +111,6 @@ function DiscoveryStartForm({
                             <Label className="mb-1.5" htmlFor="start-url">Start URL</Label>
                             <Input id="start-url" value={startUrl} onChange={(event) => setStartUrl(event.target.value)} type="url" inputMode="url" placeholder={baseUrl} />
                             <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">Must stay on the base URL origin.</p>
-                        </div>
-                        <div>
-                            <Label className="mb-1.5" htmlFor="max-actions">Maximum browser actions</Label>
-                            <Select value={maxActions} onValueChange={setMaxActions}>
-                                <SelectTrigger id="max-actions" className="w-full"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="20">20 actions · quick pass</SelectItem>
-                                    <SelectItem value="40">40 actions · balanced</SelectItem>
-                                    <SelectItem value="60">60 actions · deeper exploration</SelectItem>
-                                </SelectContent>
-                            </Select>
                         </div>
                         <div>
                             <Label className="mb-1.5" htmlFor="safety-notes">Additional safety notes</Label>
@@ -275,10 +261,11 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                     <section aria-label="Discovery in progress" className="rounded-[13px] border border-line bg-canvas p-4">
                         <div className="flex items-center gap-2 text-xs font-bold"><Compass size={14} className="text-ink-faint" /> Discovery in progress</div>
                         <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink-soft" title={draft.brief.goal}>{draft.brief.goal}</p>
-                        <p className="mt-1 text-[0.65625rem] text-ink-faint">
-                            {draft.actionsUsed} of {draft.brief.maxActions} browser actions used
-                            {draft.brief.safetyNotes.length > 0 && ` · ${draft.brief.safetyNotes.length} safety ${draft.brief.safetyNotes.length === 1 ? "note" : "notes"}`}
-                        </p>
+                        {draft.brief.safetyNotes.length > 0 && (
+                            <p className="mt-1 text-[0.65625rem] text-ink-faint">
+                                {draft.brief.safetyNotes.length} safety {draft.brief.safetyNotes.length === 1 ? "note" : "notes"}
+                            </p>
+                        )}
                         {draft.brief.safetyNotes.length > 0 && (
                             <ul className="mt-2 list-disc pl-4 text-[0.65625rem] leading-4 text-ink-soft">
                                 {draft.brief.safetyNotes.map((note, index) => (
@@ -327,7 +314,7 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                         <div className="border-b border-line px-4 py-3">
                             <h3 className="text-[0.8125rem] font-bold">Review project context</h3>
                             <p className="mt-0.5 text-[0.65625rem] leading-4 text-ink-faint">
-                                Drafted from discovery ({draft.actionsUsed} of {draft.brief.maxActions} actions). Edit anything before confirming.
+                                Drafted from discovery. Edit anything before confirming.
                             </p>
                         </div>
                         <div className="p-4">

@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 
 export interface CredentialRequestField {
     key: string;
-    secret: boolean;
     label?: string;
 }
 

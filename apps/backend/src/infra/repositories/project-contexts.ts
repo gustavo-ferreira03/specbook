@@ -36,7 +36,6 @@ class ProjectContextsRepository {
             status: "draft",
             brief,
             context: EMPTY_PROJECT_CONTEXT,
-            actionsUsed: 0,
             createdAt: now,
             updatedAt: now,
             confirmedAt: null,
@@ -110,19 +109,6 @@ class ProjectContextsRepository {
         return this.getProjectContextRevision(revisionId);
     }
 
-    async updateProjectContextDraftBrief(
-        revisionId: string,
-        brief: DiscoveryBrief,
-    ): Promise<ProjectContextRevisionRow | null> {
-        await db
-            .update(projectContextRevisions)
-            .set({ brief, updatedAt: new Date().toISOString() })
-            .where(
-                and(eq(projectContextRevisions.id, revisionId), eq(projectContextRevisions.status, "draft")),
-            );
-        return this.getProjectContextRevision(revisionId);
-    }
-
     async insertConfirmedRevision(
         projectId: string,
         brief: DiscoveryBrief,
@@ -136,7 +122,6 @@ class ProjectContextsRepository {
             status: "confirmed",
             brief,
             context,
-            actionsUsed: 0,
             createdAt: now,
             updatedAt: now,
             confirmedAt: now,
@@ -176,32 +161,6 @@ class ProjectContextsRepository {
                     eq(projectContextRevisions.status, "draft"),
                 ),
             );
-    }
-
-    async consumeDiscoveryAction(
-        revisionId: string,
-    ): Promise<{ used: number; max: number; allowed: boolean } | null> {
-        return db.transaction(async (tx) => {
-            const rows = await tx
-                .select()
-                .from(projectContextRevisions)
-                .where(eq(projectContextRevisions.id, revisionId));
-            const revision = rows[0];
-            if (!revision) return null;
-            const max = revision.brief.maxActions;
-            if (revision.status !== "draft") {
-                return { used: revision.actionsUsed, max, allowed: false };
-            }
-            if (revision.actionsUsed >= max) {
-                return { used: revision.actionsUsed, max, allowed: false };
-            }
-            const used = revision.actionsUsed + 1;
-            await tx
-                .update(projectContextRevisions)
-                .set({ actionsUsed: used, updatedAt: new Date().toISOString() })
-                .where(eq(projectContextRevisions.id, revisionId));
-            return { used, max, allowed: true };
-        });
     }
 
     async deleteProjectContextDraft(revisionId: string): Promise<void> {

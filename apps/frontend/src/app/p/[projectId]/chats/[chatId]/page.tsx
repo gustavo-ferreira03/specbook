@@ -166,9 +166,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const discovery = state?.mode === "discovery";
     const revisionInfo = state?.contextRevision ?? null;
     const discoveryTerminal = discovery && revisionInfo ? revisionInfo.status !== "draft" : false;
-    const budgetExhausted =
-        discovery && revisionInfo ? revisionInfo.actionsUsed >= revisionInfo.brief.maxActions : false;
-    const discoveryComposerLocked = budgetExhausted && Boolean(revisionInfo?.hasProposal);
     const awaitingDiscoveryStart =
         discovery && state !== null && state.messages.length === 0 && !state.busy && !discoveryTerminal;
 
@@ -204,7 +201,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             await api<{ ok: true }>(`/chats/${chatId}/message`, {
                 method: "POST",
                 body: JSON.stringify({
-                    text: "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes and the action budget, then propose the project context.",
+                    text: "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes, then propose the project context.",
                 }),
             });
             stickToBottomRef.current = true;
@@ -294,7 +291,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                     <div className="mx-auto flex max-w-[780px] flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem]">
                         <span className="flex items-center gap-1.5 font-bold"><Compass size={13} className="text-ink-faint" /> Project discovery</span>
                         <span className="min-w-0 flex-1 truncate text-ink-soft" title={revisionInfo.brief.goal}>{revisionInfo.brief.goal}</span>
-                        <span className="shrink-0 text-ink-faint">{revisionInfo.actionsUsed}/{revisionInfo.brief.maxActions} actions</span>
                         {revisionInfo.hasProposal && revisionInfo.status === "draft" && (
                             <Link href={`/p/${projectId}`} className="shrink-0 font-bold underline underline-offset-2">Review project context</Link>
                         )}
@@ -323,7 +319,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                 <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Project discovery</p>
                                 <h2 className="mt-2 text-xl font-bold tracking-[-0.025em] text-balance">Ready to explore this application</h2>
                                 <p className="mt-3 max-w-[58ch] text-[0.75rem] leading-5 text-ink-soft">
-                                    The agent will browse from <span className="font-mono text-[0.6875rem] [overflow-wrap:anywhere]">{revisionInfo.brief.startUrl}</span> with up to {revisionInfo.brief.maxActions} browser actions, following the saved goal, and draft a project context for your review.
+                                    The agent will browse from <span className="font-mono text-[0.6875rem] [overflow-wrap:anywhere]">{revisionInfo.brief.startUrl}</span>, following the saved goal, and draft a project context for your review.
                                 </p>
                                 {beginError && (
                                     <Alert variant="destructive" className="mt-4 max-w-md text-xs" role="alert">
@@ -416,20 +412,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                             </AlertDescription>
                         </Alert>
                     )}
-                    {!discoveryTerminal && budgetExhausted && (
-                        <Alert className="mb-2 text-xs" role="status">
-                            <AlertDescription>
-                                {revisionInfo?.hasProposal ? (
-                                    <>
-                                        The discovery used all {revisionInfo.brief.maxActions} browser actions.{" "}
-                                        <Link href={`/p/${projectId}`} className="font-bold underline underline-offset-2">Review the drafted context</Link> on the project overview.
-                                    </>
-                                ) : (
-                                    <>The discovery used all {revisionInfo?.brief.maxActions} browser actions without saving a draft. Ask the agent to save its current findings.</>
-                                )}
-                            </AlertDescription>
-                        </Alert>
-                    )}
                     {sendError && (
                         <Alert variant="destructive" className="mb-2 flex items-start gap-2 bg-transparent p-0 text-xs leading-5" role="alert">
                             <AlertCircle size={13} className="mt-1 shrink-0" />
@@ -455,22 +437,20 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                         }
                                     }}
                                     rows={1}
-                                    disabled={discoveryTerminal || discoveryComposerLocked}
+                                    disabled={discoveryTerminal}
                                     placeholder={
                                         discoveryTerminal
                                             ? "This discovery is closed"
-                                            : discoveryComposerLocked
-                                              ? "The discovery action budget is used up"
-                                              : discovery
-                                                ? "Guide the discovery or ask about what was found..."
-                                                : "Describe what to explore or verify..."
+                                            : discovery
+                                              ? "Guide the discovery or ask about what was found..."
+                                              : "Describe what to explore or verify..."
                                     }
                                     className="max-h-28 min-h-10 resize-none rounded-none border-0 bg-transparent px-2 py-2 text-[0.78125rem] leading-5 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0"
                                 />
                             </Label>
                             <Button
                                 type="submit"
-                                disabled={!text.trim() || state.busy || sending || discoveryTerminal || discoveryComposerLocked}
+                                disabled={!text.trim() || state.busy || sending || discoveryTerminal}
                                 size="icon-lg"
                                 className="rounded-[9px] disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-35"
                                 aria-label="Send message"

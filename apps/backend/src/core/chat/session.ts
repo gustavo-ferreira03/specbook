@@ -91,8 +91,6 @@ function discoverySystemPrompt(project: Project, revision: ProjectContextRevisio
         origin: new URL(project.baseUrl).origin,
         startUrl: brief.startUrl,
         goal: brief.goal,
-        maxActions: String(brief.maxActions),
-        actionsUsed: String(revision.actionsUsed),
         safetyNotes,
         schema: PROJECT_CONTEXT_SCHEMA_TEXT,
     });
@@ -113,6 +111,7 @@ export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([
     "browser_navigate_back",
     "browser_snapshot",
     "browser_click",
+    "browser_type",
     "browser_hover",
     "browser_wait_for",
     "browser_tabs",
@@ -168,13 +167,6 @@ export function createDiscoveryBrowserPolicy(
                         `Click rejected: "${description}" looks like a destructive or irreversible action ("${match[0]}"). Discovery must not trigger it.`,
                     );
                 }
-            }
-            const budget = await projectContextsRepository.consumeDiscoveryAction(revision.id);
-            if (!budget) throw new Error("The discovery draft for this chat no longer exists.");
-            if (!budget.allowed) {
-                throw new Error(
-                    `Discovery action limit reached (${budget.used}/${budget.max}). Stop browsing and call propose_project_context with your current findings.`,
-                );
             }
         },
         afterCall: async () => {
@@ -438,27 +430,28 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
             flushSessionFile(sessionManager);
         }
 
-        const credentialTools = discoveryRevision
-            ? []
-            : createCredentialTools({
-                  projectId: row.projectId,
-                  baseUrl: project.baseUrl,
-                  chatId: id,
-                  mcp: chatBrowser?.mcp ?? null,
-                  workDir: chatBrowser?.workDir ?? null,
-                  scrub,
-                  notify: () => publishChatUpdate(id),
-              });
-        const sessionTools = discoveryRevision
-            ? []
-            : createSessionTools({
-                  projectId: row.projectId,
-                  baseUrl: project.baseUrl,
-                  mcp: chatBrowser?.mcp ?? null,
-                  workDir: chatBrowser?.workDir ?? null,
-              });
+        const credentialTools = createCredentialTools({
+            projectId: row.projectId,
+            baseUrl: project.baseUrl,
+            chatId: id,
+            mcp: chatBrowser?.mcp ?? null,
+            workDir: chatBrowser?.workDir ?? null,
+            scrub,
+            notify: () => publishChatUpdate(id),
+        });
+        const sessionTools = createSessionTools({
+            projectId: row.projectId,
+            baseUrl: project.baseUrl,
+            mcp: chatBrowser?.mcp ?? null,
+            workDir: chatBrowser?.workDir ?? null,
+        });
         const customTools = discoveryRevision
-            ? [...browserTools, ...createContextTools(discoveryRevision.id, row.projectId)]
+            ? [
+                  ...browserTools,
+                  ...createContextTools(discoveryRevision.id, row.projectId),
+                  ...credentialTools,
+                  ...sessionTools,
+              ]
             : [...browserTools, ...createDomainTools(row.projectId), ...credentialTools, ...sessionTools];
         const confirmedContext = discoveryRevision
             ? null

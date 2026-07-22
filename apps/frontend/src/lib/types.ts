@@ -90,7 +90,6 @@ export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
 export interface DiscoveryBrief {
     goal: string;
     startUrl: string;
-    maxActions: number;
     safetyNotes: string[];
 }
 
@@ -113,7 +112,6 @@ export interface ProjectContextRevision {
     status: ProjectContextStatus;
     brief: DiscoveryBrief;
     context: ProjectContext;
-    actionsUsed: number;
     createdAt: string;
     updatedAt: string;
     confirmedAt: string | null;
@@ -128,7 +126,6 @@ export interface ChatContextRevision {
     id: string;
     status: ProjectContextStatus;
     brief: DiscoveryBrief;
-    actionsUsed: number;
     hasProposal: boolean;
 }
 
@@ -141,7 +138,7 @@ export interface Chat {
 export interface ChatCredentialRequest {
     id: string;
     profileName: string;
-    fields: { key: string; secret: boolean; label?: string }[];
+    fields: { key: string; label?: string }[];
 }
 
 export interface ChatState {
@@ -236,8 +233,6 @@ export interface LlmOAuthPoll {
 
 export interface CredentialFieldPublic {
     key: string;
-    secret: boolean;
-    value?: string;
     hasValue: boolean;
 }
 
@@ -251,6 +246,5 @@ export interface CredentialProfile {
 
 export interface CredentialFieldInput {
     key: string;
-    secret: boolean;
     value?: string;
 }

@@ -40,7 +40,7 @@ export function createContextTools(revisionId: string, projectId: string) {
             name: "get_project_context_draft",
             label: "get_project_context_draft",
             description:
-                "Read the current project-context draft for this discovery, including the brief, the saved context, and the action usage.",
+                "Read the current project-context draft for this discovery, including the brief and the saved context.",
             parameters: Type.Object({}),
             async execute() {
                 const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
@@ -51,7 +51,6 @@ export function createContextTools(revisionId: string, projectId: string) {
                         status: revision.status,
                         brief: revision.brief,
                         context: revision.context,
-                        actionsUsed: revision.actionsUsed,
                     }),
                 );
             },
