@@ -4,11 +4,13 @@ import type {
     Feature,
     GitStatus,
     GitSyncOutcome,
+    HumanSpec,
     LlmCurrentSettings,
     LlmOAuthPoll,
     LlmOAuthStart,
     LlmRuntimeStatus,
     LlmSettingsResponse,
+    Project,
     ProjectContext,
     ProjectContextRevision,
     ProjectContextState,
@@ -85,6 +87,20 @@ export function startRunBatch(projectId: string, specIds: string[], label: strin
 
 export function getRunBatch(batchId: string): Promise<{ batch: RunBatch; reportUrl: string | null }> {
     return api(`/run-batches/${encodeURIComponent(batchId)}`);
+}
+
+export function updateProject(
+    projectId: string,
+    input: { name?: string; baseUrl?: string },
+): Promise<{ project: Project }> {
+    return api(`/projects/${encodeURIComponent(projectId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+    });
+}
+
+export function deleteProject(projectId: string): Promise<void> {
+    return api(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
 }
 
 export function getProjectGit(projectId: string): Promise<{ git: GitStatus }> {
@@ -187,6 +203,16 @@ export function updateSpecFiles(specId: string, input: { yaml?: string; robot?: 
     });
 }
 
+export function updateSpec(
+    specId: string,
+    input: { title?: string; description?: string; humanSpec?: HumanSpec },
+): Promise<SpecDetail> {
+    return api(`/specs/${encodeURIComponent(specId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+    });
+}
+
 export function createManualSpec(
     projectId: string,
     featureId: string,
@@ -204,6 +230,16 @@ export function createFeature(
 ): Promise<{ feature: Feature }> {
     return api(`/projects/${encodeURIComponent(projectId)}/features`, {
         method: "POST",
+        body: JSON.stringify(input),
+    });
+}
+
+export function updateFeature(
+    featureId: string,
+    input: { title?: string; description?: string },
+): Promise<{ feature: Feature }> {
+    return api(`/features/${encodeURIComponent(featureId)}`, {
+        method: "PATCH",
         body: JSON.stringify(input),
     });
 }

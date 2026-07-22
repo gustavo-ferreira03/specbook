@@ -22,6 +22,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ContextFileCard } from "@/components/ContextFileCard";
 import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
 import { GitHubConnection } from "@/components/GitHubConnection";
+import { ProjectSettingsCard } from "@/components/ProjectSettingsCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -342,8 +343,11 @@ export default function SettingsPage() {
         <Dialog open={providersOpen} onOpenChange={handleProvidersOpenChange}>
             <div className="min-h-full bg-surface">
                 <PageHeader title="Agent settings" eyebrow="Settings" />
-                <Tabs defaultValue="model" className="mx-auto w-full max-w-[720px] px-4 py-7 sm:px-6 sm:py-8">
+                <Tabs defaultValue="general" className="mx-auto w-full max-w-[720px] px-4 py-7 sm:px-6 sm:py-8">
                     <TabsList className="w-full justify-start gap-0 border-b border-line">
+                        <TabsTrigger value="general" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
+                            General
+                        </TabsTrigger>
                         <TabsTrigger value="model" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
                             Model
                         </TabsTrigger>
@@ -357,6 +361,10 @@ export default function SettingsPage() {
                             Credentials
                         </TabsTrigger>
                     </TabsList>
+
+                    <TabsContent value="general" className="mt-6 flex-none">
+                        <ProjectSettingsCard projectId={projectId} />
+                    </TabsContent>
 
                     <TabsContent value="model" className="mt-6 flex-none">
                         <section aria-labelledby="agent-model-heading">

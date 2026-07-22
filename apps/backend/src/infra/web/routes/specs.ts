@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
 import { editSpecFiles, readSpecRawFiles, RepoConflictError } from "../../../core/repo/manual";
-import { readSpecFiles } from "../../../core/repo/writer";
+import { readSpecFiles, updateSpecInRepo } from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
 import { runsRepository } from "../../repositories/runs";
 import { specsRepository, type Spec } from "../../repositories/specs";
@@ -16,6 +16,23 @@ const editFilesSchema = z
     })
     .refine((body) => body.yaml !== undefined || body.robot !== undefined, {
         message: "Provide yaml and/or robot content",
+    });
+
+const humanSpecSchema = z.object({
+    preconditions: z.array(z.string()),
+    steps: z.array(z.string()),
+    expectedResult: z.string(),
+    postconditions: z.array(z.string()),
+});
+
+const updateSpecSchema = z
+    .object({
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+        humanSpec: humanSpecSchema.optional(),
+    })
+    .refine((body) => body.title !== undefined || body.description !== undefined || body.humanSpec !== undefined, {
+        message: "Provide at least one of title, description, or humanSpec",
     });
 
 function mapManualError(error: unknown): never {
@@ -49,6 +66,13 @@ export function createSpecsRouter(): Hono {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         return c.json(await specDetail(spec));
+    });
+
+    router.patch("/specs/:id", zValidator("json", updateSpecSchema), async (c) => {
+        const spec = await specsRepository.getSpec(c.req.param("id"));
+        if (!spec) throw new HTTPException(404, { message: "Spec not found" });
+        const { spec: updated } = await updateSpecInRepo(spec, c.req.valid("json")).catch(mapManualError);
+        return c.json(await specDetail(updated));
     });
 
     router.put("/specs/:id/files", zValidator("json", editFilesSchema), async (c) => {

@@ -41,6 +41,10 @@ class ProjectsRepository {
         await db.update(projects).set({ contextSyncError: error }).where(eq(projects.id, id));
     }
 
+    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl">>): Promise<void> {
+        await db.update(projects).set(patch).where(eq(projects.id, id));
+    }
+
     async listProjects(): Promise<Project[]> {
         return db.select().from(projects).orderBy(asc(projects.createdAt), asc(projects.id));
     }

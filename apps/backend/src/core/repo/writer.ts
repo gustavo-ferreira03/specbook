@@ -121,6 +121,41 @@ export async function createSpecInRepo(input: {
     });
 }
 
+export async function updateFeatureInRepo(
+    feature: Feature,
+    patch: { title?: string; description?: string },
+): Promise<Feature> {
+    return withRepoLock(feature.projectId, async () => {
+        await assertRepoWritableUnlocked(feature.projectId);
+        const title = patch.title ?? feature.title;
+        const description = patch.description ?? feature.description;
+
+        const dir = path.posix.dirname(feature.path);
+        const currentSlug = path.posix.basename(feature.path);
+        let featurePath = feature.path;
+        if (patch.title !== undefined) {
+            const taken = await siblingNames(feature.projectId, dir);
+            taken.delete(currentSlug);
+            const slug = uniqueSlug(title, taken, feature.id);
+            if (slug !== currentSlug) {
+                featurePath = `${dir}/${slug}`;
+                await fs.rename(absolute(feature.projectId, feature.path), absolute(feature.projectId, featurePath));
+            }
+        }
+        await fs.writeFile(
+            absolute(feature.projectId, featureYamlFile(featurePath)),
+            serializeFeatureYaml({ title, description }),
+            "utf8",
+        );
+        await commitAll(feature.projectId, `feature: update "${title}"`);
+        schedulePush(feature.projectId);
+        await featuresRepository.updateFeatureRecord(feature.id, { title, description, path: featurePath });
+        const updated = await featuresRepository.getFeature(feature.id);
+        if (!updated) throw new Error("Feature disappeared during update");
+        return updated;
+    });
+}
+
 export async function readSpecFiles(spec: Spec): Promise<{ humanSpec: HumanSpec; robotSource: string }> {
     const markdown = await fs.readFile(absolute(spec.projectId, specYamlFile(spec.path)), "utf8");
     const robotSource = await fs.readFile(absolute(spec.projectId, specRobotFile(spec.path)), "utf8");

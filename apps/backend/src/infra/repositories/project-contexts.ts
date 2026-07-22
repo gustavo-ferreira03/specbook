@@ -211,6 +211,10 @@ class ProjectContextsRepository {
                 and(eq(projectContextRevisions.id, revisionId), eq(projectContextRevisions.status, "draft")),
             );
     }
+
+    async deleteAllForProject(projectId: string): Promise<void> {
+        await db.delete(projectContextRevisions).where(eq(projectContextRevisions.projectId, projectId));
+    }
 }
 
 export const projectContextsRepository = new ProjectContextsRepository();

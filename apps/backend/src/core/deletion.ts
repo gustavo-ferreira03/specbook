@@ -1,15 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { blockChatBrowser, cancelChatBrowserDeletion, removeChatBrowserData } from "./browser/sessions";
-import { beginChatDeletion, cancelChatDeletion, removeChatSession } from "./chat/session";
+import { beginChatDeletion, cancelChatDeletion, isChatBusy, isChatDeleting, removeChatSession } from "./chat/session";
+import { deleteProfile } from "./credentials/profiles";
 import { runsDir } from "./paths";
-import { deleteRunCommitRefsUnlocked, withRepoLock } from "./repo/git";
+import { deleteRunCommitRefsUnlocked, repoDir, withRepoLock } from "./repo/git";
 import { deleteFeatureDirectory, deleteSpecFiles } from "./repo/writer";
 import { getRunBatch, getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
 import { chatsRepository } from "../infra/repositories/chats";
+import { credentialsRepository } from "../infra/repositories/credentials";
 import { projectContextsRepository } from "../infra/repositories/project-contexts";
 import { featuresRepository } from "../infra/repositories/features";
+import { projectsRepository } from "../infra/repositories/projects";
 import { runsRepository } from "../infra/repositories/runs";
 import { specsRepository } from "../infra/repositories/specs";
 
@@ -113,4 +116,51 @@ export async function deleteFeatureData(id: string): Promise<boolean> {
         await removeRunResources(feature.projectId, result.runIds);
         return true;
     });
+}
+
+export async function deleteProjectData(id: string): Promise<boolean> {
+    const project = await projectsRepository.getProject(id);
+    if (!project) return false;
+
+    const chatRows = await chatsRepository.listChatRows(id);
+    if (chatRows.some((chat) => isChatBusy(chat.id) || isChatDeleting(chat.id))) {
+        throw new ResourceBusyError("Wait for the active chat to finish before deleting this project");
+    }
+    const specIds = (await specsRepository.listSpecs(id)).map((spec) => spec.id);
+    if (areSpecsLocked(specIds)) {
+        throw new ResourceBusyError("Wait for active Spec operations to finish before deleting this project");
+    }
+    if (await runsRepository.hasRunningRuns(specIds)) {
+        throw new ResourceBusyError("Wait for a running Spec verification to finish before deleting this project");
+    }
+
+    for (const chat of chatRows) {
+        await deleteChatData(chat.id);
+    }
+
+    const features = await featuresRepository.listFeatures(id);
+    const knownFeatureIds = new Set(features.map((feature) => feature.id));
+    const rootFeatures = features.filter(
+        (feature) => feature.parentId === null || !knownFeatureIds.has(feature.parentId),
+    );
+    for (const feature of rootFeatures) {
+        await deleteFeatureData(feature.id);
+    }
+
+    for (const spec of await specsRepository.listSpecs(id)) {
+        await deleteSpecData(spec.id);
+    }
+
+    for (const profile of await credentialsRepository.listProfiles(id)) {
+        await deleteProfile(profile);
+    }
+
+    await projectContextsRepository.deleteAllForProject(id);
+
+    await withRepoLock(id, async () => {
+        await fs.rm(repoDir(id), { recursive: true, force: true });
+    });
+
+    await projectsRepository.deleteProject(id);
+    return true;
 }

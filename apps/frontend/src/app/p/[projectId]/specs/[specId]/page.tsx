@@ -13,11 +13,21 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_URL, api, resolveProjectGit, updateSpecFiles } from "@/lib/api";
+import { Textarea } from "@/components/ui/textarea";
+import { API_URL, api, resolveProjectGit, updateSpec, updateSpecFiles } from "@/lib/api";
 import type { Run, RunEvidence, SpecDetail } from "@/lib/types";
+
+function splitLines(raw: string): string[] {
+    return raw
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+}
 
 interface LoadedRunEvidence {
     data: RunEvidence | null;
@@ -166,7 +176,13 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const [resolving, setResolving] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
     const [editing, setEditing] = useState(false);
-    const [yamlDraft, setYamlDraft] = useState("");
+    const [titleDraft, setTitleDraft] = useState("");
+    const [descriptionDraft, setDescriptionDraft] = useState("");
+    const [preconditionsDraft, setPreconditionsDraft] = useState("");
+    const [stepsDraft, setStepsDraft] = useState("");
+    const [expectedResultDraft, setExpectedResultDraft] = useState("");
+    const [postconditionsDraft, setPostconditionsDraft] = useState("");
+    const [rawYamlDraft, setRawYamlDraft] = useState("");
     const [robotDraft, setRobotDraft] = useState("");
     const [saving, setSaving] = useState(false);
 
@@ -246,7 +262,14 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
 
     function startEditing() {
         if (!detail?.content) return;
-        setYamlDraft(detail.content.yamlSource);
+        const { humanSpec } = detail.content;
+        setTitleDraft(detail.spec.title);
+        setDescriptionDraft(detail.spec.description);
+        setPreconditionsDraft(humanSpec ? humanSpec.preconditions.join("\n") : "");
+        setStepsDraft(humanSpec ? humanSpec.steps.join("\n") : "");
+        setExpectedResultDraft(humanSpec ? humanSpec.expectedResult : "");
+        setPostconditionsDraft(humanSpec ? humanSpec.postconditions.join("\n") : "");
+        setRawYamlDraft(detail.content.yamlSource);
         setRobotDraft(detail.content.robotSource);
         setEditing(true);
         setActionError("");
@@ -257,15 +280,26 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         setSaving(true);
         setActionError("");
         try {
-            const input: { yaml?: string; robot?: string } = {};
-            if (yamlDraft !== detail.content.yamlSource) input.yaml = yamlDraft;
-            if (robotDraft !== detail.content.robotSource) input.robot = robotDraft;
-            if (Object.keys(input).length === 0) {
-                setEditing(false);
-                return;
+            let current = detail;
+            if (current.content?.humanSpec) {
+                const patch: { title?: string; description?: string; humanSpec?: typeof current.content.humanSpec } = {};
+                if (titleDraft.trim() !== current.spec.title) patch.title = titleDraft.trim();
+                if (descriptionDraft !== current.spec.description) patch.description = descriptionDraft;
+                const nextHumanSpec = {
+                    preconditions: splitLines(preconditionsDraft),
+                    steps: splitLines(stepsDraft),
+                    expectedResult: expectedResultDraft.trim(),
+                    postconditions: splitLines(postconditionsDraft),
+                };
+                if (JSON.stringify(nextHumanSpec) !== JSON.stringify(current.content.humanSpec)) patch.humanSpec = nextHumanSpec;
+                if (Object.keys(patch).length > 0) current = await updateSpec(specId, patch);
+            } else if (rawYamlDraft !== current.content?.yamlSource) {
+                current = await updateSpecFiles(specId, { yaml: rawYamlDraft });
             }
-            const nextDetail = await updateSpecFiles(specId, input);
-            setDetail(nextDetail);
+            if (current.content && robotDraft !== current.content.robotSource) {
+                current = await updateSpecFiles(specId, { robot: robotDraft });
+            }
+            setDetail(current);
             setEditing(false);
         } catch (error) {
             setActionError(error instanceof Error ? error.message : String(error));
@@ -399,9 +433,43 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                     <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={12} /> Edit with AI</Link>
                                 </Button>
                             </div>
-                            <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={yamlDraft} onChange={setYamlDraft} disabled={saving} />
+                            {content.humanSpec ? (
+                                <div className="space-y-4">
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="spec-title">Title</Label>
+                                        <Input id="spec-title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} disabled={saving} />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="spec-description">Description</Label>
+                                        <Textarea id="spec-description" value={descriptionDraft} onChange={(event) => setDescriptionDraft(event.target.value)} disabled={saving} rows={2} />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="spec-preconditions">Preconditions</Label>
+                                        <Textarea id="spec-preconditions" value={preconditionsDraft} onChange={(event) => setPreconditionsDraft(event.target.value)} disabled={saving} rows={3} placeholder="One precondition per line" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="spec-steps">Execution steps</Label>
+                                        <Textarea id="spec-steps" value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)} disabled={saving} rows={5} placeholder="One step per line, in order" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="spec-expected-result">Expected result</Label>
+                                        <Textarea id="spec-expected-result" value={expectedResultDraft} onChange={(event) => setExpectedResultDraft(event.target.value)} disabled={saving} rows={3} />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="spec-postconditions">Postconditions</Label>
+                                        <Textarea id="spec-postconditions" value={postconditionsDraft} onChange={(event) => setPostconditionsDraft(event.target.value)} disabled={saving} rows={3} placeholder="One postcondition per line" />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <Alert variant="warning" role="alert">
+                                        <AlertDescription>spec.yml could not be parsed into fields. Fix the raw file below, then save.</AlertDescription>
+                                    </Alert>
+                                    <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={rawYamlDraft} onChange={setRawYamlDraft} disabled={saving} />
+                                </div>
+                            )}
                             <RawFileEditor id="spec-robot" label="spec.robot" language="robotframework" value={robotDraft} onChange={setRobotDraft} disabled={saving} rows={16} />
-                            <p className="max-w-[68ch] text-[0.625rem] leading-4 text-ink-faint">Changes are committed exactly as entered. Invalid files are saved and marked for correction.</p>
+                            <p className="max-w-[68ch] text-[0.625rem] leading-4 text-ink-faint">Changes are committed to the repository. Invalid Robot source is saved and marked for correction.</p>
                         </div>
                     ) : content && !content.humanSpec ? (
                         <div className="border-y border-line py-6 text-center"><p className="text-xs font-bold">spec.yml could not be parsed</p><p className="mt-1 text-[0.6875rem] text-ink-faint">Use Edit to fix the YAML by hand.</p></div>

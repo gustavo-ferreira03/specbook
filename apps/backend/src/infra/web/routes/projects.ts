@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { deleteProjectData, ResourceBusyError } from "../../../core/deletion";
 import { ensureProjectRepo } from "../../../core/repo/git";
 import { createManualSpec, editContextFile, readContextRaw, RepoConflictError } from "../../../core/repo/manual";
 import { syncProject } from "../../../core/repo/sync";
@@ -22,6 +23,15 @@ const createProjectSchema = z.object({
     name: z.string().min(1),
     baseUrl: z.string().url(),
 });
+
+const updateProjectSchema = z
+    .object({
+        name: z.string().min(1).optional(),
+        baseUrl: z.string().url().optional(),
+    })
+    .refine((value) => value.name !== undefined || value.baseUrl !== undefined, {
+        message: "Provide at least one of name or baseUrl",
+    });
 
 const createSpecSchema = z.object({
     featureId: z.string().min(1),
@@ -61,6 +71,28 @@ export function createProjectsRouter(): Hono {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ project: publicProject(project) });
+    });
+
+    router.patch("/projects/:id", zValidator("json", updateProjectSchema), async (c) => {
+        const project = await projectsRepository.getProject(c.req.param("id"));
+        if (!project) throw new HTTPException(404, { message: "Project not found" });
+        await projectsRepository.updateProject(project.id, c.req.valid("json"));
+        const updated = await projectsRepository.getProject(project.id);
+        if (!updated) throw new HTTPException(404, { message: "Project not found" });
+        return c.json({ project: publicProject(updated) });
+    });
+
+    router.delete("/projects/:id", async (c) => {
+        try {
+            if (!(await deleteProjectData(c.req.param("id")))) {
+                throw new HTTPException(404, { message: "Project not found" });
+            }
+            return c.body(null, 204);
+        } catch (error) {
+            if (error instanceof HTTPException) throw error;
+            if (error instanceof ResourceBusyError) throw new HTTPException(409, { message: error.message });
+            throw error;
+        }
     });
 
     router.get("/projects/:id/tree", async (c) => {

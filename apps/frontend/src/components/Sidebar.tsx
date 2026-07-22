@@ -13,6 +13,7 @@ import {
     LoaderCircle,
     Menu,
     MessageSquare,
+    Pencil,
     Play,
     Plus,
     RefreshCw,
@@ -23,6 +24,7 @@ import {
 import { API_URL, api, getLlmRuntimeStatus, getRunBatch, startRunBatch } from "@/lib/api";
 import type { Chat, Feature, Project, RunBatch, SpecSummary } from "@/lib/types";
 import { ConfirmDeleteDialog } from "./ConfirmDeleteDialog";
+import { FeatureEditDialog } from "./FeatureEditDialog";
 import { LogoMark } from "./LogoMark";
 import { SpecRunDialog, type SpecBatchItem } from "./SpecRunDialog";
 import { StatusDot } from "./StatusDot";
@@ -408,6 +410,27 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         </TooltipTrigger>
                         <TooltipContent>Run feature</TooltipContent>
                     </Tooltip>
+                    <FeatureEditDialog
+                        feature={feature}
+                        onSaved={() => setRefreshKey((key) => key + 1)}
+                        renderTrigger={(onClick) => (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        onClick={onClick}
+                                        className="text-ink-faint opacity-70 hover:text-ink group-hover:opacity-100 focus:opacity-100"
+                                        aria-label={`Edit feature ${feature.title}`}
+                                    >
+                                        <Pencil size={12} />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Edit feature</TooltipContent>
+                            </Tooltip>
+                        )}
+                    />
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button

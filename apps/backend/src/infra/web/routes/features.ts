@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteFeatureData, ResourceBusyError } from "../../../core/deletion";
 import { editFeatureFile, readFeatureRaw, RepoConflictError } from "../../../core/repo/manual";
-import { createFeatureInRepo } from "../../../core/repo/writer";
+import { createFeatureInRepo, updateFeatureInRepo } from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
 import { projectsRepository } from "../../repositories/projects";
 
@@ -15,6 +15,15 @@ const createFeatureSchema = z.object({
     title: z.string().min(1),
     description: z.string().default(""),
 });
+
+const updateFeatureSchema = z
+    .object({
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+    })
+    .refine((value) => value.title !== undefined || value.description !== undefined, {
+        message: "Provide at least one of title or description",
+    });
 
 function mapManualError(error: unknown): never {
     if (error instanceof RepoConflictError) throw new HTTPException(409, { message: error.message });
@@ -39,6 +48,13 @@ export function createFeaturesRouter(): Hono {
         }
         const feature = await createFeatureInRepo(project.id, parentId ?? null, title, description).catch(mapManualError);
         return c.json({ feature });
+    });
+
+    router.patch("/features/:id", zValidator("json", updateFeatureSchema), async (c) => {
+        const feature = await featuresRepository.getFeature(c.req.param("id"));
+        if (!feature) throw new HTTPException(404, { message: "Feature not found" });
+        const updated = await updateFeatureInRepo(feature, c.req.valid("json")).catch(mapManualError);
+        return c.json({ feature: updated });
     });
 
     router.get("/features/:id/file", async (c) => {
