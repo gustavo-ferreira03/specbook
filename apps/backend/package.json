@@ -30,7 +30,7 @@
         "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@types/node": "^26.1.1",
+        "@types/node": "^26.1.2",
         "@types/ws": "^8.18.1",
         "drizzle-kit": "^0.31.10",
         "esbuild": "^0.28.1",
