@@ -23,14 +23,14 @@
         "fast-xml-parser": "^5.2.0",
         "gray-matter": "^4.0.3",
         "hono": "^4.12.23",
-        "playwright-core": "^1.60.0",
+        "playwright-core": "^1.62.0",
         "simple-git": "^3.36.0",
         "ws": "^8.21.0",
         "yaml": "^2.9.0",
         "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@types/node": "^26.1.1",
+        "@types/node": "^26.1.2",
         "@types/ws": "^8.18.1",
         "drizzle-kit": "^0.31.10",
         "esbuild": "^0.28.1",
