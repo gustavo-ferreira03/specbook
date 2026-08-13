@@ -37,6 +37,6 @@ ENV NODE_ENV=production
 ENV SPECBOOK_STORAGE_DIR=/app/apps/backend/storage
 ENV HOST=0.0.0.0
 
-EXPOSE 4000 4001
+EXPOSE 4000 4001 1455
 
 CMD ["/app/entrypoint.sh"]

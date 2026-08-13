@@ -9,6 +9,9 @@ import { settingsRepository } from "../../repositories/settings";
 
 type OAuthProvider = "anthropic" | "openai-codex" | "github-copilot";
 type OAuthStatus = "pending" | "done" | "error";
+type OAuthPrompt =
+    | { type: "select"; message: string; options: { id: string; label: string; description?: string }[] }
+    | { type: "text" | "secret" | "manual_code"; message: string; placeholder?: string };
 
 interface OAuthSession {
     provider: OAuthProvider;
@@ -19,8 +22,9 @@ interface OAuthSession {
     userCode?: string;
     verificationUri?: string;
     error?: string;
-    manualInput?: string;
-    resolveManualInput?: (input: string) => void;
+    prompt?: OAuthPrompt;
+    promptInput?: string;
+    resolvePromptInput?: (input: string) => void;
 }
 
 interface ProviderInfo {
@@ -43,7 +47,7 @@ const llmPatchSchema = z
     })
     .strict();
 const apiKeySchema = z.object({ apiKey: z.string().trim().min(1) }).strict();
-const oauthManualSchema = z.object({ sessionId: z.string().uuid(), input: z.string().trim().min(1) }).strict();
+const oauthInputSchema = z.object({ sessionId: z.string().uuid(), input: z.string() }).strict();
 
 function providerIds(modelRegistry: Awaited<typeof modelRegistryPromise>): Set<string> {
     return new Set([...modelRegistry.getAll().map((model) => model.provider), ...OAUTH_PROVIDERS]);
@@ -103,6 +107,8 @@ function finishOAuthSession(id: string, status: "done" | "error", error?: string
     session.controller.abort();
     session.status = status;
     session.error = error;
+    session.prompt = undefined;
+    session.resolvePromptInput = undefined;
     session.timeout = setTimeout(() => removeOAuthSession(id, false), OAUTH_RESULT_TTL_MS);
     session.timeout.unref();
 }
@@ -118,10 +124,11 @@ function failOAuthSession(id: string, error: unknown): void {
     finishOAuthSession(id, "error", message || "Authentication failed. Please try again.");
 }
 
-function waitForManualInput(session: OAuthSession): Promise<string> {
-    if (session.manualInput) {
-        const input = session.manualInput;
-        delete session.manualInput;
+function waitForPromptInput(session: OAuthSession): Promise<string> {
+    if (session.promptInput !== undefined) {
+        const input = session.promptInput;
+        delete session.promptInput;
+        session.prompt = undefined;
         return Promise.resolve(input);
     }
     return new Promise((resolve, reject) => {
@@ -130,13 +137,21 @@ function waitForManualInput(session: OAuthSession): Promise<string> {
             reject(new Error("OAuth session expired"));
             return;
         }
-        session.resolveManualInput = (input) => {
+        session.resolvePromptInput = (input) => {
             session.controller.signal.removeEventListener("abort", onAbort);
-            delete session.resolveManualInput;
+            delete session.resolvePromptInput;
+            session.prompt = undefined;
             resolve(input);
         };
         session.controller.signal.addEventListener("abort", onAbort, { once: true });
     });
+}
+
+function publicOAuthPrompt(prompt: AuthPrompt): OAuthPrompt {
+    if (prompt.type === "select") {
+        return { type: "select", message: prompt.message, options: prompt.options.map(({ id, label, description }) => ({ id, label, description })) };
+    }
+    return { type: prompt.type, message: prompt.message, ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}) };
 }
 
 function handleOAuthEvent(id: string, event: AuthEvent): void {
@@ -151,23 +166,17 @@ function createOAuthInteraction(id: string, session: OAuthSession): AuthInteract
         signal: session.controller.signal,
         notify: (event) => handleOAuthEvent(id, event),
         prompt: async (prompt: AuthPrompt) => {
-            if (prompt.type === "select") {
-                const deviceCodeOption = prompt.options.find((option) => option.id === "device_code");
-                return deviceCodeOption?.id ?? prompt.options[0]?.id ?? "";
-            }
-            if (prompt.type === "text") return "";
-            if (prompt.type === "manual_code") return waitForManualInput(session);
-            throw new Error(`Unsupported OAuth prompt: ${prompt.type}`);
+            updateOAuthSession(id, { prompt: publicOAuthPrompt(prompt) });
+            return waitForPromptInput(session);
         },
     };
 }
 
-function startOAuthLogin(id: string, session: OAuthSession, modelRuntime: ModelRuntime): "browser" | "device_code" {
+function startOAuthLogin(id: string, session: OAuthSession, modelRuntime: ModelRuntime): void {
     void modelRuntime
         .login(session.provider, "oauth", createOAuthInteraction(id, session))
         .then(() => saveOAuthCredentials(id))
         .catch((error) => failOAuthSession(id, error));
-    return session.provider === "anthropic" ? "browser" : "device_code";
 }
 
 function listProviders(modelRegistry: Awaited<typeof modelRegistryPromise>): ProviderInfo[] {
@@ -262,21 +271,20 @@ export function createSettingsRouter(): Hono {
         const provider = requireOAuthProvider(c.req.param("provider"));
         requireProvider(provider, modelRegistry);
         const [sessionId, session] = createOAuthSession(provider);
-        const type = startOAuthLogin(sessionId, session, modelRuntime);
-        return c.json({ sessionId, type });
+        startOAuthLogin(sessionId, session, modelRuntime);
+        return c.json({ sessionId });
     });
 
-    router.post("/settings/llm/providers/:provider/oauth/manual", async (c) => {
+    router.post("/settings/llm/providers/:provider/oauth/input", async (c) => {
         const provider = requireOAuthProvider(c.req.param("provider"));
-        if (provider !== "anthropic") throw new HTTPException(400, { message: "Manual input is not supported for this provider" });
-        const body = oauthManualSchema.safeParse(await c.req.json().catch(() => null));
-        if (!body.success) throw new HTTPException(400, { message: "A valid OAuth session and redirect URL or code are required" });
+        const body = oauthInputSchema.safeParse(await c.req.json().catch(() => null));
+        if (!body.success) throw new HTTPException(400, { message: "A valid OAuth session and input are required" });
         const session = oauthSessions.get(body.data.sessionId);
         if (!session || session.provider !== provider || session.status !== "pending") {
             throw new HTTPException(404, { message: "OAuth session not found" });
         }
-        if (session.resolveManualInput) session.resolveManualInput(body.data.input);
-        else session.manualInput = body.data.input;
+        if (session.resolvePromptInput) session.resolvePromptInput(body.data.input);
+        else session.promptInput = body.data.input;
         return c.json({ ok: true });
     });
 
@@ -293,6 +301,7 @@ export function createSettingsRouter(): Hono {
             ...(session.url ? { url: session.url } : {}),
             ...(session.userCode ? { userCode: session.userCode } : {}),
             ...(session.verificationUri ? { verificationUri: session.verificationUri } : {}),
+            ...(session.prompt ? { prompt: session.prompt } : {}),
             ...(session.error ? { error: session.error } : {}),
         };
         if (session.status !== "pending") removeOAuthSession(sessionId, false);

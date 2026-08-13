@@ -24,6 +24,7 @@ docker run --detach \
   --shm-size=1g \
   -p 4000:4000 \
   -p 4001:4001 \
+  -p 1455:1455 \
   -p 53692:53692 \
   -e HOST=0.0.0.0 \
   -e FRONTEND_ORIGIN=http://localhost:4001 \
@@ -133,6 +134,7 @@ docker run --detach \
   --shm-size=1g \
   -p 4000:4000 \
   -p 4001:4001 \
+  -p 1455:1455 \
   -p 53692:53692 \
   -e HOST=0.0.0.0 \
   -e FRONTEND_ORIGIN=https://specbook.example.com \

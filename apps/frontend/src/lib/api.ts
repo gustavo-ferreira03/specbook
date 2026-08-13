@@ -188,8 +188,8 @@ export function pollLlmProviderOAuth(providerId: string, sessionId: string): Pro
     );
 }
 
-export function submitLlmProviderOAuthManual(providerId: string, sessionId: string, input: string): Promise<{ ok: boolean }> {
-    return api<{ ok: boolean }>(`/settings/llm/providers/${encodeURIComponent(providerId)}/oauth/manual`, {
+export function submitLlmProviderOAuthInput(providerId: string, sessionId: string, input: string): Promise<{ ok: boolean }> {
+    return api<{ ok: boolean }>(`/settings/llm/providers/${encodeURIComponent(providerId)}/oauth/input`, {
         method: "POST",
         body: JSON.stringify({ sessionId, input }),
     });

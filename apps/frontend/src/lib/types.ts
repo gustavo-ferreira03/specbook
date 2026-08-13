@@ -220,14 +220,18 @@ export interface LlmRuntimeStatus {
 
 export interface LlmOAuthStart {
     sessionId: string;
-    type: "browser" | "device_code";
 }
+
+export type LlmOAuthPrompt =
+    | { type: "select"; message: string; options: { id: string; label: string; description?: string }[] }
+    | { type: "text" | "secret" | "manual_code"; message: string; placeholder?: string };
 
 export interface LlmOAuthPoll {
     status: "pending" | "done" | "error";
     url?: string;
     userCode?: string;
     verificationUri?: string;
+    prompt?: LlmOAuthPrompt;
     error?: string;
 }
 

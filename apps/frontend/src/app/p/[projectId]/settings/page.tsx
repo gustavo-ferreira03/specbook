@@ -50,10 +50,10 @@ import {
     removeLlmProviderAuth,
     saveLlmProviderApiKey,
     startLlmProviderOAuth,
-    submitLlmProviderOAuthManual,
+    submitLlmProviderOAuthInput,
     updateLlmSettings,
 } from "@/lib/api";
-import type { LlmAuthMethod, LlmCurrentSettings, LlmProvider, LlmSettingsResponse } from "@/lib/types";
+import type { LlmAuthMethod, LlmCurrentSettings, LlmOAuthPrompt, LlmProvider, LlmSettingsResponse } from "@/lib/types";
 
 interface Feedback {
     type: "success" | "error";
@@ -67,11 +67,11 @@ interface ProviderFeedback extends Feedback {
 interface OAuthState {
     providerId: string;
     sessionId?: string;
-    type?: "browser" | "device_code";
     status: "starting" | "pending" | "done" | "error";
     url?: string;
     userCode?: string;
     verificationUri?: string;
+    prompt?: LlmOAuthPrompt;
     error?: string;
 }
 
@@ -242,13 +242,13 @@ export default function SettingsPage() {
         try {
             const started = await startLlmProviderOAuth(providerId);
             if (generation !== oauthGenerationRef.current) return;
-            setOAuthState({ providerId, sessionId: started.sessionId, type: started.type, status: "pending" });
+            setOAuthState({ providerId, sessionId: started.sessionId, status: "pending" });
             const poll = async () => {
                 if (generation !== oauthGenerationRef.current) return;
                 try {
                     const result = await pollLlmProviderOAuth(providerId, started.sessionId);
                     if (generation !== oauthGenerationRef.current) return;
-                    setOAuthState((current) => ({ providerId, sessionId: started.sessionId, type: started.type, ...current, ...result }));
+                    setOAuthState((current) => ({ providerId, sessionId: started.sessionId, ...current, ...result }));
                     if (result.status === "done") {
                         await refreshSettings();
                         setProviderFeedback({ providerId, type: "success", text: "Provider connected." });
@@ -258,7 +258,7 @@ export default function SettingsPage() {
                     oauthTimerRef.current = window.setTimeout(poll, 2000);
                 } catch (error) {
                     if (generation !== oauthGenerationRef.current) return;
-                    setOAuthState({ providerId, sessionId: started.sessionId, type: started.type, status: "error", error: error instanceof Error ? error.message : String(error) });
+                    setOAuthState({ providerId, sessionId: started.sessionId, status: "error", error: error instanceof Error ? error.message : String(error) });
                 }
             };
             oauthTimerRef.current = window.setTimeout(poll, 500);
@@ -268,15 +268,27 @@ export default function SettingsPage() {
         }
     }
 
-    async function submitManualOAuth(event: React.FormEvent<HTMLFormElement>, providerId: string, sessionId: string) {
+    async function submitOAuthInput(event: React.FormEvent<HTMLFormElement>, providerId: string, sessionId: string) {
         event.preventDefault();
         const input = manualOAuthInput.trim();
         if (!input || providerBusy === providerId) return;
         setProviderBusy(providerId);
         try {
-            await submitLlmProviderOAuthManual(providerId, sessionId, input);
+            await submitLlmProviderOAuthInput(providerId, sessionId, input);
             setManualOAuthInput("");
             setProviderFeedback({ providerId, type: "success", text: "Authorization submitted." });
+        } catch (error) {
+            setProviderFeedback({ providerId, type: "error", text: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setProviderBusy(null);
+        }
+    }
+
+    async function selectOAuthOption(providerId: string, sessionId: string, optionId: string) {
+        if (providerBusy === providerId) return;
+        setProviderBusy(providerId);
+        try {
+            await submitLlmProviderOAuthInput(providerId, sessionId, optionId);
         } catch (error) {
             setProviderFeedback({ providerId, type: "error", text: error instanceof Error ? error.message : String(error) });
         } finally {
@@ -646,71 +658,69 @@ export default function SettingsPage() {
                                                                 <span className="status-pulse size-1.5 rounded-full bg-ink" /> Starting authentication
                                                             </p>
                                                         )}
-                                                        {oauth?.status === "pending" && oauth.type === "browser" && (
-                                                            <div className="space-y-2">
-                                                                <p className="text-[0.65625rem] text-ink-soft">Authorize this provider in your browser.</p>
-                                                                {oauth.url ? (
-                                                                    <Button asChild>
-                                                                        <a href={oauth.url} target="_blank" rel="noopener noreferrer">
-                                                                            Open authorization page <ExternalLink size={12} />
-                                                                        </a>
-                                                                    </Button>
-                                                                ) : (
-                                                                    <p className="text-[0.625rem] text-ink-faint">Waiting for authorization link...</p>
-                                                                )}
-                                                                {oauth.sessionId && (
-                                                                    <form onSubmit={(event) => submitManualOAuth(event, provider.id, oauth.sessionId!)} className="pt-1">
-                                                                        <Label htmlFor={`oauth-manual-${provider.id}`} className="mb-1.5">Remote redirect URL or code</Label>
-                                                                        <div className="flex gap-2">
-                                                                            <Input
-                                                                                id={`oauth-manual-${provider.id}`}
-                                                                                value={manualOAuthInput}
-                                                                                onChange={(event) => setManualOAuthInput(event.target.value)}
-                                                                                className="min-w-0 flex-1"
-                                                                                placeholder="Paste the final redirect URL"
-                                                                            />
-                                                                            <Button type="submit" variant="outline" disabled={!manualOAuthInput.trim() || busy}>{busy ? "Submitting..." : "Submit"}</Button>
-                                                                        </div>
-                                                                    </form>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                        {oauth?.status === "pending" && oauth.type === "device_code" && (
-                                                            <div className="max-w-sm">
-                                                                <p className="text-[0.65625rem] font-bold">Enter this device code</p>
-                                                                {oauth.userCode ? (
-                                                                    <div className="mt-2 flex gap-2">
-                                                                        <code className="flex min-h-9 min-w-0 flex-1 items-center justify-center break-all rounded-md bg-primary-soft px-3 font-mono text-[0.875rem] font-bold tracking-[0.14em]">
-                                                                            {oauth.userCode}
-                                                                        </code>
-                                                                        <Tooltip>
-                                                                            <TooltipTrigger asChild>
-                                                                                <Button
-                                                                                    type="button"
-                                                                                    variant="outline"
-                                                                                    size="icon-lg"
-                                                                                    onClick={() => copyDeviceCode(oauth.userCode!)}
-                                                                                    className="size-9"
-                                                                                    aria-label="Copy device code"
-                                                                                >
-                                                                                    <Clipboard size={13} />
-                                                                                </Button>
-                                                                            </TooltipTrigger>
-                                                                            <TooltipContent>Copy device code</TooltipContent>
-                                                                        </Tooltip>
-                                                                    </div>
-                                                                ) : (
-                                                                    <p className="mt-2 text-[0.625rem] text-ink-faint">Waiting for device code...</p>
-                                                                )}
-                                                                {oauth.verificationUri && (
-                                                                    <Button asChild variant="link" className="mt-2 h-8 px-0 text-[0.65625rem]">
-                                                                        <a href={oauth.verificationUri} target="_blank" rel="noopener noreferrer">
-                                                                            Open verification page <ExternalLink size={11} />
-                                                                        </a>
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        )}
+                                                         {oauth?.status === "pending" && (
+                                                             <div className="space-y-3">
+                                                                 {oauth.url && (
+                                                                     <Button asChild>
+                                                                         <a href={oauth.url} target="_blank" rel="noopener noreferrer">
+                                                                             Open authorization page <ExternalLink size={12} />
+                                                                         </a>
+                                                                     </Button>
+                                                                 )}
+                                                                 {oauth.userCode && (
+                                                                     <div className="max-w-sm">
+                                                                         <p className="text-[0.65625rem] font-bold">Device code</p>
+                                                                         <div className="mt-2 flex gap-2">
+                                                                             <code className="flex min-h-9 min-w-0 flex-1 items-center justify-center break-all rounded-md bg-primary-soft px-3 font-mono text-[0.875rem] font-bold tracking-[0.14em]">
+                                                                                 {oauth.userCode}
+                                                                             </code>
+                                                                             <Tooltip>
+                                                                                 <TooltipTrigger asChild>
+                                                                                     <Button type="button" variant="outline" size="icon-lg" onClick={() => copyDeviceCode(oauth.userCode!)} className="size-9" aria-label="Copy device code">
+                                                                                         <Clipboard size={13} />
+                                                                                     </Button>
+                                                                                 </TooltipTrigger>
+                                                                                 <TooltipContent>Copy device code</TooltipContent>
+                                                                             </Tooltip>
+                                                                         </div>
+                                                                     </div>
+                                                                 )}
+                                                                 {oauth.verificationUri && (
+                                                                     <Button asChild variant="link" className="h-8 px-0 text-[0.65625rem]">
+                                                                         <a href={oauth.verificationUri} target="_blank" rel="noopener noreferrer">
+                                                                             Open verification page <ExternalLink size={11} />
+                                                                         </a>
+                                                                     </Button>
+                                                                 )}
+                                                                 {oauth.prompt?.type === "select" && oauth.sessionId && (
+                                                                     <div className="max-w-sm space-y-1.5">
+                                                                         <Label>{oauth.prompt.message}</Label>
+                                                                         <Select onValueChange={(value) => selectOAuthOption(provider.id, oauth.sessionId!, value)}>
+                                                                             <SelectTrigger>
+                                                                                 <SelectValue placeholder="Choose an option" />
+                                                                             </SelectTrigger>
+                                                                             <SelectContent>
+                                                                                 {oauth.prompt.options.map((option) => (
+                                                                                     <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                                                                                 ))}
+                                                                             </SelectContent>
+                                                                         </Select>
+                                                                     </div>
+                                                                 )}
+                                                                 {(oauth.prompt?.type === "text" || oauth.prompt?.type === "secret" || oauth.prompt?.type === "manual_code") && oauth.sessionId && (
+                                                                     <form onSubmit={(event) => submitOAuthInput(event, provider.id, oauth.sessionId!)} className="max-w-sm space-y-1.5">
+                                                                         <Label htmlFor={`oauth-input-${provider.id}`}>{oauth.prompt.message}</Label>
+                                                                         <div className="flex gap-2">
+                                                                             <Input id={`oauth-input-${provider.id}`} type={oauth.prompt.type === "secret" ? "password" : "text"} value={manualOAuthInput} onChange={(event) => setManualOAuthInput(event.target.value)} className="min-w-0 flex-1" placeholder={oauth.prompt.placeholder} />
+                                                                             <Button type="submit" variant="outline" disabled={!manualOAuthInput.trim() || busy}>{busy ? "Submitting..." : "Submit"}</Button>
+                                                                         </div>
+                                                                     </form>
+                                                                 )}
+                                                                 {!oauth.url && !oauth.userCode && !oauth.prompt && (
+                                                                     <p className="text-[0.65625rem] text-ink-faint">Waiting for authentication instructions...</p>
+                                                                 )}
+                                                             </div>
+                                                         )}
                                                         {oauth?.status === "done" && (
                                                             <Alert className="bg-transparent p-0 text-[0.65625rem] font-bold text-success" role="status">
                                                                 <AlertDescription className="flex items-center gap-1.5">
