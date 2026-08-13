@@ -3,7 +3,7 @@ FROM node:26-slim
 RUN npm install -g pnpm@10.30.1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl procps python3 python3-pip python3-venv xvfb x11vnc \
+    && apt-get install -y --no-install-recommends ca-certificates curl git procps python3 python3-pip python3-venv xvfb x11vnc \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
