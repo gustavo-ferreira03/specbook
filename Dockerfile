@@ -35,6 +35,7 @@ RUN chmod +x /app/entrypoint.sh
 
 ENV NODE_ENV=production
 ENV SPECBOOK_STORAGE_DIR=/app/apps/backend/storage
+ENV HOST=0.0.0.0
 
 EXPOSE 4000 4001
 
