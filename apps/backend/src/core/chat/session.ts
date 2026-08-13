@@ -15,7 +15,7 @@ import {
     type BrowserMcp,
     type BrowserToolPolicy,
 } from "../browser/mcp";
-import { modelRegistry } from "../llm/runtime";
+import { modelRegistryPromise, modelRuntimePromise } from "../llm/runtime";
 import { sessionsDir, storageRoot } from "../paths";
 import { createProjectScrubber } from "../credentials/scrub";
 import { chatsRepository, type ChatMetadata } from "../../infra/repositories/chats";
@@ -380,7 +380,11 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
             return;
         }
 
-        const { provider, model: modelName } = await settingsRepository.getLlmSettings();
+        const [modelRegistry, modelRuntime, { provider, model: modelName }] = await Promise.all([
+            modelRegistryPromise,
+            modelRuntimePromise,
+            settingsRepository.getLlmSettings(),
+        ]);
         const model = provider && modelName ? modelRegistry.find(provider, modelName) : null;
         if (!model) {
             ensureUserMessage(sessionManager, userText, previousUserCount);
@@ -461,7 +465,7 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
         );
         const { session } = await createAgentSession({
             model,
-            modelRegistry,
+            modelRuntime,
             cwd,
             noTools: "builtin",
             customTools,

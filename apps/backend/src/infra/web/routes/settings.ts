@@ -1,15 +1,10 @@
 import crypto from "node:crypto";
-import {
-    loginAnthropic,
-    loginGitHubCopilot,
-    loginOpenAICodexDeviceCode,
-    type OAuthCredentials,
-    type OAuthDeviceCodeInfo,
-} from "@earendil-works/pi-ai/oauth";
+import type { AuthEvent, AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { llmAuth, modelRegistry } from "../../../core/llm/runtime";
+import { llmCredentials, modelRegistryPromise, modelRuntimePromise } from "../../../core/llm/runtime";
 import { settingsRepository } from "../../repositories/settings";
 
 type OAuthProvider = "anthropic" | "openai-codex" | "github-copilot";
@@ -50,12 +45,12 @@ const llmPatchSchema = z
 const apiKeySchema = z.object({ apiKey: z.string().trim().min(1) }).strict();
 const oauthManualSchema = z.object({ sessionId: z.string().uuid(), input: z.string().trim().min(1) }).strict();
 
-function providerIds(): Set<string> {
+function providerIds(modelRegistry: Awaited<typeof modelRegistryPromise>): Set<string> {
     return new Set([...modelRegistry.getAll().map((model) => model.provider), ...OAUTH_PROVIDERS]);
 }
 
-function requireProvider(provider: string): void {
-    if (!providerIds().has(provider)) throw new HTTPException(400, { message: "Unknown LLM provider" });
+function requireProvider(provider: string, modelRegistry: Awaited<typeof modelRegistryPromise>): void {
+    if (!providerIds(modelRegistry).has(provider)) throw new HTTPException(400, { message: "Unknown LLM provider" });
 }
 
 function requireOAuthProvider(provider: string): OAuthProvider {
@@ -112,11 +107,9 @@ function finishOAuthSession(id: string, status: "done" | "error", error?: string
     session.timeout.unref();
 }
 
-function saveOAuthCredentials(id: string, credentials: OAuthCredentials): void {
+async function saveOAuthCredentials(id: string): Promise<void> {
     const session = oauthSessions.get(id);
     if (!session) return;
-    llmAuth.set(session.provider, { type: "oauth", ...credentials });
-    modelRegistry.refresh();
     finishOAuthSession(id, "done");
 }
 
@@ -145,43 +138,33 @@ function waitForManualInput(session: OAuthSession): Promise<string> {
     });
 }
 
-function startOAuthLogin(id: string, session: OAuthSession): "browser" | "device_code" {
-    if (session.provider === "anthropic") {
-        void loginAnthropic({
-            onAuth: ({ url }) => updateOAuthSession(id, { url }),
-            onPrompt: async () => "",
-            onManualCodeInput: () => waitForManualInput(session),
-        })
-            .then((credentials) => saveOAuthCredentials(id, credentials))
-            .catch(() => failOAuthSession(id));
-        return "browser";
+function handleOAuthEvent(id: string, event: AuthEvent): void {
+    if (event.type === "auth_url") updateOAuthSession(id, { url: event.url });
+    if (event.type === "device_code") {
+        updateOAuthSession(id, { userCode: event.userCode, verificationUri: event.verificationUri });
     }
-
-    if (session.provider === "openai-codex") {
-        void loginOpenAICodexDeviceCode({
-            onDeviceCode: ({ userCode, verificationUri }: OAuthDeviceCodeInfo) => {
-                updateOAuthSession(id, { userCode, verificationUri });
-            },
-            signal: session.controller.signal,
-        })
-            .then((credentials) => saveOAuthCredentials(id, credentials))
-            .catch(() => failOAuthSession(id));
-        return "device_code";
-    }
-
-    void loginGitHubCopilot({
-        onDeviceCode: ({ userCode, verificationUri }: OAuthDeviceCodeInfo) => {
-            updateOAuthSession(id, { userCode, verificationUri });
-        },
-        onPrompt: async () => "",
-        signal: session.controller.signal,
-    })
-        .then((credentials) => saveOAuthCredentials(id, credentials))
-        .catch(() => failOAuthSession(id));
-    return "device_code";
 }
 
-function listProviders(): ProviderInfo[] {
+function createOAuthInteraction(id: string, session: OAuthSession): AuthInteraction {
+    return {
+        signal: session.controller.signal,
+        notify: (event) => handleOAuthEvent(id, event),
+        prompt: async (prompt: AuthPrompt) => {
+            if (prompt.type === "manual_code") return waitForManualInput(session);
+            throw new Error(`Unsupported OAuth prompt: ${prompt.type}`);
+        },
+    };
+}
+
+function startOAuthLogin(id: string, session: OAuthSession, modelRuntime: ModelRuntime): "browser" | "device_code" {
+    void modelRuntime
+        .login(session.provider, "oauth", createOAuthInteraction(id, session))
+        .then(() => saveOAuthCredentials(id))
+        .catch(() => failOAuthSession(id));
+    return session.provider === "anthropic" ? "browser" : "device_code";
+}
+
+function listProviders(modelRegistry: Awaited<typeof modelRegistryPromise>): ProviderInfo[] {
     const modelsByProvider = new Map<string, { id: string; label: string }[]>(
         [...OAUTH_PROVIDERS].map((provider) => [provider, []]),
     );
@@ -215,6 +198,7 @@ export function createSettingsRouter(): Hono {
     const router = new Hono();
 
     router.get("/settings/llm/status", async (c) => {
+        const modelRegistry = await modelRegistryPromise;
         const current = await settingsRepository.getLlmSettings();
         const model = current.provider && current.model ? modelRegistry.find(current.provider, current.model) : null;
         return c.json({
@@ -225,10 +209,12 @@ export function createSettingsRouter(): Hono {
     });
 
     router.get("/settings/llm", async (c) => {
-        return c.json({ providers: listProviders(), current: await settingsRepository.getLlmSettings() });
+        const modelRegistry = await modelRegistryPromise;
+        return c.json({ providers: listProviders(modelRegistry), current: await settingsRepository.getLlmSettings() });
     });
 
     router.patch("/settings/llm", async (c) => {
+        const modelRegistry = await modelRegistryPromise;
         const body = llmPatchSchema.safeParse(await c.req.json().catch(() => null));
         if (!body.success) throw new HTTPException(400, { message: "Invalid LLM settings" });
         const current = await settingsRepository.getLlmSettings();
@@ -236,7 +222,7 @@ export function createSettingsRouter(): Hono {
         if (!updated.provider && !updated.model) {
             return c.json(await settingsRepository.updateLlmSettings(updated));
         }
-        requireProvider(updated.provider);
+        requireProvider(updated.provider, modelRegistry);
         if (!modelRegistry.find(updated.provider, updated.model)) {
             throw new HTTPException(400, { message: "Unknown model for this provider" });
         }
@@ -244,30 +230,33 @@ export function createSettingsRouter(): Hono {
     });
 
     router.put("/settings/llm/providers/:provider", async (c) => {
+        const [modelRegistry, modelRuntime] = await Promise.all([modelRegistryPromise, modelRuntimePromise]);
         const provider = c.req.param("provider");
-        requireProvider(provider);
+        requireProvider(provider, modelRegistry);
         const body = apiKeySchema.safeParse(await c.req.json().catch(() => null));
         if (!body.success) throw new HTTPException(400, { message: "apiKey is required" });
         removeProviderOAuthSessions(provider);
-        llmAuth.set(provider, { type: "api_key", key: body.data.apiKey });
-        modelRegistry.refresh();
+        await llmCredentials.modify(provider, async () => ({ type: "api_key", key: body.data.apiKey }));
+        await modelRuntime.reloadConfig();
         return c.json({ ok: true });
     });
 
-    router.delete("/settings/llm/providers/:provider", (c) => {
+    router.delete("/settings/llm/providers/:provider", async (c) => {
+        const [modelRegistry, modelRuntime] = await Promise.all([modelRegistryPromise, modelRuntimePromise]);
         const provider = c.req.param("provider");
-        requireProvider(provider);
+        requireProvider(provider, modelRegistry);
         removeProviderOAuthSessions(provider);
-        llmAuth.remove(provider);
-        modelRegistry.refresh();
+        await llmCredentials.delete(provider);
+        await modelRuntime.reloadConfig();
         return c.json({ ok: true });
     });
 
-    router.post("/settings/llm/providers/:provider/oauth/start", (c) => {
+    router.post("/settings/llm/providers/:provider/oauth/start", async (c) => {
+        const [modelRegistry, modelRuntime] = await Promise.all([modelRegistryPromise, modelRuntimePromise]);
         const provider = requireOAuthProvider(c.req.param("provider"));
-        requireProvider(provider);
+        requireProvider(provider, modelRegistry);
         const [sessionId, session] = createOAuthSession(provider);
-        const type = startOAuthLogin(sessionId, session);
+        const type = startOAuthLogin(sessionId, session, modelRuntime);
         return c.json({ sessionId, type });
     });
 
