@@ -113,8 +113,9 @@ async function saveOAuthCredentials(id: string): Promise<void> {
     finishOAuthSession(id, "done");
 }
 
-function failOAuthSession(id: string): void {
-    finishOAuthSession(id, "error", "Authentication failed. Please try again.");
+function failOAuthSession(id: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    finishOAuthSession(id, "error", message || "Authentication failed. Please try again.");
 }
 
 function waitForManualInput(session: OAuthSession): Promise<string> {
@@ -150,6 +151,11 @@ function createOAuthInteraction(id: string, session: OAuthSession): AuthInteract
         signal: session.controller.signal,
         notify: (event) => handleOAuthEvent(id, event),
         prompt: async (prompt: AuthPrompt) => {
+            if (prompt.type === "select") {
+                const deviceCodeOption = prompt.options.find((option) => option.id === "device_code");
+                return deviceCodeOption?.id ?? prompt.options[0]?.id ?? "";
+            }
+            if (prompt.type === "text") return "";
             if (prompt.type === "manual_code") return waitForManualInput(session);
             throw new Error(`Unsupported OAuth prompt: ${prompt.type}`);
         },
@@ -160,7 +166,7 @@ function startOAuthLogin(id: string, session: OAuthSession, modelRuntime: ModelR
     void modelRuntime
         .login(session.provider, "oauth", createOAuthInteraction(id, session))
         .then(() => saveOAuthCredentials(id))
-        .catch(() => failOAuthSession(id));
+        .catch((error) => failOAuthSession(id, error));
     return session.provider === "anthropic" ? "browser" : "device_code";
 }
 
