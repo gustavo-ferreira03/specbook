@@ -11,11 +11,11 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
     const { projectId } = use(params);
     return (
         <div className="flex min-h-full flex-col bg-surface">
-            <PageHeader title="Chats" eyebrow="Project" />
+            <PageHeader title="Chats" eyebrow="Project" description="Describe behavior, clarify intent, and turn the result into a Spec." />
             <div className="flex flex-1 items-center justify-center px-5 py-10">
                 <div className="max-w-[420px] text-center">
                     <LogoMark className="mx-auto size-9" />
-                    <h2 className="mt-4 text-sm font-bold">No chat selected</h2>
+                    <h2 className="mt-4 text-xl font-bold tracking-[-0.03em]">Choose a conversation</h2>
                     <p className="mt-2 text-xs leading-5 text-ink-soft">
                         Describe a behavior in a chat while the agent operates a live browser, or pick up an
                         existing one from the sidebar.

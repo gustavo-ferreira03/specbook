@@ -4,23 +4,23 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-    --color-canvas: #f4f4f3;
-    --color-sidebar: #f7f7f6;
-    --color-surface: #ffffff;
-    --color-surface-soft: #f8f8f7;
-    --color-surface-hover: #efefed;
-    --color-line: #e3e3df;
-    --color-line-strong: #d2d2cd;
-    --color-line-hover: #b8b8b2;
-    --color-ink: #202020;
-    --color-ink-soft: #60605b;
-    --color-ink-faint: #666660;
-    --color-ink-disabled: #b9b9b4;
-    --color-primary: #2b2b2b;
+    --color-canvas: oklch(97.5% 0.003 260);
+    --color-sidebar: oklch(98.2% 0.002 260);
+    --color-surface: oklch(100% 0 0);
+    --color-surface-soft: oklch(97.2% 0.004 260);
+    --color-surface-hover: oklch(95.2% 0.006 260);
+    --color-line: oklch(91.8% 0.004 260);
+    --color-line-strong: oklch(86.8% 0.006 260);
+    --color-line-hover: oklch(75.5% 0.008 260);
+    --color-ink: oklch(27.5% 0 0);
+    --color-ink-soft: oklch(48.5% 0.004 260);
+    --color-ink-faint: oklch(44% 0.004 260);
+    --color-ink-disabled: oklch(73.5% 0.003 260);
+    --color-primary: oklch(26% 0 0);
     --color-primary-foreground: #ffffff;
-    --color-primary-hover: #3a3a3a;
-    --color-primary-soft: #ededeb;
-    --color-surface-selected: #e9e9e7;
+    --color-primary-hover: oklch(35% 0 0);
+    --color-primary-soft: oklch(93.5% 0.004 260);
+    --color-surface-selected: oklch(91.8% 0.006 260);
     --color-success: #1f8559;
     --color-success-soft: #e9f8ef;
     --color-success-chart: #2c9b68;
@@ -39,23 +39,23 @@
     --color-conflict-chart: #9577c4;
     --color-info: #406b9f;
     --color-info-soft: #edf3fa;
-    --color-background: #ffffff;
-    --color-foreground: #202020;
-    --color-card: #ffffff;
-    --color-card-foreground: #202020;
-    --color-popover: #ffffff;
-    --color-popover-foreground: #202020;
-    --color-secondary: #f8f8f7;
-    --color-secondary-foreground: #202020;
-    --color-muted: #f8f8f7;
-    --color-muted-foreground: #60605b;
-    --color-accent: #efefed;
-    --color-accent-foreground: #202020;
+    --color-background: oklch(100% 0 0);
+    --color-foreground: oklch(27.5% 0 0);
+    --color-card: oklch(100% 0 0);
+    --color-card-foreground: oklch(27.5% 0 0);
+    --color-popover: oklch(100% 0 0);
+    --color-popover-foreground: oklch(27.5% 0 0);
+    --color-secondary: oklch(97.2% 0.004 260);
+    --color-secondary-foreground: oklch(27.5% 0 0);
+    --color-muted: oklch(97.2% 0.004 260);
+    --color-muted-foreground: oklch(48.5% 0.004 260);
+    --color-accent: oklch(95.2% 0.006 260);
+    --color-accent-foreground: oklch(27.5% 0 0);
     --color-destructive: #ba5751;
     --color-destructive-foreground: #ffffff;
-    --color-border: #e3e3df;
-    --color-input: #d2d2cd;
-    --color-ring: #2b2b2b;
+    --color-border: oklch(91.8% 0.004 260);
+    --color-input: oklch(86.8% 0.006 260);
+    --color-ring: oklch(26% 0 0);
     --color-overlay: rgb(24 24 22 / 42%);
     --color-overlay-soft: rgb(0 0 0 / 35%);
     --color-browser: #11110f;
@@ -95,9 +95,31 @@ body {
     background: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     font-kerning: normal;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+    text-wrap: pretty;
+}
+
+h1,
+h2,
+h3,
+h4 {
+    text-wrap: balance;
+}
+
+[data-slot="scroll-area-viewport"] {
+    scrollbar-gutter: stable;
 }
 
 button,
@@ -183,6 +205,16 @@ summary:focus-visible {
 
 .status-pulse {
     animation: status-pulse 1.35s ease-in-out infinite;
+}
+
+.chat-message-user {
+    box-shadow: 0 1px 0 rgb(0 0 0 / 8%);
+}
+
+@media (max-width: 767px) {
+    body {
+        font-size: 0.9375rem;
+    }
 }
 
 @media (pointer: coarse) {

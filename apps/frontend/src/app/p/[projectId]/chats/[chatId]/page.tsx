@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, use, useEffect, useRef, useState } from "react";
+import { Suspense, type ReactNode, use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowUp, Compass, ExternalLink, Monitor, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowUp, Check, Compass, Copy, ExternalLink, LoaderCircle, Monitor, Pencil, RefreshCw, RotateCcw, Square, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CredentialRequestCard } from "@/components/CredentialRequestCard";
@@ -18,7 +18,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { API_URL, api } from "@/lib/api";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { API_URL, abortChatTurn, api, editChatMessage, queueChatFollowUp, retryChatMessage } from "@/lib/api";
 import type { ChatState } from "@/lib/types";
 
 function MessageContent({ content, user }: { content: string; user: boolean }) {
@@ -58,6 +59,8 @@ function sameChatState(left: ChatState, right: ChatState): boolean {
         left.vncSessionId !== right.vncSessionId ||
         left.projectId !== right.projectId ||
         left.mode !== right.mode ||
+        left.queue.steering !== right.queue.steering ||
+        left.queue.followUp !== right.queue.followUp ||
         left.messages.length !== right.messages.length
     ) {
         return false;
@@ -71,7 +74,8 @@ function sameChatState(left: ChatState, right: ChatState): boolean {
             message.chatId === next.chatId &&
             message.role === next.role &&
             message.content === next.content &&
-            message.createdAt === next.createdAt
+            message.createdAt === next.createdAt &&
+            message.canRetry === next.canRetry
         );
     });
 }
@@ -92,6 +96,82 @@ function LiveBrowserCard({ sessionId }: { sessionId: string }) {
     );
 }
 
+function readableToolName(toolName: string): string {
+    return toolName
+        .replace(/^browser_/, "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function MessageActions({
+    userMessage,
+    retryable,
+    disabled,
+    copied,
+    onCopy,
+    onEdit,
+    onRetry,
+}: {
+    userMessage: boolean;
+    retryable: boolean;
+    disabled: boolean;
+    copied: boolean;
+    onCopy: () => void;
+    onEdit: () => void;
+    onRetry: () => void;
+}) {
+    const tone = userMessage
+        ? "bg-transparent text-white/65 hover:text-white focus-visible:bg-white/15"
+        : "bg-transparent text-ink-faint hover:text-ink focus-visible:bg-surface-hover";
+    function ActionButton({
+        label,
+        children,
+        onClick,
+    }: {
+        label: string;
+        children: ReactNode;
+        onClick: () => void;
+    }) {
+        return (
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={onClick}
+                        disabled={disabled}
+                        className={`size-7 rounded-md ${tone}`}
+                        aria-label={label}
+                    >
+                        {children}
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={5}>{label}</TooltipContent>
+            </Tooltip>
+        );
+    }
+    return (
+        <div className={`relative z-10 mt-1 flex min-h-8 items-center gap-0.5 ${userMessage ? "justify-end" : "justify-start"}`}>
+            <ActionButton label={copied ? "Message copied" : "Copy message"} onClick={onCopy}>
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+            </ActionButton>
+            {userMessage && (
+                <>
+                    <ActionButton label="Edit message" onClick={onEdit}>
+                        <Pencil size={13} />
+                    </ActionButton>
+                </>
+            )}
+            {retryable && (
+                <ActionButton label={userMessage ? "Retry message" : "Retry response"} onClick={onRetry}>
+                    <RotateCcw size={13} />
+                </ActionButton>
+            )}
+        </div>
+    );
+}
+
 function ChatContent({ projectId, chatId }: { projectId: string; chatId: string }) {
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
@@ -100,15 +180,21 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const [loadError, setLoadError] = useState("");
     const [pollError, setPollError] = useState("");
     const [sendError, setSendError] = useState("");
-    const [browserError, setBrowserError] = useState("");
-    const [browserAttempt, setBrowserAttempt] = useState(0);
     const [sending, setSending] = useState(false);
+    const [actionMessageId, setActionMessageId] = useState("");
+    const [actionError, setActionError] = useState("");
+    const [copiedMessageId, setCopiedMessageId] = useState("");
+    const [editingMessageId, setEditingMessageId] = useState("");
+    const [editingText, setEditingText] = useState("");
+    const [streamingText, setStreamingText] = useState("");
+    const [activeTool, setActiveTool] = useState("");
+    const [agentStatus, setAgentStatus] = useState("");
+    const [stopping, setStopping] = useState(false);
     const [beginning, setBeginning] = useState(false);
     const [beginError, setBeginError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const browserStartRef = useRef("");
     const stickToBottomRef = useRef(true);
 
     useEffect(() => {
@@ -121,6 +207,12 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         setState(null);
         setLoadError("");
         setPollError("");
+        setActionError("");
+        setActionMessageId("");
+        setEditingMessageId("");
+        setStreamingText("");
+        setActiveTool("");
+        setAgentStatus("");
 
         async function refresh() {
             try {
@@ -128,6 +220,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 if (!active) return;
                 loaded = true;
                 setState((current) => (current && sameChatState(current, result) ? current : result));
+                if (!result.busy) {
+                    setStreamingText("");
+                    setActiveTool("");
+                    setAgentStatus("");
+                }
                 setLoadError("");
                 setPollError("");
             } catch (error) {
@@ -141,6 +238,45 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         void refresh();
         const events = new EventSource(`${API_URL}/chats/${encodeURIComponent(chatId)}/events`);
         events.addEventListener("updated", () => void refresh());
+        const readEvent = (event: Event) => {
+            try {
+                return JSON.parse((event as MessageEvent<string>).data) as {
+                    delta?: string;
+                    toolName?: string;
+                    status?: "working" | "retrying" | "idle";
+                    message?: string;
+                    steering?: number;
+                    followUp?: number;
+                };
+            } catch {
+                return null;
+            }
+        };
+        const onDelta = (event: Event) => {
+            const data = readEvent(event);
+            if (data?.delta) setStreamingText((current) => current + data.delta);
+        };
+        const onToolStart = (event: Event) => {
+            const data = readEvent(event);
+            if (data?.toolName) setActiveTool(data.toolName);
+        };
+        const onToolEnd = () => setActiveTool("");
+        const onAgentStatus = (event: Event) => {
+            const data = readEvent(event);
+            if (data?.status === "retrying") setAgentStatus(data.message || "Retrying the response");
+            else if (data?.status === "working") setAgentStatus("Thinking through the request");
+            else setAgentStatus("");
+        };
+        const onQueueUpdate = (event: Event) => {
+            const data = readEvent(event);
+            if (typeof data?.steering !== "number" || typeof data.followUp !== "number") return;
+            setState((current) => current ? { ...current, queue: { steering: data.steering!, followUp: data.followUp! } } : current);
+        };
+        events.addEventListener("assistant_delta", onDelta);
+        events.addEventListener("tool_start", onToolStart);
+        events.addEventListener("tool_end", onToolEnd);
+        events.addEventListener("agent_status", onAgentStatus);
+        events.addEventListener("queue_update", onQueueUpdate);
         return () => {
             active = false;
             events.close();
@@ -169,35 +305,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const awaitingDiscoveryStart =
         discovery && state !== null && state.messages.length === 0 && !state.busy && !discoveryTerminal;
 
-    useEffect(() => {
-        if (!state || state.vncSessionId) return;
-        if (state.mode === "discovery" && state.messages.length === 0 && !state.busy) return;
-        const key = `${chatId}:${browserAttempt}`;
-        if (browserStartRef.current === key) return;
-        browserStartRef.current = key;
-        let active = true;
-        setBrowserError("");
-        api<{ vncSessionId: string }>(`/chats/${chatId}/browser`, { method: "POST" })
-            .then((result) => {
-                if (!active) return;
-                setState((current) => current ? { ...current, vncSessionId: result.vncSessionId } : current);
-            })
-            .catch((error) => {
-                if (active) setBrowserError(error instanceof Error ? error.message : String(error));
-            });
-        return () => {
-            active = false;
-        };
-    }, [browserAttempt, chatId, state]);
-
     async function beginDiscovery() {
         if (beginning) return;
         setBeginning(true);
         setBeginError("");
         try {
-            const browser = await api<{ vncSessionId: string }>(`/chats/${chatId}/browser`, {
-                method: "POST",
-            });
             await api<{ ok: true }>(`/chats/${chatId}/message`, {
                 method: "POST",
                 body: JSON.stringify({
@@ -205,9 +317,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 }),
             });
             stickToBottomRef.current = true;
-            setState((current) =>
-                current ? { ...current, vncSessionId: browser.vncSessionId, busy: true } : current,
-            );
+            setState((current) => current ? { ...current, busy: true } : current);
         } catch (error) {
             setBeginError(error instanceof Error ? error.message : String(error));
         } finally {
@@ -218,17 +328,25 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         const value = text.trim();
-        if (!value || !state || state.busy || sending) return;
+        if (!value || !state || sending) return;
+        const followUp = state.busy;
         setSending(true);
         setSendError("");
+        setActionError("");
         setText("");
         stickToBottomRef.current = true;
         try {
-            await api<{ ok: true }>(`/chats/${chatId}/message`, {
-                method: "POST",
-                body: JSON.stringify({ text: value }),
-            });
-            setState((current) => current ? { ...current, busy: true } : current);
+            if (followUp) await queueChatFollowUp(chatId, value);
+            else {
+                await api<{ ok: true }>(`/chats/${chatId}/message`, {
+                    method: "POST",
+                    body: JSON.stringify({ text: value }),
+                });
+                setState((current) => current ? { ...current, busy: true } : current);
+            }
+            if (followUp) {
+                setState((current) => current ? { ...current, queue: { ...current.queue, followUp: current.queue.followUp + 1 } } : current);
+            }
             setPollError("");
             if (textareaRef.current) textareaRef.current.style.height = "auto";
         } catch (error) {
@@ -236,6 +354,65 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             setText(value);
         } finally {
             setSending(false);
+        }
+    }
+
+    async function stopAgent() {
+        if (stopping || !state?.busy) return;
+        setStopping(true);
+        setActionError("");
+        try {
+            await abortChatTurn(chatId);
+            setStreamingText("");
+            setActiveTool("");
+        } catch (error) {
+            setActionError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setStopping(false);
+        }
+    }
+
+    async function copyMessage(messageId: string, content: string) {
+        try {
+            await navigator.clipboard.writeText(content);
+            setCopiedMessageId(messageId);
+            window.setTimeout(() => setCopiedMessageId((current) => current === messageId ? "" : current), 1600);
+        } catch {
+            setActionError("Could not copy this message. Select the text and copy it manually.");
+        }
+    }
+
+    async function editMessage(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        const value = editingText.trim();
+        if (!editingMessageId || !value || state?.busy || actionMessageId) return;
+        setActionMessageId(editingMessageId);
+        setActionError("");
+        try {
+            await editChatMessage(chatId, editingMessageId, value);
+            setEditingMessageId("");
+            setEditingText("");
+            setState((current) => current ? { ...current, busy: true } : current);
+            stickToBottomRef.current = true;
+        } catch (error) {
+            setActionError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setActionMessageId("");
+        }
+    }
+
+    async function retryMessage(messageId: string) {
+        if (state?.busy || actionMessageId) return;
+        setActionMessageId(messageId);
+        setActionError("");
+        try {
+            await retryChatMessage(chatId, messageId);
+            setState((current) => current ? { ...current, busy: true } : current);
+            stickToBottomRef.current = true;
+        } catch (error) {
+            setActionError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setActionMessageId("");
         }
     }
 
@@ -312,12 +489,12 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             )}
 
             <ScrollArea ref={scrollRef} role="log" aria-live="polite" className="min-h-0 flex-1">
-                <div className="px-4 py-6 sm:px-7 sm:py-8">
+                <div className="px-4 py-6 sm:px-7 sm:py-9">
                     <div className="mx-auto w-full max-w-[780px]">
                         {awaitingDiscoveryStart && revisionInfo && (
-                            <div className="py-6 sm:py-10">
+                            <div className="border-b border-line pb-7 pt-3 sm:pb-10 sm:pt-5">
                                 <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Project discovery</p>
-                                <h2 className="mt-2 text-xl font-bold tracking-[-0.025em] text-balance">Ready to explore this application</h2>
+                                <h2 className="mt-2 max-w-[24ch] text-2xl font-bold tracking-[-0.03em] text-balance">Ready to explore this application</h2>
                                 <p className="mt-3 max-w-[58ch] text-[0.75rem] leading-5 text-ink-soft">
                                     The agent will browse from <span className="font-mono text-[0.6875rem] [overflow-wrap:anywhere]">{revisionInfo.brief.startUrl}</span>, following the saved goal, and draft a project context for your review.
                                 </p>
@@ -333,18 +510,18 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                         )}
 
                         {!discovery && state.messages.length === 0 && !state.busy && (
-                            <div className="py-6 sm:py-10">
+                            <div className="border-b border-line pb-7 pt-3 sm:pb-10 sm:pt-5">
                                 <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">New chat</p>
-                                <h2 className="mt-2 text-xl font-bold tracking-[-0.025em] text-balance">What should this application do?</h2>
+                                <h2 className="mt-2 max-w-[24ch] text-2xl font-bold tracking-[-0.03em] text-balance">What should this application do?</h2>
                                 <p className="mt-3 max-w-[58ch] text-[0.75rem] leading-5 text-ink-soft">
                                     Describe a flow or point the agent to an area of the application. It will browse, clarify the behavior, and save the verified result as a Spec.
                                 </p>
-                                <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                                    <Button type="button" variant="outline" onClick={() => setText("A user should be able to ")} className="h-auto min-h-20 flex-col items-stretch justify-start gap-0 whitespace-normal rounded-[11px] p-3.5 text-left font-normal">
+                                <div className="mt-7 grid gap-2 sm:grid-cols-2">
+                                    <Button type="button" variant="outline" onClick={() => setText("A user should be able to ")} className="h-auto min-h-20 flex-col items-stretch justify-start gap-0 whitespace-normal rounded-[11px] border-line bg-transparent p-3.5 text-left font-normal hover:border-line-strong hover:bg-surface-soft">
                                         <span className="block text-xs font-bold">Describe a flow</span>
                                         <span className="mt-1 block text-[0.6875rem] leading-5 text-ink-faint">State what should happen and how success is recognized.</span>
                                     </Button>
-                                    <Button type="button" variant="outline" onClick={() => setText("Explore the ")} className="h-auto min-h-20 flex-col items-stretch justify-start gap-0 whitespace-normal rounded-[11px] p-3.5 text-left font-normal">
+                                    <Button type="button" variant="outline" onClick={() => setText("Explore the ")} className="h-auto min-h-20 flex-col items-stretch justify-start gap-0 whitespace-normal rounded-[11px] border-line bg-transparent p-3.5 text-left font-normal hover:border-line-strong hover:bg-surface-soft">
                                         <span className="block text-xs font-bold">Explore a feature</span>
                                         <span className="mt-1 block text-[0.6875rem] leading-5 text-ink-faint">Let the agent inspect an area and propose useful coverage.</span>
                                     </Button>
@@ -352,26 +529,77 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                             </div>
                         )}
 
-                        <div className="flex flex-col gap-[15px]">
+                        <div className="flex flex-col gap-2 pt-2 sm:gap-3 sm:pt-4">
                             {state.messages.map((message) => {
                                 const userMessage = message.role === "user";
+                                const editing = editingMessageId === message.id;
+                                const actionBusy = actionMessageId === message.id;
                                 return (
-                                    <article key={message.id} className={`flex items-start gap-2.5 ${userMessage ? "justify-end" : ""}`}>
+                                    <article key={message.id} className={`group flex items-start gap-2.5 ${userMessage ? "justify-end" : ""}`}>
                                         {!userMessage && (
-                                            <LogoMark inverse className="size-6 shrink-0 rounded-md" />
+                                            <LogoMark inverse className="mt-1 size-6 shrink-0 rounded-md" />
                                         )}
-                                        <div className={`max-w-[calc(100%-2.5rem)] overflow-x-auto rounded-[13px] px-3.5 py-2.5 text-[0.75rem] leading-[1.6] break-words select-text [overflow-wrap:anywhere] sm:max-w-[84%] ${
-                                            userMessage ? "chat-message-user rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm border border-line bg-surface-soft text-ink"
-                                        }`}>
-                                            <p className={`mb-1 text-[0.5625rem] font-bold tracking-[0.05em] uppercase ${userMessage ? "text-white/60" : "text-ink-faint"}`}>
-                                                {userMessage ? "You" : "Specbook agent"}
-                                            </p>
-                                            <MessageContent content={message.content} user={userMessage} />
+                                        <div className={`flex min-w-0 max-w-[min(100%,680px)] flex-col ${userMessage ? "items-end" : "items-start"}`}>
+                                            <div className={`w-fit max-w-full overflow-x-auto rounded-[13px] px-3.5 py-2.5 text-[0.75rem] leading-[1.65] break-words select-text [overflow-wrap:anywhere] sm:px-4 sm:py-3 ${
+                                                userMessage ? "chat-message-user rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm border border-line bg-surface-soft text-ink"
+                                            }`}>
+                                                <p className={`mb-1.5 text-[0.5625rem] font-bold tracking-[0.05em] uppercase ${userMessage ? "text-white/60" : "text-ink-faint"}`}>
+                                                    {userMessage ? "You" : "Specbook agent"}
+                                                </p>
+                                                {editing ? (
+                                                    <form onSubmit={editMessage} className="min-w-[min(100%,420px)]">
+                                                        <Textarea
+                                                            value={editingText}
+                                                            onChange={(event) => setEditingText(event.target.value)}
+                                                            rows={3}
+                                                            autoFocus
+                                                            className="min-h-20 resize-y border-white/25 bg-white/10 text-xs leading-5 text-white placeholder:text-white/55 focus-visible:border-white/45 focus-visible:ring-white/25"
+                                                            aria-label="Edit message"
+                                                        />
+                                                        <div className="mt-2 flex items-center justify-end gap-1.5">
+                                                            <Button type="button" variant="ghost" size="sm" onClick={() => setEditingMessageId("")} className="text-white/75 hover:bg-white/15 hover:text-white">
+                                                                <X size={12} /> Cancel
+                                                            </Button>
+                                                            <Button type="submit" size="sm" disabled={!editingText.trim() || actionBusy} className="bg-white text-primary hover:bg-white/90">
+                                                                {actionBusy ? "Saving..." : "Save and retry"}
+                                                            </Button>
+                                                        </div>
+                                                    </form>
+                                                ) : (
+                                                    <MessageContent content={message.content} user={userMessage} />
+                                                )}
+                                            </div>
+                                            {!editing && (
+                                                 <MessageActions
+                                                     userMessage={userMessage}
+                                                     retryable={userMessage || message.canRetry !== false}
+                                                     disabled={Boolean(state.busy || actionMessageId || discoveryTerminal)}
+                                                    copied={copiedMessageId === message.id}
+                                                    onCopy={() => void copyMessage(message.id, message.content)}
+                                                    onEdit={() => {
+                                                        setEditingMessageId(message.id);
+                                                        setEditingText(message.content);
+                                                        setActionError("");
+                                                    }}
+                                                    onRetry={() => void retryMessage(message.id)}
+                                                />
+                                            )}
                                         </div>
                                     </article>
                                 );
                             })}
                         </div>
+
+                        {streamingText && state.busy && (
+                            <article className="mt-2 flex items-start gap-2.5 sm:mt-3">
+                                <LogoMark inverse className="mt-1 size-6 shrink-0 rounded-md" />
+                                <div className="min-w-0 max-w-[min(100%,680px)] rounded-[13px] rounded-bl-sm border border-line bg-surface-soft px-3.5 py-2.5 text-[0.75rem] leading-[1.65] text-ink sm:px-4 sm:py-3">
+                                    <p className="mb-1.5 text-[0.5625rem] font-bold tracking-[0.05em] text-ink-faint uppercase">Specbook agent</p>
+                                    <MessageContent content={streamingText} user={false} />
+                                    <span className="ml-0.5 inline-block h-3.5 w-px animate-pulse bg-primary align-[-2px]" aria-hidden="true" />
+                                </div>
+                            </article>
+                        )}
 
                         {state.vncSessionId && <LiveBrowserCard sessionId={state.vncSessionId} />}
 
@@ -385,17 +613,13 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                             />
                         )}
 
-                        {!state.vncSessionId && browserError && (
-                            <Alert variant="destructive" className="my-5 flex w-auto items-center justify-between gap-3 md:ml-[38px]" role="alert">
-                                <AlertDescription className="min-w-0 flex-1">Live browser could not start: {browserError}</AlertDescription>
-                                <Button type="button" variant="link" size="sm" onClick={() => setBrowserAttempt((value) => value + 1)} className="h-auto shrink-0 px-0 text-danger underline underline-offset-2">Try again</Button>
-                            </Alert>
-                        )}
-
                         {state.busy && (
-                            <Badge variant="secondary" className="mt-4 flex gap-2 rounded-none bg-transparent p-0 pl-[38px] text-[0.6875rem] font-semibold whitespace-normal text-ink-faint" role="status">
-                                <span className="status-pulse size-1.5 rounded-full bg-primary" />
-                                Agent is working...
+                            <Badge variant="secondary" className="mt-3 flex gap-2 rounded-none bg-transparent p-0 pl-[38px] text-[0.6875rem] font-semibold whitespace-normal text-ink-faint" role="status">
+                                <LoaderCircle size={12} className="status-pulse shrink-0 text-primary" />
+                                <span>
+                                    {activeTool ? `Using ${readableToolName(activeTool)}` : agentStatus || "Thinking through the request"}
+                                    {state.queue.followUp > 0 && <span className="font-normal text-ink-faint"> · {state.queue.followUp} follow-up queued</span>}
+                                </span>
                             </Badge>
                         )}
                     </div>
@@ -416,6 +640,12 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                         <Alert variant="destructive" className="mb-2 flex items-start gap-2 bg-transparent p-0 text-xs leading-5" role="alert">
                             <AlertCircle size={13} className="mt-1 shrink-0" />
                             <AlertDescription>{sendError}</AlertDescription>
+                        </Alert>
+                    )}
+                    {actionError && (
+                        <Alert variant="destructive" className="mb-2 flex items-start gap-2 bg-transparent p-0 text-xs leading-5" role="alert">
+                            <AlertCircle size={13} className="mt-1 shrink-0" />
+                            <AlertDescription>{actionError}</AlertDescription>
                         </Alert>
                     )}
                     <form onSubmit={sendMessage} className="rounded-[13px] border border-line-strong bg-surface p-2 shadow-composer">
@@ -448,21 +678,36 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                     className="max-h-28 min-h-10 resize-none rounded-none border-0 bg-transparent px-2 py-2 text-[0.78125rem] leading-5 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0"
                                 />
                             </Label>
-                            <Button
-                                type="submit"
-                                disabled={!text.trim() || state.busy || sending || discoveryTerminal}
-                                size="icon-lg"
-                                className="rounded-[9px] disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-35"
-                                aria-label="Send message"
-                            >
-                                <ArrowUp size={16} strokeWidth={2.2} />
-                            </Button>
+                             {state.busy && (
+                                 <Button
+                                     type="button"
+                                     variant="outline"
+                                     size="icon-lg"
+                                     onClick={() => void stopAgent()}
+                                     disabled={stopping}
+                                     className="rounded-[9px]"
+                                     aria-label="Stop agent"
+                                 >
+                                     {stopping ? <LoaderCircle size={15} className="animate-spin" /> : <Square size={14} fill="currentColor" />}
+                                 </Button>
+                             )}
+                             <Button
+                                 type="submit"
+                                 disabled={!text.trim() || sending || discoveryTerminal}
+                                 size="icon-lg"
+                                 className="rounded-[9px] disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-35"
+                                 aria-label={state.busy ? "Queue follow-up" : "Send message"}
+                             >
+                                 <ArrowUp size={16} strokeWidth={2.2} />
+                             </Button>
                         </div>
                     </form>
-                    <p className="mt-1.5 hidden text-center text-[0.59375rem] text-ink-faint sm:block">
-                        {discovery
-                            ? "The agent explores within the allowed origin and drafts project context. It cannot create Specs here."
-                            : "The agent can browse the application and create or update Specs."}
+                    <p className="mt-2 hidden text-center text-[0.59375rem] text-ink-faint sm:block">
+                         {discovery
+                             ? "The agent explores within the allowed origin and drafts project context. It cannot create Specs here."
+                             : state.busy
+                               ? "Your message will be added as a follow-up. Stop the agent at any time."
+                               : "Enter to send. Shift+Enter adds a new line. Edit or retry any message from its actions."}
                     </p>
                 </div>
             </div>

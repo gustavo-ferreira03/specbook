@@ -12,6 +12,7 @@ interface ChatBrowser {
     workDir: string;
     idleTimer: NodeJS.Timeout;
     lastHealthCheck: number;
+    activeTools: Map<string, number>;
 }
 
 const browsers = new Map<string, ChatBrowser>();
@@ -34,7 +35,7 @@ export async function getChatBrowser(chatId: string): Promise<ChatBrowser | null
     }
     if (Date.now() - browser.lastHealthCheck >= 5000) {
         try {
-            await browser.mcp.ensureBrowser();
+            await browser.mcp.client.listTools();
             browser.lastHealthCheck = Date.now();
         } catch {
             await closeChatBrowser(chatId);
@@ -76,7 +77,14 @@ export async function getOrCreateChatBrowser(chatId: string): Promise<ChatBrowse
             }
             const idleTimer = setTimeout(() => undefined, BROWSER_IDLE_MS);
             idleTimer.unref();
-            const record: ChatBrowser = { vnc, mcp, workDir, idleTimer, lastHealthCheck: Date.now() };
+            const record: ChatBrowser = {
+                vnc,
+                mcp,
+                workDir,
+                idleTimer,
+                lastHealthCheck: Date.now(),
+                activeTools: new Map(),
+            };
             browsers.set(chatId, record);
             touchChatBrowser(chatId, record);
             return record;
@@ -97,12 +105,36 @@ export async function closeChatBrowser(chatId: string): Promise<void> {
     const record = browsers.get(chatId);
     if (!record) return;
     browsers.delete(chatId);
+    record.activeTools.clear();
     clearTimeout(record.idleTimer);
     try {
         await record.mcp.close();
     } finally {
         stopVncStack(record.vnc.id);
     }
+}
+
+export function beginChatBrowserTool(chatId: string, toolName: string): void {
+    const browser = browsers.get(chatId);
+    if (!browser) return;
+    browser.activeTools.set(toolName, (browser.activeTools.get(toolName) ?? 0) + 1);
+    touchChatBrowser(chatId, browser);
+}
+
+export function endChatBrowserTool(chatId: string, toolName: string): void {
+    const browser = browsers.get(chatId);
+    if (!browser) return;
+    const count = browser.activeTools.get(toolName) ?? 0;
+    if (count <= 1) browser.activeTools.delete(toolName);
+    else browser.activeTools.set(toolName, count - 1);
+    touchChatBrowser(chatId, browser);
+}
+
+export function getChatBrowserActivity(chatId: string): { sessionId: string; toolName: string } | null {
+    const browser = browsers.get(chatId);
+    if (!browser) return null;
+    const toolName = browser.activeTools.keys().next().value;
+    return typeof toolName === "string" ? { sessionId: browser.vnc.id, toolName } : null;
 }
 
 export async function blockChatBrowser(chatId: string): Promise<void> {

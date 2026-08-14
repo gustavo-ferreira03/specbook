@@ -4,4 +4,5 @@ export interface ChatMessageRecord {
     role: "user" | "agent";
     content: string;
     createdAt: string;
+    canRetry?: boolean;
 }

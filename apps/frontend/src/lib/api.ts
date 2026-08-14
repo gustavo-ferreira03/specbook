@@ -98,6 +98,31 @@ export function updateProject(
     });
 }
 
+export function editChatMessage(chatId: string, messageId: string, text: string): Promise<{ ok: boolean }> {
+    return api<{ ok: boolean }>(
+        `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
+        { method: "PATCH", body: JSON.stringify({ text }) },
+    );
+}
+
+export function retryChatMessage(chatId: string, messageId: string): Promise<{ ok: boolean }> {
+    return api<{ ok: boolean }>(
+        `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/retry`,
+        { method: "POST" },
+    );
+}
+
+export function queueChatFollowUp(chatId: string, text: string): Promise<{ ok: boolean }> {
+    return api<{ ok: boolean }>(`/chats/${encodeURIComponent(chatId)}/follow-up`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+    });
+}
+
+export function abortChatTurn(chatId: string): Promise<{ ok: boolean }> {
+    return api<{ ok: boolean }>(`/chats/${encodeURIComponent(chatId)}/abort`, { method: "POST" });
+}
+
 export function deleteProject(projectId: string): Promise<void> {
     return api(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
 }

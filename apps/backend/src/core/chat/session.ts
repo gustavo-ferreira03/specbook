@@ -6,9 +6,14 @@ import {
     createAgentSession,
     DefaultResourceLoader,
     SessionManager,
+    type AgentSession,
     type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
-import { getOrCreateChatBrowser } from "../browser/sessions";
+import {
+    beginChatBrowserTool,
+    endChatBrowserTool,
+    getOrCreateChatBrowser,
+} from "../browser/sessions";
 import {
     bridgeBrowserTools,
     getActiveTabUrl,
@@ -33,11 +38,28 @@ import type { ChatMessageRecord } from "./types";
 
 const busyChats = new Set<string>();
 const deletingChats = new Set<string>();
-const chatUpdateListeners = new Map<string, Set<() => void>>();
+const activeChatSessions = new Map<string, ActiveChatSession>();
+const pendingFollowUps = new Map<string, string[]>();
+const abortRequestedChats = new Set<string>();
+const chatUpdateListeners = new Map<string, Set<(event: ChatUpdateEvent) => void>>();
 const ERROR_TYPE = "specbook-error";
 const WARNING_TYPE = "specbook-warning";
 const cwd = process.cwd();
 const agentDir = path.join(storageRoot, "pi-agent");
+
+export type ChatUpdateEvent =
+    | { type: "updated" }
+    | { type: "assistant_delta"; delta: string }
+    | { type: "tool_start"; toolName: string }
+    | { type: "tool_end"; toolName: string }
+    | { type: "agent_status"; status: "working" | "retrying" | "idle"; message?: string }
+    | { type: "queue_update"; steering: number; followUp: number };
+
+interface ActiveChatSession {
+    session: AgentSession;
+    sessionManager: SessionManager;
+    aborted: boolean;
+}
 
 interface AgentMessage {
     role?: string;
@@ -257,8 +279,11 @@ export function isChatDeleting(id: string): boolean {
     return deletingChats.has(id);
 }
 
-export function subscribeToChatUpdates(id: string, listener: () => void): () => void {
-    const listeners = chatUpdateListeners.get(id) ?? new Set<() => void>();
+export function subscribeToChatUpdates(
+    id: string,
+    listener: (event: ChatUpdateEvent) => void,
+): () => void {
+    const listeners = chatUpdateListeners.get(id) ?? new Set<(event: ChatUpdateEvent) => void>();
     listeners.add(listener);
     chatUpdateListeners.set(id, listeners);
     return () => {
@@ -267,8 +292,50 @@ export function subscribeToChatUpdates(id: string, listener: () => void): () => 
     };
 }
 
-export function publishChatUpdate(id: string): void {
-    for (const listener of chatUpdateListeners.get(id) ?? []) listener();
+export function publishChatUpdate(id: string, event: ChatUpdateEvent = { type: "updated" }): void {
+    for (const listener of chatUpdateListeners.get(id) ?? []) listener(event);
+}
+
+export function getChatQueueState(id: string): { steering: number; followUp: number } {
+    const active = activeChatSessions.get(id);
+    return {
+        steering: active?.session.getSteeringMessages().length ?? 0,
+        followUp: (active?.session.getFollowUpMessages().length ?? 0) + (pendingFollowUps.get(id)?.length ?? 0),
+    };
+}
+
+export async function queueChatFollowUp(id: string, text: string): Promise<void> {
+    if (deletingChats.has(id)) throw new Error("Chat is being deleted");
+    if (!busyChats.has(id)) throw new Error("The agent is not currently replying");
+
+    const active = activeChatSessions.get(id);
+    if (active) {
+        await active.session.followUp(text);
+        publishChatUpdate(id, {
+            type: "queue_update",
+            ...getChatQueueState(id),
+        });
+        return;
+    }
+
+    const queue = pendingFollowUps.get(id) ?? [];
+    queue.push(text);
+    pendingFollowUps.set(id, queue);
+    publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
+}
+
+export async function abortChatTurn(id: string): Promise<void> {
+    const active = activeChatSessions.get(id);
+    if (!active) {
+        if (busyChats.has(id)) {
+            abortRequestedChats.add(id);
+            publishChatUpdate(id, { type: "agent_status", status: "idle" });
+            return;
+        }
+        throw new Error("The agent is not currently replying");
+    }
+    active.aborted = true;
+    await active.session.abort();
 }
 
 export function beginChatDeletion(id: string): boolean {
@@ -279,6 +346,53 @@ export function beginChatDeletion(id: string): boolean {
 
 export function cancelChatDeletion(id: string): void {
     deletingChats.delete(id);
+}
+
+export async function branchChatForTurn(
+    id: string,
+    messageId: string,
+    options: { editedText?: string; userOnly?: boolean } = {},
+): Promise<{ text: string; sessionManager: SessionManager }> {
+    if (busyChats.has(id)) throw new Error("The agent is still replying");
+    if (deletingChats.has(id)) throw new Error("Chat is being deleted");
+
+    const sessionManager = await openSession(id);
+    if (!sessionManager) throw new Error("Chat not found");
+
+    const branch = sessionManager.getBranch();
+    const targetIndex = branch.findIndex((entry) => entry.id === messageId);
+    const target = targetIndex >= 0 ? branch[targetIndex] : undefined;
+    if (
+        !target ||
+        target.type !== "message" ||
+        (target.message.role !== "user" && target.message.role !== "assistant") ||
+        (options.userOnly && target.message.role !== "user")
+    ) {
+        throw new Error("Message is not available in the active conversation");
+    }
+
+    let text = "";
+    let branchFromId: string | null = null;
+    if (target.message.role === "user") {
+        text = options.editedText ?? extractText(target.message as AgentMessage);
+        branchFromId = target.parentId;
+    } else {
+        for (let index = targetIndex - 1; index >= 0; index -= 1) {
+            const entry = branch[index];
+            if (entry.type === "message" && entry.message.role === "user") {
+                text = extractText(entry.message as AgentMessage);
+                branchFromId = entry.parentId;
+                break;
+            }
+        }
+    }
+
+    if (!text.trim()) throw new Error("Message has no text to send");
+    if (branchFromId) sessionManager.branch(branchFromId);
+    else sessionManager.resetLeaf();
+    flushSessionFile(sessionManager);
+    publishChatUpdate(id);
+    return { text: text.trim(), sessionManager };
 }
 
 export async function removeChatSession(id: string): Promise<void> {
@@ -332,7 +446,7 @@ export async function getChatMessages(id: string): Promise<ChatMessageRecord[] |
     const sessionManager = await openSession(id);
     if (!sessionManager) return null;
     const messages: ChatMessageRecord[] = [];
-    for (const entry of sessionManager.getEntries()) {
+    for (const entry of sessionManager.getBranch()) {
         if (entry.type === "custom_message" && entry.display) {
             const content = extractText({ role: "assistant", content: entry.content }).trim();
             if (content) {
@@ -342,6 +456,7 @@ export async function getChatMessages(id: string): Promise<ChatMessageRecord[] |
                     role: "agent",
                     content,
                     createdAt: entry.timestamp,
+                    canRetry: false,
                 });
             }
             continue;
@@ -357,21 +472,28 @@ export async function getChatMessages(id: string): Promise<ChatMessageRecord[] |
             role: role === "user" ? "user" : "agent",
             content,
             createdAt: entry.timestamp,
+            canRetry: role === "user" || role === "assistant",
         });
     }
     return messages;
 }
 
-export async function runChatTurn(id: string, userText: string): Promise<void> {
+export async function runChatTurn(
+    id: string,
+    userText: string,
+    existingSessionManager?: SessionManager,
+): Promise<void> {
     if (busyChats.has(id) || deletingChats.has(id)) return;
     busyChats.add(id);
     publishChatUpdate(id);
-    let sessionManager: SessionManager | null = null;
+    let sessionManager: SessionManager | null = existingSessionManager ?? null;
     let previousUserCount = 0;
     try {
+        if (abortRequestedChats.delete(id)) return;
         const row = await chatsRepository.getChatRow(id);
-        sessionManager = await openSession(id);
+        sessionManager = sessionManager ?? (await openSession(id));
         if (!row || !sessionManager) return;
+        if (abortRequestedChats.delete(id)) return;
         previousUserCount = userMessageCount(sessionManager);
         const project = await projectsRepository.getProject(row.projectId);
         if (!project) {
@@ -421,9 +543,26 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
         const scrub = createProjectScrubber(row.projectId);
         try {
             chatBrowser = await getOrCreateChatBrowser(id);
-            const policy: BrowserToolPolicy = discoveryRevision
+            const basePolicy: BrowserToolPolicy = discoveryRevision
                 ? { ...createDiscoveryBrowserPolicy(discoveryRevision, chatBrowser.mcp), sanitizeResult: scrub }
                 : { sanitizeResult: scrub };
+            const policy: BrowserToolPolicy = {
+                ...basePolicy,
+                beforeCall: async (toolName, args) => {
+                    await chatBrowser!.mcp.ensureBrowser();
+                    await basePolicy.beforeCall?.(toolName, args);
+                    beginChatBrowserTool(id, toolName);
+                    publishChatUpdate(id);
+                },
+                afterCall: async (toolName, args, result) => {
+                    try {
+                        await basePolicy.afterCall?.(toolName, args, result);
+                    } finally {
+                        endChatBrowserTool(id, toolName);
+                        publishChatUpdate(id);
+                    }
+                },
+            };
             browserTools = bridgeBrowserTools(chatBrowser.mcp, chatBrowser.workDir, policy);
         } catch (error) {
             sessionManager.appendCustomMessageEntry(
@@ -463,6 +602,7 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
         const resourceLoader = await createResourceLoader(
             buildSystemPrompt(project, discoveryRevision, confirmedContext),
         );
+        if (abortRequestedChats.delete(id)) return;
         const { session } = await createAgentSession({
             model,
             modelRuntime,
@@ -472,9 +612,25 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
             resourceLoader,
             sessionManager,
         });
+        const activeSession: ActiveChatSession = { session, sessionManager, aborted: false };
+        activeChatSessions.set(id, activeSession);
+        const queuedFollowUps = pendingFollowUps.get(id) ?? [];
+        pendingFollowUps.delete(id);
         let modelError = "";
         const unsubscribe = session.subscribe((event) => {
-            const value = event as { type?: string; message?: AgentMessage; messages?: AgentMessage[] };
+            const value = event as unknown as {
+                type?: string;
+                message?: AgentMessage;
+                messages?: AgentMessage[];
+                assistantMessageEvent?: { type?: string; delta?: string };
+                toolName?: string;
+                steering?: readonly string[];
+                followUp?: readonly string[];
+                willRetry?: boolean;
+                attempt?: number;
+                maxAttempts?: number;
+                errorMessage?: string;
+            };
             const messages =
                 value.type === "agent_end" && Array.isArray(value.messages)
                     ? value.messages
@@ -486,34 +642,81 @@ export async function runChatTurn(id: string, userText: string): Promise<void> {
                     modelError = message.errorMessage;
                 }
             }
-            if (value.type === "agent_end") publishChatUpdate(id);
+            if (value.type === "message_update" && value.assistantMessageEvent?.type === "text_delta") {
+                const delta = value.assistantMessageEvent.delta;
+                if (delta) publishChatUpdate(id, { type: "assistant_delta", delta });
+            }
+            if (value.type === "tool_execution_start" && value.toolName) {
+                publishChatUpdate(id, { type: "tool_start", toolName: value.toolName });
+            }
+            if (value.type === "tool_execution_end" && value.toolName) {
+                publishChatUpdate(id, { type: "tool_end", toolName: value.toolName });
+            }
+            if (value.type === "agent_start") {
+                publishChatUpdate(id, { type: "agent_status", status: "working" });
+            }
+            if (value.type === "agent_end") {
+                publishChatUpdate(
+                    id,
+                    value.willRetry
+                        ? { type: "agent_status", status: "retrying", message: value.errorMessage }
+                        : { type: "updated" },
+                );
+            }
+            if (value.type === "agent_settled") {
+                publishChatUpdate(id, { type: "agent_status", status: "idle" });
+            }
+            if (value.type === "auto_retry_start") {
+                publishChatUpdate(id, {
+                    type: "agent_status",
+                    status: "retrying",
+                    message: `Retrying (${value.attempt ?? 1}/${value.maxAttempts ?? 1})`,
+                });
+            }
+            if (value.type === "queue_update") {
+                publishChatUpdate(id, {
+                    type: "queue_update",
+                    steering: value.steering?.length ?? 0,
+                    followUp: value.followUp?.length ?? 0,
+                });
+            }
         });
 
         try {
-            await session.prompt(userText);
+            const promptPromise = session.prompt(userText);
+            for (const followUp of queuedFollowUps) await session.followUp(followUp);
+            await promptPromise;
         } catch (error) {
-            ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(
-                sessionManager,
-                `The model couldn't respond: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            if (!activeSession.aborted) {
+                ensureUserMessage(sessionManager, userText, previousUserCount);
+                appendError(
+                    sessionManager,
+                    `The model couldn't respond: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            }
         } finally {
             unsubscribe();
             session.dispose();
+            if (activeChatSessions.get(id)?.session === session) activeChatSessions.delete(id);
         }
-        if (modelError) appendError(sessionManager, `The model couldn't respond: ${modelError}`);
+        if (modelError && !activeSession.aborted) appendError(sessionManager, `The model couldn't respond: ${modelError}`);
     } catch (error) {
         if (sessionManager) {
-            ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(
-                sessionManager,
-                `The chat turn failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            if (!activeChatSessions.get(id)?.aborted) {
+                ensureUserMessage(sessionManager, userText, previousUserCount);
+                appendError(
+                    sessionManager,
+                    `The chat turn failed: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            }
         } else {
             console.error(error);
         }
     } finally {
+        pendingFollowUps.delete(id);
+        abortRequestedChats.delete(id);
         busyChats.delete(id);
+        publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
         publishChatUpdate(id);
     }
 }

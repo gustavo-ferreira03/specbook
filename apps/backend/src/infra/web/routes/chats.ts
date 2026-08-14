@@ -3,16 +3,19 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { getChatBrowser, getOrCreateChatBrowser } from "../../../core/browser/sessions";
+import { getChatBrowser, getChatBrowserActivity } from "../../../core/browser/sessions";
 import { getPendingCredentialRequest } from "../../../core/chat/credential-requests";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import {
     createChat,
+    branchChatForTurn,
     getChatMessages,
+    getChatQueueState,
     isChatBusy,
     isChatDeleting,
     listChats,
-    publishChatUpdate,
+    abortChatTurn,
+    queueChatFollowUp,
     runChatTurn,
     subscribeToChatUpdates,
 } from "../../../core/chat/session";
@@ -43,6 +46,7 @@ export function createChatsRouter(): Hono {
         if (!row || !messages) throw new HTTPException(404, { message: "Chat not found" });
         const chat = (await listChats(row.projectId)).find((item) => item.id === id);
         const browser = await getChatBrowser(id);
+        const browserActivity = getChatBrowserActivity(id);
         const revision = row.contextRevisionId
             ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
@@ -51,7 +55,8 @@ export function createChatsRouter(): Hono {
             title: chat?.title ?? "Chat",
             messages,
             busy: isChatBusy(id),
-            vncSessionId: browser?.vnc.id ?? null,
+            queue: getChatQueueState(id),
+            vncSessionId: browserActivity?.sessionId ?? null,
             projectId: row.projectId,
             mode: chatsRepository.chatMode(row),
             contextRevision: revision
@@ -72,7 +77,13 @@ export function createChatsRouter(): Hono {
         const id = c.req.param("id");
         if (!(await chatsRepository.getChatRow(id))) throw new HTTPException(404, { message: "Chat not found" });
         return streamSSE(c, async (stream) => {
-            const notify = () => void stream.writeSSE({ event: "updated", data: "" }).catch(() => undefined);
+            const notify = (event: Parameters<typeof subscribeToChatUpdates>[1] extends (event: infer T) => void ? T : never) =>
+                void stream
+                    .writeSSE({
+                        event: event.type,
+                        data: event.type === "updated" ? "" : JSON.stringify(event),
+                    })
+                    .catch(() => undefined);
             const unsubscribe = subscribeToChatUpdates(id, notify);
             stream.onAbort(unsubscribe);
             await stream.writeSSE({ event: "connected", data: "" });
@@ -93,40 +104,72 @@ export function createChatsRouter(): Hono {
         }
     });
 
-    router.post("/chats/:id/browser", async (c) => {
-        const id = c.req.param("id");
-        const row = await chatsRepository.getChatRow(id);
-        if (!row) throw new HTTPException(404, { message: "Chat not found" });
-        if (isChatDeleting(id)) throw new HTTPException(409, { message: "Chat is being deleted" });
-        const project = await projectsRepository.getProject(row.projectId);
-        if (!project) throw new HTTPException(404, { message: "Project not found" });
-        if (!(await chatsRepository.getChatRow(id))) throw new HTTPException(404, { message: "Chat not found" });
-        const revision = row.contextRevisionId
-            ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
-            : null;
-        if (row.contextRevisionId && revision?.status !== "draft") {
-            throw new HTTPException(409, { message: "This discovery is closed" });
-        }
-        const browser = await getOrCreateChatBrowser(id);
-        await browser.mcp.navigate(revision?.brief.startUrl ?? project.baseUrl);
-        publishChatUpdate(id);
-        return c.json({ vncSessionId: browser.vnc.id });
-    });
-
     router.post("/chats/:id/message", zValidator("json", messageSchema), async (c) => {
         const id = c.req.param("id");
-        const row = await chatsRepository.getChatRow(id);
-        if (!row) throw new HTTPException(404, { message: "Chat not found" });
-        if (row.contextRevisionId) {
-            const revision = await projectContextsRepository.getProjectContextRevision(row.contextRevisionId);
-            if (revision?.status !== "draft") throw new HTTPException(409, { message: "This discovery is closed" });
-        }
-        if (isChatDeleting(id)) throw new HTTPException(409, { message: "Chat is being deleted" });
-        if (isChatBusy(id)) throw new HTTPException(409, { message: "The agent is still replying" });
+        await assertChatWritable(id);
         const { text } = c.req.valid("json");
         void runChatTurn(id, text).catch(console.error);
         return c.json({ ok: true });
     });
 
+    router.post("/chats/:id/follow-up", zValidator("json", messageSchema), async (c) => {
+        const id = c.req.param("id");
+        await assertChatWritable(id, { allowBusy: true });
+        const { text } = c.req.valid("json");
+        try {
+            await queueChatFollowUp(id, text);
+            return c.json({ ok: true });
+        } catch (error) {
+            throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });
+        }
+    });
+
+    router.post("/chats/:id/abort", async (c) => {
+        const id = c.req.param("id");
+        await assertChatWritable(id, { allowBusy: true });
+        try {
+            await abortChatTurn(id);
+            return c.json({ ok: true });
+        } catch (error) {
+            throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });
+        }
+    });
+
+    router.patch("/chats/:id/messages/:messageId", zValidator("json", messageSchema), async (c) => {
+        const id = c.req.param("id");
+        await assertChatWritable(id);
+        const { text } = c.req.valid("json");
+        try {
+            const branch = await branchChatForTurn(id, c.req.param("messageId"), { editedText: text, userOnly: true });
+            void runChatTurn(id, branch.text, branch.sessionManager).catch(console.error);
+            return c.json({ ok: true });
+        } catch (error) {
+            throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });
+        }
+    });
+
+    router.post("/chats/:id/messages/:messageId/retry", async (c) => {
+        const id = c.req.param("id");
+        await assertChatWritable(id);
+        try {
+            const branch = await branchChatForTurn(id, c.req.param("messageId"));
+            void runChatTurn(id, branch.text, branch.sessionManager).catch(console.error);
+            return c.json({ ok: true });
+        } catch (error) {
+            throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });
+        }
+    });
+
     return router;
+}
+
+async function assertChatWritable(id: string, options: { allowBusy?: boolean } = {}): Promise<void> {
+    const row = await chatsRepository.getChatRow(id);
+    if (!row) throw new HTTPException(404, { message: "Chat not found" });
+    if (row.contextRevisionId) {
+        const revision = await projectContextsRepository.getProjectContextRevision(row.contextRevisionId);
+        if (revision?.status !== "draft") throw new HTTPException(409, { message: "This discovery is closed" });
+    }
+    if (isChatDeleting(id)) throw new HTTPException(409, { message: "Chat is being deleted" });
+    if (!options.allowBusy && isChatBusy(id)) throw new HTTPException(409, { message: "The agent is still replying" });
 }

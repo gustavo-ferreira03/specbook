@@ -3,6 +3,7 @@ import path from "node:path";
 
 const nextConfig: NextConfig = {
     devIndicators: false,
+    allowedDevOrigins: ["localhost", "127.0.0.1"],
     distDir: process.env.NEXT_DIST_DIR ?? ".next",
     outputFileTracingRoot: path.resolve(process.cwd(), "../.."),
     webpack(config, { isServer }) {

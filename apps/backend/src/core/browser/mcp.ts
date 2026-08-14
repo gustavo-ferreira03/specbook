@@ -104,7 +104,6 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string 
         const navigate = async (url: string) => {
             await client.callTool({ name: "browser_navigate", arguments: { url } });
         };
-        await ensureBrowser();
         return {
             client,
             tools: tools as BrowserMcp["tools"],
@@ -205,24 +204,28 @@ export function bridgeBrowserTools(
                             return toolError(error instanceof Error ? error.message : String(error));
                         }
                     }
+                    let resultText = "";
+                    let callError = "";
                     try {
                         const result = await mcp.client.callTool({ name: tool.name, arguments: args });
-                        const text = await renderMcpResult(result as { content?: unknown }, workDir);
-                        if (policy?.afterCall) {
-                            try {
-                                await policy.afterCall(tool.name, args, text);
-                            } catch (error) {
-                                return toolError(error instanceof Error ? error.message : String(error));
-                            }
-                        }
-                        return {
-                            content: [{ type: "text" as const, text: (await clean(text)) || "(no output)" }],
-                            details: undefined,
-                            terminate: false,
-                        };
+                        resultText = await renderMcpResult(result as { content?: unknown }, workDir);
                     } catch (error) {
-                        return toolError(`browser tool failed: ${String(error)}`);
+                        callError = `browser tool failed: ${String(error)}`;
+                        resultText = callError;
                     }
+                    if (policy?.afterCall) {
+                        try {
+                            await policy.afterCall(tool.name, args, resultText);
+                        } catch (error) {
+                            return toolError(error instanceof Error ? error.message : String(error));
+                        }
+                    }
+                    if (callError) return toolError(callError);
+                    return {
+                        content: [{ type: "text" as const, text: (await clean(resultText)) || "(no output)" }],
+                        details: undefined,
+                        terminate: false,
+                    };
                 },
             }),
         );

@@ -517,7 +517,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
         const setProjectMenuOpen = mobile ? setMobileProjectMenuOpen : setDesktopProjectMenuOpen;
         return (
             <>
-                <div className="flex h-[72px] shrink-0 items-center gap-3 border-b border-line px-[17px]">
+                <div className="flex h-[72px] shrink-0 items-center gap-3 border-b border-line bg-sidebar px-[17px]">
                     <Button asChild variant="ghost" className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none p-0 hover:bg-transparent">
                         <Link href={`/p/${projectId}`}>
                             <LogoMark className="size-[34px] shrink-0" />
@@ -542,7 +542,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 <div className="px-[13px] pt-[13px] pb-2">
                     <DropdownMenu open={projectMenuOpen} onOpenChange={setProjectMenuOpen}>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="h-[34px] w-full justify-between gap-3 px-2.5 text-left text-[0.71875rem] hover:border-line-hover">
+                            <Button variant="outline" className="h-10 w-full justify-between gap-3 rounded-[10px] border-line-strong bg-surface px-2.5 text-left text-[0.71875rem] shadow-none hover:border-line-hover hover:bg-surface">
                                 <span className="flex min-w-0 items-center gap-2.5">
                                     <span className="size-2 shrink-0 rounded-[3px] bg-primary" />
                                     <span className="truncate">{projectName}</span>
@@ -591,7 +591,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     <TabsContent value="chats" className="data-[state=active]:flex data-[state=active]:flex-col">
                         {renderLoadError()}
                         <div className="flex h-12 shrink-0 items-center justify-between px-[14px]">
-                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Chats</span>
+                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Conversation history</span>
                             <Button asChild variant="ghost" size="icon" className="text-ink-faint" aria-label="Start chat">
                                 <Link href={`/p/${projectId}/chats/new`}><Plus size={14} /></Link>
                             </Button>
@@ -632,9 +632,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                     );
                                 })}
                                 {loaded && chats.length === 0 && !loadError && (
-                                    <div className="px-2.5 py-4">
+                                    <div className="mx-1 rounded-[10px] border border-dashed border-line-strong px-3 py-4">
                                         <p className="text-[0.75rem] font-bold">No chats yet</p>
-                                        <p className="mt-1 text-[0.6875rem] leading-5 text-ink-faint">Start one to document a behavior.</p>
+                                        <p className="mt-1 text-[0.6875rem] leading-5 text-ink-faint">Start one to describe a behavior.</p>
                                     </div>
                                 )}
                             </div>
@@ -644,7 +644,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     <TabsContent value="specs" className="data-[state=active]:flex data-[state=active]:flex-col">
                         {renderLoadError()}
                         <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-[14px]">
-                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Specs</span>
+                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Verified Specs</span>
                             <Button
                                 type="button"
                                 variant="ghost"
@@ -663,7 +663,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                 {loaded && rootFeatures.map((feature) => renderFeature(feature, 0))}
                                 {loaded && ungroupedSpecs.map((spec) => renderSpec(spec, 0))}
                                 {loaded && features.length === 0 && specs.length === 0 && !loadError && (
-                                    <div className="px-2.5 py-4">
+                                    <div className="mx-1 rounded-[10px] border border-dashed border-line-strong px-3 py-4">
                                         <p className="text-[0.75rem] font-bold">No Specs yet</p>
                                         <p className="mt-1 text-[0.6875rem] leading-5 text-ink-faint">Saved behavior will appear here.</p>
                                     </div>

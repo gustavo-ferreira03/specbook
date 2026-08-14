@@ -235,14 +235,15 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
-            <PageHeader title="Project overview" eyebrow="Project" />
-            <div className="mx-auto w-full max-w-[720px] flex-1 px-5 py-8">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <PageHeader title="Project overview" eyebrow="Project" description="Context, discovery, and verified behavior in one place." />
+            <div className="mx-auto w-full max-w-[760px] flex-1 px-5 py-8 md:py-10">
+                <div className="flex flex-wrap items-end justify-between gap-4">
                     <div>
-                        <h2 className="text-lg font-bold tracking-[-0.02em]">{project.name}</h2>
+                        <p className="mb-1 text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Active project</p>
+                        <h2 className="text-xl font-bold tracking-[-0.03em]">{project.name}</h2>
                         <p className="mt-0.5 font-mono text-[0.65625rem] text-ink-faint [overflow-wrap:anywhere]">{project.baseUrl}</p>
                     </div>
-                    <Button asChild variant="outline" size="sm">
+                    <Button asChild size="sm">
                         <Link href={`/p/${projectId}/chats/new`}>
                             <MessageSquareText size={13} /> Start chat
                         </Link>

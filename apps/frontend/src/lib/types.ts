@@ -82,6 +82,7 @@ export interface ChatMessage {
     role: "user" | "agent";
     content: string;
     createdAt: string;
+    canRetry?: boolean;
 }
 
 export type ChatMode = "standard" | "discovery";
@@ -145,6 +146,7 @@ export interface ChatState {
     title: string;
     messages: ChatMessage[];
     busy: boolean;
+    queue: { steering: number; followUp: number };
     vncSessionId: string | null;
     projectId: string;
     mode: ChatMode;
