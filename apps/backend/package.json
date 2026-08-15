@@ -22,7 +22,7 @@
         "drizzle-orm": "^0.45.2",
         "fast-xml-parser": "^5.2.0",
         "gray-matter": "^4.0.3",
-        "hono": "^4.12.23",
+        "hono": "^4.13.1",
         "playwright-core": "^1.62.0",
         "simple-git": "^3.36.0",
         "ws": "^8.21.0",
