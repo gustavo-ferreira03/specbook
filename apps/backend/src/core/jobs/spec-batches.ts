@@ -161,7 +161,7 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
     const { item, candidate } = await selectedCandidate(job);
     const features = await featuresRepository.listFeatures(job.projectId);
     let feature = features.find((feature) => feature.id === (candidate.resolvedFeatureId ?? candidate.featureId));
-    feature ??= features.find((feature) => feature.title === candidate.feature);
+    feature ??= features.find((feature) => feature.title.trim().toLowerCase() === candidate.feature.trim().toLowerCase());
     if (!feature) feature = await createFeatureInRepo(job.projectId, null, candidate.feature, "", {
         commitMessage: `spec-batch:${item.id}:${candidate.id} organize selected Spec`,
         checkPolicy: async () => {

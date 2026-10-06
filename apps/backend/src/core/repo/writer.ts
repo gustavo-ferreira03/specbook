@@ -155,6 +155,17 @@ export async function createFeatureInRepo(
     });
 }
 
+/** Gives every area of a confirmed context a feature with the same title. Existing features are never renamed or removed. */
+export async function createAreaFeatures(projectId: string, context: ProjectContext): Promise<void> {
+    const titles = new Set((await featuresRepository.listFeatures(projectId)).map((feature) => feature.title.trim().toLowerCase()));
+    for (const area of context.areas) {
+        const key = area.name.trim().toLowerCase();
+        if (!key || titles.has(key)) continue;
+        titles.add(key);
+        await createFeatureInRepo(projectId, null, area.name.trim(), area.description);
+    }
+}
+
 export async function createSpecInRepo(input: {
     id?: string;
     projectId: string;

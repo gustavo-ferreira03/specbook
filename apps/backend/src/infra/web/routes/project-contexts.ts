@@ -7,7 +7,7 @@ import { projectContextSchema } from "../../../core/chat/context-tools";
 import { createChat } from "../../../core/chat/session";
 import { configuredModel } from "../../../core/llm/runtime";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
-import { writeContextToRepo } from "../../../core/repo/writer";
+import { createAreaFeatures, writeContextToRepo } from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
@@ -145,6 +145,7 @@ export function createProjectContextsRouter(): Hono {
             if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
             if (revision.status === "confirmed") {
                 await writeContextToRepo(revision.projectId, revision.context).catch(mapRepoError);
+                await createAreaFeatures(revision.projectId, revision.context).catch(mapRepoError);
                 return c.json({ revision });
             }
             if (revision.status !== "draft") {
@@ -159,6 +160,7 @@ export function createProjectContextsRouter(): Hono {
             const confirmed = await writeContextToRepo(revision.projectId, revision.context, {
                 confirmRevisionId: revision.id,
             }).catch(mapRepoError);
+            await createAreaFeatures(revision.projectId, revision.context).catch(mapRepoError);
             return c.json({ revision: confirmed ?? revision });
         });
     });

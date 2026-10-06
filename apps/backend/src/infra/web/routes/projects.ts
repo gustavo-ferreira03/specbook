@@ -8,7 +8,9 @@ import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { YamlParseError } from "../../../core/repo/yaml";
 import { createProject, publicProject } from "../../../core/projects";
 import { createManualSpec, editContextFile, readContextRaw } from "../../../core/repo/manual";
+import { createAreaFeatures } from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
+import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
 import { runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
@@ -134,7 +136,10 @@ export function createProjectsRouter(): Hono {
     router.put("/projects/:id/context-file", access("editor"), zValidator("json", contextFileSchema), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
+        const previous = await projectContextsRepository.getLatestConfirmedProjectContext(project.id);
         await editContextFile(project.id, c.req.valid("json").yaml).catch(mapManualError);
+        const confirmed = await projectContextsRepository.getLatestConfirmedProjectContext(project.id);
+        if (confirmed && confirmed.id !== previous?.id) await createAreaFeatures(project.id, confirmed.context).catch(mapManualError);
         const refreshed = await projectsRepository.getProject(project.id);
         return c.json({ yaml: await readContextRaw(project.id), contextSyncError: refreshed?.contextSyncError ?? null });
     });
