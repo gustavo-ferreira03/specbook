@@ -37,7 +37,7 @@ Limits: Docker Desktop is unavailable, so the published container itself has not
 
 ## Phase 2: company accounts and operations
 
-Completed on `feat/accounts-sso`; verified and ready for the local merge. Accounts, sessions, declared route roles, OIDC, invites, attribution/audit, encrypted secrets, retention and operational commands are implemented. The interface uses the existing Settings layout and role-aware controls.
+Completed on `feat/accounts-sso` and merged locally into `main` (`dca50b8`). Accounts, sessions, declared route roles, OIDC, invites, attribution/audit, encrypted secrets, retention and operational commands are implemented. The interface uses the existing Settings layout and role-aware controls.
 
 Browser safety now reads the actual MCP snapshot reference before a discovery/autonomous click, including interactive ancestors. Interactive chat shares the project/credential origin policy. A Chromium document-request guard blocks external destinations before navigation, including redirects. The real MCP test passed with no request reaching the forbidden server. Administrators control automatic selector approval (off by default) and whether screenshots reach the model; the image policy also applies to restored conversation images and active sessions.
 
@@ -53,10 +53,23 @@ Docker Desktop is still unavailable. Dex ran as the official local binary, and s
 
 ## Phase 3: landing and release preparation
 
-Pending on `docs/landing`: static landing with real demo assets, concise README and reference docs, trust files, Pages workflow, multi-architecture image builds, vulnerability scan, SBOM and signing. Prepare release-please for v0.2.0; Gus performs push and publication.
+Completed on `docs/landing` and merged locally into `main` after verification. The static landing uses the existing Specbook visual language, real SauceDemo screenshots and a short captured run video. It builds without dependencies and works under the GitHub Pages repository prefix. Desktop (1440 px) and mobile (390 px) checks passed: no horizontal overflow, body text 14 px, minimum text 12 px, working anchors/assets, video and clipboard fallback. Evidence: `/tmp/specbook-phase3-qa`.
+
+The concise README links to configuration, deployment with Caddy/TLS, SSO, CI examples, Spec format, security, backups/upgrades, troubleshooting, FAQ, architecture and development guides. Trust files document reporting, conduct and product priorities. Pages and release-please are prepared; native amd64/arm64 builds must pass Trivy, fresh-volume/browser verification, SBOM/provenance checks and cosign signing before install tags move. Gus performs push and publication.
+
+A local Trivy 0.75.0 scan initially found 34 HIGH/CRITICAL advisories. Next.js, simple-git and affected transitive packages were updated; the unused shadcn CLI was removed. The new simple-git environment guard explicitly permits the existing non-interactive setting. The repeat scan returned zero HIGH/CRITICAL findings across 651 packages, without exclusions. Typecheck, both production builds and 71 focused Git/repository tests passed. Versions, scan scope and reproduction command: [dependency verification](dependency-verification.md).
+
+Workflows passed actionlint and ShellCheck. Simulated workflow source checks cover ordinary previews, lightweight/annotated release tags, missing CI, draft releases, invalid input and tag cycles. The shared image workflow checks CI on the exact source SHA independently of its caller. Publication recovery can rebuild a published release, and the guide explains the possibility of partial tag promotion. These checks did not publish anything. The container and OS scan still require Docker and remain unverified locally.
+
+Final verification: `pnpm typecheck`, backend/operations bundles, the isolated Next.js 16.3.8 production build, and all 279 tests passed with no skips. The first test attempt encountered a sandbox-only write restriction in the installed Playwright cache; repeating with cache access passed the complete suite. Final log: `/tmp/specbook-phase3-tests-verified.log`.
+
+A fresh production instance at the LAN address verified administrator creation, session cookies, Git authorship, a real SauceDemo check, authenticated PNG evidence through `/api`, and a settled Overview with no active work. Spec and Overview captures passed at 1440 and 390 px. Both temporary projects were deleted through the API; temporary services, browsers and production build directories were removed. Evidence: `/tmp/specbook-phase3-production-qa/result.json`. The original development instance was restarted on the patched dependencies and passes `/health` and `/ready`.
+
+Remaining external verification: the Docker quick start on a clean machine, native multi-architecture image execution, OS/browser vulnerability scan and actual registry signing/publication. Docker is unavailable here; those checks are encoded in the workflows and must succeed after Gus pushes. No push, tag, release or Pages deployment was performed. Follow [the release commands](releases.md#publish-the-prepared-release) and enable GitHub Pages with the Actions source.
 
 ## Environment and evidence
 
 - Development services currently use backend :4000 and frontend :4001; LAN address is `192.168.0.165`.
-- Docker's installed WSL shim reports that Docker Desktop integration is disabled. Checking available alternatives; this must not be reported as a successful image/container verification.
+- Docker's installed WSL shim reports that Docker Desktop integration is disabled. Image execution, clean-machine Docker quick start and multi-architecture publication are not claimed as verified.
 - The controlling tmux session `specbook-codex` exists.
+- The original instance was stopped cleanly, backed up to private `/tmp/specbook-before-accounts-20261006.tar.gz`, and restarted with the production backend bundle. All 9 existing projects and 1,010 repository files were preserved (hash comparison against the backup). Model credentials migrated to encrypted storage. First access asks Gus to create the administrator; no account was created on his behalf. Automatic retention is disabled in this development session.

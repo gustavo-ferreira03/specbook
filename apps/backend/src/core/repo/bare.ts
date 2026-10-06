@@ -48,7 +48,7 @@ function maxPushBytes(): number {
 }
 
 function checkoutGit(checkoutDir: string): SimpleGit {
-    return simpleGit({ baseDir: checkoutDir, timeout: { block: 30_000 } }).env("GIT_TERMINAL_PROMPT", "0");
+    return simpleGit({ baseDir: checkoutDir, timeout: { block: 30_000 }, allowEnvironment: ["GIT_TERMINAL_PROMPT"] }).env("GIT_TERMINAL_PROMPT", "0");
 }
 
 class RepoBare {
@@ -63,6 +63,7 @@ class RepoBare {
         return simpleGit({
             baseDir: this.getBareRepoDir(projectId),
             timeout: { block: 30_000 },
+            allowEnvironment: ["GIT_TERMINAL_PROMPT"],
         }).env("GIT_TERMINAL_PROMPT", "0");
     }
 

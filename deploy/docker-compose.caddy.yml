@@ -1,0 +1,35 @@
+services:
+    app:
+        image: ${SPECBOOK_IMAGE:-ghcr.io/gustavo-ferreira03/specbook:latest}
+        restart: unless-stopped
+        shm_size: "1gb"
+        environment:
+            HOST: 0.0.0.0
+            FRONTEND_ORIGIN: https://${SPECBOOK_HOST:?Set SPECBOOK_HOST to your public hostname}
+            SPECBOOK_BACKEND_URL: http://127.0.0.1:4000
+            PI_OAUTH_CALLBACK_HOST: 0.0.0.0
+        ports:
+            - "127.0.0.1:1455:1455"
+            - "127.0.0.1:53692:53692"
+        volumes:
+            - specbook-storage:/app/apps/backend/storage
+    caddy:
+        image: caddy:2
+        restart: unless-stopped
+        environment:
+            SPECBOOK_HOST: ${SPECBOOK_HOST:?Set SPECBOOK_HOST to your public hostname}
+        ports:
+            - "80:80"
+            - "443:443"
+            - "443:443/udp"
+        volumes:
+            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+            - caddy-data:/data
+            - caddy-config:/config
+        depends_on:
+            - app
+
+volumes:
+    specbook-storage:
+    caddy-data:
+    caddy-config:

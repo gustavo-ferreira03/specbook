@@ -3,12 +3,9 @@ services:
         image: ${SPECBOOK_IMAGE:-ghcr.io/gustavo-ferreira03/specbook:latest}
         shm_size: "1gb"
         restart: unless-stopped
-        # Published on loopback only: Specbook has no application-level login.
-        # To reach it from other machines, drop the "127.0.0.1:" prefix (or use
-        # a specific interface address), add the public host names to
-        # SPECBOOK_ALLOWED_HOSTS (literal IPs work directly), and put an authenticated reverse proxy or a
-        # VPN in front of it. 1455 and 53692 receive OAuth callbacks and only
-        # need to be reachable from the browser completing the login.
+        # Publish loopback for a local install; use deploy/docker-compose.caddy.yml
+        # for shared HTTPS access. Model-provider OAuth callbacks stay on loopback
+        # and can be forwarded over SSH from the browser's machine.
         ports:
             - "127.0.0.1:4000:4000"
             - "127.0.0.1:4001:4001"
