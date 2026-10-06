@@ -3,26 +3,20 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { environmentSchema, validateEnvironmentCredentials } from "../../../core/environments";
 import { environmentsRepository } from "../../repositories/environments";
-import { projectsRepository } from "../../repositories/projects";
+import { createKeyedLock } from "../../../core/operations/keyed-lock";
 import { access } from "../access";
+import { loadProject } from "../load-project";
 
-const saves = new Map<string, Promise<unknown>>();
-
-async function withEnvironmentLock<T>(projectId: string, work: () => Promise<T>): Promise<T> {
-    const previous = saves.get(projectId) ?? Promise.resolve();
-    const pending = previous.catch(() => undefined).then(work);
-    saves.set(projectId, pending);
-    try { return await pending; } finally { if (saves.get(projectId) === pending) saves.delete(projectId); }
-}
+const withEnvironmentLock = createKeyedLock().run;
 
 export function createEnvironmentsRouter(): Hono {
     const router = new Hono();
     router.get("/projects/:id/environments", access("viewer"), async (c) => {
-        if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
+        await loadProject(c.req.param("id"));
         return c.json({ environments: await environmentsRepository.list(c.req.param("id")) });
     });
     const save = async (projectId: string, input: typeof environmentSchema._output, id?: string) => withEnvironmentLock(projectId, async () => {
-        if (!await projectsRepository.getProject(projectId)) throw new HTTPException(404, { message: "Project not found" });
+        await loadProject(projectId);
         const rows = await environmentsRepository.list(projectId);
         const previous = id ? rows.find((row) => row.id === id) : undefined;
         if (id && !previous) throw new HTTPException(404, { message: "Environment not found" });

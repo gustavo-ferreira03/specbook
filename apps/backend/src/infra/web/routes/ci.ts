@@ -1,6 +1,6 @@
 import { access } from "../access";
+import { loadProject } from "../load-project";
 import { publicFrontendOrigin } from "../security";
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { zValidator } from "@hono/zod-validator";
@@ -19,15 +19,10 @@ import { ResourceBusyError } from "../../../core/specs/lifecycle";
 import { getRunBatch, listCiBatches, startSpecBatch } from "../../../core/runner/batch";
 import { ciRepository } from "../../repositories/ci";
 import { featuresRepository } from "../../repositories/features";
-import { projectsRepository } from "../../repositories/projects";
 import { specsRepository } from "../../repositories/specs";
 import { stewardRepository } from "../../repositories/steward";
-
-async function requireProject(id: string) {
-    const project = await projectsRepository.getProject(id);
-    if (!project) throw new HTTPException(404, { message: "Project not found" });
-    return project;
-}
+import { tokenHash } from "../../../core/accounts/tokens";
+import { fingerprint } from "../../../core/steward/signals";
 
 async function authenticate(c: Context, projectId: string) {
     if (!await authenticateCiToken(projectId, c.req.header("authorization"))) {
@@ -42,13 +37,11 @@ const projectAuth: MiddlewareHandler = async (c, next) => {
 };
 
 async function acceptTrigger(c: Context, projectId: string, target?: string, name?: string) {
-    const token = c.req.header("authorization")!.slice("Bearer ".length);
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    if (!await ciRepository.consumeRequest(projectId, tokenHash)) {
+    if (!await ciRepository.consumeRequest(projectId, tokenHash(c.req.header("authorization")!.slice("Bearer ".length)))) {
         c.header("Retry-After", String(60 - Math.floor(Date.now() / 1000) % 60));
         throw new HTTPException(429, { message: "CI trigger limit reached. Retry after the current minute." });
     }
-    const project = await requireProject(projectId);
+    const project = await loadProject(projectId);
     try { const environment = await resolveRunEnvironment(projectId, name, target); await projectRunPolicy(project, environment.baseUrl, undefined, environment); return environment; }
     catch (error) {
         if (error instanceof NetworkTargetError) throw new HTTPException(400, { message: error.message });
@@ -60,18 +53,18 @@ export function createCiSettingsRouter(): Hono {
     const router = new Hono();
     router.get("/projects/:id/ci", access("viewer"), async (c) => {
         const id = c.req.param("id");
-        const project = await requireProject(id);
+        const project = await loadProject(id);
         c.header("Cache-Control", "no-store");
         return c.json({ environments: await environmentsRepository.list(id), token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map((batch) => ciResult(batch, publicFrontendOrigin(c)))) });
     });
     router.post("/projects/:id/ci/token", access("editor"), async (c) => {
         const id = c.req.param("id");
-        await requireProject(id);
+        await loadProject(id);
         c.header("Cache-Control", "no-store");
         return c.json(await issueCiToken(id));
     });
     router.delete("/projects/:id/ci/token", access("editor"), async (c) => {
-        await requireProject(c.req.param("id"));
+        await loadProject(c.req.param("id"));
         await ciRepository.revokeToken(c.req.param("id"));
         return c.body(null, 204);
     });
@@ -142,7 +135,7 @@ export function createCiRouter(): Hono {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
         const environment = await acceptTrigger(c, projectId, input.url, input.environment);
-        const hash = crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
+        const hash = fingerprint(input);
         const now = Date.now();
         const windowMs = 5 * 60_000;
         const key = input.commitSha ? hash : `${hash}:${Math.floor(now / windowMs)}`;

@@ -1,19 +1,9 @@
-import crypto from "node:crypto";
 import { projectsRepository, type Project } from "../../infra/repositories/projects";
+import { issuePrefixedToken, verifyTokenHash } from "../accounts/tokens";
 
-const TOKEN_PREFIX = "sbk_";
 const TOUCH_INTERVAL_MS = 60_000;
 
 const lastTouched = new Map<string, number>();
-
-/**
- * Tokens are 256-bit random strings rather than user-chosen passwords, so a
- * single SHA-256 is enough: there is nothing to brute force and Git clients
- * re-authenticate on every request of a clone, which rules out a slow KDF.
- */
-function hashToken(token: string): string {
-    return crypto.createHash("sha256").update(token).digest("hex");
-}
 
 export interface GitAccessTokenInfo {
     hasToken: boolean;
@@ -33,10 +23,9 @@ export function accessTokenInfoOf(project: Project): GitAccessTokenInfo {
 
 /** Creates a token, replacing any previous one. The plain value is returned once. */
 export async function issueGitAccessToken(projectId: string): Promise<{ token: string; info: GitAccessTokenInfo }> {
-    const token = `${TOKEN_PREFIX}${crypto.randomBytes(32).toString("base64url")}`;
+    const { token, hash, prefix } = issuePrefixedToken("sbk_");
     const createdAt = new Date().toISOString();
-    const prefix = token.slice(0, TOKEN_PREFIX.length + 6);
-    await projectsRepository.setGitAccessToken(projectId, { hash: hashToken(token), prefix, createdAt });
+    await projectsRepository.setGitAccessToken(projectId, { hash, prefix, createdAt });
     lastTouched.delete(projectId);
     return { token, info: { hasToken: true, prefix, createdAt, lastUsedAt: null } };
 }
@@ -47,11 +36,7 @@ export async function revokeGitAccessToken(projectId: string): Promise<void> {
 }
 
 export function verifyGitAccessToken(project: Project, candidate: string): boolean {
-    if (!project.gitAccessTokenHash) return false;
-    const expected = Buffer.from(project.gitAccessTokenHash, "hex");
-    const actual = Buffer.from(hashToken(candidate), "hex");
-    if (expected.length !== actual.length) return false;
-    return crypto.timingSafeEqual(expected, actual);
+    return project.gitAccessTokenHash ? verifyTokenHash(project.gitAccessTokenHash, candidate) : false;
 }
 
 /** Records token usage at most once a minute; a single clone issues several requests. */

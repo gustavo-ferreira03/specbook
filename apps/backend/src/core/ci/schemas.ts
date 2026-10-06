@@ -1,11 +1,7 @@
 import { z } from "zod";
+import { isHttpTarget } from "../network/targets";
 
-export const httpUrlSchema = z.string().url().max(2048).refine((value) => {
-    try {
-        const url = new URL(value);
-        return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.hash;
-    } catch { return false; }
-}, "Use an HTTP(S) URL without credentials");
+export const httpUrlSchema = z.string().url().max(2048).refine(isHttpTarget, "Use an HTTP(S) URL without credentials");
 
 export const qualityGateSchema = z.object({
     failOnFlaky: z.boolean().default(false),

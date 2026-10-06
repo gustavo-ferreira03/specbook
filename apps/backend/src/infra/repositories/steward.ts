@@ -10,8 +10,11 @@ const now = () => new Date().toISOString();
 
 export const stewardRepository = {
     async get(projectId: string): Promise<Steward> {
+        const select = async () => (await db.select().from(projectStewards).where(eq(projectStewards.projectId, projectId)))[0];
+        const existing = await select();
+        if (existing) return existing;
         await db.insert(projectStewards).values({ projectId, updatedAt: now() }).onConflictDoNothing();
-        return (await db.select().from(projectStewards).where(eq(projectStewards.projectId, projectId)))[0]!;
+        return (await select())!;
     },
     async update(projectId: string, patch: Partial<Pick<Steward, "autonomy" | "paused" | "observation">>) {
         await this.get(projectId);

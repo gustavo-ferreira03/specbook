@@ -4,7 +4,8 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
 import { schedulesRepository, type ProjectAutomation } from "../../infra/repositories/schedules";
 import { specsRepository } from "../../infra/repositories/specs";
-import { NetworkTargetError, resolveTarget } from "../network/targets";
+import { isHttpTarget, NetworkTargetError, resolveTarget } from "../network/targets";
+import { createKeyedLock } from "../operations/keyed-lock";
 import { postWebhook } from "../network/webhook";
 import { decryptSecret } from "../credentials/crypto";
 import { projectSecretScrubber } from "../credentials/scrub";
@@ -68,12 +69,7 @@ const cronSchema = z.string().trim().min(1).max(120).superRefine((value, context
         context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid cron" });
     }
 });
-const webhookSchema = z.string().trim().max(4000).url().refine((value) => {
-    try {
-        const url = new URL(value);
-        return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.hash;
-    } catch { return false; }
-}, "Use an HTTP(S) webhook URL without username, password or fragment");
+const webhookSchema = z.string().trim().max(4000).url().refine(isHttpTarget, "Use an HTTP(S) webhook URL without username, password or fragment");
 
 export const automationSettingsSchema = z.object({
     cron: cronSchema.nullable().optional(),
@@ -83,20 +79,11 @@ export const automationSettingsSchema = z.object({
     allowPrivateWebhook: z.boolean().optional(),
 }).strict();
 
-const locks = new Map<string, Promise<unknown>>();
+const withAutomationLock = createKeyedLock().run;
 let processing = false;
 let stopped = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 const deliveries = new Set<AbortController>();
-
-async function withAutomationLock<T>(projectId: string, work: () => Promise<T>): Promise<T> {
-    const previous = locks.get(projectId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(work);
-    locks.set(projectId, current);
-    try { return await current; } finally {
-        if (locks.get(projectId) === current) locks.delete(projectId);
-    }
-}
 
 export function publicAutomation(projectId: string, row: ProjectAutomation | null) {
     return {

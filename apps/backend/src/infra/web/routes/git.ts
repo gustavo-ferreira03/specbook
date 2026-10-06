@@ -1,4 +1,5 @@
 import { access } from "../access";
+import { loadProject } from "../load-project";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
@@ -11,7 +12,7 @@ import { repoGit } from "../../../core/repo/git";
 import { gitCloneUrl } from "./git-http";
 import { specAtCommit, specHistory } from "../../../core/repo/history";
 import { reindexProjectUnlocked } from "../../../core/repo/indexer";
-import { projectsRepository, type Project } from "../../repositories/projects";
+import type { Project } from "../../repositories/projects";
 import { specsRepository } from "../../repositories/specs";
 
 async function remoteAccessOf(c: Context, project: Project) {
@@ -22,12 +23,6 @@ async function remoteAccessOf(c: Context, project: Project) {
         token: accessTokenInfoOf(project),
         externalSyncError: project.gitExternalSyncError,
     };
-}
-
-async function loadProject(id: string): Promise<Project> {
-    const project = await projectsRepository.getProject(id);
-    if (!project) throw new HTTPException(404, { message: "Project not found" });
-    return project;
 }
 
 export function createGitRouter(): Hono {
