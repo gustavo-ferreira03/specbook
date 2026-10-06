@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CircleDashed, LoaderCircle, Pause, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, LoaderCircle, X, type LucideIcon } from "lucide-react";
 import type { RunStatus, SpecHealth, SpecStatus } from "./types";
 
 export type AnyStatus = SpecStatus | RunStatus | SpecHealth["status"];
@@ -38,7 +38,6 @@ const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
     passing: { label: "Passing", runLabel: "Passed", description: "The last check passed.", tone: "success", icon: Check },
     failing: { label: "Failing", runLabel: "Failed", description: "The last check failed.", tone: "danger", icon: X },
     flaky: { label: "Flaky", runLabel: "Passed on retry", description: "The check failed, then passed on retry.", tone: "warning", icon: AlertTriangle },
-    paused: { label: "Paused", runLabel: "Paused", description: "This check is waiting to continue.", tone: "neutral", icon: Pause },
     not_checked: { label: "Not checked yet", runLabel: "Not checked yet", description: "There is no completed run for the current check.", tone: "neutral", icon: CircleDashed },
 };
 

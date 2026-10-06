@@ -1,6 +1,6 @@
 # <img src="apps/frontend/public/specbook-chat-icon.svg" width="32" height="32" align="absmiddle" alt=""> Specbook
 
-Specbook checks web applications through readable, executable Specs. Describe a flow in chat or let the project agent investigate failures, application changes, and missing coverage. Review its findings and proposed changes in the project's Overview.
+Specbook checks web applications through readable, executable Specs. Describe a flow in chat, verify application changes, and let the agent investigate failed checks. Review its findings and proposed changes in the project's Overview.
 
 Every project gets its own Git repository. Specs, Features, and confirmed project context remain ordinary files that a team can inspect and edit; SQLite only indexes them for the application.
 
@@ -62,16 +62,18 @@ The repository accepts the `main` branch only. Generated files and edits made in
 
 ## Autonomous QA
 
-Specbook observes failed runs, invalid or changed Specs, deployments, confirmed project context, new credentials, and requests from chat. **Overview** brings together decisions that need you, current work, application bugs, paused checks, and history by day. Each row opens a side panel with the evidence and next step. Work persists across backend restarts and uses the same agent and browser tools as chat.
+Specbook acts on events: deployments and changed Specs start checks; failures that persist after retry start an investigation; missing prerequisites become questions. Invalid Specs can trigger a repair, and new credentials resume blocked work. Schedules and CI requests run the selected checks. Without an event or a user request, the agent stays idle; there is no LLM planning loop. Work persists across backend restarts and uses the same agent and browser tools as chat.
+
+**Overview** shows **Needs you**, **Failing** and **Recent runs**. The header and Specs tree share the same health counts. Failing checks show their triage status; recent runs are grouped by trigger. Rows open a side panel with evidence and the next step.
 
 **Needs you** contains questions and suggested changes. Review the behavior and before/after screenshots where available; file diffs with added and removed lines are under **Technical details**. Approving a suggestion commits it to the project's repository. Answering a question resumes the investigation; enter secrets in **Settings → Credentials**. The agent treats `spec.yml` as the behavior contract: changes to its steps or expected result always require human review. The Specs tree shows each check's health alongside its name.
 
 **Settings → Automation** provides optional controls:
 
-- **Propose** is the default: investigate and submit changes for review. **Observe** records signals without starting new work. **Act** may apply a verified selector-only fix after three approved examples, provided none were rejected.
+- **Propose** is the default: investigate and submit changes for review. **Observe** records signals without starting automatic investigations; explicit requests from Actions or chat remain available. **Act** may apply a verified selector-only fix after three approved examples, provided none were rejected.
 - A five-field UTC cron schedule runs all Specs or a selected set. An optional webhook receives scheduled batch status changes; failure investigation can be disabled for scheduled runs.
 
-A failed Spec runs once more before the healer investigates. Passing on retry marks it as flaky and keeps both attempts in its history. Persistent failures lead to a verified implementation patch, a bug report with evidence, or a question about the environment. Exploration can collect console and network failures, check safe links, and inspect accessibility with axe. Bug reports can be promoted to regression Spec proposals.
+A failed Spec runs once more before the healer investigates. Passing on retry marks it as flaky and keeps both attempts in its history. Persistent failures lead to a verified implementation patch, a bug report with evidence, or a question about the environment. Choose **Actions → Find uncovered areas** or **Explore app**, or ask in chat, to request coverage analysis or exploration. Neither starts automatically. Exploration can collect console and network failures, check safe links, and inspect accessibility with axe. Bug reports can be promoted to regression Spec proposals.
 
 Pause or resume Specbook for a project from **Overview**, or for all projects from **Settings → Automation**. Pause is separate from Observe, Propose and Act. It stops new automatic work, lets agent turns stop cleanly and preserves their progress. There is no daily quota or token reservation. Internal safeguards stop investigations that fail to reach a result; retries use a different approach with backoff. Equivalent work and rejected suggestions are deduplicated. Schedules, webhooks, and steering fields are optional.
 
@@ -322,7 +324,7 @@ The JSON response contains `batch.id`, `complete`, `status`, `qualityGate`, and 
 
 ### Deploy notifications
 
-Send a deploy event when the new application is ready. The steward uses it to choose verification work under the project's autonomy policy and budget. A deploy event acknowledges the signal; use the runs endpoint above when the pipeline must wait for a gate result.
+Send a deploy event when the new application is ready. Deterministic rules run the project's checks under its automation policy. A deploy event acknowledges the signal; use the runs endpoint above when the pipeline must wait for a gate result.
 
 ```bash
 curl -fsS -X POST \
@@ -386,7 +388,7 @@ storage/
 ├── chat/             # Chat sessions and browser profiles
 ├── repos/            # One Git repository per project
 ├── git/              # Canonical bare repositories served over Smart HTTP
-├── metrics/          # chat-turns.jsonl evaluation metrics
+├── metrics/          # chat-turns.jsonl and agent-events.jsonl evaluation records
 └── runs/             # Results, reports, screenshots, video, and batch state
 ```
 
@@ -501,8 +503,11 @@ The backend listens on `4000` and the frontend on `4001`. `browser:install` down
 | Create a database migration | `pnpm --filter backend db:generate` |
 | Apply database migrations | `pnpm --filter backend db:migrate` |
 | Export chat metrics as CSV | `node apps/backend/scripts/export-metrics.mjs [--runs] [--out file.csv]` |
+| Export investigation and review events | `node apps/backend/scripts/export-metrics.mjs --agent [--out file.csv]` |
 
 The backend applies pending migrations from `apps/backend/drizzle` at startup, so `db:migrate` is only needed to migrate without starting the server. Each chat turn appends evaluation metrics to `storage/metrics/chat-turns.jsonl`; `scripts/export-metrics.mjs` converts that file to CSV, one row per turn or, with `--runs`, one row per `run_spec` call.
 </details>
 
 Questions, ideas, and bug reports belong in [GitHub Discussions](https://github.com/gustavo-ferreira03/specbook/discussions) and [Issues](https://github.com/gustavo-ferreira03/specbook/issues).
+
+Agent evaluation events record investigation identifiers, classifications, candidate test outcomes, human or automatic decisions, and cumulative usage. They exclude prompts, free-text errors, URLs and credentials. A passing candidate is distinct from an applied fix. Join these events with run and chat records; injected-fault labels and manual authoring times must come from the experiment protocol.

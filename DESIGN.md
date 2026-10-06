@@ -89,9 +89,9 @@ The sidebar has, from top to bottom: brand (56px), project switcher, segmented C
 
 ## Project Overview
 
-Overview is the single entry for autonomous activity and review. Its sidebar badge counts decisions that need an answer, excluding bug reports. The header states the current check results and the next check trigger; the same per-Spec health feeds the status dots in the feature tree.
+Overview is the single entry for autonomous activity and review. Its sidebar badge counts decisions that need an answer, including requests to turn an uncovered bug into a regression check. The header states the current check results and last check; the same per-Spec health feeds the status dots in the feature tree.
 
-Sections stay in this order and disappear when empty: Needs you, Working on it now, Problems found, Paused, History. Use compact rows with one sentence, an icon, time and one action. Show at most five decisions and two active rows before offering more. Pauses are one aggregated row; finished work is grouped by day.
+Sections stay in this order: Needs you, Failing, Recent runs. Use compact rows with one sentence, an icon, time and one action. Failing lists the current triage state per Spec. Recent runs group by trigger: deployment, CI, schedule, manual or check changes. Empty sections are hidden; an empty project gets the existing EmptyState. Pause is a minor header control; coverage analysis and exploration live in the Actions menu and require an explicit request.
 
 Open evidence, a chronological timeline and decision actions in the existing right-side Sheet. Questions explain what accepting them will change. Keep screenshots and readable behavior visible inside the sheet; put file diffs and logs under collapsed Technical details. Do not repeat the row title as a timeline event or add generic investigation narration.
 

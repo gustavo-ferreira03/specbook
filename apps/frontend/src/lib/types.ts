@@ -292,15 +292,11 @@ export interface InboxItem {
 
 export interface AgentSummary {
     projectName: string;
-    statusText: string;
     attentionCount: number;
     activeCount: number;
-    queuedCount: number;
-    pausedCount: number;
     lastCheckedAt: string | null;
     paused: boolean;
     globallyPaused: boolean;
-    effectivePause: boolean;
     autonomy: string;
     systemHealth?: { message: string; detail?: string };
 }
@@ -340,18 +336,25 @@ export interface ActivityStory {
 }
 
 export interface SpecHealth {
-    status: "passing" | "failing" | "flaky" | "paused" | "not_checked" | "running";
+    status: "passing" | "failing" | "flaky" | "not_checked" | "running";
     label: string;
     runId?: string;
     lastCheckedAt: string | null;
 }
 
-export interface OverviewPausedGroup {
-    reason: "user";
-    label: string;
-    count: number;
-    stories: ActivityStory[];
-    specIds: string[];
+export interface FailingSpec {
+    specId: string;
+    title: string;
+    triageStatus: string;
+    runId?: string;
+    updatedAt: string;
+    storyId?: string;
+    inboxIds: string[];
+}
+
+export interface RecentRun extends ActivityStory {
+    trigger: "deploy" | "ci" | "schedule" | "manual" | "spec_change";
+    counts: { total: number; passed: number; failed: number; flaky: number; running: number };
 }
 
 export interface OverviewResponse {
@@ -359,16 +362,12 @@ export interface OverviewResponse {
         verdict: string;
         nextCheck: string;
         nextCheckAt: string | null;
-        problemCount: number;
-        specHealth: { total: number; passing: number; failing: number; flaky: number; paused: number; not_checked: number; running: number };
+        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number };
     };
     specHealth: Record<string, SpecHealth>;
     needsYou: PresentedInboxItem[];
-    working: ActivityStory[];
-    queued: ActivityStory[];
-    problems: PresentedInboxItem[];
-    paused: OverviewPausedGroup[];
-    history: ActivityStory[];
+    failing: FailingSpec[];
+    recentRuns: RecentRun[];
     items: PresentedInboxItem[];
     stories: ActivityStory[];
 }

@@ -656,7 +656,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         <LayoutDashboard size={15} /> Overview
                         {attentionCount > 0 && <Badge variant="secondary" size="sm" className="ml-auto" aria-label={`${attentionCount} ${attentionCount === 1 ? "decision needs" : "decisions need"} you`} title={`${attentionCount} needs you`}>{attentionCount}</Badge>}
                     </Link>
-                    {currentOverview?.summary.effectivePause && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{currentOverview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
+                    {(currentOverview?.summary.paused || currentOverview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{currentOverview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
                     <Link
                         href={`${settingsHref}?tab=model`}
                         className="flex min-h-10 items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring"
