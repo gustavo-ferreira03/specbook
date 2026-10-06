@@ -1,7 +1,6 @@
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
 import { createProjectScrubber } from "../credentials/scrub";
 import { specsRepository } from "../../infra/repositories/specs";
-import { jobLimitsSchema } from "./schemas";
 import { isAgentPaused } from "./pause";
 import { sanitizeTechnicalDetails } from "./presentation-errors";
 
@@ -51,10 +50,8 @@ export async function retryStalledJob(job: Job): Promise<void> {
         return;
     }
     if (current.retryAt && Date.parse(current.retryAt) > Date.now()) return;
-    const limits = jobLimitsSchema.parse({});
-    const changed = await jobsRepository.transition(job.id, "stalled", "queued", {
-        safetyRetries: current.safetyRetries + 1, retryAt: null,
-        limits: { maxActions: current.actionsUsed + limits.maxActions, wallTimeMs: current.elapsedMs + limits.wallTimeMs },
+    const changed = await jobsRepository.requeue(current, "stalled", {
+        safetyRetries: current.safetyRetries + 1, stopReason: current.stopReason,
         pendingMessage: `Continue the unfinished investigation using a different approach. The previous attempt stopped because: ${current.stopReason ?? "it did not reach a confirmed result"}. First read the existing suggestions, failed verification and browser state. Explain what you will change in the approach before using tools. Do not repeat the same locator, timing change or browser action without new evidence. Keep spec.yml unchanged. Ask a specific question if access, missing information or a human decision is the actual blocker.`,
     });
     if (changed) await jobsRepository.log(job.id, "different_approach", `Attempt ${current.safetyRetries + 1}: ${current.stopReason ?? "No confirmed result"}`);
@@ -65,13 +62,11 @@ export async function retryInfrastructure(job: Job, error: string): Promise<void
     if (!current || !["running", "blocked", "stalled"].includes(current.status)) return;
     const message = await createProjectScrubber(job.projectId)(error);
     const attempts = current.infrastructureRetries + 1;
-    const limits = jobLimitsSchema.parse({});
     const activeMs = current.startedAt ? Math.max(0, Date.now() - Date.parse(current.startedAt)) : 0;
-    const changed = await jobsRepository.transition(job.id, current.status, await isAgentPaused(job.projectId) ? "paused" : "queued", {
-        infrastructureRetries: attempts, systemError: message,
-        limits: { maxActions: current.actionsUsed + limits.maxActions, wallTimeMs: current.elapsedMs + activeMs + limits.wallTimeMs },
+    const changed = await jobsRepository.requeue(current, current.status, {
+        infrastructureRetries: attempts, systemError: message, safetyRetries: current.safetyRetries, stopReason: current.stopReason,
         retryAt: new Date(Date.now() + Math.min(300_000, 15_000 * 2 ** Math.min(attempts - 1, 5))).toISOString(),
         pendingMessage: "Specbook encountered an internal service problem and is retrying. Check the current state before repeating actions. This is not a question for the human; do not put browser, server or AI-provider failures in the Inbox.",
-    });
+    }, { to: await isAgentPaused(job.projectId) ? "paused" : "queued", activeMs });
     if (changed) await jobsRepository.log(job.id, "service_retry", message);
 }

@@ -12,6 +12,7 @@ import { createFeatureInRepo, createSpecInRepo, validateSpec } from "../repo/wri
 import { executeSpec } from "../runner/run";
 import { sanitizeTechnicalDetails } from "./presentation-errors";
 import { isAgentPaused } from "./pause";
+import { finishedAt } from "./shared";
 import { jobLimitsSchema, newSpecProposalSchema, specBatchProposalSchema, type specCandidateSchema } from "./schemas";
 import type { z } from "zod";
 import type { RunEnvironment } from "../../infra/db/schema";
@@ -223,7 +224,7 @@ export async function presentSpecBatch(item: InboxItem) {
             : ["completed", "cancelled"].includes(job?.status ?? "") || (job?.status === "stalled" && !job.retryAt) ? "stopped" : "queued";
         const error = run?.failReason ?? candidate.error ?? job?.stopReason;
         return { ...candidate, specId: spec?.id, runId: run?.id, lifecycle: spec?.lifecycle, state, questionId: question?.id,
-            finishedAt: run && run.status !== "running" ? new Date(Date.parse(run.startedAt) + (run.durationMs ?? 0)).toISOString() : undefined,
+            finishedAt: run && run.status !== "running" ? finishedAt(run) : undefined,
             error: error ? sanitizeTechnicalDetails(await scrub(error)) : undefined };
     }));
     const context = batch.contextRevisionId ? await projectContextsRepository.getProjectContextRevision(batch.contextRevisionId) : null;

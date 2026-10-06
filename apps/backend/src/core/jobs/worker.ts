@@ -8,7 +8,7 @@ import { abortChatTurn } from "../chat/chat-registry";
 import { createChat, getChatMessages } from "../chat/session-store";
 import { runChatTurn } from "../chat/turn-runner";
 import { createProjectScrubber } from "../credentials/scrub";
-import { createJobSchema, jobLimitsSchema } from "./schemas";
+import { createJobSchema } from "./schemas";
 import { AGENT_RULES_VERSION, createJobPolicy } from "./policy";
 import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure, stallJob } from "./retry";
@@ -117,16 +117,17 @@ export async function drainJobs(): Promise<void> {
     try {
         const configured = Number(process.env.SPECBOOK_MAX_CONCURRENT_JOBS ?? process.env.SPECBOOK_MAX_CONCURRENT_RUNS ?? 2);
         const limit = Number.isInteger(configured) && configured > 0 ? configured : 2;
+        const busyProjects = await jobsRepository.busyProjects([...active.keys()]);
         for (const row of await jobsRepository.queued()) {
             if (active.size >= limit || stopped) break;
             if (active.has(row.id)) continue;
             if (await isAgentPaused(row.projectId)) { await jobsRepository.transition(row.id, "queued", "paused"); continue; }
             if (!await canRunAgentJob(row) || await cancelStaleTriage(row)) continue;
             if (row.retryAt && Date.parse(row.retryAt) > Date.now()) continue;
-            const siblings = await jobsRepository.list(row.projectId);
-            if (siblings.some((job) => job.status === "running" || active.has(job.id))) continue;
+            if (busyProjects.has(row.projectId)) continue;
             const job = await jobsRepository.claim(row.id);
             if (!job) continue;
+            busyProjects.add(job.projectId);
             if (await isAgentPaused(job.projectId)) { await jobsRepository.transition(job.id, "running", "paused", { startedAt: null, heartbeatAt: null }); continue; }
             const execution = withActor({ id: job.id, name: "Specbook", kind: "agent" }, () => executeJob(job)).catch((error) => logger.error("job failed", { jobId: job.id, error }))
                 .finally(() => { active.delete(job.id); void drainJobs(); });
@@ -168,46 +169,39 @@ export async function resumeAgentJobs(projectId?: string): Promise<void> {
     void drainJobs();
 }
 
-/**
- * A question asked under older agent rules may no longer apply (for example, permission to perform a Spec's own
- * steps). Close it as outdated and let the job re-check under the current rules; it asks again only if still blocked.
- */
-async function reviewOutdatedQuestions(): Promise<void> {
-    for (const project of await projectsRepository.listProjects()) {
-        if (await isAgentPaused(project.id)) continue;
-        for (const item of await jobsRepository.inbox(project.id)) {
-            if (item.kind !== "question" || item.status !== "pending" || Number(item.payload.rulesVersion ?? 1) >= AGENT_RULES_VERSION) continue;
-            const job = await jobsRepository.get(item.jobId);
-            if (job?.status !== "blocked" || !["regenerate", "failure_triage", "generate_spec"].includes(job.kind)) continue;
-            const allowance = jobLimitsSchema.parse({});
-            const resumed = await jobsRepository.transition(job.id, "blocked", "queued", {
-                limits: { maxActions: job.actionsUsed + allowance.maxActions, wallTimeMs: job.elapsedMs + allowance.wallTimeMs },
-                safetyRetries: 0, stopReason: null, retryAt: null,
-                pendingMessage: `Specbook updated its rules after you asked "${item.title}". The steps written in a Spec are now authorized, and saved credential profiles can be used to sign in. Your question was closed without a human answer. Re-check whether it still applies under these rules and continue the original goal; ask again only if you are still blocked. Inspect list_inbox before repeating work.`,
-            });
-            if (!resumed) continue;
-            await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, outdatedRules: true } });
-            await jobsRepository.log(job.id, "resumed", "The question was asked under older agent rules and was reviewed automatically.");
-        }
+async function recoverProject(projectId: string): Promise<void> {
+    const paused = await isAgentPaused(projectId);
+    if (!paused) for (const job of await jobsRepository.list(projectId)) {
+        if (job.status === "paused") await jobsRepository.transition(job.id, "paused", "queued");
+    }
+    const questions = (await jobsRepository.inbox(projectId)).filter((item) => item.kind === "question" && item.status === "pending");
+    // Internal service failures belong to automatic recovery, including earlier unanswered reports.
+    const infrastructure = new Set(questions.filter((item) => isInfrastructureFailure(`${item.title}\n${item.body}`)));
+    for (const item of infrastructure) {
+        const job = await jobsRepository.get(item.jobId);
+        if (job?.status !== "blocked") continue;
+        await retryInfrastructure(job, `${item.title}\n${item.body}`);
+        await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, internalRecovery: true } });
+    }
+    if (paused) return;
+    // A question asked under older agent rules may no longer apply (for example, permission to perform a Spec's own
+    // steps). Close it as outdated and let the job re-check under the current rules; it asks again only if still blocked.
+    for (const item of questions) {
+        if (infrastructure.has(item) || Number(item.payload.rulesVersion ?? 1) >= AGENT_RULES_VERSION) continue;
+        const job = await jobsRepository.get(item.jobId);
+        if (job?.status !== "blocked" || !["regenerate", "failure_triage", "generate_spec"].includes(job.kind)) continue;
+        const resumed = await jobsRepository.requeue(job, "blocked", {
+            pendingMessage: `Specbook updated its rules after you asked "${item.title}". The steps written in a Spec are now authorized, and saved credential profiles can be used to sign in. Your question was closed without a human answer. Re-check whether it still applies under these rules and continue the original goal; ask again only if you are still blocked. Inspect list_inbox before repeating work.`,
+        });
+        if (!resumed) continue;
+        await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, outdatedRules: true } });
+        await jobsRepository.log(job.id, "resumed", "The question was asked under older agent rules and was reviewed automatically.");
     }
 }
 
 export async function startJobWorker(): Promise<void> {
     await jobsRepository.recover();
-    // Internal service failures belong to automatic recovery, including earlier unanswered reports.
-    for (const project of await (await import("../../infra/repositories/projects")).projectsRepository.listProjects()) {
-        if (!await isAgentPaused(project.id)) for (const job of await jobsRepository.list(project.id)) {
-            if (job.status === "paused") await jobsRepository.transition(job.id, "paused", "queued");
-        }
-        for (const item of await jobsRepository.inbox(project.id)) {
-            if (item.kind !== "question" || item.status !== "pending" || !isInfrastructureFailure(`${item.title}\n${item.body}`)) continue;
-            const job = await jobsRepository.get(item.jobId);
-            if (job?.status !== "blocked") continue;
-            await retryInfrastructure(job, `${item.title}\n${item.body}`);
-            await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, internalRecovery: true } });
-        }
-    }
-    await reviewOutdatedQuestions();
+    for (const project of await projectsRepository.listProjects()) await recoverProject(project.id);
     stopped = false;
     await recoverSpecBatches();
     timer = setInterval(() => void drainJobs().catch((error) => logger.error("job queue failed", { error })), 2000);
