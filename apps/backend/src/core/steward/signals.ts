@@ -68,7 +68,7 @@ export async function collectProjectSignals(project: Project, previous: ProjectO
         const generation = (previous.specGenerations?.[spec.id] ?? 0) + (changed ? 1 : 0);
         generations[spec.id] = generation;
         if (spec.status !== "invalid" && changed) {
-            await signal("spec_changed", `changed:${spec.id}:${generation}:${fingerprint([previous.specs?.[spec.id] ?? null, hash])}`, `“${spec.title}” changed`, "Verify the changed implementation against the app.", { specIds: [spec.id] });
+            await signal("spec_changed", `changed:${spec.id}:${generation}:${fingerprint([previous.specs?.[spec.id] ?? null, hash])}`, `“${spec.title}” changed`, "Verify the changed implementation against the app.", { specIds: [spec.id], sourceHash: spec.sourceHash, markdownHash: spec.markdownHash, generation });
         }
     }
     observation.specs = hashes;
@@ -82,7 +82,7 @@ export async function collectProjectSignals(project: Project, previous: ProjectO
             const changed = old !== undefined && old.fingerprint !== null && (old.fingerprint !== next || old.baseUrl !== project.baseUrl);
             const generation = (old?.generation ?? 0) + (changed ? 1 : 0);
             observation.deployment = { baseUrl: project.baseUrl, fingerprint: next, nextCheckAt: at + 300_000, failures: 0, generation };
-            if (changed) await signal("deployment_changed", `deploy:${generation}:${fingerprint([old?.baseUrl, old?.fingerprint, project.baseUrl, next])}`, "The application changed", "The app's build assets or response fingerprint changed. Run the existing Specs against this deployment.");
+            if (changed) await signal("deployment_changed", `deploy:${generation}:${fingerprint([old?.baseUrl, old?.fingerprint, project.baseUrl, next])}`, "The application changed", "The app's build assets or response fingerprint changed. Run the existing Specs against this deployment.", { baseUrl: project.baseUrl, fingerprint: next, generation });
         } else {
             const failures = (old?.failures ?? 0) + 1;
             const generation = (old?.generation ?? 0) + (failures === 1 ? 1 : 0);

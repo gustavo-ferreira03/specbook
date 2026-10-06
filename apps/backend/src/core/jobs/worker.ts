@@ -1,5 +1,5 @@
 import { jobBaseUrl } from "./environment";
-import { prepareTriageGoal } from "./triage";
+import { cancelStaleTriage, prepareTriageGoal } from "./triage";
 import { closeChatBrowser } from "../browser/sessions";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
 import { logger } from "../../infra/logger";
@@ -60,6 +60,7 @@ async function executeJob(job: Job): Promise<void> {
             await jobsRepository.transition(job.id, "running", "paused");
             return;
         }
+        if (await cancelStaleTriage(job)) return;
         if (!await canRunAgentJob(job)) { await jobsRepository.transition(job.id, "running", "queued", { startedAt: null, heartbeatAt: null }); return; }
         if (remaining <= 0 || job.actionsUsed >= job.limits.maxActions) {
             if (job.systemError) await retryInfrastructure(job, job.systemError);
@@ -109,7 +110,7 @@ export async function drainJobs(): Promise<void> {
             if (active.size >= limit || stopped) break;
             if (active.has(row.id)) continue;
             if (await isAgentPaused(row.projectId)) { await jobsRepository.transition(row.id, "queued", "paused"); continue; }
-            if (!await canRunAgentJob(row)) continue;
+            if (!await canRunAgentJob(row) || await cancelStaleTriage(row)) continue;
             if (row.retryAt && Date.parse(row.retryAt) > Date.now()) continue;
             const siblings = await jobsRepository.list(row.projectId);
             if (siblings.some((job) => job.status === "running" || active.has(job.id))) continue;

@@ -11,11 +11,30 @@ import { createProjectScrubber } from "../credentials/scrub";
 import { triageSchema } from "./schemas";
 import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure } from "./retry";
+import { matchesCurrentSpec } from "./current-run";
 
-export async function prepareTriageGoal(projectId: string, runId?: string) {
+export class StaleTriageError extends Error {}
+
+export async function currentFailure(projectId: string, runId?: string) {
     const run = runId ? await runsRepository.getRun(runId) : null;
     const spec = run ? await specsRepository.getSpec(run.specId) : null;
-    if (!run || !spec || spec.projectId !== projectId || !["failed", "error"].includes(run.status)) throw new Error("A failed run from this project is required for triage");
+    if (!run || !spec || spec.projectId !== projectId || run.flaky || !["failed", "error"].includes(run.status)) return null;
+    if ((await runsRepository.listRuns(spec.id, { limit: 1 }))[0]?.id !== run.id || !await matchesCurrentSpec(run, spec)) return null;
+    return { run, spec };
+}
+
+export async function cancelStaleTriage(job: Job): Promise<boolean> {
+    if (job.kind !== "failure_triage" || await currentFailure(job.projectId, job.runId ?? undefined)) return false;
+    if (await jobsRepository.transition(job.id, job.status, "cancelled", { stopReason: "A newer check or Spec change superseded this failure.", retryAt: null })) {
+        await jobsRepository.log(job.id, "superseded", "The failed run is no longer the current result for this check.");
+    }
+    return true;
+}
+
+export async function prepareTriageGoal(projectId: string, runId?: string) {
+    const current = await currentFailure(projectId, runId);
+    if (!current) throw new StaleTriageError("The failed run is no longer the current result for this Spec and behavior contract");
+    const { run, spec } = current;
     return { runId: run.id, specId: spec.id, goal: `Investigate failure in ${spec.title}`, message: `Investigate the failure of Spec "${spec.title}" (${spec.id}), run ${run.id}. Read get_failure_evidence and get_spec, then investigate the application in the browser. Classify with triage_failure before proposing a fix.\nTest drift (locator or timing): propose the smallest spec.ts change that restores the SAME behavior and assertions. update_spec verifies candidates in isolation; a passing verification is required for approval.\nApplication bug: submit a bug report with precise repro steps, observed versus expected behavior and evidence; leave the test untouched.\nEnvironment (unavailable site, expired session, missing credentials): retry if transient, otherwise ask a question through the Inbox and resume after the answer.\nNever change spec.yml or weaken the test to make it pass. Ask the human if the intended behavior must change. Do not claim drift when the app violates the contract. End with an Inbox result.` };
 }
 

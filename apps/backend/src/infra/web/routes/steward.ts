@@ -5,7 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { pauseAgentJobs, resumeAgentJobs } from "../../../core/jobs/worker";
 import { isAgentPaused } from "../../../core/jobs/pause";
-import { enqueueIntent, processProjectSteward, withProjectLock } from "../../../core/steward/engine";
+import { enqueueIntent, processProjectSteward, resumeCurrentSignals, withProjectLock } from "../../../core/steward/engine";
 import { jobsRepository } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
 import { settingsRepository } from "../../repositories/settings";
@@ -32,7 +32,7 @@ export function createStewardRouter(): Hono {
         const previous = await stewardRepository.get(id);
         const patch = c.req.valid("json");
         await stewardRepository.update(id, patch);
-        if (previous.autonomy === "observe" && patch.autonomy && patch.autonomy !== "observe") await stewardRepository.resumeObserved(id);
+        if (previous.autonomy === "observe" && patch.autonomy && patch.autonomy !== "observe") await resumeCurrentSignals(id);
         if (patch.paused === true) await pauseAgentJobs(id);
         else if (patch.paused === false) await resumeAgentJobs(id);
         const row = await stewardRepository.get(id);

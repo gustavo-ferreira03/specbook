@@ -470,7 +470,116 @@ describe("project steward", () => {
         const replay = await enqueueIntent(projectId, firstFailure, `failure:${failedRuns[0]!.id}`);
         const nextTriage = await enqueueIntent(projectId, { ...firstFailure, runId: failedRuns[1]!.id }, `failure:${failedRuns[1]!.id}`);
         assert.equal(firstTriage.id, replay.id, "replaying one failure still deduplicates");
-        assert.notEqual(firstTriage.fingerprint, nextTriage.fingerprint, "a new failed run cannot be hidden by the previous investigation's cooldown");
+        assert.equal(firstTriage.fingerprint, nextTriage.fingerprint, "equivalent failures share their subject across run and signal IDs");
+    });
+
+    test("triage requires the latest failed run and both current source and behavior hashes", async () => {
+        const { prepareTriageGoal, cancelStaleTriage } = await import("../../src/core/jobs/triage");
+        const { enqueueJob, stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { runsDir } = await import("../../src/core/paths");
+        await stopJobWorker();
+        const projectId = await createProject("Current failure");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const { spec } = await createSpec(projectId, feature.id, "Store");
+        const yaml = await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"), "utf8");
+        const snapshot = async (status: "failed" | "passed") => {
+            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+            await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+            await fs.writeFile(path.join(runsDir, run.id, "spec.yml"), yaml);
+            await runsRepository.finishRun(run.id, status, 1, status === "failed" ? "Expected: Store" : null);
+            return run;
+        };
+        const first = await snapshot("failed");
+        assert.equal((await prepareTriageGoal(projectId, first.id)).runId, first.id);
+        const queued = await enqueueJob(projectId, { kind: "failure_triage", trigger: "spec_failure", goal: "Investigate", runId: first.id });
+        await snapshot("passed");
+        await assert.rejects(() => prepareTriageGoal(projectId, first.id), /no longer the current result/);
+        assert.equal(await cancelStaleTriage(queued), true);
+        assert.equal((await jobsRepository.get(queued.id))?.status, "cancelled");
+        assert.equal((await jobsRepository.get(queued.id))?.actionsUsed, 0, "superseded queued work never starts an agent turn");
+        const latest = await snapshot("failed");
+        await specsRepository.updateSpecRecord(spec.id, { markdownHash: "changed-behavior" });
+        await assert.rejects(() => prepareTriageGoal(projectId, latest.id), /no longer the current result/);
+        await specsRepository.updateSpecRecord(spec.id, { markdownHash: spec.markdownHash, sourceHash: "changed-implementation" });
+        await assert.rejects(() => prepareTriageGoal(projectId, latest.id), /no longer the current result/);
+    });
+
+    test("leaving Observe discards the backlog and resumes only a current failure", async () => {
+        const { createStewardRouter } = await import("../../src/infra/web/routes/steward");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { recordFailureSignal, processProjectSteward } = await import("../../src/core/steward/engine");
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { runsDir } = await import("../../src/core/paths");
+        await stopJobWorker();
+        const projectId = await createProject("Observed failures");
+        await stewardRepository.update(projectId, { autonomy: "observe" });
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const ids: string[] = [];
+        let currentRunId = "";
+        for (const state of ["fixed", "current", "changed", "no-healing"]) {
+            const { spec } = await createSpec(projectId, feature.id, state);
+            ids.push(spec.id);
+            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId), healOnFailure: state !== "no-healing" });
+            await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+            await fs.writeFile(path.join(runsDir, run.id, "spec.yml"), await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"), "utf8"));
+            await runsRepository.finishRun(run.id, "failed", 1, "Expected: Store");
+            await recordFailureSignal(projectId, run.id, spec.id, state);
+            if (state === "fixed") {
+                const passed = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: run.commitSha });
+                await runsRepository.finishRun(passed.id, "passed", 1, null);
+            } else if (state === "changed") await specsRepository.updateSpecRecord(spec.id, { sourceHash: "new" });
+            else if (state === "current") currentRunId = run.id;
+        }
+        for (let i = 0; i < 10; i++) await stewardRepository.signal({ projectId, key: `old-change:${i}`, kind: "spec_changed", title: "Old version", body: "Run old version", payload: { specIds: [ids[0]], sourceHash: `old-${i}`, markdownHash: "old" } });
+        await processProjectSteward(projectId, false);
+        assert.equal((await stewardRepository.intents(projectId)).length, 0);
+        const router = createStewardRouter();
+        assert.equal((await router.request(`/projects/${projectId}/steward`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autonomy: "propose" }) })).status, 200);
+        const pending = await stewardRepository.pendingSignals(projectId);
+        assert.deepEqual(pending.map((signal) => signal.payload.runId), [currentRunId]);
+        await processProjectSteward(projectId, false);
+        const jobs = await jobsRepository.list(projectId);
+        assert.equal(jobs.length, 1);
+        assert.equal(jobs[0]?.runId, currentRunId);
+        assert.equal((await stewardRepository.intents(projectId)).length, 1);
+    });
+
+    test("automatic investigations remember cooldowns and rejections across repeated runs", async () => {
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { runsDir } = await import("../../src/core/paths");
+        await stopJobWorker();
+        const projectId = await createProject("Repeated failure");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const { spec } = await createSpec(projectId, feature.id, "Store");
+        const failed = async (status: "failed" | "error" = "failed") => {
+            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+            await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+            await fs.writeFile(path.join(runsDir, run.id, "spec.yml"), await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"), "utf8"));
+            await runsRepository.finishRun(run.id, status, 1, status === "failed" ? "Expected: Store" : "Connection refused");
+            return enqueueIntent(projectId, { kind: "triage", specIds: [spec.id], runId: run.id, goal: "Investigate", reason: "Latest check failed" }, `test:${run.id}`);
+        };
+        const first = await failed();
+        await processProjectSteward(projectId, false);
+        const job = (await jobsRepository.get(first.id))!;
+        await jobsRepository.update(job.id, { status: "completed" });
+        const second = await failed();
+        await processProjectSteward(projectId, false);
+        assert.equal((await stewardRepository.intents(projectId)).find((row) => row.id === second.id)?.status, "ignored");
+        assert.equal((await jobsRepository.list(projectId)).length, 1);
+        const suggestion = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_fix", title: "Suggested change", body: "Review" });
+        await jobsRepository.updateItem(suggestion.id, { status: "rejected" });
+        const third = await failed();
+        await processProjectSteward(projectId, false);
+        assert.match((await stewardRepository.intents(projectId)).find((row) => row.id === third.id)?.reason ?? "", /rejected/);
+        const different = await failed("error");
+        assert.notEqual(different.fingerprint, third.fingerprint, "a different failure category remains actionable");
+        await processProjectSteward(projectId, false);
+        assert.equal((await jobsRepository.get(different.id))?.status, "queued");
     });
 
     test("trusted automatic fixes preserve assertion targets, action kinds, aliases and input values", async () => {
@@ -617,6 +726,17 @@ describe("project steward", () => {
             assert.equal(observation.specGenerations?.[spec.id], index + 1);
             await stewardRepository.update(projectId, { observation });
         }
+        await stewardRepository.signal({ projectId, key: "preview:first", kind: "deployment", title: "Preview", body: "Run preview", payload: { environment: "preview", url: "https://first.preview.test", commitSha: "one" } });
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        await stewardRepository.signal({ projectId, key: "preview:latest", kind: "deployment", title: "Preview", body: "Run preview", payload: { environment: "preview", url: "https://latest.preview.test", commitSha: "two" } });
+        for (const signal of await stewardRepository.signals(projectId)) await stewardRepository.acknowledge(signal.id, "observed");
+        const { resumeCurrentSignals } = await import("../../src/core/steward/engine");
+        await resumeCurrentSignals(projectId);
+        const current = await stewardRepository.pendingSignals(projectId);
+        assert.equal(current.length, 3, "only the current Spec, detected build and explicit deployment remain actionable");
+        assert.equal(current.find((signal) => signal.kind === "spec_changed")?.payload.generation, 3, "returning to the same content does not replay an older generation");
+        assert.equal(current.find((signal) => signal.kind === "deployment_changed")?.payload.generation, 3);
+        assert.equal(current.find((signal) => signal.kind === "deployment")?.payload.url, "https://latest.preview.test", "older preview URLs for the same environment are not resumed");
     });
 
     test("run prerequisites ask once and resume the original request without exploratory work", async () => {

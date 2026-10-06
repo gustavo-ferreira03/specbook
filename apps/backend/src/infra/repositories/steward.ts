@@ -27,9 +27,6 @@ export const stewardRepository = {
     async pendingSignals(projectId: string) {
         return db.select().from(projectSignals).where(and(eq(projectSignals.projectId, projectId), eq(projectSignals.status, "pending")));
     },
-    async resumeObserved(projectId: string) {
-        await db.update(projectSignals).set({ status: "pending" }).where(and(eq(projectSignals.projectId, projectId), eq(projectSignals.status, "observed")));
-    },
     async acknowledge(id: string, status: ProjectSignal["status"]) {
         await db.update(projectSignals).set({ status }).where(eq(projectSignals.id, id));
     },

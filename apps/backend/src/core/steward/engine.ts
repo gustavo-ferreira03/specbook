@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { applyTrustedFixes } from "./approval";
 import { runsRepository } from "../../infra/repositories/runs";
 import { areSpecsLocked } from "../specs/lifecycle";
@@ -12,6 +14,9 @@ import { createChat } from "../chat/session-store";
 import { enqueueJob } from "../jobs/worker";
 import { jobLimitsSchema } from "../jobs/schemas";
 import { canRunAgentJob, isAgentPaused } from "../jobs/pause";
+import { currentFailure, StaleTriageError } from "../jobs/triage";
+import { runsDir } from "../paths";
+import { markdownHashOf } from "../repo/writer";
 import { retryStalledJob } from "../jobs/retry";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { collectProjectSignals, fingerprint, runSignalForIntent, runTriggerForIntent } from "./signals";
@@ -31,23 +36,41 @@ export async function withProjectLock<T>(id: string, work: () => Promise<T>): Pr
     try { return await current; } finally { if (locks.get(id) === current) locks.delete(id); }
 }
 
+async function intentFingerprint(projectId: string, intent: StewardIntent, source: "user" | "event", key: string): Promise<string> {
+    const specs = await specsRepository.listSpecs(projectId);
+    const run = intent.kind === "triage" && intent.runId ? await runsRepository.getRun(intent.runId) : null;
+    if (run) {
+        const spec = specs.find((spec) => spec.id === run.specId);
+        if (!spec || intent.specIds?.some((id) => id !== spec.id)) throw new Error("The failed run must belong to the selected Spec in this project");
+        const yaml = await fs.readFile(path.join(runsDir, run.id, "spec.yml"), "utf8").catch(() => null);
+        const evidence = await fs.readFile(path.join(runsDir, run.id, "evidence.json"), "utf8").then((value) => JSON.parse(value) as { failedStep?: string }).catch(() => ({} as { failedStep?: string }));
+        const reason = run.failReason ?? "";
+        const failureKind = run.status === "error" || /net::|ECONN|ENOTFOUND|connection refused|session expired/i.test(reason) ? "environment"
+            : /expect\(|AssertionError|Expected:|Received:|to[A-Z]\w+/.test(reason) ? "assertion"
+              : /locator|TimeoutError|waiting for|strict mode/i.test(reason) ? "locator" : "failed";
+        const project = await projectsRepository.getProject(projectId);
+        return fingerprint({ kind: "triage", specId: spec.id, sourceHash: run.sourceHash,
+            markdownHash: yaml === null ? null : markdownHashOf(yaml),
+            failureKind, failedStep: evidence.failedStep ?? null, baseUrl: run.baseUrl ?? intent.baseUrl ?? project?.baseUrl });
+    }
+    const context = await projectContextsRepository.getLatestConfirmedProjectContext(projectId);
+    const targets = specs.filter((spec) => !intent.specIds?.length || intent.specIds.includes(spec.id)).map((spec) => [spec.id, spec.sourceHash, spec.markdownHash]).sort();
+    return fingerprint({ kind: intent.kind, targets, context: context?.context, baseUrl: intent.baseUrl,
+        goal: source === "user" ? intent.goal.replace(/\s+/g, " ").trim().toLowerCase() : undefined,
+        regressionKey: key.startsWith("regression:") ? key : undefined });
+}
+
 export async function enqueueIntent(projectId: string, input: unknown, key: string, source: "user" | "event" = "event"): Promise<Intent> {
     if (!await projectsRepository.getProject(projectId)) throw new Error("Project not found");
     const intent = stewardIntentSchema.parse(input);
     if (source !== "user" && ["coverage", "explore"].includes(intent.kind)) throw new Error("Coverage and exploration require an explicit human request");
     const specs = await specsRepository.listSpecs(projectId);
     if (intent.specIds?.some((id) => !specs.some((spec) => spec.id === id))) throw new Error("Selected Specs must belong to this project");
-    const context = await projectContextsRepository.getLatestConfirmedProjectContext(projectId);
-    const targets = specs.filter((spec) => !intent.specIds?.length || intent.specIds.includes(spec.id)).map((spec) => [spec.id, spec.sourceHash, spec.markdownHash]).sort();
     const scrub = createProjectScrubber(projectId);
     intent.goal = await scrub(intent.goal);
     intent.reason = await scrub(intent.reason);
     return stewardRepository.addIntent({ projectId, key, source, intent, priority: intent.priority, reason: intent.reason,
-        fingerprint: fingerprint({ kind: intent.kind, targets, context: context?.context, baseUrl: intent.baseUrl,
-            runId: intent.kind === "triage" ? intent.runId : undefined,
-            goal: source === "user" ? intent.goal.replace(/\s+/g, " ").trim().toLowerCase() : undefined,
-            regressionKey: key.startsWith("regression:") ? key : undefined,
-            runKey: intent.kind === "run_specs" ? key : undefined }) });
+        fingerprint: await intentFingerprint(projectId, intent, source, key) });
 }
 
 export async function recordFailureSignal(projectId: string, runId: string, specId: string, title: string, originalRunId = runId): Promise<void> {
@@ -55,9 +78,53 @@ export async function recordFailureSignal(projectId: string, runId: string, spec
         body: "Investigate the failed step and evidence to distinguish test drift, an application bug, or an environment problem.", payload: { runId, originalRunId, specIds: [specId] } });
 }
 
+async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
+    if (signal.kind === "spec_failure") return !!await currentFailure(signal.projectId, typeof signal.payload.runId === "string" ? signal.payload.runId : undefined);
+    if (signal.kind === "spec_changed") {
+        const specId = Array.isArray(signal.payload.specIds) ? signal.payload.specIds[0] : null;
+        const spec = typeof specId === "string" ? await specsRepository.getSpec(specId) : null;
+        const observation = (await stewardRepository.get(signal.projectId)).observation;
+        return !!spec && spec.projectId === signal.projectId && spec.status !== "invalid"
+            && spec.sourceHash === signal.payload.sourceHash && spec.markdownHash === signal.payload.markdownHash
+            && signal.payload.generation !== undefined && observation.specGenerations?.[spec.id] === signal.payload.generation;
+    }
+    if (signal.kind === "deployment_changed") {
+        const deployment = (await stewardRepository.get(signal.projectId)).observation.deployment;
+        return !!deployment && deployment.baseUrl === signal.payload.baseUrl && deployment.fingerprint === signal.payload.fingerprint && deployment.generation === signal.payload.generation;
+    }
+    if (signal.kind === "deployment") {
+        const latest = (await stewardRepository.signals(signal.projectId, null)).find((other) => other.kind === "deployment"
+            && other.payload.environment === signal.payload.environment);
+        return latest?.id === signal.id;
+    }
+    return true;
+}
+
+/** Re-enabling automation evaluates present failures and changes, never the observation backlog. */
+export async function resumeCurrentSignals(projectId: string): Promise<void> {
+    await withProjectLock(projectId, async () => {
+        for (const signal of await stewardRepository.signals(projectId, null)) {
+            if (signal.status !== "observed") continue;
+            const applicable = ["spec_changed", "deployment_changed", "deployment"].includes(signal.kind) && await isCurrentSignal(signal);
+            await stewardRepository.acknowledge(signal.id, applicable ? "pending" : "handled");
+        }
+        const specs = await specsRepository.listSpecs(projectId);
+        for (const spec of specs) {
+            const run = (await runsRepository.listRuns(spec.id, { limit: 1 }))[0];
+            if (!run || run.automationPending || !await currentFailure(projectId, run.id)) continue;
+            const original = run.retryOf ? await runsRepository.getRun(run.retryOf) : run;
+            if (!original?.healOnFailure) continue;
+            await recordFailureSignal(projectId, run.id, spec.id, spec.title, original.id);
+            const signal = (await stewardRepository.signals(projectId, null)).find((row) => row.key === `failure:${original.id}`);
+            if (signal) await stewardRepository.acknowledge(signal.id, "pending");
+        }
+    });
+}
+
 async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<void> {
     if (await isAgentPaused(signal.projectId)) return;
     if (observe && !["credentials_changed", "schedule"].includes(signal.kind)) { await stewardRepository.acknowledge(signal.id, "observed"); return; }
+    if (!await isCurrentSignal(signal)) { await stewardRepository.acknowledge(signal.id, "handled"); return; }
     const specIds = Array.isArray(signal.payload.specIds) ? signal.payload.specIds as string[] : undefined;
     const runId = typeof signal.payload.runId === "string" ? signal.payload.runId : undefined;
     const kinds: Record<string, StewardIntent["kind"]> = {
@@ -134,6 +201,15 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const signals = await stewardRepository.signals(row.projectId, null);
     const runTrigger = runTriggerForIntent(row, relatedIntents, signals);
     if ((await stewardRepository.get(row.projectId)).autonomy === "observe" && row.source !== "user" && !(row.intent.kind === "run_specs" && runTrigger === "schedule")) return;
+    if (row.intent.kind === "triage" && !await currentFailure(row.projectId, row.intent.runId)) {
+        await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "The failure was superseded by a newer check or Spec change." });
+        return;
+    }
+    const signal = runSignalForIntent(row, relatedIntents, signals);
+    if (row.source === "event" && signal && !await isCurrentSignal(signal)) {
+        await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "A newer project state superseded this event." });
+        return;
+    }
     const projectJobs = await jobsRepository.list(row.projectId);
     const existing = await jobsRepository.get(row.id);
     if (existing) {
@@ -145,11 +221,17 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const siblings = await stewardRepository.intents(row.projectId);
     if (siblings.some((other) => other.id !== row.id && other.status === "running" && other.batchId)) return;
     const inbox = await jobsRepository.inbox(row.projectId);
-    const previous = siblings.filter((other) => other.id !== row.id && other.fingerprint === row.fingerprint && (other.jobId || other.batchId));
+    const currentSubject = row.intent.kind === "triage" ? await intentFingerprint(row.projectId, row.intent, row.source, row.key) : row.fingerprint;
+    const previous: Intent[] = [];
+    for (const other of siblings) {
+        if (other.id === row.id || !(other.jobId || other.batchId)) continue;
+        const subject = other.intent.kind === "triage" ? await intentFingerprint(other.projectId, other.intent, other.source, other.key).catch(() => null) : other.fingerprint;
+        if (subject === currentSubject) previous.push(other);
+    }
     const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && (item.status === "rejected" || item.payload.ignoredCheck === true)));
-    if ((row.source === "event" && rejected)
+    if ((row.source === "event" && row.intent.kind !== "run_specs" && rejected)
         || previous.some((other) => projectJobs.some((job) => job.id === other.jobId && ["queued", "running", "paused", "blocked", "stalled"].includes(job.status)))
-        || (row.source === "event" && previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000))) {
+        || (row.source === "event" && row.intent.kind !== "run_specs" && previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000))) {
         await stewardRepository.updateIntent(row.id, { status: "ignored", reason: rejected ? "A human rejected this proposal for the current Spec/context version." : "Equivalent work is already active or was handled recently." });
         return;
     }
@@ -218,6 +300,10 @@ export async function processProjectSteward(projectId: string, collect = true): 
             try { await dispatchIntent(intent); }
             catch (error) {
                 if (error instanceof IntentDeferred) continue;
+                if (error instanceof StaleTriageError) {
+                    await stewardRepository.updateIntent(intent.id, { status: "ignored", reason: error.message });
+                    continue;
+                }
                 const scrub = createProjectScrubber(projectId);
                 const reason = await scrub(String(error));
                 if (intent.intent.kind === "run_specs") {
