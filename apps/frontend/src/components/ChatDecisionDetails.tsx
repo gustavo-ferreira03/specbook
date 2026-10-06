@@ -5,7 +5,6 @@ import { Check, CircleDashed, KeyRound, LoaderCircle, MessageSquareText, X } fro
 import { useAuth } from "@/components/AuthProvider";
 import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
 import { FileDiff } from "@/components/FileDiff";
-import { TechnicalDetails } from "@/components/TechnicalDetails";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, focusRing } from "@/components/ui/button";
@@ -95,7 +94,7 @@ function ChatSpecBatch({ projectId, item, onChange, onDiscuss, onReviewContext, 
                 {selectedCandidates.map((candidate) => <li key={candidate.id} className="min-w-0 space-y-2 py-3">
                     <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 break-words text-body font-medium text-ink">{candidate.title}</span><CandidateStatus candidate={candidate} /></div>
                     <p className="break-words text-body text-ink-muted">{candidate.goal}</p>
-                    {candidate.error && <TechnicalDetails><p className="whitespace-pre-wrap break-words text-meta text-ink-muted">{candidate.error}</p></TechnicalDetails>}
+                    {candidate.error && <p className="whitespace-pre-wrap break-words text-meta text-ink-muted">{candidate.error}</p>}
                     <div className="flex flex-wrap gap-2">
                         {candidate.specId && onViewSpec && <Button variant="outline" size="sm" onClick={() => onViewSpec(candidate.specId!, candidate.runId)}>Review Spec{candidate.runId ? " and first result" : ""}</Button>}
                         {candidate.questionId && onAnswerQuestion && <Button variant="outline" size="sm" onClick={() => onAnswerQuestion(candidate.questionId!)}>Answer question</Button>}
@@ -171,8 +170,6 @@ export function ChatDecisionDetails(props: ChatDecisionDetailsProps) {
     }
 
     const label = (action: DecisionAction, ready: string, working: string) => busy === action ? working : ready;
-    const verification = item.payload.verification;
-    const hasDetails = item.payload.files?.length || view.technicalDetails || verification || item.commitSha;
 
     return <section id={`chat-result-${item.id}`} aria-labelledby={`chat-result-title-${item.id}`} className="min-w-0 space-y-4 border-y border-line py-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -197,12 +194,7 @@ export function ChatDecisionDetails(props: ChatDecisionDetailsProps) {
             </div> : <p className="text-body text-ink-muted">An editor can answer or review this decision.</p>}
             <p className="text-meta text-ink-subtle">{view.consequence}</p>
         </div>}
-        {hasDetails && <TechnicalDetails>
-            {verification && <p className="text-meta text-ink-muted">Latest run: {verification.status === "passed" ? "passed" : verification.status === "failed" ? "failed" : "could not finish"}.</p>}
-            {item.payload.files?.map((file) => <FileDiff key={file.path} file={file} />)}
-            {view.technicalDetails && <pre tabIndex={0} aria-label="Technical details of this suggestion" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-canvas p-3 font-mono text-meta text-ink-muted">{view.technicalDetails}</pre>}
-            {item.commitSha && <p className="text-meta text-ink-subtle">Saved revision: <code>{item.commitSha.slice(0, 8)}</code></p>}
-        </TechnicalDetails>}
+        {item.payload.files?.length ? <section className="space-y-3"><h3 className="text-body font-medium text-ink">Proposed changes</h3>{item.payload.files.map((file) => <FileDiff key={file.path} file={file} />)}</section> : null}
         <Dialog open={credentialsOpen} onOpenChange={setCredentialsOpen}>
             <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-reading"><DialogHeader><DialogTitle>Update access</DialogTitle><DialogDescription>Save credentials securely, then check access again in this conversation.</DialogDescription></DialogHeader><CredentialProfilesCard projectId={projectId} /></DialogContent>
         </Dialog>

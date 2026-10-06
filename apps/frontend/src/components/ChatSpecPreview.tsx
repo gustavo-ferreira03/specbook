@@ -5,7 +5,6 @@ import { RefreshCw } from "lucide-react";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { ApiRunEvidence } from "@/components/SpecRunDialog";
 import { StatusPill } from "@/components/StatusPill";
-import { TechnicalDetails } from "@/components/TechnicalDetails";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -91,10 +90,6 @@ export function ChatSpecPreview({ specId, runId, onClose }: { specId: string; ru
                         <RunDiagnostics evidence={evidence} />
                     </>}
                 </section>}
-                <TechnicalDetails>
-                    {run?.failReason && <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-meta text-ink-muted">{run.failReason}</pre>}
-                    {detail.content && <><pre tabIndex={0} aria-label="Spec behavior file" className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-canvas p-3 font-mono text-meta text-ink-muted">{detail.content.yamlSource}</pre><pre tabIndex={0} aria-label="Spec implementation" className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-canvas p-3 font-mono text-meta text-ink-muted">{detail.content.testSource}</pre></>}
-                </TechnicalDetails>
             </div>}
         </DialogContent>
     </Dialog>;

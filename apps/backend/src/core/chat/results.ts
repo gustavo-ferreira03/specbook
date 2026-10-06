@@ -67,7 +67,7 @@ function scanNote(id: string, evidence: Record<string, unknown>, createdAt: stri
     const brokenLinks = scan?.links?.filter((link) => ["broken", "unreachable"].includes(link.result ?? "")).length ?? 0;
     return { id, title: clean(scan?.title ? `Page scan: ${scan.title}` : "Page scan"),
         body: `${consoleErrors} console errors, ${networkFailures} failed requests, ${brokenLinks} broken or unreachable links and ${scan?.accessibility?.total ?? 0} accessibility findings.`,
-        technicalDetails: clean(JSON.stringify(evidence, null, 2)), createdAt, updatedAt: createdAt, afterMessageId };
+        createdAt, updatedAt: createdAt, afterMessageId };
 }
 
 export async function chatResults(chatId: string) {
@@ -121,7 +121,7 @@ export async function chatResults(chatId: string) {
     const presentation = await projectPresentation(chat.projectId, { ...state, jobs, intents, signals: [] }, { inbox });
     const items = presentation.items.map((item) => ({ ...item, afterMessageId: anchorForItem(item) }));
     const notes = inbox.filter((item) => item.kind === "note" && item.payload.retiredByScope !== true).map((item) => ({
-        id: item.id, title: state.clean(item.title), body: state.clean(item.body), technicalDetails: undefined as string | undefined, createdAt: item.createdAt, updatedAt: item.updatedAt, afterMessageId: anchorForItem(item),
+        id: item.id, title: state.clean(item.title), body: state.clean(item.body), createdAt: item.createdAt, updatedAt: item.updatedAt, afterMessageId: anchorForItem(item),
     }));
     for (const artifact of artifacts) if (artifact.toolName === "scan_page" && artifact.value.evidence) notes.push(scanNote(artifact.id, artifact.value.evidence, artifact.createdAt, artifact.afterMessageId, state.clean));
     const actions = await jobsRepository.actionsByJob(jobs.map((job) => job.id));

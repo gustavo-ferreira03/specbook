@@ -11,7 +11,7 @@ interface Placement { afterMessageId?: string | null }
 export interface ChatResults {
     items: (PresentedInboxItem & Placement)[];
     tasks: (Placement & { id: string; kind: string; title: string; status: "queued" | "working" | "needs_answer" | "paused" | "completed" | "failed" | "stopped"; summary: string; batchId?: string; createdAt: string; updatedAt: string })[];
-    notes: (Placement & { id: string; title: string; body: string; technicalDetails?: string; createdAt: string; updatedAt: string })[];
+    notes: (Placement & { id: string; title: string; body: string; createdAt: string; updatedAt: string })[];
     runs: (Placement & { id: string; specId: string; title: string; status: RunStatus; durationMs: number | null; failReason: string | null; flaky: boolean; startedAt: string; batchId?: string; evidenceUrl: string })[];
     specs: (Placement & { id: string; title: string; status: SpecStatus; toolName: string; createdAt: string })[];
     credentialRequests: (Placement & { chatId: string; request: ChatCredentialRequest })[];

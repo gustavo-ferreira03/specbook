@@ -7,7 +7,6 @@ import { ChatDecisionDetails } from "@/components/ChatDecisionDetails";
 import { CredentialRequestCard } from "@/components/CredentialRequestCard";
 import { RelativeTime } from "@/components/RelativeTime";
 import { StatusPill } from "@/components/StatusPill";
-import { TechnicalDetails } from "@/components/TechnicalDetails";
 import { Button } from "@/components/ui/button";
 import type { ChatResults } from "@/lib/chatResults";
 import { formatDuration } from "@/lib/format";
@@ -56,7 +55,6 @@ export function ChatResultGroup({ projectId, data, busy, onChange, onDiscuss, on
         {data.notes.map((note) => <section key={note.id} className="space-y-2" aria-label={note.title}>
             <h3 className="text-body font-medium text-ink">{note.title}</h3>
             <p className="whitespace-pre-wrap break-words text-body text-ink-muted">{note.body}</p>
-            {note.technicalDetails && <TechnicalDetails><pre tabIndex={0} className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-canvas p-3 font-mono text-meta text-ink-muted">{note.technicalDetails}</pre></TechnicalDetails>}
         </section>)}
         {(data.runs.length > 0 || data.specs.length > 0) && <ul className="divide-y divide-line border-y border-line">
             {data.runs.map((run) => <li key={run.id} className="flex min-w-0 flex-wrap items-center gap-2 py-3">
