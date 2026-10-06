@@ -207,6 +207,7 @@ export const jobs = sqliteTable("jobs", {
     systemError: text("system_error"),
     infrastructureRetries: integer("infrastructure_retries").notNull().default(0),
     startedAt: text("started_at"),
+    heartbeatAt: text("heartbeat_at"),
     pendingMessage: text("pending_message").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),

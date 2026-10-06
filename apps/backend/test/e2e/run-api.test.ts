@@ -891,30 +891,64 @@ describe("autonomous pause and decisions", () => {
         }
     });
 
-    test("backend recovery retains interrupted time and cumulative usage exactly once", async () => {
+    test("backend recovery counts recorded active time once and excludes downtime", async () => {
         const { retryStalledJob } = await import("../../src/core/jobs/retry");
         const project = await projectWithWork();
         const job = await createWork(project.id);
         await jobsRepository.recordUsage(job.id, 1500, 5000);
-        await jobsRepository.update(job.id, { status: "running", startedAt: new Date(Date.now() - 30_000).toISOString() });
+        const startedAt = new Date(Date.now() - 86_400_000).toISOString();
+        await jobsRepository.update(job.id, { status: "running", startedAt, heartbeatAt: new Date(Date.parse(startedAt) + 30_000).toISOString() });
         const stalled = await createWork(project.id);
-        await jobsRepository.update(stalled.id, { status: "stalled", retryAt: "2000-01-01T00:00:00.000Z", startedAt: new Date(Date.now() - 20_000).toISOString() });
+        await jobsRepository.update(stalled.id, { status: "stalled", retryAt: "2000-01-01T00:00:00.000Z", startedAt, heartbeatAt: new Date(Date.parse(startedAt) + 20_000).toISOString() });
+        const paused = await createWork(project.id);
+        await jobsRepository.update(paused.id, { status: "paused", startedAt, heartbeatAt: new Date(Date.parse(startedAt) + 10_000).toISOString() });
+        const missingHeartbeat = await createWork(project.id);
+        await jobsRepository.update(missingHeartbeat.id, { status: "running", startedAt });
         await jobsRepository.recover();
         const recovered = (await jobsRepository.get(job.id))!;
         assert.equal(recovered.status, "queued");
         assert.equal(recovered.startedAt, null);
-        assert.ok(recovered.elapsedMs >= 35_000);
+        assert.equal(recovered.heartbeatAt, null);
+        assert.equal(recovered.elapsedMs, 35_000);
         assert.equal(recovered.tokensUsed, 1500);
         const interruptedStall = (await jobsRepository.get(stalled.id))!;
         assert.equal(interruptedStall.status, "stalled");
         assert.equal(interruptedStall.startedAt, null);
-        assert.ok(interruptedStall.elapsedMs >= 20_000);
+        assert.equal(interruptedStall.elapsedMs, 20_000);
+        assert.equal((await jobsRepository.get(paused.id))?.status, "paused");
+        assert.equal((await jobsRepository.get(paused.id))?.elapsedMs, 10_000);
+        assert.equal((await jobsRepository.get(missingHeartbeat.id))?.elapsedMs, 0, "unknown active time must not include a day of backend downtime");
         await retryStalledJob(interruptedStall);
         assert.equal((await jobsRepository.get(stalled.id))?.status, "queued");
         assert.equal((await jobsRepository.get(stalled.id))?.safetyRetries, 1);
         await jobsRepository.recover();
         assert.equal((await jobsRepository.get(job.id))?.elapsedMs, recovered.elapsedMs);
         assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "recovered").length, 1);
+    });
+
+    test("execution checkpoints cannot charge twice or update a later attempt", async () => {
+        const project = await projectWithWork();
+        const job = await createWork(project.id);
+        const running = (await jobsRepository.claim(job.id))!;
+        assert.equal(running.heartbeatAt, running.startedAt);
+        await Promise.all([jobsRepository.recordUsage(job.id, 20), jobsRepository.recordUsage(job.id, 30)]);
+        await jobsRepository.heartbeat(job.id, running.startedAt!);
+        assert.ok(Date.parse((await jobsRepository.get(job.id))!.heartbeatAt!) >= Date.parse(running.startedAt!));
+        await jobsRepository.finishExecution(job.id, running.startedAt!, 1500);
+        await jobsRepository.finishExecution(job.id, running.startedAt!, 1500);
+        await jobsRepository.heartbeat(job.id, running.startedAt!);
+        const finished = (await jobsRepository.get(job.id))!;
+        assert.equal(finished.elapsedMs, 1500);
+        assert.equal(finished.tokensUsed, 50);
+        assert.equal(finished.startedAt, null);
+        assert.equal(finished.heartbeatAt, null);
+        const nextStartedAt = new Date(Date.parse(running.startedAt!) + 10_000).toISOString();
+        await jobsRepository.update(job.id, { startedAt: nextStartedAt, heartbeatAt: nextStartedAt });
+        await jobsRepository.finishExecution(job.id, running.startedAt!, 1500);
+        await jobsRepository.heartbeat(job.id, running.startedAt!);
+        assert.equal((await jobsRepository.get(job.id))?.startedAt, nextStartedAt);
+        assert.equal((await jobsRepository.get(job.id))?.heartbeatAt, nextStartedAt);
+        assert.equal((await jobsRepository.get(job.id))?.elapsedMs, 1500);
     });
 
     test("infrastructure failures persist a delayed retry and scrub details without asking the human", async () => {

@@ -43,14 +43,19 @@ export const jobsRepository = {
         }
     },
     async recordUsage(id: string, tokens: number, wallTimeMs = 0) {
-        const job = await this.get(id);
-        if (!job) return;
-        await this.update(id, {
-            tokensUsed: job.tokensUsed + tokens, elapsedMs: job.elapsedMs + wallTimeMs,
-        });
+        await db.update(jobs).set({ tokensUsed: sql`${jobs.tokensUsed} + ${tokens}`, elapsedMs: sql`${jobs.elapsedMs} + ${wallTimeMs}`, updatedAt: now() })
+            .where(eq(jobs.id, id));
+    },
+    async heartbeat(id: string, startedAt: string) {
+        await db.update(jobs).set({ heartbeatAt: now() }).where(and(eq(jobs.id, id), eq(jobs.startedAt, startedAt)));
+    },
+    async finishExecution(id: string, startedAt: string, wallTimeMs: number) {
+        await db.update(jobs).set({ elapsedMs: sql`${jobs.elapsedMs} + ${wallTimeMs}`, startedAt: null, heartbeatAt: null, updatedAt: now() })
+            .where(and(eq(jobs.id, id), eq(jobs.startedAt, startedAt)));
     },
     async claim(id: string) {
-        const [job] = await db.update(jobs).set({ status: "running", startedAt: now(), updatedAt: now() })
+        const startedAt = now();
+        const [job] = await db.update(jobs).set({ status: "running", startedAt, heartbeatAt: startedAt, updatedAt: startedAt })
             .where(and(eq(jobs.id, id), eq(jobs.status, "queued"))).returning();
         if (job) await recordAgentMetric(job, "started");
         return job ?? null;
@@ -109,9 +114,15 @@ export const jobsRepository = {
     },
     async recover() {
         for (const job of await db.select().from(jobs).where(isNotNull(jobs.startedAt))) {
-            await this.recordUsage(job.id, 0, Math.max(0, Date.now() - Date.parse(job.startedAt ?? now())));
-            await this.update(job.id, { status: job.status === "running" ? "queued" : job.status, startedAt: null });
-            await this.log(job.id, "recovered", "Backend restarted. Reconcile existing Inbox proposals before continuing; do not repeat browser mutations.");
+            const interval = Date.parse(job.heartbeatAt ?? job.startedAt!) - Date.parse(job.startedAt!);
+            const activeMs = Number.isFinite(interval) ? Math.max(0, interval) : 0;
+            const [recovered] = await db.update(jobs).set({ status: job.status === "running" ? "queued" : job.status,
+                elapsedMs: sql`${jobs.elapsedMs} + ${activeMs}`, startedAt: null, heartbeatAt: null, updatedAt: now() })
+                .where(and(eq(jobs.id, job.id), eq(jobs.status, job.status), eq(jobs.startedAt, job.startedAt!))).returning();
+            if (recovered) {
+                await recordAgentMetric(recovered, "status_changed");
+                await this.log(job.id, "recovered", "Backend restarted. Reconcile existing Inbox proposals before continuing; do not repeat browser mutations.");
+            }
         }
         // An approval may have committed before the process stopped. Require a
         // human to reconcile it rather than silently applying the same change twice.

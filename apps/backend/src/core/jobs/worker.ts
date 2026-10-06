@@ -45,6 +45,9 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
 
 async function executeJob(job: Job): Promise<void> {
     const started = Date.now();
+    const heartbeat = setInterval(() => void jobsRepository.heartbeat(job.id, job.startedAt!)
+        .catch((error) => logger.error("job heartbeat failed", { jobId: job.id, error })), 5000);
+    heartbeat.unref();
     const scrub = createProjectScrubber(job.projectId);
     const abort = () => {
         void abortChatTurn(job.chatId).catch(() => undefined);
@@ -89,8 +92,8 @@ async function executeJob(job: Job): Promise<void> {
     } finally {
         clearTimeout(deadline);
         await closeChatBrowser(job.chatId).catch(() => undefined);
-        await jobsRepository.recordUsage(job.id, 0, Date.now() - started);
-        await jobsRepository.update(job.id, { startedAt: null });
+        clearInterval(heartbeat);
+        await jobsRepository.finishExecution(job.id, job.startedAt!, Math.max(0, Date.now() - started));
         await jobsRepository.log(job.id, "stopped", (await jobsRepository.get(job.id))?.status ?? "unknown");
     }
 }
