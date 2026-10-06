@@ -8,7 +8,7 @@ import { decryptSecret } from "../credentials/crypto";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { getRunBatch, startSpecBatch, type RunBatch } from "../runner/batch";
 import { areSpecsLocked } from "../specs/lifecycle";
-import { enqueueJob } from "./worker";
+import { stewardRepository } from "../../infra/repositories/steward";
 
 interface CronField {
     values: Set<number>;
@@ -180,9 +180,9 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
             const scrub = await projectSecretScrubber(projectId);
             const message = scrub(error instanceof Error ? error.message : String(error)).slice(0, 4000);
             await schedulesRepository.update(projectId, { lastError: message });
-            if (automation.lastError !== message) await enqueueJob(projectId, {
-                trigger: "schedule",
-                goal: `A scheduled Spec run could not start: ${message}\nInvestigate the blocker. Ask for credentials or a human decision through the Inbox when needed. Keep spec.yml unchanged.`,
+            if (automation.lastError !== message) await stewardRepository.signal({
+                projectId, kind: "app_unavailable", key: `schedule:${message}`, title: "A scheduled run could not start",
+                body: `A scheduled Spec run could not start: ${message}\nInvestigate the blocker. Ask for credentials or a human decision through the Inbox when needed. Keep spec.yml unchanged.`,
             });
         }
     });

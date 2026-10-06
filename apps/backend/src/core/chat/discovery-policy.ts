@@ -27,7 +27,7 @@ function isWithinDiscoveryOrigin(url: string, origin: string): boolean {
 }
 
 export function createDiscoveryBrowserPolicy(
-    revision: ProjectContextRevisionRow,
+    revision: Pick<ProjectContextRevisionRow, "brief">,
     mcp: BrowserMcp,
 ): BrowserToolPolicy {
     const origin = new URL(revision.brief.startUrl).origin;
@@ -76,5 +76,18 @@ export function createDiscoveryBrowserPolicy(
                 `The page left the discovery origin ${origin} (it reached ${active}). The browser returned to the allowed origin; the external destination was not inspected.`,
             );
         },
+    };
+}
+
+/** Keep the browser capabilities visible; enforce autonomous exploration policy at execution. */
+export function createAutonomousBrowserPolicy(startUrl: string, mcp: BrowserMcp): BrowserToolPolicy {
+    const policy = createDiscoveryBrowserPolicy({ brief: { startUrl } as ProjectContextRevisionRow["brief"] }, mcp);
+    const allowed = new Set([...DISCOVERY_BROWSER_TOOLS, "browser_console_messages", "browser_network_requests", "browser_take_screenshot"]);
+    return {
+        beforeCall: async (name, args) => {
+            if (!allowed.has(name)) throw new Error("This browser action needs human authorization. Explain the blocker in the Inbox before proceeding.");
+            await policy.beforeCall?.(name, args);
+        },
+        afterCall: policy.afterCall,
     };
 }

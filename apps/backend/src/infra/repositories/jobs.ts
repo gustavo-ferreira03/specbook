@@ -8,8 +8,8 @@ export type InboxItem = typeof inboxItems.$inferSelect;
 const now = () => new Date().toISOString();
 
 export const jobsRepository = {
-    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "budget"> & Partial<Pick<Job, "kind" | "specId" | "runId" | "pendingMessage">>): Promise<Job> {
-        const [job] = await db.insert(jobs).values({ ...input, id: crypto.randomUUID(), status: "queued", pendingMessage: input.pendingMessage ?? input.goal, createdAt: now(), updatedAt: now() }).returning();
+    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "budget"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage">>): Promise<Job> {
+        const [job] = await db.insert(jobs).values({ ...input, id: input.id ?? crypto.randomUUID(), status: "queued", pendingMessage: input.pendingMessage ?? input.goal, createdAt: now(), updatedAt: now() }).returning();
         return job!;
     },
     async get(id: string) {

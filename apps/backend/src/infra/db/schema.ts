@@ -251,3 +251,38 @@ export const webhookNotifications = sqliteTable("webhook_notifications", {
     lastError: text("last_error"),
     createdAt: text("created_at").notNull(),
 }, (table) => [uniqueIndex("webhook_batch_status_unique").on(table.batchId, table.status), index("webhook_retry_idx").on(table.nextAttemptAt)]);
+
+export const projectStewards = sqliteTable("project_stewards", {
+    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+    autonomy: text("autonomy").$type<"observe" | "propose" | "act">().notNull().default("propose"),
+    observation: text("observation", { mode: "json" }).$type<import("../../core/steward/signals").ProjectObservation>().notNull().default({}),
+    lastPlannerAt: text("last_planner_at"),
+    updatedAt: text("updated_at").notNull(),
+});
+
+export const projectSignals = sqliteTable("project_signals", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    status: text("status").$type<"pending" | "handled" | "observed">().notNull().default("pending"),
+    createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("project_signal_key").on(table.projectId, table.key)]);
+
+export const stewardIntents = sqliteTable("steward_intents", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    intent: text("intent", { mode: "json" }).$type<import("../../core/steward/schemas").StewardIntent>().notNull(),
+    priority: integer("priority").notNull(),
+    status: text("status").$type<"pending" | "running" | "completed" | "ignored" | "failed">().notNull().default("pending"),
+    reason: text("reason").notNull(),
+    jobId: text("job_id"),
+    batchId: text("batch_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [uniqueIndex("steward_intent_key").on(table.projectId, table.key)]);

@@ -360,3 +360,59 @@ describe("autonomous job proposals", () => {
         assert.equal((await jobsRepository.item(next.id))?.answer, null);
     });
 });
+
+describe("project steward", () => {
+    test("observes without launching work, then deduplicates intents across concurrent processing", async () => {
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { enqueueIntent, processProjectSteward, dailyBudget } = await import("../../src/core/steward/engine");
+        await stopJobWorker();
+        const projectId = await createProject("Steward decisions");
+        await stewardRepository.update(projectId, { autonomy: "observe" });
+        const signal = { projectId, key: "empty", kind: "empty_project", title: "No Specs", body: "Propose a first Spec" };
+        await stewardRepository.signal(signal);
+        await stewardRepository.signal(signal);
+        await processProjectSteward(projectId, false);
+        assert.equal((await stewardRepository.signals(projectId)).length, 1);
+        assert.equal((await stewardRepository.signals(projectId))[0]?.status, "observed");
+        assert.equal((await jobsRepository.list(projectId)).length, 0);
+        await stewardRepository.update(projectId, { autonomy: "propose" });
+        const intent = { kind: "coverage", goal: "Explore sign in", reason: "Sign in lacks coverage", priority: 90 };
+        const one = await enqueueIntent(projectId, intent, "chat:one");
+        const duplicate = await enqueueIntent(projectId, intent, "chat:one");
+        assert.equal(one.id, duplicate.id);
+        await Promise.all([processProjectSteward(projectId, false), processProjectSteward(projectId, false)]);
+        const jobs = await jobsRepository.list(projectId);
+        assert.equal(jobs.length, 1);
+        assert.equal(jobs[0]?.id, one.id, "job identity allows dispatch recovery without duplicates");
+        assert.equal(dailyBudget(jobs).tokens, 200_000, "queued work reserves its full budget");
+        const proposal = await jobsRepository.addItem({ projectId, jobId: one.id, kind: "new_spec", title: "Sign in", body: "Proposed coverage" });
+        await jobsRepository.updateItem(proposal.id, { status: "rejected" });
+        await jobsRepository.update(one.id, { status: "completed" });
+        const again = await enqueueIntent(projectId, intent, "chat:two");
+        await processProjectSteward(projectId, false);
+        const remembered = (await stewardRepository.intents(projectId)).find((item) => item.id === again.id);
+        assert.equal(remembered?.status, "ignored");
+        assert.match(remembered?.reason ?? "", /human rejected/i);
+    });
+
+    test("trusted automatic fixes compare syntax, not selector-like text inside input values", async () => {
+        const { isLocatorOnlyFix } = await import("../../src/core/steward/approval");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const projectId = await createProject("Trusted fixes");
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Review", budget: jobBudgetSchema.parse({}) });
+        const source = VALID_SPEC.replace('page.getByRole("heading")', 'page.locator("body")');
+        const before = source.replace('page.locator("body")', 'page.locator("main")');
+        const item = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_fix", title: "Fix", body: "Fix", payload: {
+            requiresVerification: true, before: { testSource: before }, params: { specId: crypto.randomUUID(), testSource: source },
+        } });
+        assert.equal(isLocatorOnlyFix(item), true);
+        item.payload.params = { ...(item.payload.params as object), humanSpec: HUMAN_SPEC };
+        assert.equal(isLocatorOnlyFix(item), false, "behavior proposals always need a human");
+        item.payload.before = { testSource: `page.fill(".locator('old')")` };
+        item.payload.params = { specId: crypto.randomUUID(), testSource: `page.fill(".locator('new')")` };
+        assert.equal(isLocatorOnlyFix(item), false, "input data cannot masquerade as a locator change");
+    });
+});

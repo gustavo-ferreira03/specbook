@@ -33,7 +33,8 @@ import {
 } from "./chat-registry";
 import { createContextTools } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
-import { createDiscoveryBrowserPolicy } from "./discovery-policy";
+import { createBackgroundTaskTool } from "../steward/tools";
+import { createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy } from "./discovery-policy";
 import { TurnMetricsRecorder, type TurnTrigger } from "./metrics";
 import { buildSystemPrompt } from "./prompts";
 import {
@@ -226,7 +227,7 @@ async function runReservedChatTurn(
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision
                 ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp), sanitizeResult: scrub }
-                : { sanitizeResult: scrub };
+                : turnPolicy ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp), sanitizeResult: scrub } : { sanitizeResult: scrub };
             const policy: BrowserToolPolicy = {
                 ...basePolicy,
                 beforeCall: async (toolName, args) => {
@@ -278,6 +279,7 @@ async function runReservedChatTurn(
             : [
                   ...browserTools,
                   ...createDomainTools(row.projectId, { scrub, metrics }),
+                  ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`)] : []),
                   ...credentialTools,
                   ...sessionTools,
               ];

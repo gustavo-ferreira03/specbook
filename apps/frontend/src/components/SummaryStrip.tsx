@@ -6,7 +6,6 @@ const SUMMARY_WORDING: Record<string, string> = {
     passed: "passing",
     failed: "failing",
     invalid: "invalid",
-    conflict: "in conflict",
     unverified: "not run",
 };
 

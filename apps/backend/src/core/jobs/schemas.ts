@@ -6,11 +6,11 @@ export const jobBudgetSchema = z.object({
     maxActions: z.number().int().min(1).max(1000).default(80),
 });
 export const createJobSchema = z.object({
-    kind: z.enum(["review", "failure_triage"]).default("review"),
+    kind: z.enum(["review", "failure_triage", "planner", "regenerate", "coverage", "explore"]).default("review"),
     specId: z.string().uuid().optional(),
     runId: z.string().uuid().optional(),
     goal: z.string().trim().min(1).max(12000).default("Review this project's Specs and propose useful improvements. Ask when blocked."),
-    trigger: z.enum(["manual", "schedule", "spec_failure", "webhook"]).default("manual"),
+    trigger: z.enum(["manual", "schedule", "spec_failure", "webhook", "steward", "chat"]).default("manual"),
     budget: jobBudgetSchema.default(() => jobBudgetSchema.parse({})),
 });
 export const humanSpecSchema = z.object({

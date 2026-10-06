@@ -19,6 +19,12 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
             throw new Error("Healing changes only this Spec’s implementation. Propose any behavior change as an Inbox question.");
         }
     }
+    if (job.kind === "regenerate") {
+        const patch = fixProposalSchema.parse(input);
+        if (name !== "update_spec" || patch.specId !== job.specId || patch.humanSpec || patch.title !== undefined || patch.description !== undefined) {
+            throw new Error("Regeneration changes only spec.ts. Ask the human about changes to spec.yml.");
+        }
+    }
     return repoGit.withRepoLock(job.projectId, async () => {
         const baseHead = await repoGit.getHeadSha(job.projectId);
         let kind: InboxItem["kind"];
@@ -57,7 +63,7 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
             title = `Proposed Feature: ${proposed.title}`;
             params = proposed;
         }
-        const payload = { baseHead, params, before, requiresVerification: job.kind === "failure_triage" };
+        const payload = { baseHead, params, before, requiresVerification: ["failure_triage", "regenerate"].includes(job.kind) };
         const existing = (await jobsRepository.inbox(job.projectId)).find((item) =>
             item.jobId === job.id && item.status === "pending" && item.payload.baseHead === baseHead && JSON.stringify(item.payload.params) === JSON.stringify(params));
         if (existing) return existing;

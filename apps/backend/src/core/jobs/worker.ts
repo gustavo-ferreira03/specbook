@@ -14,7 +14,11 @@ let polling = false;
 let stopped = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 
-export async function enqueueJob(projectId: string, input: unknown = {}): Promise<Job> {
+export async function enqueueJob(projectId: string, input: unknown = {}, id?: string): Promise<Job> {
+    if (id) {
+        const existing = await jobsRepository.get(id);
+        if (existing) return existing;
+    }
     const parsed = createJobSchema.parse(input);
     let pendingMessage = parsed.goal;
     if (parsed.kind === "failure_triage") {
@@ -26,7 +30,7 @@ export async function enqueueJob(projectId: string, input: unknown = {}): Promis
         pendingMessage = input.message;
     }
     const chat = await createChat(projectId);
-    const job = await jobsRepository.create({ ...parsed, pendingMessage, projectId, chatId: chat.id });
+    const job = await jobsRepository.create({ ...parsed, id, pendingMessage, projectId, chatId: chat.id });
     await jobsRepository.log(job.id, "queued", parsed.trigger);
     void drainJobs();
     return job;
@@ -51,11 +55,10 @@ async function executeJob(job: Job): Promise<void> {
         }
         if (stopped) return;
         const current = await jobsRepository.get(job.id);
-        const items = (await jobsRepository.inbox(job.projectId)).filter((item) => item.jobId === job.id);
         const messages = await getChatMessages(job.chatId);
         const last = messages?.filter((message) => message.role === "agent").at(-1)?.content;
         if (current?.status === "running") {
-            const blocked = !items.length || /couldn't respond|No LLM model|not authenticated|turn failed|unavailable/.test(last ?? "");
+            const blocked = !last || /couldn't respond|No LLM model|not authenticated|turn failed|unavailable/.test(last ?? "");
             await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: blocked ? "question" : "note",
                 title: blocked ? "Job needs your input" : "Job result", body: await scrub(last || "The agent could not complete this turn. Check the provider settings and reply to resume.") });
             await jobsRepository.transition(job.id, "running", blocked ? "blocked" : "completed");
@@ -86,6 +89,8 @@ export async function drainJobs(): Promise<void> {
         for (const row of await jobsRepository.queued()) {
             if (active.size >= limit || stopped) break;
             if (active.has(row.id)) continue;
+            const siblings = await jobsRepository.list(row.projectId);
+            if (siblings.some((job) => job.status === "running" || active.has(job.id))) continue;
             const job = await jobsRepository.claim(row.id);
             if (!job) continue;
             active.add(job.id);

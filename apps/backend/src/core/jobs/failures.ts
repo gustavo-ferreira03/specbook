@@ -1,7 +1,7 @@
 import { runsRepository } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { logger } from "../../infra/logger";
-import { enqueueJob } from "./worker";
+import { recordFailureSignal } from "../steward/engine";
 
 let processing = false;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -14,7 +14,7 @@ export async function processRunFailures(): Promise<void> {
             try {
                 const spec = await specsRepository.getSpec(run.specId);
                 if (spec && (run.status === "failed" || run.status === "error")) {
-                    await enqueueJob(spec.projectId, { kind: "failure_triage", trigger: "spec_failure", runId: run.id });
+                    await recordFailureSignal(spec.projectId, run.id, spec.id, spec.title);
                 }
                 await runsRepository.acknowledgeAutomation(run.id);
             } catch (error) {

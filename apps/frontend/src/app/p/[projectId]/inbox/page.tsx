@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
-import { AlertCircle, Bot, Check, ChevronDown, CircleDashed, FileCode2, Inbox, LoaderCircle, MessageSquareText, RefreshCw, X } from "lucide-react";
+import { Activity, AlertCircle, Check, ChevronDown, CircleDashed, FileCode2, Inbox, LoaderCircle, MessageSquareText, RefreshCw, X } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { HighlightedCode } from "@/components/RawFileEditor";
@@ -115,8 +115,9 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
         }
     }
 
-    const pending = items?.filter((item) => item.status === "pending" || item.status === "applying") ?? [];
-    const visible = showReviewed ? items ?? [] : pending;
+    const reviewable = items?.filter((item) => item.kind !== "note") ?? [];
+    const pending = reviewable.filter((item) => item.status === "pending" || item.status === "applying");
+    const visible = showReviewed ? reviewable : pending;
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
@@ -124,7 +125,7 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
                 title="Inbox"
                 description="Review the agent’s proposals, findings, and questions."
                 width="data"
-                actions={<Button asChild variant="outline"><Link href={`/p/${projectId}/jobs`}><Bot size={14} /> View jobs</Link></Button>}
+                actions={<Button asChild variant="outline"><Link href={`/p/${projectId}/activity`}><Activity size={14} /> View activity</Link></Button>}
             />
             <PageContainer width="data" innerClassName="space-y-6">
                 {loadError && items && (
@@ -141,9 +142,9 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
                     </div>
                 ) : (
                     <>
-                        {items.length > 0 && (
+                        {reviewable.length > 0 && (
                             <div role="group" aria-label="Filter Inbox" className="-mx-1 flex flex-wrap items-center gap-1">
-                                {[{ value: false, label: "Needs review", count: pending.length }, { value: true, label: "All items", count: items.length }].map((filter) => (
+                                {[{ value: false, label: "Needs review", count: pending.length }, { value: true, label: "All items", count: reviewable.length }].map((filter) => (
                                     <Button key={filter.label} type="button" variant="ghost" size="sm" aria-pressed={showReviewed === filter.value} onClick={() => setShowReviewed(filter.value)} className={cn("h-8 gap-1.5 rounded-full px-3", showReviewed === filter.value && "bg-surface-selected text-ink hover:bg-surface-selected")}>
                                         {filter.label}<span className="tabular text-ink-subtle">{filter.count}</span>
                                     </Button>
@@ -153,9 +154,9 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
                         {visible.length === 0 ? (
                             <EmptyState
                                 icon={Inbox}
-                                title="Nothing to review"
-                                description={items.length ? "All items have been reviewed. New proposals and questions will appear here." : "Start a job to investigate your app. Its proposals and questions will appear here."}
-                                action={<Button asChild><Link href={`/p/${projectId}/jobs`}><Bot size={14} /> Start a job</Link></Button>}
+                                title="Nothing needs your attention"
+                                description="The agent brings you proposals, findings, and questions when a decision is needed. Follow its work in Activity."
+                                action={<Button asChild variant="outline"><Link href={`/p/${projectId}/activity`}><Activity size={14} /> View activity</Link></Button>}
                             />
                         ) : (
                             <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line" aria-label="Inbox items">
@@ -173,7 +174,7 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
                                             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ink-subtle">
                                                 <span>{ITEM_KINDS[item.kind]}</span>
                                                 <RelativeTime value={item.createdAt} />
-                                                <Link className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={`/p/${projectId}/jobs#${item.jobId}`}>Job details</Link>
+                                                <Link className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={`/p/${projectId}/activity#${item.jobId}`}>View activity</Link>
                                             </div>
                                             <p className="mt-3 max-w-reading whitespace-pre-wrap break-words text-body text-ink">{item.body}</p>
                                             {item.payload.params && <ProposedChanges item={item} />}

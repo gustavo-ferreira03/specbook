@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import {
     AlertCircle,
     Inbox,
-    Bot,
+    Activity,
     ChevronRight,
     ChevronsUpDown,
     FileCheck2,
@@ -639,7 +639,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 </Tabs>
 
                 <div className="shrink-0 space-y-1 border-t border-line p-2">
-                    {([ ["inbox", "Inbox", Inbox], ["jobs", "Jobs", Bot] ] as const).map(([route, label, Icon]) => (
+                    {([ ["inbox", "Inbox", Inbox], ["activity", "Activity", Activity] ] as const).map(([route, label, Icon]) => (
                         <Link key={route} href={`/p/${projectId}/${route}`} aria-current={pathname === `/p/${projectId}/${route}` ? "page" : undefined}
                             className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}/${route}` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}><Icon size={15} />{label}</Link>
                     ))}

@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { startSteward, stopSteward } from "./core/steward/engine";
+import { createStewardRouter } from "./infra/web/routes/steward";
 import { startFailureMonitor, stopFailureMonitor } from "./core/jobs/failures";
 import { startScheduleMonitor, stopScheduleMonitor } from "./core/jobs/schedules";
 import { startJobWorker, stopJobWorker } from "./core/jobs/worker";
@@ -87,6 +89,7 @@ app.onError((err, c) => {
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/", createProjectsRouter());
 app.route("/", createJobsRouter());
+app.route("/", createStewardRouter());
 app.route("/", createSchedulesRouter());
 app.route("/", createSpecsRouter());
 app.route("/", createRunsRouter());
@@ -110,6 +113,7 @@ await reindexAllProjects();
 await startJobWorker();
 startFailureMonitor();
 startScheduleMonitor();
+startSteward();
 // ---------------------------------------------------------------------------
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     logger.info("backend listening", { hostname, port });
@@ -160,6 +164,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     wss.close();
     stopFailureMonitor();
     stopScheduleMonitor();
+    stopSteward();
     await stopJobWorker();
     stopActiveRunProcesses();
     await closeAllChatBrowsers().catch((error: unknown) => logger.error("closing browsers failed", { error }));

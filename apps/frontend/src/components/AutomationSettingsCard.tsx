@@ -36,6 +36,8 @@ interface AutomationResponse {
 }
 
 export function AutomationSettingsCard({ projectId }: { projectId: string }) {
+    const [autonomy, setAutonomy] = useState("propose");
+    const [savedAutonomy, setSavedAutonomy] = useState("propose");
     const [settings, setSettings] = useState<AutomationSettings | null>(null);
     const [notifications, setNotifications] = useState<AutomationResponse["notifications"]>([]);
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
@@ -65,8 +67,13 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setLoading(true);
         setLoadError("");
         setSpecsError("");
-        api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, { signal: controller.signal })
-            .then((result) => {
+        Promise.all([
+            api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, { signal: controller.signal }),
+            api<{ autonomy: string }>(apiPath`/projects/${projectId}/steward`, { signal: controller.signal }),
+        ])
+            .then(([result, steward]) => {
+                setAutonomy(steward.autonomy);
+                setSavedAutonomy(steward.autonomy);
                 applySettings(result.automation);
                 setNotifications(result.notifications);
             })
@@ -79,7 +86,8 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
     }, [projectId, retryKey]);
 
     const dirty = settings !== null && (
-        cron.trim() !== (settings.cron ?? "")
+        autonomy !== savedAutonomy
+        || cron.trim() !== (settings.cron ?? "")
         || JSON.stringify([...specIds].sort()) !== JSON.stringify([...settings.specIds].sort())
         || healFailures !== settings.healFailures
         || Boolean(webhookUrl.trim())
@@ -91,6 +99,8 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setSaving(true);
         setFeedback(null);
         try {
+            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ autonomy }) });
+            setSavedAutonomy(autonomy);
             const result = await api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, {
                 method: "PUT",
                 body: JSON.stringify({
@@ -124,6 +134,17 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                     </SettingsBlock>
                 ) : settings && (
                     <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
+                        <SettingsRow label="Autonomy" htmlFor="automation-autonomy" description="The agent watches for changes without a schedule.">
+                            <Select value={autonomy} onValueChange={(value) => { setAutonomy(value); setFeedback(null); }} disabled={saving}>
+                                <SelectTrigger id="automation-autonomy"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="observe">Observe changes</SelectItem>
+                                    <SelectItem value="propose">Investigate and propose</SelectItem>
+                                    <SelectItem value="act">Apply trusted locator fixes</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes always need your approval. Trusted fixes must pass verification and follow at least three approved locator fixes. Daily investigation budget: 300,000 tokens and 30 minutes, including reserved work.</p>
+                        </SettingsRow>
                         <SettingsRow label="Schedule" htmlFor="automation-cron" description="Optional, in UTC.">
                             <Input id="automation-cron" value={cron} onChange={(event) => { setCron(event.target.value); setFeedback(null); }} placeholder="0 9 * * 1-5" disabled={saving} className="font-mono" autoComplete="off" aria-describedby="automation-cron-help" />
                             <p id="automation-cron-help" className="mt-1.5 text-meta text-ink-subtle">Five cron fields: minute, hour, day, month, weekday. This example runs at 09:00 UTC on weekdays. Leave blank to turn scheduled runs off.</p>
