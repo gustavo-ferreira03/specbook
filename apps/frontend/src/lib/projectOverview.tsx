@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { getOverview } from "./api";
-import { onInvalidate } from "./invalidation";
+import { invalidate, onInvalidate } from "./invalidation";
 import type { OverviewResponse } from "./types";
 import { useVisiblePolling } from "./usePolling";
 
@@ -20,11 +20,18 @@ export function ProjectOverviewProvider({ projectId, children }: { projectId: st
     const [state, setState] = useState<{ projectId: string; data: OverviewResponse | null; failed: boolean }>({ projectId, data: null, failed: false });
     const generation = useRef(0);
 
+    const specSet = useRef("");
+
     const reload = useCallback(async () => {
         const current = ++generation.current;
         try {
             const data = await getOverview(projectId);
-            if (current === generation.current) setState({ projectId, data, failed: false });
+            if (current !== generation.current) return;
+            setState({ projectId, data, failed: false });
+            // The agent saves and repairs Specs in the background; refresh the Spec tree when the set changes.
+            const specs = `${projectId}:${Object.entries(data.specHealth).map(([id, health]) => `${id}=${health.status}`).sort().join(",")}`;
+            if (specSet.current && specSet.current !== specs && specSet.current.startsWith(`${projectId}:`)) invalidate({ resource: "tree", projectId });
+            specSet.current = specs;
         } catch {
             if (current === generation.current) setState((previous) => ({ projectId, data: previous.projectId === projectId ? previous.data : null, failed: true }));
         }

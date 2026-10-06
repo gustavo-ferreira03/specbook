@@ -923,11 +923,12 @@ describe("autonomous pause and decisions", () => {
         await jobsRepository.recover();
         assert.equal((await jobsRepository.get(queued.id))?.status, "paused");
         assert.equal((await stewardRepository.get(project.id)).paused, true);
-        await put(endpoint, { autonomy: "act" });
+        await put(endpoint, { autonomy: "observe" });
+        await put(endpoint, { autonomy: "propose" });
         assert.equal((await stewardRepository.get(project.id)).paused, true, "autonomy changes must not implicitly resume the agent");
         const resumed = await put(endpoint, { paused: false });
         assert.equal(resumed.status, 200);
-        assert.deepEqual(await resumed.json(), { autonomy: "act", paused: false, globallyPaused: false });
+        assert.deepEqual(await resumed.json(), { autonomy: "propose", paused: false, globallyPaused: false });
         const retained = (await jobsRepository.get(queued.id))!;
         assert.equal(retained.status, "queued");
         assert.equal(retained.tokensUsed, 25_000);

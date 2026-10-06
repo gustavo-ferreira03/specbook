@@ -174,11 +174,10 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                                 <SelectTrigger id="automation-autonomy"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="observe">Observe changes</SelectItem>
-                                    <SelectItem value="propose">Investigate and propose</SelectItem>
-                                    <SelectItem value="act">Investigate with optional automatic fixes</SelectItem>
+                                    <SelectItem value="propose">Investigate and repair</SelectItem>
                                 </SelectContent>
                             </Select>
-                            <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes and assertion changes always need your approval.</p>
+                            <p className="mt-1.5 text-meta text-ink-subtle">Verified repairs that keep the expected behavior are saved automatically. Behavior and assertion changes always need your approval.</p>
                         </SettingsRow>
                         <SettingsRow label="Schedule" htmlFor="automation-cron" description="Optional, in UTC.">
                             <Input id="automation-cron" value={cron} onChange={(event) => { setCron(event.target.value); setFeedback(null); }} placeholder="0 9 * * 1-5" disabled={saving} className="font-mono" autoComplete="off" aria-describedby="automation-cron-help" />

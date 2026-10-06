@@ -12,7 +12,7 @@ import { projectsRepository } from "../../repositories/projects";
 import { settingsRepository } from "../../repositories/settings";
 import { stewardRepository } from "../../repositories/steward";
 
-const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose", "act"]).optional(), paused: z.boolean().optional() }).strict()
+const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose"]).optional(), paused: z.boolean().optional() }).strict()
     .refine((input) => Object.keys(input).length > 0, "Provide an automation setting or pause state");
 const taskSchema = z.object({ kind: z.enum(["coverage", "explore"]), goal: z.string().trim().min(1).max(6000).optional() }).strict();
 

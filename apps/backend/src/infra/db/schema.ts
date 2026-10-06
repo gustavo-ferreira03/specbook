@@ -351,7 +351,7 @@ export const webhookNotifications = sqliteTable("webhook_notifications", {
 
 export const projectStewards = sqliteTable("project_stewards", {
     projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
-    autonomy: text("autonomy").$type<"observe" | "propose" | "act">().notNull().default("propose"),
+    autonomy: text("autonomy").$type<"observe" | "propose">().notNull().default("propose"),
     paused: integer("paused", { mode: "boolean" }).notNull().default(false),
     observation: text("observation", { mode: "json" }).$type<import("../../core/steward/signals").ProjectObservation>().notNull().default({}),
     updatedAt: text("updated_at").notNull(),
