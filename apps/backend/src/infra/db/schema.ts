@@ -184,8 +184,71 @@ export const appSettings = sqliteTable("app_settings", {
     id: integer("id").primaryKey(),
     llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),
     agentPaused: integer("agent_paused", { mode: "boolean" }).notNull().default(false),
+    sso: text("sso", { mode: "json" }).$type<import("../../core/accounts/schemas").SsoSettings>(),
+    retention: text("retention", { mode: "json" }).$type<import("../../core/operations/schemas").RetentionSettings>(),
+    retentionLastCleanup: text("retention_last_cleanup", { mode: "json" }).$type<import("../../core/operations/schemas").RetentionCleanup>(),
+    security: text("security", { mode: "json" }).$type<import("../../core/chat/safety-settings").SecuritySettings>(),
     updatedAt: text("updated_at").notNull(),
 });
+
+export const users = sqliteTable("users", {
+    id: text("id").primaryKey(),
+    email: text("email").notNull().unique(),
+    name: text("name").notNull(),
+    passwordHash: text("password_hash"),
+    role: text("role").$type<import("../../core/accounts/schemas").UserRole>().notNull(),
+    disabledAt: text("disabled_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+});
+
+export const userSessions = sqliteTable("user_sessions", {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+}, (table) => [index("user_sessions_user").on(table.userId), index("user_sessions_expiry").on(table.expiresAt)]);
+
+export const userInvites = sqliteTable("user_invites", {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    email: text("email").notNull(),
+    role: text("role").$type<import("../../core/accounts/schemas").UserRole>().notNull(),
+    createdBy: text("created_by").notNull().references(() => users.id),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    consumedAt: text("consumed_at"),
+});
+
+export const oidcIdentities = sqliteTable("oidc_identities", {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    issuer: text("issuer").notNull(),
+    subject: text("subject").notNull(),
+}, (table) => [uniqueIndex("oidc_issuer_subject").on(table.issuer, table.subject), index("oidc_user").on(table.userId)]);
+
+export const oidcStates = sqliteTable("oidc_states", {
+    stateHash: text("state_hash").primaryKey(),
+    browserHash: text("browser_hash").notNull(),
+    pkceVerifier: text("pkce_verifier").notNull(),
+    nonce: text("nonce").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    issuer: text("issuer").notNull(),
+    clientId: text("client_id").notNull(),
+    linkUserId: text("link_user_id").references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: text("expires_at").notNull(),
+});
+
+export const auditEvents = sqliteTable("audit_events", {
+    id: text("id").primaryKey(),
+    actorId: text("actor_id"),
+    actorName: text("actor_name").notNull(),
+    actorKind: text("actor_kind").$type<"user" | "agent" | "ci" | "git" | "system">().notNull(),
+    action: text("action").notNull(),
+    projectId: text("project_id"),
+    details: text("details", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: text("created_at").notNull(),
+}, (table) => [index("audit_created").on(table.createdAt, table.id), index("audit_project").on(table.projectId)]);
 
 export const jobs = sqliteTable("jobs", {
     id: text("id").primaryKey(),
