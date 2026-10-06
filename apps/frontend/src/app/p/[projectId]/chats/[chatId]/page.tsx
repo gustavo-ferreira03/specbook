@@ -2,10 +2,9 @@
 
 import { useAuth } from "@/components/AuthProvider";
 
-import { Suspense, type ReactNode, memo, use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, memo, use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowUp, Check, Compass, Copy, ExternalLink, LoaderCircle, MessageSquareText, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, WifiOff, X } from "lucide-react";
+import { AlertCircle, ArrowUp, Check, Compass, Copy, ExternalLink, LoaderCircle, Pencil, RefreshCw, RotateCcw, Settings2, Square, WifiOff, X } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatResultGroup } from "@/components/ChatResultGroup";
@@ -444,9 +443,6 @@ const MessageList = memo(function MessageList({
 function ChatContent({ projectId, chatId }: { projectId: string; chatId: string }) {
     const { canEdit, isAdmin } = useAuth();
     const chatResults = useChatResults(chatId, projectId);
-    const searchParams = useSearchParams();
-    const specId = searchParams.get("specId");
-    const repair = searchParams.get("intent") === "repair";
     const [state, setState] = useState<ChatState | null>(null);
     const [text, setText] = useState("");
     const [loadError, setLoadError] = useState("");
@@ -463,8 +459,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const [activeTool, setActiveTool] = useState("");
     const [agentStatus, setAgentStatus] = useState("");
     const [stopping, setStopping] = useState(false);
-    const [beginning, setBeginning] = useState(false);
-    const [beginError, setBeginError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
     const [steps, setSteps] = useState<ToolStep[]>([]);
     const [modelReady, setModelReady] = useState<boolean | null>(null);
@@ -478,14 +472,8 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const stickToBottomRef = useRef(true);
 
     useEffect(() => {
-        setText(
-            !specId
-                ? ""
-                : repair
-                    ? `Repair the executable check for Spec ${specId}, keeping its saved steps and expected result unchanged. `
-                    : `I want to change the Spec ${specId}. `,
-        );
-    }, [chatId, repair, specId]);
+        setText("");
+    }, [chatId]);
 
     useEffect(() => {
         let active = true;
@@ -702,26 +690,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
 
     const discovery = state?.mode === "discovery" && state.contextRevision?.status === "draft";
     const revisionInfo = state?.contextRevision ?? null;
-    const awaitingDiscoveryStart =
-        discovery && state !== null && state.messages.length === 0 && !state.busy;
-
-    async function beginDiscovery() {
-        if (beginning) return;
-        setBeginning(true);
-        setBeginError("");
-        try {
-            await sendChatMessage(
-                chatId,
-                "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes, then propose the project context.",
-            );
-            stickToBottomRef.current = true;
-            setState((current) => current ? { ...current, busy: true } : current);
-        } catch (error) {
-            setBeginError(errorMessage(error));
-        } finally {
-            setBeginning(false);
-        }
-    }
 
     async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -905,7 +873,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const chatsHref = `/p/${projectId}/chats`;
 
     useEffect(() => {
-        // Autosize, including text set programmatically (suggestions, the Spec prefill, a failed send).
+        // Autosize, including text restored after a failed send.
         const textarea = textareaRef.current;
         if (!textarea) return;
         textarea.style.height = "auto";
@@ -1012,66 +980,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                     <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
                         <div className="px-4 pt-6 pb-10 md:px-8 md:pt-8">
                             <div className="mx-auto w-full max-w-chat">
-                                {canEdit && awaitingDiscoveryStart && revisionInfo && (
-                                    <section className="pt-2 pb-8 md:pt-6" aria-labelledby="discovery-intro">
-                                        <span className="flex size-10 items-center justify-center rounded-full bg-surface-hover text-ink-muted" aria-hidden="true"><Compass size={18} /></span>
-                                        <h2 id="discovery-intro" className="mt-4 text-title text-ink text-balance">Ready to explore this application</h2>
-                                        <p className="mt-2 max-w-[60ch] text-body text-ink-muted">
-                                            The agent will browse from <span className="rounded-sm border border-line bg-surface-soft px-1 font-mono text-control text-ink [overflow-wrap:anywhere]">{revisionInfo.brief.startUrl}</span>, follow the saved goal, and draft a project context for your review.
-                                        </p>
-                                        {beginError && (
-                                            <Alert variant="destructive" className="mt-4 max-w-md" role="alert">
-                                                <AlertDescription>{beginError}</AlertDescription>
-                                            </Alert>
-                                        )}
-                                        <div className="mt-6 flex flex-wrap items-center gap-3">
-                                            <Button type="button" onClick={() => void beginDiscovery()} disabled={beginning || modelMissing}>
-                                                <Compass size={14} /> {beginning ? "Starting…" : "Begin discovery"}
-                                            </Button>
-                                            {modelMissing && isAdmin && (
-                                                <Button variant="link" onClick={() => setSettingsTab("model")}>Set up a model first</Button>
-                                            )}
-                                        </div>
-                                    </section>
-                                )}
-
-                                {canEdit && !discovery && state.messages.length === 0 && !state.busy && (
-                                    <section className="pt-2 pb-8 md:pt-6" aria-labelledby="chat-intro">
-                                        <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface" aria-hidden="true">
-                                            <LogoMark className="size-5 dark:invert" />
-                                        </span>
-                                        <h2 id="chat-intro" className="mt-4 text-title text-ink text-balance">What should this application do?</h2>
-                                        <p className="mt-2 max-w-[60ch] text-body text-ink-muted">
-                                            Describe a flow or point the agent to an area of the application. It will browse, clarify the behavior, and save the verified result as a Spec.
-                                        </p>
-                                        <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                                            {[
-                                                { title: "Describe a flow", body: "State what should happen and how success is recognized.", seed: "A user should be able to ", icon: MessageSquareText },
-                                                { title: "Explore a feature", body: "Let the agent inspect an area and propose useful coverage.", seed: "Explore the ", icon: Sparkles },
-                                            ].map((suggestion) => (
-                                                <button
-                                                    key={suggestion.title}
-                                                    type="button"
-                                                    disabled={modelMissing}
-                                                    onClick={() => {
-                                                        setText(suggestion.seed);
-                                                        textareaRef.current?.focus();
-                                                    }}
-                                                    className="group/suggestion flex items-start gap-3 rounded-xl border border-line bg-surface p-3.5 text-left transition-colors hover:border-line-strong hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                                                >
-                                                    <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-ink-muted transition-colors group-hover/suggestion:text-ink" aria-hidden="true">
-                                                        <suggestion.icon size={14} />
-                                                    </span>
-                                                    <span>
-                                                        <span className="block text-control font-semibold text-ink">{suggestion.title}</span>
-                                                        <span className="mt-0.5 block text-meta text-ink-muted">{suggestion.body}</span>
-                                                    </span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </section>
-                                )}
-
                                 <MessageList
                                     messages={state.messages}
                                     steps={visibleSteps}
@@ -1248,9 +1156,5 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
 
 export default function ChatPage({ params }: { params: Promise<{ projectId: string; chatId: string }> }) {
     const { projectId, chatId } = use(params);
-    return (
-        <Suspense fallback={<span className="sr-only" role="status">Loading chat</span>}>
-            <ChatContent projectId={projectId} chatId={chatId} />
-        </Suspense>
-    );
+    return <ChatContent projectId={projectId} chatId={chatId} />;
 }

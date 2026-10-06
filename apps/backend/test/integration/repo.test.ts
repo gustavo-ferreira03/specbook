@@ -1822,7 +1822,8 @@ describe("accounts, roles and session security", () => {
         assert.equal(signedIn.status, 200);
         const cookie = cookieOf(signedIn);
         const projectId = await createProject("Authenticated stream");
-        const chat = (await (await call("POST", `/projects/${projectId}/chats`, undefined, cookie)).json()).chat;
+        const { createChat } = await import("../../src/core/chat/session-store");
+        const chat = await createChat(projectId);
         const stream = await call("GET", `/chats/${chat.id}/events`, undefined, cookie);
         const reader = stream.body!.getReader();
         assert.match(new TextDecoder().decode((await reader.read()).value), /event: connected/);
@@ -2043,7 +2044,7 @@ describe("selected batch suggestions", () => {
 
     test("requires discovery confirmation, validates selection and resumes only selected checks after restart", async () => {
         const { chatsRepository } = await import("../../src/infra/repositories/chats");
-        const { listChats } = await import("../../src/core/chat/session-store");
+        const { createChat, listChats } = await import("../../src/core/chat/session-store");
         const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
@@ -2051,8 +2052,7 @@ describe("selected batch suggestions", () => {
         const projectId = await createProject("Selected checks");
         await stewardRepository.update(projectId, { paused: true });
         const revision = await projectContextsRepository.createProjectContextDraft(projectId, { startUrl: "https://app.example.com", goal: "Find useful checks", safetyNotes: [] });
-        const chatId = crypto.randomUUID();
-        await chatsRepository.insertChat(chatId, projectId, { contextRevisionId: revision.id });
+        const { id: chatId } = await createChat(projectId, { contextRevisionId: revision.id }, "Project discovery");
         assert.deepEqual((await listChats(projectId)).map((chat) => chat.id), [chatId]);
         const input = { candidates: [
             { title: "Sign-in form", goal: "Show the username and password fields.", feature: "Authentication", why: "Users need an entry point." },
@@ -2089,8 +2089,7 @@ describe("selected batch suggestions", () => {
     });
 
     test("rejects cross-project suggestions and generation outside the selected title and feature", async () => {
-        const { chatsRepository } = await import("../../src/infra/repositories/chats");
-        const { listChats } = await import("../../src/core/chat/session-store");
+        const { createChat, listChats } = await import("../../src/core/chat/session-store");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeSpecBatch, selectSpecBatch, presentSpecBatch, selectedSpecInstructions, createSelectedSpec, selectedSpecResult } = await import("../../src/core/jobs/spec-batches");
@@ -2099,8 +2098,7 @@ describe("selected batch suggestions", () => {
         await stewardRepository.update(projectId, { paused: true });
         const feature = await writer.createFeatureInRepo(projectId, null, "Authentication", "");
         const otherFeature = await writer.createFeatureInRepo(otherId, null, "Other", "");
-        const chatId = crypto.randomUUID();
-        await chatsRepository.insertChat(chatId, projectId);
+        const { id: chatId } = await createChat(projectId, {}, "Sign-in form");
         assert.deepEqual((await listChats(projectId)).map((chat) => chat.id), [chatId]);
         const candidate = { title: "Sign-in form", goal: "Show the sign-in form.", feature: feature.title, featureId: feature.id, why: "Every user starts here." };
         await assert.rejects(() => proposeSpecBatch(otherId, chatId, { candidates: [candidate] }), /conversation belongs/);

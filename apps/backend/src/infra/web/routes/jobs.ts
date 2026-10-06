@@ -17,7 +17,7 @@ import { ACTIVE_JOB_STATUSES } from "../../../core/jobs/shared";
 import { jobsRepository, type InboxItem, type Job } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
-import { createChat, startChatTurn } from "../../../core/chat/session";
+import { chatTitle, createChat, startChatTurn } from "../../../core/chat/session";
 import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors";
 
 async function projectJob(projectId: string, jobId: string) {
@@ -109,7 +109,7 @@ ${item.body}`.slice(0, 6000),
         const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
         const existing = await sourceChatForItem(item);
         if (existing) return c.json({ chatId: existing });
-        const chat = await createChat(item.projectId);
+        const chat = await createChat(item.projectId, {}, chatTitle(item.title));
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, discussionChatId: chat.id } });
         startChatTurn(chat.id, `Help me understand this suggestion and decide what to do. Explain it in plain English. Do not change files unless I ask you to.\n${item.title}\n${sanitizeTechnicalDetails(item.body)}\nSuggestion reference: ${item.id}.`);
         return c.json({ chatId: chat.id });

@@ -102,9 +102,19 @@ function sessionTitle(sessionManager: SessionManager): string {
     for (const entry of sessionManager.getEntries()) {
         if (entry.type !== "message" || entry.message.role !== "user") continue;
         const text = extractText(entry.message as AgentMessage).trim();
-        if (text) return text.slice(0, 80);
+        if (text) return chatTitle(text);
     }
     return DEFAULT_TITLE;
+}
+
+/** A short, sentence-cased title taken from the first message of a chat. */
+export function chatTitle(text: string): string {
+    let title = text.replace(/\s+/g, " ").trim();
+    if (title.length > 60) {
+        const space = title.lastIndexOf(" ", 60);
+        title = `${title.slice(0, space > 0 ? space : 60)}…`;
+    }
+    return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
 async function cachedTitle(id: string): Promise<string> {
@@ -207,10 +217,12 @@ export async function removeChatSession(id: string): Promise<void> {
 export async function createChat(
     projectId: string,
     metadata: ChatMetadata = {},
+    title?: string,
 ): Promise<{ id: string }> {
     await fs.mkdir(sessionsDir, { recursive: true });
     const id = crypto.randomUUID();
     const sessionManager = SessionManager.create(cwd, sessionsDir, { id });
+    if (title) sessionManager.appendSessionInfo(title);
     flushSessionFile(sessionManager);
     const sessionId = sessionManager.getSessionId();
     const sessionFile = sessionManager.getSessionFile();
@@ -225,13 +237,15 @@ export async function listChats(
 ): Promise<{ id: string; title: string; createdAt: string }[]> {
     const jobChatIds = new Set((await jobsRepository.list(projectId)).map((job) => job.chatId));
     const rows = (await chatsRepository.listChatRows(projectId)).filter((row) => !jobChatIds.has(row.id));
-    return Promise.all(
+    const chats = await Promise.all(
         rows.map(async (row) => ({
             id: row.id,
             title: await cachedTitle(row.id).catch(() => DEFAULT_TITLE),
             createdAt: row.createdAt,
         })),
     );
+    // A chat without a title has no messages yet; it is listed once something is said in it.
+    return chats.filter((chat) => chat.title !== DEFAULT_TITLE);
 }
 
 export function messagesOf(id: string, sessionManager: SessionManager): ChatMessageRecord[] {
