@@ -21,7 +21,6 @@ type SpecHealth = "passing" | "failing" | "flaky" | "draft" | "notRun" | "invali
 export interface CoverageArea {
     kind: "area" | "role" | "rule";
     name: string;
-    description: string;
     routes: string[];
     coverage: CoverageStatus;
     featureIds: string[];
@@ -72,14 +71,22 @@ function testedRoutes(source: string): string[] {
     return [...routes];
 }
 
-async function implementation(spec: Spec): Promise<{ valid: boolean; routes: string[] }> {
+type Implementation = { valid: boolean; routes: string[] };
+const analyses = new Map<string, { sourceHash: string; markdownHash: string; result: Implementation }>();
+
+async function implementation(spec: Spec): Promise<Implementation> {
     if (spec.status === "invalid") return { valid: false, routes: [] };
     const root = repoGit.getRepoDir(spec.projectId);
     try {
+        // The files are read on every call so edits on disk and unsafe links are still noticed; only the parse is reused.
         const [source, yaml] = await Promise.all([readRepoFile(root, path.resolve(root, specTestFile(spec.path))), readRepoFile(root, path.resolve(root, specYamlFile(spec.path)))]);
-        const human = parseSpecYaml(yaml).humanSpec;
-        const valid = sourceHashOf(source) === spec.sourceHash && markdownHashOf(yaml) === spec.markdownHash && validateSpecSource(source, human).ok;
-        return { valid, routes: valid ? testedRoutes(source) : [] };
+        if (sourceHashOf(source) !== spec.sourceHash || markdownHashOf(yaml) !== spec.markdownHash) return { valid: false, routes: [] };
+        const cached = analyses.get(spec.id);
+        if (cached?.sourceHash === spec.sourceHash && cached.markdownHash === spec.markdownHash) return cached.result;
+        const valid = validateSpecSource(source, parseSpecYaml(yaml).humanSpec).ok;
+        const result = { valid, routes: valid ? testedRoutes(source) : [] };
+        analyses.set(spec.id, { sourceHash: spec.sourceHash, markdownHash: spec.markdownHash, result });
+        return result;
     } catch { return { valid: false, routes: [] }; }
 }
 
@@ -125,7 +132,7 @@ export async function projectCoverage(projectId: string, environmentName?: strin
         return [spec.id, state] as const;
     })));
     const areas: CoverageArea[] = [];
-    const addArea = (kind: CoverageArea["kind"], name: string, description: string, routes: string[]) => {
+    const addArea = (kind: CoverageArea["kind"], name: string, routes: string[]) => {
         const matched = specs.filter((spec) => contains(`${spec.title} ${spec.description} ${featureMap.has(spec.featureId) ? featureText(featureMap.get(spec.featureId)!, featureMap) : ""}`, name)
             || routes.some((route) => details.get(spec.id)?.routes.some((tested) => matchesRoute(route, tested))));
         const active = matched.filter((spec) => spec.lifecycle === "active" && details.get(spec.id)?.valid);
@@ -136,12 +143,13 @@ export async function projectCoverage(projectId: string, environmentName?: strin
             : coverage === "partial" ? `${routes.length - matchedRoutes.length} known route${routes.length - matchedRoutes.length === 1 ? " has" : "s have"} no matching active Spec`
             : routes.length ? "Active Specs reference every known route" : "Matching active Specs exist";
         const featureIds = [...new Set([...features.filter((feature) => contains(featureText(feature, featureMap), name)).map((feature) => feature.id), ...matched.map((spec) => spec.featureId)])];
-        areas.push({ kind, name, description, routes, coverage, featureIds, specIds: matched.map((spec) => spec.id), specs: matched.map((spec) => ({ id: spec.id, title: spec.title })), matchedRoutes, reason });
+        const areaSpecs = matched.map((spec) => ({ id: spec.id, title: spec.title }));
+        areas.push({ kind, name, routes, coverage, featureIds, specIds: areaSpecs.map((spec) => spec.id), specs: areaSpecs, matchedRoutes, reason });
     };
     if (revision) {
-        for (const area of revision.context.areas) addArea("area", area.name, area.description, area.routes);
-        for (const role of revision.context.roles) addArea("role", role.name, role.capabilities.join("; "), []);
-        for (const rule of revision.context.businessRules) addArea("rule", rule, "", []);
+        for (const area of revision.context.areas) addArea("area", area.name, area.routes);
+        for (const role of revision.context.roles) addArea("role", role.name, []);
+        for (const rule of revision.context.businessRules) addArea("rule", rule, []);
     }
     const totals = emptyCounts();
     const featureRows = features.map((feature) => {
@@ -157,7 +165,7 @@ export async function projectCoverage(projectId: string, environmentName?: strin
         if (!result.complete) continue;
         const passed = result.results.filter((item) => item.status === "passed" || item.flaky).length;
         const total = result.results.length;
-        trend.push({ id: batch.id, label: batch.label, startedAt: batch.startedAt, environment: batch.environment?.name ?? "Production", passed, total, passRate: Math.round(passed / total * 100) });
+        trend.push({ id: batch.id, label: batch.label, startedAt: batch.startedAt, passed, total, passRate: Math.round(passed / total * 100) });
         if (trend.length === 20) break;
     }
     trend.reverse();

@@ -415,6 +415,23 @@ export async function markInterruptedBatches(): Promise<void> {
     }
 }
 
+const finishedBatches = new Map<string, { stamp: string; batch: RunBatch }>();
+
+/** Finished batches no longer change, so listings reuse them until their file is rewritten or removed. */
+async function readListedBatch(id: string): Promise<RunBatch | null> {
+    const stamp = await fs.stat(path.join(batchDirectory(id), "batch.json")).then((stat) => `${stat.ino}:${stat.mtimeMs}:${stat.size}`).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+    });
+    const cached = finishedBatches.get(id);
+    if (stamp && cached?.stamp === stamp) return cached.batch;
+    finishedBatches.delete(id);
+    if (!stamp) return null;
+    const batch = await getRunBatch(id);
+    if (batch && batch.status !== "running") finishedBatches.set(id, { stamp, batch });
+    return batch;
+}
+
 export async function listRunBatches(projectId: string, limit = 100, ciOnly = false): Promise<RunBatch[]> {
     await ensureBatchIndex();
     const project = batchIndex.get(projectId);
@@ -422,11 +439,15 @@ export async function listRunBatches(projectId: string, limit = 100, ciOnly = fa
     const candidates = [...project].filter(([, entry]) => !ciOnly || entry.ci)
         .sort(([, a], [, b]) => b.startedAt.localeCompare(a.startedAt));
     const batches: RunBatch[] = [];
-    for (const [id] of candidates) {
-        if (batches.length >= limit) break;
-        const batch = await getRunBatch(id);
-        if (!batch) { project.delete(id); continue; }
-        if (batch.projectId === projectId && (!ciOnly || batch.ci)) batches.push(batch);
+    let next = 0;
+    while (batches.length < limit && next < candidates.length) {
+        const window = candidates.slice(next, next += limit - batches.length);
+        const loaded = await Promise.all(window.map(([id]) => readListedBatch(id)));
+        window.forEach(([id], index) => {
+            const batch = loaded[index];
+            if (!batch) project.delete(id);
+            else if (batch.projectId === projectId && (!ciOnly || batch.ci)) batches.push(batch);
+        });
     }
     return batches;
 }

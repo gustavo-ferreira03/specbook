@@ -15,7 +15,6 @@ const client = createClient({ url: `file:${dbPath}`, timeout: 5000 });
 export async function initializeDatabase(): Promise<void> {
     await client.execute("PRAGMA journal_mode = WAL");
     await client.execute("PRAGMA busy_timeout = 5000");
-    // libsql already enables foreign keys on every connection; keep it explicit.
     await client.execute("PRAGMA foreign_keys = ON");
 }
 
