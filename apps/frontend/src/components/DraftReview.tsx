@@ -119,7 +119,7 @@ export function DraftReview({
                     disabled={confirming || !confirmable}
                     title={confirmable ? undefined : "Confirmation needs a summary and at least one area or unknown"}
                 >
-                    <Check size={14} /> {confirming ? "Confirming..." : "Confirm context"}
+                    <Check size={14} /> {confirming ? "Confirming…" : "Confirm context"}
                 </Button>
                 <Button
                     ref={discardTriggerRef}
@@ -129,7 +129,7 @@ export function DraftReview({
                     disabled={discarding}
                     className="text-ink-muted sm:ml-auto"
                 >
-                    <Trash2 size={14} /> {discarding ? "Discarding..." : "Discard draft"}
+                    <Trash2 size={14} /> {discarding ? "Discarding…" : "Discard draft"}
                 </Button>
             </div>
 
@@ -173,7 +173,7 @@ export function DraftReview({
                                 void confirmDraft();
                             }}
                         >
-                            {confirming ? "Confirming..." : "Confirm context"}
+                            {confirming ? "Confirming…" : "Confirm context"}
                         </AlertDialogAction>
                     </div>
                 </AlertDialogContent>
@@ -184,7 +184,7 @@ export function DraftReview({
                 title="Discard this draft?"
                 description="The drafted context and its edits are discarded. Any previously confirmed context stays active."
                 confirmLabel="Discard draft"
-                busyLabel="Discarding..."
+                busyLabel="Discarding…"
                 busy={discarding}
                 error={discardError}
                 returnFocusRef={discardTriggerRef}

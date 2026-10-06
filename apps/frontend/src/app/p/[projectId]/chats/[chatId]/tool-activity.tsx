@@ -64,7 +64,7 @@ const TOOL_COPY: Record<string, ToolCopy> = {
     get_spec: { done: "Read Spec", active: "Reading Spec", icon: FileSearch },
     list_specs: { done: "Listed Specs", active: "Listing Specs", icon: ListChecks },
     run_spec: { done: "Ran Spec", active: "Running Spec", icon: Play },
-    create_feature: { done: "Created Feature", active: "Creating Feature", icon: FolderPlus },
+    create_feature: { done: "Created feature", active: "Creating feature", icon: FolderPlus },
     list_features: { done: "Listed Features", active: "Listing Features", icon: ListChecks },
     list_credential_profiles: { done: "Checked credential profiles", active: "Checking credential profiles", icon: KeyRound },
     request_credential: { done: "Requested a credential", active: "Requesting a credential", icon: KeyRound },

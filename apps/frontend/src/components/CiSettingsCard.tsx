@@ -204,7 +204,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                 {(error || notice) && <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : { type: "success", text: notice }} />} />}
             </SettingsSection>
 
-            <SettingsSection id="ci-origins-heading" title="Preview deployments" description="Choose where CI tokens may run checks or report a deployment.">
+            <SettingsSection id="ci-origins-heading" title="Preview deployments" description="Choose where CI tokens may run Specs or report a deployment.">
                 <form onSubmit={(event) => { event.preventDefault(); void saveOrigins(); }}>
                     <SettingsRow label="Allowed origins" htmlFor="ci-origins" description="Optional. One exact HTTP(S) origin per line, without paths or wildcards.">
                         <Textarea id="ci-origins" rows={3} value={originsDraft ?? settings.allowedOrigins.join("\n")} onChange={(event) => { setOriginsDraft(event.target.value); setOriginsFeedback(null); }} placeholder="https://preview.example.com" disabled={originsSaving} className="font-mono text-meta" aria-describedby="ci-origins-help" />
@@ -242,7 +242,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                 {settings.batches.length === 0 ? <SettingsBlock><p className="text-body text-ink-muted">Your first pipeline run will appear here with its results and evidence.</p></SettingsBlock> : <ul className="divide-y divide-line" aria-label="Recent CI runs">{settings.batches.map((result) => (
                     <li key={result.batch.id} id={`ci-batch-${result.batch.id}`} className="scroll-mt-4 space-y-2 px-4 py-4 sm:px-5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <a href={result.url} className="min-w-0 break-words text-body font-medium text-ink hover:underline">{result.batch.label || "CI verification"}</a>
+                            <a href={result.url} className="min-w-0 break-words text-body font-medium text-ink hover:underline">{result.batch.label || "CI runs"}</a>
                             <div className="flex flex-wrap items-center gap-2"><StatusPill status={result.batch.status} kind="run" size="sm" />{result.complete && <Badge variant={result.qualityGate.passed ? "success" : "danger"} size="sm">{result.qualityGate.passed ? <Check size={12} /> : <X size={12} />}Gate {result.qualityGate.passed ? "passed" : "failed"}</Badge>}</div>
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ink-subtle">
@@ -262,7 +262,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                 ))}</ul>}
             </SettingsSection>
 
-            <ConfirmDeleteDialog open={confirmation !== null} title={confirmation === "rotate" ? "Rotate CI token?" : "Revoke CI token?"} description={confirmation === "rotate" ? "The current token stops working immediately. Update the secret in each pipeline with the new token." : "Pipelines using this token will no longer be able to trigger runs, read results, or send deploy events."} confirmLabel={confirmation === "rotate" ? "Rotate token" : "Revoke token"} busyLabel={confirmation === "rotate" ? "Rotating..." : "Revoking..."} busy={busy} error={confirmError} returnFocusRef={confirmTriggerRef} onCancel={() => { setConfirmation(null); setConfirmError(""); }} onConfirm={() => confirmation && void changeToken(confirmation)} />
+            <ConfirmDeleteDialog open={confirmation !== null} title={confirmation === "rotate" ? "Rotate CI token?" : "Revoke CI token?"} description={confirmation === "rotate" ? "The current token stops working immediately. Update the secret in each pipeline with the new token." : "Pipelines using this token will no longer be able to trigger runs, read results, or send deploy events."} confirmLabel={confirmation === "rotate" ? "Rotate token" : "Revoke token"} busyLabel={confirmation === "rotate" ? "Rotating…" : "Revoking…"} busy={busy} error={confirmError} returnFocusRef={confirmTriggerRef} onCancel={() => { setConfirmation(null); setConfirmError(""); }} onConfirm={() => confirmation && void changeToken(confirmation)} />
         </div>
     );
 }

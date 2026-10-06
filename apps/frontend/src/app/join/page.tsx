@@ -40,7 +40,7 @@ export default function JoinPage() {
                 <SettingsBlock><p className="text-body text-ink">Invited as <strong className="font-medium">{invitation.email}</strong> with <span className="font-medium">{invitation.role}</span> access.</p><p className="mt-1 text-meta text-ink-subtle">Expires {formatDateTime(invitation.expiresAt)}</p></SettingsBlock>
                 <SettingsRow label="Name" htmlFor="join-name"><Input id="join-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required disabled={busy} /></SettingsRow>
                 <SettingsRow label="Password" htmlFor="join-password" description="Use at least 12 characters."><Input id="join-password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={12} maxLength={128} required disabled={busy} /></SettingsRow>
-                <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Creating account..." : "Accept invitation"}</Button></SettingsFooter>
+                <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Creating account…" : "Accept invitation"}</Button></SettingsFooter>
             </form>}
         </SettingsSection><Button asChild variant="link" className="mt-4 px-0"><Link href="/login">Already have an account? Sign in</Link></Button></PageContainer>
     </main>;

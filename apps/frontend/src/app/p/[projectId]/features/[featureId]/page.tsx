@@ -215,7 +215,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                             )}
                         />
                         <Button type="button" size="sm" onClick={() => runSpecs(scopedSpecs, `Run ${feature.title}`)} disabled={running || runnable.length === 0}>
-                            <RunningIcon running={running} /> {running ? "Running..." : "Run all"}
+                            <RunningIcon running={running} /> {running ? "Running…" : "Run all"}
                         </Button>
                         <Button
                             type="button"

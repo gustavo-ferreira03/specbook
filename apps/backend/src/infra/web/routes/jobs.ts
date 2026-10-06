@@ -105,7 +105,7 @@ ${item.body}`.slice(0, 6000),
                 const params = item.payload.params as { specId?: string } | undefined;
                 const existing = (await jobsRepository.inbox(item.projectId)).find((other) => other.kind === "bug_report" && other.payload.sourceItemId === item.id);
                 if (!existing) await jobsRepository.addItem({ projectId: item.projectId, jobId: item.jobId, kind: "bug_report",
-                    title: "You marked this as a problem in the app. Add a regression check?",
+                    title: "You marked this as a problem in the app. Add a regression Spec?",
                     body: "The suggested update was declined. The existing check and expected behavior are unchanged.",
                     payload: { sourceItemId: item.id, specId: params?.specId ?? job?.specId, runId: job?.runId, language: "en" } });
                 await jobsRepository.updateItem(item.id, { status: "rejected" });

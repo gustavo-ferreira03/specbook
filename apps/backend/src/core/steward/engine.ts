@@ -161,8 +161,8 @@ async function askForRunPrerequisite(row: Intent, reason: string): Promise<void>
         const credentials = /credential|password|session|sign.?in|authentication/i.test(reason);
         const edits = /uncommitted|repository.*dirty/i.test(reason);
         await jobsRepository.addItem({ projectId: row.projectId, jobId: job.id, kind: "question",
-            title: credentials ? "Can you provide access to run these checks?" : edits ? "Can you save or discard the pending edits before running these checks?" : "Can you resolve this prerequisite so the checks can run?",
-            body: `${credentials ? "Add the missing sign-in details in Settings → Credentials, then answer here. Do not paste passwords in your answer." : edits ? "Save or discard the pending edits in the project repository, then answer here to retry." : "The requested checks could not start. Resolve the prerequisite described below, then answer here to retry."}\n\n${reason}`,
+            title: credentials ? "Can you provide access to run these Specs?" : edits ? "Can you save or discard the pending edits before running these Specs?" : "Can you resolve this prerequisite so the Specs can run?",
+            body: `${credentials ? "Add the missing sign-in details in Settings → Credentials, then answer here. Do not paste passwords in your answer." : edits ? "Save or discard the pending edits in the project repository, then answer here to retry." : "The requested Specs could not start. Resolve the prerequisite described below, then answer here to retry."}\n\n${reason}`,
             payload: { runIntentId: row.id, waitingFor: credentials ? "credentials" : "run_prerequisite", language: "en", specId: job.specId } });
     }
     await stewardRepository.updateIntent(row.id, { status: "running", jobId: job.id, reason });
@@ -181,7 +181,7 @@ export async function recordScheduledPrerequisite(projectId: string, specIds: st
         await stewardRepository.signal({ projectId, key, kind: "schedule", title: "A scheduled run needs a prerequisite", body: reason, payload: { specIds, healFailures } });
         const signal = (await stewardRepository.signals(projectId, null)).find((row) => row.key === key)!;
         const intent = stewardIntentSchema.parse({ kind: "run_specs", specIds, priority: 70,
-            goal: "Run the checks selected for this scheduled occurrence after its prerequisite is resolved.", reason: "Scheduled run" });
+            goal: "Run the Specs selected for this scheduled occurrence after its prerequisite is resolved.", reason: "Scheduled run" });
         // The saved schedule can refer to a deleted check. Keep that selection so a retry cannot silently run a different set.
         const row = await stewardRepository.addIntent({ projectId, key: `signal:${signal.id}`, source: "event", intent, priority: intent.priority, reason: intent.reason,
             fingerprint: fingerprint({ projectId, key, specIds }) });
@@ -201,7 +201,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const runTrigger = runTriggerForIntent(row, relatedIntents, signals);
     if ((await stewardRepository.get(row.projectId)).autonomy === "observe" && row.source !== "user" && !(row.intent.kind === "run_specs" && runTrigger === "schedule")) return;
     if (row.intent.kind === "triage" && !await currentFailure(row.projectId, row.intent.runId)) {
-        await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "The failure was superseded by a newer check or Spec change." });
+        await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "The failure was superseded by a newer run or Spec change." });
         return;
     }
     const signal = runSignalForIntent(row, relatedIntents, signals);
@@ -236,7 +236,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     }
     if (row.intent.kind === "run_specs") {
         const selected = (await specsRepository.listSpecs(row.projectId)).filter((spec) => !row.intent.specIds?.length || row.intent.specIds.includes(spec.id));
-        if (row.intent.specIds?.length && (selected.length !== row.intent.specIds.length || selected.some((spec) => spec.status === "invalid"))) throw new Error("Some selected checks are missing or invalid. Restore or update those checks before retrying this selection.");
+        if (row.intent.specIds?.length && (selected.length !== row.intent.specIds.length || selected.some((spec) => spec.status === "invalid"))) throw new Error("Some selected Specs are missing or invalid. Restore or update those Specs before retrying this selection.");
         const specs = selected.filter((spec) => spec.status !== "invalid");
         if (!specs.length) { await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "No runnable Specs yet." }); return; }
         if (areSpecsLocked(specs.map((spec) => spec.id)) || await runsRepository.hasRunningRuns(specs.map((spec) => spec.id))) return;
@@ -246,7 +246,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
             trigger: runTrigger,
             healFailures: runSignalForIntent(row, relatedIntents, signals)?.payload.healFailures !== false,
             onPrepared: async (batch) => {
-                if (stopped || await isAgentPaused(row.projectId) || (row.source === "event" && runTrigger !== "schedule" && (await stewardRepository.get(row.projectId)).autonomy === "observe")) throw new IntentDeferred("Automatic execution was deferred before the checks started");
+                if (stopped || await isAgentPaused(row.projectId) || (row.source === "event" && runTrigger !== "schedule" && (await stewardRepository.get(row.projectId)).autonomy === "observe")) throw new IntentDeferred("Automatic execution was deferred before the Specs started");
                 if (runTrigger === "schedule") await (await import("../jobs/schedules")).recordScheduledBatch(batch);
                 await stewardRepository.updateIntent(row.id, { status: "running", batchId: batch.id });
             },
@@ -255,7 +255,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     }
     const kind = row.intent.kind === "triage" ? "failure_triage" : row.intent.kind;
     const decisions = inbox.filter((item) => ["approved", "rejected", "dismissed"].includes(item.status)).slice(0, 12).map((item) => ({ title: item.title, status: item.status }));
-    const goal = `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${kind === "regenerate" ? "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval." : kind === "explore" ? "Explore only the area requested by the human. Inspect available access and ask through the Inbox when a prerequisite needs human help." : kind === "coverage" ? "Compare confirmed areas, roles and rules to the existing Specs and propose additional coverage only for the requested scope. Ask when blocked." : "Investigate the failed check and classify its cause without changing expected behavior."}\nRecent human decisions: ${JSON.stringify(decisions)}`;
+    const goal = `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${kind === "regenerate" ? "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval." : kind === "explore" ? "Explore only the area requested by the human. Inspect available access and ask through the Inbox when a prerequisite needs human help." : kind === "coverage" ? "Compare confirmed areas, roles and rules to the existing Specs and propose additional coverage only for the requested scope. Ask when blocked." : "Investigate the failed Spec and classify its cause without changing expected behavior."}\nRecent human decisions: ${JSON.stringify(decisions)}`;
     const job = await enqueueJob(row.projectId, { kind, goal: goal.slice(0, 12000), trigger: row.source === "user" ? "manual" : row.intent.kind === "triage" ? "spec_failure" : "steward",
         specId: row.intent.specIds?.[0], runId: row.intent.runId,
         limits: jobLimitsSchema.parse({}),

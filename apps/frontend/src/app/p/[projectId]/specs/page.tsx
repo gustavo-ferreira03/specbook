@@ -4,7 +4,7 @@ import { useAuth } from "@/components/AuthProvider";
 
 import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
-import { ChevronDown, FileCheck2, MessageSquarePlus, RefreshCw, Search, X } from "lucide-react";
+import { ChevronDown, FileCheck2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { NewFeatureDialog, NewSpecDialog } from "@/components/CreateStructureDialogs";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
@@ -15,13 +15,13 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage, getProject, getProjectContext, getProjectTree, isAbortError } from "@/lib/api";
+import { errorMessage, getProjectTree, isAbortError } from "@/lib/api";
 import { formatNumber } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
-import { countStatuses, statusMeta } from "@/lib/status";
+import { NO_SPECS_DESCRIPTION, countStatuses, statusMeta } from "@/lib/status";
 import { useRunBatch } from "@/lib/useRunBatch";
 import { cn } from "@/lib/utils";
-import type { Feature, Project, ProjectContextState, SpecStatus, SpecSummary } from "@/lib/types";
+import type { Feature, SpecStatus, SpecSummary } from "@/lib/types";
 import { RunningIcon, SpecTable, SpecTableSkeleton, orderFeatures, lastRunsOf, type SpecGroup } from "./_components/spec-table";
 
 type StatusFilter = "all" | SpecStatus;
@@ -44,51 +44,11 @@ function plural(count: number, noun: string) {
     return `${formatNumber(count)} ${count === 1 ? noun : `${noun}s`}`;
 }
 
-function ContextLine({ projectId, project, contextState }: { projectId: string; project: Project | null; contextState: ProjectContextState | null }) {
-    const confirmed = contextState?.confirmed;
-    let context: React.ReactNode = null;
-    if (contextState && !confirmed) {
-        context = (
-            <span>
-                No project context yet.{" "}
-                <Link href={`/p/${projectId}`} className="font-medium text-ink underline underline-offset-2 hover:no-underline">Set up context</Link>
-            </span>
-        );
-    } else if (confirmed) {
-        const ctx = confirmed.context;
-        const stats = [
-            ctx.areas.length > 0 && plural(ctx.areas.length, "area"),
-            ctx.terminology.length > 0 && plural(ctx.terminology.length, "term"),
-            ctx.roles.length > 0 && plural(ctx.roles.length, "role"),
-            ctx.businessRules.length > 0 && plural(ctx.businessRules.length, "rule"),
-        ].filter(Boolean);
-        context = (
-            <Link href={`/p/${projectId}`} className="hover:text-ink hover:underline hover:underline-offset-2">
-                Project context{stats.length > 0 ? `: ${stats.join(", ")}` : ""}
-            </Link>
-        );
-    }
-    if (!project && !context) return null;
-    return (
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-            {project && (
-                <a href={project.baseUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 font-mono text-meta [overflow-wrap:anywhere] hover:text-ink hover:underline hover:underline-offset-2">
-                    {project.baseUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
-                </a>
-            )}
-            {project && context && <span aria-hidden="true" className="text-ink-disabled">·</span>}
-            {context}
-        </span>
-    );
-}
-
 export default function SpecsDashboard({ params }: { params: Promise<{ projectId: string }> }) {
     const { canEdit } = useAuth();
     const { projectId } = use(params);
     const [features, setFeatures] = useState<Feature[] | null>(null);
     const [specs, setSpecs] = useState<SpecSummary[] | null>(null);
-    const [project, setProject] = useState<Project | null>(null);
-    const [contextState, setContextState] = useState<ProjectContextState | null>(null);
     const [syncWarning, setSyncWarning] = useState("");
     const [loadError, setLoadError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
@@ -111,12 +71,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 if (isAbortError(error)) return;
                 setLoadError(errorMessage(error));
             });
-        getProject(projectId, signal)
-            .then((result) => setProject(result.project))
-            .catch(() => undefined);
-        getProjectContext(projectId)
-            .then((result) => { if (!signal.aborted) setContextState(result); })
-            .catch(() => undefined);
         return () => controller.abort();
     }, [projectId, retryKey]);
 
@@ -150,7 +104,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
 
     const lastRuns = useMemo(() => lastRunsOf(specs ?? []), [specs]);
 
-    const crumbs = [{ label: project?.name ?? "Project", href: `/p/${projectId}` }];
     const createActions = features ? (
         <>
             <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
@@ -161,7 +114,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     if (loadError) {
         return (
             <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="Specs" breadcrumbs={crumbs} width="data" />
+                <PageHeader title="Specs" width="data" />
                 <EmptyState
                     role="alert"
                     tone="danger"
@@ -178,7 +131,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
         return (
             <div className="flex min-h-full flex-col bg-surface" aria-busy="true" role="status">
                 <span className="sr-only">Loading Specs</span>
-                <PageHeader title="Specs" breadcrumbs={crumbs} width="data" />
+                <PageHeader title="Specs" width="data" />
                 <PageContainer width="data" innerClassName="space-y-6">
                     <div className="space-y-3"><Skeleton className="h-4 w-80 max-w-full" /><Skeleton className="h-1.5 w-full rounded-full" /></div>
                     <SpecTableSkeleton />
@@ -190,14 +143,14 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     if (specs.length === 0) {
         return (
             <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="Specs" breadcrumbs={crumbs} width="data" meta={<ContextLine projectId={projectId} project={project} contextState={contextState} />} actions={createActions} />
+                <PageHeader title="Specs" width="data" actions={createActions} />
                 <EmptyState
                     icon={FileCheck2}
                     title="No Specs yet"
-                    description="Describe a behavior in a chat and the agent saves it here as a Spec you can verify."
+                    description={NO_SPECS_DESCRIPTION}
                     action={canEdit &&
                         <Button asChild>
-                            <Link href={`/p/${projectId}/chats/new`}><MessageSquarePlus size={14} /> Start a chat</Link>
+                            <Link href={`/p/${projectId}/chats/new`}><Plus size={14} /> New chat</Link>
                         </Button>
                     }
                 />
@@ -238,15 +191,14 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader
                 title="Specs"
-                breadcrumbs={crumbs}
+               
                 width="data"
-                meta={<ContextLine projectId={projectId} project={project} contextState={contextState} />}
                 actions={canEdit &&
                     <>
                         {createActions}
                         <div className="flex items-center">
                             <Button type="button" size="sm" className="rounded-r-none" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>
-                                <RunningIcon running={isRunning} size={13} /> {isRunning ? "Running..." : "Run all"}
+                                <RunningIcon running={isRunning} size={13} /> {isRunning ? "Running…" : "Run all"}
                             </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>

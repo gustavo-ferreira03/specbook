@@ -81,7 +81,7 @@ export function CredentialRequestCard({
                 )}
                 <div className="flex justify-end gap-2 pt-1">
                     <Button type="button" size="sm" variant="ghost" onClick={() => void dismiss()}>Dismiss</Button>
-                    <Button type="submit" size="sm" disabled={sending}>{sending ? "Saving..." : "Save credential"}</Button>
+                    <Button type="submit" size="sm" disabled={sending}>{sending ? "Saving…" : "Save credential"}</Button>
                 </div>
             </form>
         </article>

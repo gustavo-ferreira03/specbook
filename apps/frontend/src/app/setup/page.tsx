@@ -112,7 +112,7 @@ export default function SetupPage() {
 
     return <main className="min-h-dvh bg-surface">
         <InstanceHeader setup />
-        <PageHeader title="Set up Specbook" description="Connect a model, then choose the app you want to check." width="reading" />
+        <PageHeader title="Set up Specbook" description="Create the administrator account, then connect a model." width="reading" />
         <PageContainer width="reading" className="pb-16" innerClassName="space-y-8">
             {loadError ? <EmptyState icon={AlertCircle} tone="danger" role="alert" title="Setup could not load" description={loadError} action={<Button onClick={() => void load()}><RefreshCw size={14} /> Try again</Button>} /> : !status ? <div role="status" aria-label="Loading setup" aria-busy="true" className="space-y-5"><Skeleton className="h-5 w-60" /><Skeleton className="h-48 w-full" /></div> : <>
                 <ol aria-label="Setup progress" className="flex flex-wrap items-center gap-x-6 gap-y-3 text-body">
@@ -125,7 +125,7 @@ export default function SetupPage() {
                         <SettingsRow label="Name" htmlFor="admin-name"><Input id="admin-name" value={adminName} onChange={(event) => setAdminName(event.target.value)} required autoComplete="name" disabled={busy} /></SettingsRow>
                         <SettingsRow label="Email" htmlFor="admin-email"><Input id="admin-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" disabled={busy} /></SettingsRow>
                         <SettingsRow label="Password" htmlFor="admin-password" description="Use at least 12 characters."><Input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} maxLength={128} required autoComplete="new-password" disabled={busy} /></SettingsRow>
-                        <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Creating account..." : "Create admin and continue"}<ArrowRight size={14} /></Button></SettingsFooter>
+                        <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Creating account…" : "Create admin and continue"}<ArrowRight size={14} /></Button></SettingsFooter>
                     </form>
                 </SettingsSection>}
                 {step === "model" && <ModelSettings onConnectionTested={connectionTested} />}
@@ -137,7 +137,7 @@ export default function SetupPage() {
                             <SettingsRow label="App URL" htmlFor="setup-base-url"><Input id="setup-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} type="url" inputMode="url" placeholder="https://staging.example.com" required disabled={busy || demo || Boolean(createdProject)} /></SettingsRow>
                             {demo && <SettingsBlock><p className="text-body text-ink">Sauce Demo is a public practice store. Specbook will save its public login for the agent to use.</p><p className="mt-2 text-body text-ink-muted">Username: <code className="text-meta">standard_user</code><br />Password: <code className="text-meta">secret_sauce</code></p></SettingsBlock>}
                             <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}>
-                                <Button type="submit" disabled={busy}>{busy && <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />}{busy ? "Preparing your project..." : createdProject ? "Retry exploration" : "Create project and explore"}<ArrowRight size={14} /></Button>
+                                <Button type="submit" disabled={busy}>{busy && <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />}{busy ? "Preparing your project…" : createdProject ? "Retry exploration" : "Create project and explore"}<ArrowRight size={14} /></Button>
                             </SettingsFooter>
                         </form>
                     </SettingsSection>

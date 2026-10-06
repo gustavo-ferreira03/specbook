@@ -176,7 +176,7 @@ function HomeContent() {
         );
     }
 
-    if (!canEdit) return <main className="min-h-dvh bg-surface"><InstanceHeader /><EmptyState title="No projects available" description="An administrator or editor can create the first project. You will be able to read its checks and results here." /></main>;
+    if (!canEdit) return <main className="min-h-dvh bg-surface"><InstanceHeader /><EmptyState title="No projects available" description="An administrator or editor can create the first project. You will be able to read its Specs and results here." /></main>;
     const returnProject = projects.find((project) => project.id === lastProjectId) ?? projects[0];
     const busy = submitting !== false;
     const steps = [
@@ -308,10 +308,10 @@ function HomeContent() {
                     </div>
                     <div className="flex flex-col gap-2 border-t border-line bg-surface-soft px-5 py-4">
                         <Button type="submit" size="lg" disabled={busy || !llmReady} className="w-full">
-                            {submitting === "discovery" ? <><LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" /> Creating project...</> : <>Create project and explore <ArrowRight size={15} /></>}
+                            {submitting === "discovery" ? <><LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" /> Creating project…</> : <>Create project and explore <ArrowRight size={15} /></>}
                         </Button>
                         <Button type="button" variant="outline" onClick={createWithoutDiscovery} disabled={busy} className="w-full">
-                            {submitting === "plain" ? "Creating project..." : "Create without discovery"}
+                            {submitting === "plain" ? "Creating project…" : "Create without discovery"}
                         </Button>
                     </div>
                 </form>

@@ -81,7 +81,7 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
 
 function LastRunText({ run }: { run: Run | null | undefined }) {
     if (run === undefined) return <Skeleton className="ml-auto h-3 w-20" />;
-    if (run === null) return <span className="text-ink-subtle">Never run</span>;
+    if (run === null) return <span className="text-ink-subtle" aria-label="Never run">—</span>;
     return <RelativeTime value={run.startedAt} />;
 }
 

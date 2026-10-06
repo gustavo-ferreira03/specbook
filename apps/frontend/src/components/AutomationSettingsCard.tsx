@@ -196,7 +196,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                                 <SelectTrigger id="automation-auto-approve" aria-describedby="automation-auto-approve-help"><SelectValue /></SelectTrigger>
                                 <SelectContent><SelectItem value="disabled">Review every fix</SelectItem><SelectItem value="enabled">Allow verified locator fixes</SelectItem></SelectContent>
                             </Select>
-                            <p id="automation-auto-approve-help" className="mt-1.5 text-meta text-ink-subtle">Only action locators may change. Fixes must pass verification and follow three approved locator fixes with no rejected fixes.</p>
+                            <p id="automation-auto-approve-help" className="mt-1.5 text-meta text-ink-subtle">Only action locators may change. Fixes must pass a test run and follow three approved locator fixes with no rejected fixes.</p>
                             {!allowAutoApproveFixes && <p className="mt-1.5 text-meta text-ink-muted">Automatic fixes are disabled for this instance. <Link href="/settings?tab=security" className="underline underline-offset-2">Review agent safety settings</Link>.</p>}
                         </SettingsRow>}
                         <SettingsRow label="Schedule" htmlFor="automation-cron" description="Optional, in UTC.">

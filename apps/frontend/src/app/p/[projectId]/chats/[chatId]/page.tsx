@@ -346,7 +346,7 @@ const MessageItem = memo(function MessageItem({
                                     <X size={13} /> Cancel
                                 </Button>
                                 <Button type="submit" size="sm" disabled={!editingText.trim() || actionBusy}>
-                                    {actionBusy ? "Saving..." : "Save and retry"}
+                                    {actionBusy ? "Saving…" : "Save and retry"}
                                 </Button>
                             </div>
                         </div>
@@ -854,20 +854,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const browserBeside = canEdit && wide && Boolean(state.vncSessionId);
     const browserOrigin = originOf(revisionInfo?.brief.startUrl) || projectOrigin;
 
-    const statusIndicator = (
-        <span className="inline-flex items-center gap-1.5 text-meta text-ink-muted sm:h-7 sm:rounded-full sm:border sm:border-line sm:px-2.5">
-            <span className={cn("size-1.5 rounded-full", state.busy ? "status-pulse bg-running" : modelMissing ? "bg-warning-chart" : "bg-success")} aria-hidden="true" />
-            {state.busy ? "Agent working" : modelMissing ? "Model not set up" : "Ready"}
-        </span>
-    );
-
     return (
         <div className="flex h-full min-h-0 flex-col bg-surface">
             <PageHeader
                 title={<span className="line-clamp-1 max-sm:text-section" title={state.title}>{state.title}</span>}
                 breadcrumbs={[{ label: discovery ? "Project discovery" : "Chats", href: discovery ? `/p/${projectId}` : chatsHref }]}
-                actions={<span className="hidden sm:contents">{statusIndicator}</span>}
-                meta={<span className="sm:hidden">{statusIndicator}</span>}
                 width={browserBeside ? "full" : "chat"}
                 className="pt-3 pb-3 md:pt-5 md:pb-4"
             />
@@ -882,7 +873,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                 <Link href={`/p/${projectId}`}>Review project context</Link>
                             </Button>
                         ) : !revisionInfo.hasProposal ? (
-                            <Link href={`/p/${projectId}`} className="shrink-0 rounded-sm text-ink-muted underline decoration-line-hover underline-offset-[3px] hover:text-ink">Project overview</Link>
+                            <Link href={`/p/${projectId}`} className="shrink-0 rounded-sm text-ink-muted underline decoration-line-hover underline-offset-[3px] hover:text-ink">Project context</Link>
                         ) : null}
                     </div>
                 </div>
@@ -892,7 +883,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 <Alert variant="warning" className="shrink-0 rounded-none border-x-0 border-t-0 px-4 py-2 md:px-8" role="status">
                     <div className="mx-auto flex w-full max-w-chat items-center gap-2">
                         <WifiOff size={14} className="status-pulse shrink-0" aria-hidden="true" />
-                        <span className="min-w-0 flex-1 break-words">Updates paused. Reconnecting to the agent...</span>
+                        <span className="min-w-0 flex-1 break-words">Updates paused. Reconnecting to the agent…</span>
                     </div>
                 </Alert>
             )}
@@ -926,7 +917,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                         )}
                                         <div className="mt-6 flex flex-wrap items-center gap-3">
                                             <Button type="button" onClick={() => void beginDiscovery()} disabled={beginning || modelMissing}>
-                                                <Compass size={14} /> {beginning ? "Starting..." : "Begin discovery"}
+                                                <Compass size={14} /> {beginning ? "Starting…" : "Begin discovery"}
                                             </Button>
                                             {modelMissing && isAdmin && (
                                                 <Link href={modelSettingsHref} className="rounded-sm text-control text-ink-muted underline decoration-line-hover underline-offset-[3px] hover:text-ink">Set up a model first</Link>
@@ -1082,14 +1073,14 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                         disabled={composerDisabled}
                                         placeholder={
                                             modelMissing
-                                                ? "Set up a model to start chatting"
+                                                ? "Describe a behavior to verify…"
                                                 : discoveryTerminal
                                                   ? "This discovery is closed"
                                                   : state.busy
-                                                    ? "Add a follow-up for the agent..."
+                                                    ? "Add a follow-up for the agent…"
                                                     : discovery
-                                                      ? "Guide the discovery or ask about what was found..."
-                                                      : "Describe what to explore or verify..."
+                                                      ? "Guide the discovery or ask about what was found…"
+                                                      : "Describe what to explore or verify…"
                                         }
                                         className="block max-h-[200px] min-h-12 resize-none rounded-none border-0 bg-transparent px-4 pt-3.5 pb-1 text-body shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-100"
                                     />
