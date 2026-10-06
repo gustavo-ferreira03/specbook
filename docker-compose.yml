@@ -1,22 +1,29 @@
 services:
     app:
         image: ${SPECBOOK_IMAGE:-ghcr.io/gustavo-ferreira03/specbook:latest}
-        init: true
         shm_size: "1gb"
         restart: unless-stopped
+        # Published on loopback only: Specbook has no application-level login.
+        # To reach it from other machines, drop the "127.0.0.1:" prefix (or use
+        # a specific interface address), add the public host names to
+        # SPECBOOK_ALLOWED_HOSTS, and put an authenticated reverse proxy or a
+        # VPN in front of it. 1455 and 53692 receive OAuth callbacks and only
+        # need to be reachable from the browser completing the login.
         ports:
-            - "4000:4000"
-            - "4001:4001"
-            - "1455:1455"
-            - "53692:53692"
+            - "127.0.0.1:4000:4000"
+            - "127.0.0.1:4001:4001"
+            - "127.0.0.1:1455:1455"
+            - "127.0.0.1:53692:53692"
         environment:
             HOST: 0.0.0.0
             FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4001}
             PI_OAUTH_CALLBACK_HOST: 0.0.0.0
+            SPECBOOK_ALLOWED_HOSTS: ${SPECBOOK_ALLOWED_HOSTS:-}
+            LOG_LEVEL: ${LOG_LEVEL:-info}
         volumes:
             - specbook-storage:/app/apps/backend/storage
         healthcheck:
-            test: ["CMD", "curl", "--fail", "--silent", "http://localhost:4000/health"]
+            test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:4000/health"]
             interval: 30s
             timeout: 5s
             retries: 3

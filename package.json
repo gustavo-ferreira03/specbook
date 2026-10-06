@@ -2,7 +2,11 @@
     "name": "specbook",
     "private": true,
     "scripts": {
-        "dev": "pnpm -r --parallel dev"
+        "dev": "pnpm -r --parallel dev",
+        "typecheck": "pnpm --filter backend exec tsc --noEmit && pnpm --filter frontend exec tsc --noEmit",
+        "build": "pnpm --filter backend build && pnpm --filter frontend build",
+        "test": "pnpm -r --if-present test",
+        "check": "pnpm typecheck && pnpm test"
     },
     "packageManager": "pnpm@10.30.1"
 }

@@ -1,2 +1,0 @@
-robotframework==7.4.2
-robotframework-browser==20.0.0

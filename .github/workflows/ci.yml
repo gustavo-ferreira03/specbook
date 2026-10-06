@@ -1,0 +1,46 @@
+name: CI
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+
+            # Reads the pnpm version from package.json's packageManager field.
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: 26
+                  cache: pnpm
+
+            - run: pnpm install --frozen-lockfile
+
+            - name: Type-check
+              run: pnpm typecheck
+
+            - name: Build
+              run: pnpm build
+              env:
+                  NEXT_PUBLIC_API_URL: http://localhost:4000
+
+            # Chromium for Playwright Test, so the runner's real-browser tests run
+            # instead of being skipped.
+            - name: Install Chromium for Spec runs
+              run: pnpm --filter backend exec playwright install --with-deps chromium
+
+            - name: Test
+              run: pnpm -r --if-present test

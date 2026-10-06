@@ -18,11 +18,11 @@ Precise, calm, and trustworthy. The interface should feel like a well-kept techn
 
 ## Anti-references
 
-Specbook should not look like a code-first test runner, expose Robot Framework source, or resemble a crowded enterprise QA dashboard. Avoid decorative metrics, excessive cards, generic SaaS decoration, and any interface that hides failures or relies on color alone for status.
+Specbook should not look like a code-first test runner, lead with test source code, or resemble a crowded enterprise QA dashboard. Avoid decorative metrics, excessive cards, generic SaaS decoration, and any interface that hides failures or relies on color alone for status.
 
 ## Design Principles
 
-- Keep the Spec, not its automation, at the center of the product.
+- Keep the Spec, not its automation, at the center of the product. The Playwright source (`spec.ts`) stays available as an advanced escape hatch, collapsed by default, and is never the primary surface.
 - Make state and failures visible wherever work happens.
 - Use familiar controls that stay out of the documentation workflow's way.
 - Keep the path from conversation to evidence short and legible.

@@ -10,7 +10,6 @@ on:
             - package.json
             - pnpm-lock.yaml
             - pnpm-workspace.yaml
-            - requirements.txt
             - version.txt
             - CHANGELOG.md
     workflow_dispatch:
@@ -29,6 +28,12 @@ jobs:
               uses: googleapis/release-please-action@v5
               with:
                   release-type: simple
+                  # Opening the release PR needs either the repository setting
+                  # "Allow GitHub Actions to create and approve pull requests"
+                  # or a fine-grained PAT in RELEASE_PLEASE_TOKEN (contents and
+                  # pull requests: write). A PAT also lets the release event
+                  # trigger other workflows, which GITHUB_TOKEN cannot.
+                  token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
             - uses: actions/checkout@v7
               if: ${{ steps.release.outputs.release_created }}
@@ -58,3 +63,5 @@ jobs:
                       org.opencontainers.image.version=${{ steps.release.outputs.tag_name }}
                   build-args: |
                       NEXT_PUBLIC_API_URL=http://localhost:4000
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
