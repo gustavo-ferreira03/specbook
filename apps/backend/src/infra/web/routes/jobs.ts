@@ -32,7 +32,6 @@ async function projectItem(projectId: string, itemId: string, message = "Inbox i
     return item;
 }
 
-/** Cancels the job if it is still active and stops its chat turn and browser. */
 async function cancelJob(job: Job, classification?: Job["classification"]): Promise<boolean> {
     if (!ACTIVE_JOB_STATUSES.includes(job.status)) return false;
     await jobsRepository.update(job.id, { status: "cancelled", ...(classification ? { classification } : {}) });

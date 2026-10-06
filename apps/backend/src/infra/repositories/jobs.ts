@@ -11,7 +11,6 @@ export type InboxItem = typeof inboxItems.$inferSelect;
 type JobPatch = Partial<Omit<Job, "id" | "projectId" | "chatId" | "status" | "updatedAt">>;
 const now = () => new Date().toISOString();
 
-/** Grants a fresh per-attempt allowance on top of what the job already used. */
 function requeuePatch(job: Job, patch: JobPatch & { pendingMessage: string }, activeMs = 0): JobPatch {
     const allowance = jobLimitsSchema.parse({});
     return { limits: { maxActions: job.actionsUsed + allowance.maxActions, wallTimeMs: job.elapsedMs + activeMs + allowance.wallTimeMs },
@@ -33,7 +32,6 @@ export const jobsRepository = {
     async list(projectId: string) {
         return db.select().from(jobs).where(eq(jobs.projectId, projectId)).orderBy(desc(jobs.createdAt));
     },
-    /** Projects that already have a running job, or one of the given in-process jobs. */
     async busyProjects(jobIds: string[]) {
         const rows = await db.selectDistinct({ projectId: jobs.projectId }).from(jobs)
             .where(jobIds.length ? or(eq(jobs.status, "running"), inArray(jobs.id, jobIds)) : eq(jobs.status, "running"));

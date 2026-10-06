@@ -50,7 +50,6 @@ export interface ActivityStory {
     runId?: string;
     technicalDetails: string;
 }
-/** Rows both the presentation and the overview need, loaded once per request. */
 export interface ProjectState {
     jobs: Job[];
     specs: Spec[];
