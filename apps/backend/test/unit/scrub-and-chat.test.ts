@@ -11,6 +11,56 @@ const { bridgeBrowserTools } = await import("../../src/core/browser/mcp");
 const { createCredentialTools } = await import("../../src/core/chat/credential-tools");
 const { getPendingCredentialRequest } = await import("../../src/core/chat/credential-requests");
 
+describe("conversation failure messages", () => {
+    test("provider and browser errors give a next step without exposing their raw response", async () => {
+        const { providerFailure, browserFailureMessage, sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
+        for (const [input, code] of [["429 quota exceeded", "provider_limit"], ["401 invalid API key sk-secret", "provider_auth"], ["model_not_found", "provider_model"], ["ETIMEDOUT /home/server/private", "provider_connection"]]) {
+            const failure = providerFailure(input);
+            assert.equal(failure.code, code);
+            assert.ok(failure.nextStep);
+            assert.equal(isInfrastructureFailure(failure.message), true);
+            assert.doesNotMatch(JSON.stringify(failure), /sk-secret|\/home\/server/);
+        }
+        assert.match(browserFailureMessage(new Error("spawn Xvfb ENOENT")), /required program is missing/);
+        assert.match(browserFailureMessage(new Error("Server is already active for display 118")), /display is already in use/);
+        assert.match(browserFailureMessage(new Error("EACCES /var/private")), /denied permission/);
+        assert.doesNotMatch(browserFailureMessage(new Error("Xvfb failed")), /retry automatically/);
+        const details = sanitizeTechnicalDetails("Expected https://example.com/app/profile but got /home/server/storage/run/spec.ts\n    at click (/data/specbook/src/core/runner/guard.ts:1)");
+        assert.match(details, /https:\/\/example.com\/app\/profile/);
+        assert.doesNotMatch(details, /\/home\/server|\/data\/specbook|at click/);
+    });
+
+    test("a timed out turn aborts its work before releasing the conversation", async () => {
+        const { withTurnTimeout, ChatTurnTimeoutError } = await import("../../src/core/chat/deadline");
+        const id = "timed-out-chat";
+        const controller = new AbortController();
+        let stopped = false;
+        assert.equal(registry.tryReserveChatTurn(id), true);
+        try {
+            await assert.rejects(withTurnTimeout(() => new Promise<void>((_resolve, reject) => {
+                controller.signal.addEventListener("abort", () => { stopped = true; reject(controller.signal.reason); }, { once: true });
+            }), async () => { controller.abort(); }, 5), ChatTurnTimeoutError);
+            assert.equal(stopped, true);
+        } finally { registry.releaseChatTurn(id); }
+        assert.equal(registry.isChatBusy(id), false);
+        assert.equal(await withTurnTimeout(async () => "finished", async () => { assert.fail("completed turns must not be aborted"); }, 50), "finished");
+    });
+
+    test("unexpected HTTP failures expose an error ID and keep details in server logs", async () => {
+        const { Hono } = await import("hono");
+        const { handleRequestError } = await import("../../src/infra/web/errors");
+        const app = new Hono();
+        app.onError(handleRequestError);
+        app.get("/broken", () => { throw new Error("sqlite error at /home/server/storage/private.db"); });
+        const response = await app.request("/broken");
+        assert.equal(response.status, 500);
+        const body = await response.json();
+        assert.match(body.errorId, /^[a-f0-9-]{36}$/);
+        assert.match(body.error, /Try again/);
+        assert.doesNotMatch(JSON.stringify(body), /sqlite|private.db|\/home\/server/);
+    });
+});
+
 describe("createSecretScrubber", () => {
     const secret = `p&ss<"w'rd>\\1`;
     const scrub = createSecretScrubber([secret, "abc"]);

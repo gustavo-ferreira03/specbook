@@ -10,7 +10,7 @@ import { createSchedulesRouter } from "./infra/web/routes/schedules";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { HTTPException } from "hono/http-exception";
+import { handleRequestError } from "./infra/web/errors";
 import { WebSocketServer } from "ws";
 import { closeAllChatBrowsers } from "./core/browser/sessions";
 import { getVncSession, proxyVncSession } from "./core/browser/vnc";
@@ -81,11 +81,7 @@ app.use(
 app.use("*", hostGuard(hostAllowlist));
 app.use("*", csrfGuard());
 app.use("*", jsonBodyLimit());
-app.onError((err, c) => {
-    if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
-    logger.error("request failed", { method: c.req.method, path: c.req.path, error: err });
-    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
-});
+app.onError(handleRequestError);
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/", createProjectsRouter());

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { RunStatus } from "../../infra/db/schema";
 import { runNetworkPolicy } from "../ci/targets";
 import { createRunProxy } from "../network/proxy";
+import { sanitizeTechnicalDetails } from "../jobs/presentation-errors";
 import { writeRunEvidence } from "./evidence";
 import { runNodeCli } from "./process";
 import { parsePlaywrightReport, stripAnsi, type SpecFileResult } from "./report";
@@ -212,11 +213,13 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
             const missing = options.specs.some((spec) => !parsed.files.has(spec.key));
             if (missing) processFailure = parsed.errors.join("\n\n");
         }
+        if (processFailure) processFailure = sanitizeTechnicalDetails(options.scrub(processFailure));
 
         for (const spec of options.specs) {
             const fileResult = parsed?.files.get(spec.key) ?? null;
             const safeResult = fileResult
-                ? { ...fileResult, attachments: fileResult.attachments.filter((attachment) => isInside(workDir, path.resolve(workDir, attachment.path))) }
+                ? { ...fileResult, failReason: fileResult.failReason ? sanitizeTechnicalDetails(options.scrub(fileResult.failReason)) : null,
+                    attachments: fileResult.attachments.filter((attachment) => isInside(workDir, path.resolve(workDir, attachment.path))) }
                 : null;
             const status = safeResult ? statusOf(safeResult) : "error";
             await fs.mkdir(spec.outputDir, { recursive: true });

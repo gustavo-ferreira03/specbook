@@ -134,6 +134,7 @@ test("Store", async ({ page, step, secret }) => {
         assert.equal(run.failedStep, "See the store");
         assert.equal(run.sourceHash, spec.sourceHash);
         assert.match(run.failReason ?? "", /toHaveText/);
+        assert.doesNotMatch(run.failReason ?? "", /\/tmp\/specbook|node_modules|src\/core\/runner|\n\s+at /);
 
         const evidence = (await (await app.request(`/runs/${run.id}/evidence`)).json()) as {
             steps: { label: string; file: string }[];
