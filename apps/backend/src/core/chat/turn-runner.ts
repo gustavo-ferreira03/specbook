@@ -240,7 +240,8 @@ async function runReservedChatTurn(
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision
                 ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp, origins), sanitizeResult: scrub }
-                : turnPolicy ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub } : { ...createOriginBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub };
+                : turnPolicy?.browserScope === "explore" ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub }
+                    : { ...createOriginBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub };
             const policy: BrowserToolPolicy = {
                 ...basePolicy,
                 beforeCall: async (toolName, args, signal) => {
