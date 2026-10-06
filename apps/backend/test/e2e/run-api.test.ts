@@ -912,8 +912,8 @@ describe("autonomous pause and decisions", () => {
         await jobsRepository.update(blocked.id, { status: "blocked" });
         const question = await jobsRepository.addItem({ projectId: project.id, jobId: blocked.id, kind: "question", title: "Which account should sign in?", body: "Add access to continue." });
         const endpoint = `/projects/${project.id}/steward`;
-        assert.deepEqual(await (await router.request(endpoint)).json(), { autonomy: "propose", paused: false, autoApproveFixes: false, globallyPaused: false });
-        assert.deepEqual(await (await put(endpoint, { paused: true })).json(), { autonomy: "propose", paused: true, autoApproveFixes: false, globallyPaused: false });
+        assert.deepEqual(await (await router.request(endpoint)).json(), { autonomy: "propose", paused: false, globallyPaused: false });
+        assert.deepEqual(await (await put(endpoint, { paused: true })).json(), { autonomy: "propose", paused: true, globallyPaused: false });
         assert.equal((await jobsRepository.get(queued.id))?.status, "paused");
         assert.equal((await jobsRepository.get(running.id))?.status, "paused");
         assert.equal((await jobsRepository.get(blocked.id))?.status, "blocked");
@@ -927,7 +927,7 @@ describe("autonomous pause and decisions", () => {
         assert.equal((await stewardRepository.get(project.id)).paused, true, "autonomy changes must not implicitly resume the agent");
         const resumed = await put(endpoint, { paused: false });
         assert.equal(resumed.status, 200);
-        assert.deepEqual(await resumed.json(), { autonomy: "act", paused: false, autoApproveFixes: false, globallyPaused: false });
+        assert.deepEqual(await resumed.json(), { autonomy: "act", paused: false, globallyPaused: false });
         const retained = (await jobsRepository.get(queued.id))!;
         assert.equal(retained.status, "queued");
         assert.equal(retained.tokensUsed, 25_000);
@@ -956,7 +956,7 @@ describe("autonomous pause and decisions", () => {
         assert.equal(await isAgentPaused(other.id), true);
         assert.equal((await jobsRepository.get(otherJob.id))?.status, "paused");
         const stillPaused = await put(`/projects/${other.id}/steward`, { paused: false });
-        assert.deepEqual(await stillPaused.json(), { autonomy: "propose", paused: false, autoApproveFixes: false, globallyPaused: true });
+        assert.deepEqual(await stillPaused.json(), { autonomy: "propose", paused: false, globallyPaused: true });
         assert.equal((await jobsRepository.get(otherJob.id))?.status, "paused");
         await jobsRepository.recover();
         assert.equal(await settingsRepository.getAgentPaused(), true);

@@ -846,92 +846,15 @@ describe("project steward", () => {
         assert.equal(isLocatorOnlyFix(item), false, "input data cannot masquerade as a locator change");
     });
 
-    test("trusted automatic fixes require explicit opt-in and recheck policy through the commit", async (t) => {
-        const { applyTrustedFixes } = await import("../../src/core/steward/approval");
-        const { proposeMutation } = await import("../../src/core/jobs/proposals");
-        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { stewardRepository } = await import("../../src/infra/repositories/steward");
-        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
-        const { createStewardRouter } = await import("../../src/infra/web/routes/steward");
-        const projectId = await createProject("Opt-in approval");
-        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
-        const before = VALID_SPEC.replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByTestId("old-button").click();');
-        const after = before.replace('old-button', 'new-button');
-        const { spec } = await createSpec(projectId, feature.id, "Check store", before);
-        const yaml = await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"), "utf8");
-        const job = await jobsRepository.create({ projectId, specId: spec.id, chatId: crypto.randomUUID(), trigger: "spec_failure", kind: "failure_triage", goal: "Repair selector", limits: jobLimitsSchema.parse({}) });
-        await jobsRepository.update(job.id, { status: "completed", classification: "test_drift" });
-        const item = await proposeMutation((await jobsRepository.get(job.id))!, "update_spec", { specId: spec.id, testSource: after });
-        await jobsRepository.updateItem(item.id, { payload: { ...item.payload, verification: { status: "passed", sourceHash: writer.sourceHashOf(after), baseUrl: "https://app.example.com" } } });
-        for (let i = 0; i < 3; i++) {
-            const trusted = await jobsRepository.addItem({ projectId, jobId: job.id, kind: item.kind, title: "Previously reviewed selector", body: "Approved by the human", payload: item.payload });
-            await jobsRepository.updateItem(trusted.id, { status: "approved" });
-        }
+    test("screenshot policy changes apply to existing agent sessions", async (t) => {
         const { agentSettings, updateSecuritySettings } = await import("../../src/core/chat/safety-settings");
         const manager = await agentSettings();
         assert.equal(manager.getBlockImages(), false);
         await updateSecuritySettings({ sendScreenshotsToModel: false });
         assert.equal(manager.getBlockImages(), true, "existing sessions recheck image policy on every request");
         t.after(() => updateSecuritySettings({}));
-        const router = new Hono();
-        router.use("*", async (c, next) => {
-            c.set("user", { id: "admin", role: "admin", name: "Admin", email: "admin@example.com", passwordHash: null, disabledAt: null, createdAt: "", updatedAt: "" });
-            await next();
-        });
-        router.route("/", createStewardRouter());
-        const endpoint = `/projects/${projectId}/steward`;
-        const put = (body: unknown) => router.request(endpoint, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        assert.equal((await (await router.request(endpoint)).json()).autoApproveFixes, false);
-        assert.equal((await put({ autoApproveFixes: "true" })).status, 400);
-        await put({ autonomy: "act" });
-        const head = await repoGit.getHeadSha(projectId);
-        await applyTrustedFixes(projectId);
-        assert.equal((await jobsRepository.item(item.id))?.status, "pending", "Act mode alone cannot opt in");
-        assert.equal(await repoGit.getHeadSha(projectId), head);
-        assert.equal((await (await put({ autoApproveFixes: true })).json()).autoApproveFixes, true);
-
-        await applyTrustedFixes(projectId);
-        assert.equal((await jobsRepository.item(item.id))?.status, "pending", "project opt-in cannot override the administrator's default denial");
-        await updateSecuritySettings({ allowAutoApproveFixes: true, sendScreenshotsToModel: true });
+        await updateSecuritySettings({ sendScreenshotsToModel: true });
         assert.equal(manager.getBlockImages(), false);
-
-        const claim = jobsRepository.claimItem.bind(jobsRepository);
-        const revokeAtClaim = t.mock.method(jobsRepository, "claimItem", async (id: string) => {
-            const claimed = await claim(id);
-            await stewardRepository.update(projectId, { autoApproveFixes: false });
-            return claimed;
-        });
-        await applyTrustedFixes(projectId);
-        revokeAtClaim.mock.restore();
-        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
-        assert.equal(await repoGit.getHeadSha(projectId), head);
-
-        await put({ autoApproveFixes: true });
-        const update = specsRepository.updateSpecRecord.bind(specsRepository);
-        const revokeDuringWrite = t.mock.method(specsRepository, "updateSpecRecord", async (...args: Parameters<typeof update>) => {
-            const result = await update(...args);
-            await stewardRepository.update(projectId, { autoApproveFixes: false });
-            return result;
-        });
-        await applyTrustedFixes(projectId);
-        revokeDuringWrite.mock.restore();
-        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
-        assert.equal(await repoGit.getHeadSha(projectId), head, "revoking opt-in during the write prevents the commit");
-        assert.equal((await specsRepository.getSpec(spec.id))?.sourceHash, writer.sourceHashOf(before));
-        assert.equal((await writer.readSpecFiles(spec)).testSource, before);
-        assert.equal((await repoGit.getProjectGit(projectId).status()).isClean(), true);
-
-        await stewardRepository.update(projectId, { autoApproveFixes: true, paused: true });
-        await applyTrustedFixes(projectId);
-        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
-        await stewardRepository.update(projectId, { paused: false, autonomy: "propose" });
-        await applyTrustedFixes(projectId);
-        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
-        await stewardRepository.update(projectId, { autonomy: "act" });
-        await applyTrustedFixes(projectId);
-        assert.equal((await jobsRepository.item(item.id))?.status, "approved");
-        assert.equal((await writer.readSpecFiles(spec)).testSource, after);
-        assert.equal(await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"), "utf8"), yaml);
     });
 
     test("replays changed Spec and deploy signals once after a crash, while retaining real reversions", async (t) => {
@@ -1696,7 +1619,6 @@ describe("accounts, roles and session security", () => {
         const created = await call("POST", "/projects", { name: "Attributed edits", baseUrl: "https://example.com" }, editor.cookie);
         assert.equal(created.status, 200, await created.clone().text());
         const project = (await created.json()).project;
-        assert.equal((await call("PUT", `/projects/${project.id}/steward`, { autoApproveFixes: true }, editor.cookie)).status, 403);
         const featureResponse = await call("POST", `/projects/${project.id}/features`, { title: "Authored feature", description: "" }, editor.cookie);
         assert.equal(featureResponse.status, 200, await featureResponse.clone().text());
         const author = await repoGit.getProjectGit(project.id).raw(["log", "-1", "--format=%an <%ae>"]);

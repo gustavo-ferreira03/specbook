@@ -2,17 +2,16 @@ import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 import { settingsRepository } from "../../infra/repositories/settings";
 
-export const securitySettingsSchema = z.object({
-    allowAutoApproveFixes: z.boolean().default(false),
-    sendScreenshotsToModel: z.boolean().default(true),
-}).strict();
+const storedSecuritySettingsSchema = z.object({ sendScreenshotsToModel: z.boolean().default(true) });
+export const securitySettingsSchema = storedSecuritySettingsSchema.strict();
 export type SecuritySettings = z.infer<typeof securitySettingsSchema>;
 let current = securitySettingsSchema.parse({});
 let generation = 0;
 
 export async function getSecuritySettings(): Promise<SecuritySettings> {
     const started = generation;
-    const stored = securitySettingsSchema.parse(await settingsRepository.getSecuritySettings() ?? {});
+    // Not strict: rows saved before a setting was retired still carry it.
+    const stored = storedSecuritySettingsSchema.parse(await settingsRepository.getSecuritySettings() ?? {});
     if (started === generation) current = stored;
     return current;
 }

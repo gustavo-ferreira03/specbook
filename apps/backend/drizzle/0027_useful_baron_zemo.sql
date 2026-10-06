@@ -1,0 +1,1 @@
+ALTER TABLE `project_stewards` DROP COLUMN `auto_approve_fixes`;

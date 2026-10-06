@@ -1,12 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { applyTrustedFixes, applyVerifiedRepairs } from "./approval";
+import { applyVerifiedRepairs } from "./approval";
 import { runsRepository } from "../../infra/repositories/runs";
 import { areSpecsLocked } from "../specs/lifecycle";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
-import { specsRepository } from "../../infra/repositories/specs";
+import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { stewardRepository, type Intent, type ProjectSignal } from "../../infra/repositories/steward";
 import { logger } from "../../infra/logger";
 import { createProjectScrubber } from "../credentials/scrub";
@@ -35,8 +35,8 @@ export async function withProjectLock<T>(id: string, work: () => Promise<T>): Pr
     try { return await current; } finally { if (locks.get(id) === current) locks.delete(id); }
 }
 
-async function intentFingerprint(projectId: string, intent: StewardIntent, source: "user" | "event", key: string): Promise<string> {
-    const specs = await specsRepository.listSpecs(projectId);
+async function intentFingerprint(projectId: string, intent: StewardIntent, source: "user" | "event", key: string, specs?: Spec[]): Promise<string> {
+    specs ??= await specsRepository.listSpecs(projectId);
     const run = intent.kind === "triage" && intent.runId ? await runsRepository.getRun(intent.runId) : null;
     if (run) {
         const spec = specs.find((spec) => spec.id === run.specId);
@@ -72,7 +72,7 @@ export async function enqueueIntent(projectId: string, input: unknown, key: stri
     intent.goal = await scrub(intent.goal);
     intent.reason = await scrub(intent.reason);
     return stewardRepository.addIntent({ projectId, key, source, intent, priority: intent.priority, reason: intent.reason,
-        fingerprint: await intentFingerprint(projectId, intent, source, key) });
+        fingerprint: await intentFingerprint(projectId, intent, source, key, specs) });
 }
 
 export async function recordFailureSignal(projectId: string, runId: string, specId: string, title: string, originalRunId = runId): Promise<void> {
@@ -80,20 +80,21 @@ export async function recordFailureSignal(projectId: string, runId: string, spec
         body: "Investigate the failed step and evidence to distinguish test drift, an application bug, or an environment problem.", payload: { runId, originalRunId, specIds: [specId] } });
 }
 
+/** The Spec a signal was raised for, if its files are still the version the signal saw. */
+async function signalSpec(signal: ProjectSignal): Promise<Spec | null> {
+    const specId = Array.isArray(signal.payload.specIds) ? signal.payload.specIds[0] : null;
+    const spec = typeof specId === "string" ? await specsRepository.getSpec(specId) : null;
+    return spec && spec.projectId === signal.projectId && spec.sourceHash === signal.payload.sourceHash
+        && spec.markdownHash === signal.payload.markdownHash ? spec : null;
+}
+
 async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
     if (signal.kind === "spec_failure") return !!await currentFailure(signal.projectId, typeof signal.payload.runId === "string" ? signal.payload.runId : undefined);
-    if (signal.kind === "invalid_spec") {
-        const specId = Array.isArray(signal.payload.specIds) ? signal.payload.specIds[0] : null;
-        const spec = typeof specId === "string" ? await specsRepository.getSpec(specId) : null;
-        return !!spec && spec.projectId === signal.projectId && spec.status === "invalid"
-            && spec.sourceHash === signal.payload.sourceHash && spec.markdownHash === signal.payload.markdownHash;
-    }
+    if (signal.kind === "invalid_spec") return (await signalSpec(signal))?.status === "invalid";
     if (signal.kind === "spec_changed") {
-        const specId = Array.isArray(signal.payload.specIds) ? signal.payload.specIds[0] : null;
-        const spec = typeof specId === "string" ? await specsRepository.getSpec(specId) : null;
+        const spec = await signalSpec(signal);
         const observation = (await stewardRepository.get(signal.projectId)).observation;
-        return !!spec && spec.projectId === signal.projectId && spec.status !== "invalid"
-            && spec.sourceHash === signal.payload.sourceHash && spec.markdownHash === signal.payload.markdownHash
+        return !!spec && spec.status !== "invalid"
             && signal.payload.generation !== undefined && observation.specGenerations?.[spec.id] === signal.payload.generation;
     }
     if (signal.kind === "deployment_changed") {
@@ -168,12 +169,13 @@ async function askForRunPrerequisite(row: Intent, reason: string): Promise<void>
     await jobsRepository.transition(job.id, "queued", "blocked", { stopReason: reason });
     const existing = (await jobsRepository.inbox(row.projectId)).some((item) => item.jobId === job!.id && item.payload.runIntentId === row.id);
     if (!existing) {
-        const credentials = /credential|password|session|sign.?in|authentication/i.test(reason);
-        const edits = /uncommitted|repository.*dirty/i.test(reason);
-        await jobsRepository.addItem({ projectId: row.projectId, jobId: job.id, kind: "question",
-            title: credentials ? "Can you provide access to run these Specs?" : edits ? "Can you save or discard the pending edits before running these Specs?" : "Can you resolve this prerequisite so the Specs can run?",
-            body: `${credentials ? "Add the missing sign-in details in Settings → Credentials, then answer here. Do not paste passwords in your answer." : edits ? "Save or discard the pending edits in the project repository, then answer here to retry." : "The requested Specs could not start. Resolve the prerequisite described below, then answer here to retry."}\n\n${reason}`,
-            payload: { runIntentId: row.id, waitingFor: credentials ? "credentials" : "run_prerequisite", language: "en", specId: job.specId } });
+        const question = /credential|password|session|sign.?in|authentication/i.test(reason)
+            ? { title: "Can you provide access to run these Specs?", body: "Add the missing sign-in details in Settings → Credentials, then answer here. Do not paste passwords in your answer.", waitingFor: "credentials" }
+            : /uncommitted|repository.*dirty/i.test(reason)
+                ? { title: "Can you save or discard the pending edits before running these Specs?", body: "Save or discard the pending edits in the project repository, then answer here to retry.", waitingFor: "run_prerequisite" }
+                : { title: "Can you resolve this prerequisite so the Specs can run?", body: "The requested Specs could not start. Resolve the prerequisite described below, then answer here to retry.", waitingFor: "run_prerequisite" };
+        await jobsRepository.addItem({ projectId: row.projectId, jobId: job.id, kind: "question", title: question.title, body: `${question.body}\n\n${reason}`,
+            payload: { runIntentId: row.id, waitingFor: question.waitingFor, language: "en", specId: job.specId } });
     }
     await stewardRepository.updateIntent(row.id, { status: "running", jobId: job.id, reason });
 }
@@ -200,6 +202,13 @@ export async function recordScheduledPrerequisite(projectId: string, specIds: st
     });
 }
 
+const KIND_INSTRUCTIONS = {
+    regenerate: "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval.",
+    explore: "Explore only the area requested by the human. Inspect available access and ask through the Inbox when a prerequisite needs human help.",
+    coverage: "Compare confirmed areas, roles and rules to the existing Specs and propose additional coverage only for the requested scope. Ask when blocked.",
+    failure_triage: "Investigate the failed Spec and classify its cause without changing expected behavior.",
+} as const;
+
 async function dispatchIntent(row: Intent): Promise<void> {
     if (await isAgentPaused(row.projectId)) return;
     const relatedIntents = await stewardRepository.intents(row.projectId);
@@ -223,14 +232,14 @@ async function dispatchIntent(row: Intent): Promise<void> {
         return;
     }
     for (const job of projectJobs.filter((job) => ["queued", "running"].includes(job.status))) if (await canRunAgentJob(job)) return;
-    const siblings = await stewardRepository.intents(row.projectId);
-    if (siblings.some((other) => other.id !== row.id && other.status === "running" && other.batchId)) return;
+    if (relatedIntents.some((other) => other.id !== row.id && other.status === "running" && other.batchId)) return;
     const inbox = await jobsRepository.inbox(row.projectId);
-    const currentSubject = row.intent.kind === "triage" ? await intentFingerprint(row.projectId, row.intent, row.source, row.key) : row.fingerprint;
+    const allSpecs = await specsRepository.listSpecs(row.projectId);
+    const currentSubject = row.intent.kind === "triage" ? await intentFingerprint(row.projectId, row.intent, row.source, row.key, allSpecs) : row.fingerprint;
     const previous: Intent[] = [];
-    for (const other of siblings) {
+    for (const other of relatedIntents) {
         if (other.id === row.id || !(other.jobId || other.batchId)) continue;
-        const subject = other.intent.kind === "triage" ? await intentFingerprint(other.projectId, other.intent, other.source, other.key).catch(() => null) : other.fingerprint;
+        const subject = other.intent.kind === "triage" ? await intentFingerprint(other.projectId, other.intent, other.source, other.key, allSpecs).catch(() => null) : other.fingerprint;
         if (subject === currentSubject) previous.push(other);
     }
     const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && (item.status === "rejected" || item.payload.ignoredCheck === true)));
@@ -241,7 +250,6 @@ async function dispatchIntent(row: Intent): Promise<void> {
         return;
     }
     if (row.intent.kind === "run_specs") {
-        const allSpecs = await specsRepository.listSpecs(row.projectId);
         const selected = allSpecs.filter((spec) => spec.lifecycle === "active" && (!row.intent.specIds?.length || row.intent.specIds.includes(spec.id)));
         if (row.intent.specIds?.length && (row.intent.specIds.some((id) => !allSpecs.some((spec) => spec.id === id)) || selected.some((spec) => spec.status === "invalid"))) throw new Error("Some selected Specs are missing or invalid. Restore or update those Specs before retrying this selection.");
         const specs = selected.filter((spec) => spec.status !== "invalid");
@@ -252,7 +260,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
             baseUrl: row.intent.baseUrl,
             environment: row.intent.environment,
             trigger: runTrigger,
-            healFailures: runSignalForIntent(row, relatedIntents, signals)?.payload.healFailures !== false,
+            healFailures: signal?.payload.healFailures !== false,
             onPrepared: async (batch) => {
                 if (stopped || await isAgentPaused(row.projectId) || (row.source === "event" && runTrigger !== "schedule" && (await stewardRepository.get(row.projectId)).autonomy === "observe")) throw new IntentDeferred("Automatic execution was deferred before the Specs started");
                 if (runTrigger === "schedule") await (await import("../jobs/schedules")).recordScheduledBatch(batch);
@@ -263,7 +271,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     }
     const kind = row.intent.kind === "triage" ? "failure_triage" : row.intent.kind;
     const decisions = inbox.filter((item) => ["approved", "rejected", "dismissed"].includes(item.status)).slice(0, 12).map((item) => ({ title: item.title, status: item.status }));
-    const goal = `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${kind === "regenerate" ? "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval." : kind === "explore" ? "Explore only the area requested by the human. Inspect available access and ask through the Inbox when a prerequisite needs human help." : kind === "coverage" ? "Compare confirmed areas, roles and rules to the existing Specs and propose additional coverage only for the requested scope. Ask when blocked." : "Investigate the failed Spec and classify its cause without changing expected behavior."}\nRecent human decisions: ${JSON.stringify(decisions)}`;
+    const goal = `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${KIND_INSTRUCTIONS[kind]}\nRecent human decisions: ${JSON.stringify(decisions)}`;
     const job = await enqueueJob(row.projectId, { kind, goal: goal.slice(0, 12000), trigger: row.source === "user" ? "manual" : row.intent.kind === "triage" ? "spec_failure" : "steward",
         specId: row.intent.specIds?.[0], runId: row.intent.runId,
         limits: jobLimitsSchema.parse({}),
@@ -300,7 +308,6 @@ export async function processProjectSteward(projectId: string, collect = true): 
         }
         if (await isAgentPaused(projectId)) return;
         await applyVerifiedRepairs(projectId);
-        if (settings.autonomy === "act") await applyTrustedFixes(projectId);
         const pending = (await stewardRepository.intents(projectId)).filter((intent) => intent.status === "pending");
         for (const intent of pending) {
             if (stopped || await isAgentPaused(projectId)) break;
