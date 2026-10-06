@@ -846,6 +846,15 @@ describe("project steward", () => {
 });
 
 describe("plain-language autonomous presentation", () => {
+    async function createOverviewRun(input: Parameters<typeof runsRepository.createRun>[0]) {
+        const { runsDir } = await import("../../src/core/paths");
+        const spec = (await specsRepository.getSpec(input.specId))!;
+        const run = await runsRepository.createRun(input);
+        await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+        await fs.copyFile(path.join(repoGit.getRepoDir(spec.projectId), spec.path, "spec.yml"), path.join(runsDir, run.id, "spec.yml"));
+        return run;
+    }
+
     test("unfinished updates stay out of Inbox, stopped attempts offer help, and stale updates disappear", async () => {
         const { projectPresentation } = await import("../../src/core/jobs/presentation");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
@@ -971,7 +980,7 @@ describe("plain-language autonomous presentation", () => {
         const [passing, failing, flaky, pausedOne, pausedTwo, unchecked, invalid] = checks;
         for (const spec of [passing!, failing!, flaky!]) {
             const status = spec.id === failing!.id ? "failed" : "passed";
-            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+            const run = await createOverviewRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
             await runsRepository.finishRun(run.id, status, 5, status === "failed" ? "Result did not appear" : null);
             await specsRepository.updateSpecStatus(spec.id, status);
             if (spec.id === flaky!.id) await runsRepository.markFlaky(run.id, run.id);
@@ -994,18 +1003,18 @@ describe("plain-language autonomous presentation", () => {
         await jobsRepository.update(regeneration.id, { status: "completed", classification: "application_bug" });
         const invalidFinding = await jobsRepository.addItem({ projectId, jobId: regeneration.id, kind: "bug_report", title: "The results page cannot open", body: "Opening the results page leaves an empty screen." });
         const view = await projectOverview(projectId);
-        assert.deepEqual(view.needsYou.map((item) => item.id), [older.id, newer.id]);
-        assert.equal(view.summary.attentionCount, 2);
-        assert.equal(view.failing.length, 2);
+        assert.deepEqual(view.needsYou.map((item) => item.id), [older.id, newer.id, invalidFinding.id]);
+        assert.equal(view.summary.attentionCount, 3);
+        assert.equal(view.failing.length, 1);
         assert.equal(view.failing.find((item) => item.specId === failing!.id)?.triageStatus, "App bug reported");
-        assert.equal(view.failing.find((item) => item.specId === invalid!.id)?.triageStatus, "App bug reported");
-        assert.deepEqual(view.failing.find((item) => item.specId === invalid!.id)?.inboxIds, [invalidFinding.id]);
-        assert.equal(view.needsYou.some((item) => item.id === invalidFinding.id), false, "a bug found while regenerating an invalid check appears only under that failing check");
+        assert.equal(view.failing.some((item) => item.specId === invalid!.id), false, "an invalid implementation is not a failing application check");
+        assert.equal(view.needsYou.some((item) => item.id === invalidFinding.id), true, "a finding without a current failing check remains a reviewable decision");
         assert.equal(view.summary.paused, true);
-        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 2, flaky: 1, not_checked: 3, running: 0 });
+        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, invalid: 1 });
         assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
         assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
-        assert.equal(view.specHealth[invalid!.id]?.label, "Check needs an update");
+        assert.equal(view.specHealth[invalid!.id]?.status, "invalid");
+        assert.equal(view.specHealth[invalid!.id]?.label, "Created by an older version, needs regenerating");
         assert.equal(view.specHealth[flaky!.id]?.status, "flaky");
         assert.equal(view.recentRuns.length, 3, "recent activity contains actual runs, not completed agent sessions");
         assert.equal(view.stories.some((story) => story.inboxIds.includes(older.id)), true, "pending decisions retain a detail timeline");
@@ -1014,25 +1023,124 @@ describe("plain-language autonomous presentation", () => {
         const decision = withFinding.needsYou.find((item) => item.id === finding.id);
         assert.match(decision?.presentation.title ?? "", /^Add a regression check.*\?$/);
         assert.equal(withFinding.items.find((item) => item.id === finding.id)?.presentation.title, decision?.presentation.title);
-        assert.equal(withFinding.summary.attentionCount, 3);
+        assert.equal(withFinding.summary.attentionCount, 4);
         assert.match(view.summary.nextCheck, /Resume Specbook/);
         await stewardRepository.update(projectId, { paused: false });
         const oldTriage = await jobsRepository.create({ projectId, specId: failing!.id, runId: failedRun.id, kind: "failure_triage", chatId: crypto.randomUUID(), trigger: "spec_failure", goal: "Investigate the previous failure", limits: jobLimitsSchema.parse({}) });
         await jobsRepository.update(oldTriage.id, { status: "completed", classification: "application_bug" });
-        const passingRun = await runsRepository.createRun({ specId: failing!.id, sourceHash: failing!.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+        const passingRun = await createOverviewRun({ specId: failing!.id, sourceHash: failing!.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
         await runsRepository.finishRun(passingRun.id, "passed", 1, null);
-        const newFailure = await runsRepository.createRun({ specId: failing!.id, sourceHash: failing!.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+        const newFailure = await createOverviewRun({ specId: failing!.id, sourceHash: failing!.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
         await runsRepository.finishRun(newFailure.id, "failed", 1, "A different element is missing");
         const uncheckedFailure = await projectOverview(projectId);
         const currentFailure = uncheckedFailure.failing.find((entry) => entry.specId === failing!.id)!;
         assert.equal(currentFailure.triageStatus, "Latest check failed");
         assert.equal(currentFailure.storyId, undefined, "old triage details do not stand in for the latest failure evidence");
         assert.ok(!currentFailure.inboxIds.includes(bug.id));
-        const retry = await runsRepository.createRun({ specId: failing!.id, sourceHash: failing!.sourceHash, commitSha: await repoGit.getHeadSha(projectId), retryOf: newFailure.id });
+        const retry = await createOverviewRun({ specId: failing!.id, sourceHash: failing!.sourceHash, commitSha: await repoGit.getHeadSha(projectId), retryOf: newFailure.id });
         await runsRepository.finishRun(retry.id, "failed", 1, "The same element is still missing");
         const currentTriage = await jobsRepository.create({ projectId, specId: failing!.id, runId: newFailure.id, kind: "failure_triage", chatId: crypto.randomUUID(), trigger: "spec_failure", goal: "Investigate the current failure", limits: jobLimitsSchema.parse({}) });
         await jobsRepository.update(currentTriage.id, { status: "running" });
         assert.equal((await projectOverview(projectId)).failing.find((entry) => entry.specId === failing!.id)?.triageStatus, "Investigating…", "the original and retry belong to the same investigation");
+    });
+
+    test("older checks share one regeneration decision instead of failing rows", async () => {
+        const { projectOverview } = await import("../../src/core/jobs/overview");
+        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const projectId = await createProject("Older checks");
+        await stewardRepository.update(projectId, { paused: true });
+        const feature = await writer.createFeatureInRepo(projectId, null, "Surveys", "");
+        for (const title of ["List surveys", "Open survey", "See responses"]) {
+            const { spec } = await createSpec(projectId, feature.id, title);
+            await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
+        }
+        await syncRegenerationDecision(projectId);
+        const view = await projectOverview(projectId);
+        assert.equal(view.summary.specHealth.invalid, 3);
+        assert.equal(view.summary.specHealth.failing, 0);
+        assert.equal(view.summary.lastCheckedAt, null);
+        assert.equal(view.failing.length, 0);
+        assert.equal(view.needsYou.length, 1);
+        assert.equal(view.needsYou[0]?.presentation.type, "regenerate");
+        assert.match(view.needsYou[0]?.presentation.title ?? "", /3 checks were created by an older version/);
+        assert.equal(view.summary.nextCheck, "Resume Specbook to continue.");
+        await stewardRepository.update(projectId, { paused: false });
+        assert.equal((await projectOverview(projectId)).summary.nextCheck, "Review the regeneration request in Needs you.");
+        await projectOverview(projectId);
+        await syncRegenerationDecision(projectId);
+        assert.equal((await jobsRepository.list(projectId)).length, 1, "viewing or observing the project does not start regeneration or duplicate the question");
+    });
+
+    test("overview health and last checked use the same current implementation and behavior", async () => {
+        const { projectOverview } = await import("../../src/core/jobs/overview");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const { db } = await import("../../src/infra/db/client");
+        const { runs } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const projectId = await createProject("Current health");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Checkout", "");
+        const { spec } = await createSpec(projectId, feature.id, "Show the confirmation");
+        const run = await createOverviewRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+        await db.update(runs).set({ startedAt: "2026-01-01T12:00:00.000Z" }).where(eq(runs.id, run.id));
+        await runsRepository.finishRun(run.id, "failed", 100, "Confirmation not visible");
+        const job = await jobsRepository.create({ projectId, specId: spec.id, runId: run.id, kind: "failure_triage", trigger: "spec_failure", chatId: crypto.randomUUID(), goal: "Investigate confirmation", limits: jobLimitsSchema.parse({}) });
+        await jobsRepository.update(job.id, { status: "running" });
+        const current = await projectOverview(projectId);
+        assert.equal(current.summary.specHealth.failing, 1);
+        assert.equal(current.summary.lastCheckedAt, "2026-01-01T12:00:00.100Z");
+        assert.equal(current.specHealth[spec.id]?.lastCheckedAt, current.summary.lastCheckedAt);
+        assert.equal(current.failing[0]?.updatedAt, current.summary.lastCheckedAt, "triage activity does not pretend the check ran again");
+        await writer.updateSpecWithLock(spec.id, { humanSpec: { ...HUMAN_SPEC, expectedResult: "The checkout confirmation appears" } });
+        assert.equal((await specsRepository.getSpec(spec.id))?.sourceHash, spec.sourceHash);
+        const changedBehavior = await projectOverview(projectId);
+        assert.equal(changedBehavior.summary.specHealth.not_checked, 1);
+        assert.equal(changedBehavior.summary.lastCheckedAt, null, "an old behavior result cannot supply the current check timestamp");
+        assert.equal(changedBehavior.specHealth[spec.id]?.runId, undefined);
+        assert.equal(changedBehavior.failing.length, 0);
+        assert.equal(changedBehavior.recentRuns.length, 1, "historical results remain available as history");
+        await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
+        const invalid = await projectOverview(projectId);
+        assert.equal(invalid.summary.specHealth.invalid, 1);
+        assert.equal(invalid.summary.specHealth.failing, 0);
+        assert.equal(invalid.summary.lastCheckedAt, null);
+        assert.equal(invalid.failing.length, 0);
+    });
+
+    test("overview groups repeated results while retaining each run and distinct failures", async () => {
+        const { projectOverview } = await import("../../src/core/jobs/overview");
+        const { db } = await import("../../src/infra/db/client");
+        const { runs } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const projectId = await createProject("Repeated results");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Surveys", "");
+        const { spec } = await createSpec(projectId, feature.id, "View surveys");
+        const commitSha = await repoGit.getHeadSha(projectId);
+        const runIds: string[] = [];
+        for (let minute = 0; minute < 3; minute++) {
+            const run = await createOverviewRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha });
+            runIds.push(run.id);
+            await db.update(runs).set({ startedAt: `2026-01-01T12:0${minute}:00.000Z` }).where(eq(runs.id, run.id));
+            await runsRepository.finishRun(run.id, "passed", 100, null);
+        }
+        const grouped = await projectOverview(projectId);
+        assert.equal(grouped.recentRuns.length, 1);
+        assert.equal(grouped.recentRuns[0]?.occurrences, 3);
+        assert.equal(grouped.recentRuns[0]?.counts.passed, 3);
+        assert.match(grouped.recentRuns[0]?.title ?? "", /3 runs/);
+        assert.deepEqual(grouped.recentRuns[0]?.timeline.map((event) => event.runId), runIds);
+        assert.equal(grouped.recentRuns[0]?.updatedAt, "2026-01-01T12:02:00.100Z");
+        const failed = await createOverviewRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha });
+        await db.update(runs).set({ startedAt: "2026-01-01T12:03:00.000Z" }).where(eq(runs.id, failed.id));
+        await runsRepository.finishRun(failed.id, "failed", 100, "Survey list is empty");
+        const distinct = await projectOverview(projectId);
+        assert.equal(distinct.recentRuns.length, 2);
+        assert.equal(distinct.recentRuns[0]?.runId, failed.id);
+        assert.equal(distinct.recentRuns[0]?.occurrences, 1);
+        assert.equal(distinct.recentRuns[1]?.occurrences, 3);
+        assert.equal(distinct.summary.lastCheckedAt, "2026-01-01T12:03:00.100Z");
     });
 
     test("overview keeps a batch live through retry and links the final grouped result to run evidence", async () => {
@@ -1047,7 +1155,7 @@ describe("plain-language autonomous presentation", () => {
         const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
         const { spec } = await createSpec(projectId, feature.id, "Sign in");
         const commitSha = await repoGit.getHeadSha(projectId);
-        const original = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha, automate: true });
+        const original = await createOverviewRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha, automate: true });
         await runsRepository.finishRun(original.id, "failed", 10, "Login button was not visible");
         const batchId = crypto.randomUUID();
         await fs.mkdir(path.join(runBatchesDir, batchId), { recursive: true });
@@ -1072,7 +1180,7 @@ describe("plain-language autonomous presentation", () => {
         await runsRepository.finishRun(original.id, "passed", 10, null);
         assert.deepEqual((await projectOverview(projectId)).recentRuns[0]?.counts, { total: 1, passed: 0, failed: 0, flaky: 0, running: 1 }, "pending automation is counted once even after a passing result");
         await runsRepository.finishRun(original.id, "failed", 10, "Login button was not visible");
-        const retry = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha, retryOf: original.id });
+        const retry = await createOverviewRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha, retryOf: original.id });
         await runsRepository.finishRun(retry.id, "passed", 20, null);
         await runsRepository.markFlaky(original.id, retry.id);
         assert.deepEqual((await projectOverview(projectId)).recentRuns[0]?.counts, { total: 1, passed: 0, failed: 0, flaky: 0, running: 1 }, "marking flaky before acknowledgment never duplicates the result count");

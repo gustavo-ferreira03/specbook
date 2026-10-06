@@ -3,11 +3,12 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { TechnicalDetails } from "@/components/TechnicalDetails";
 import { Button } from "@/components/ui/button";
 import type { ActivityStory } from "@/lib/types";
+import { formatDateTime } from "@/lib/format";
 
 export function StoryTimeline({ story, projectId, omit = [] }: { story: ActivityStory; projectId: string; omit?: string[] }) {
     const timeline = story.timeline.filter((event) => !omit.includes(event.detail)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (!timeline.length) return null;
-    return <ol className="space-y-4 border-l border-line pl-4" aria-label="What happened">{timeline.map((event) => <li key={event.id}><div className="flex flex-wrap items-baseline gap-x-3 gap-y-1"><h3 className="text-body font-medium text-ink">{event.label}</h3><RelativeTime value={event.createdAt} className="text-meta text-ink-subtle" /></div>{event.detail && <p className="mt-1 text-body text-ink-muted">{event.detail}</p>}{event.specId && event.runId && <Link className="mt-1 inline-block text-meta text-ink-muted underline underline-offset-2 hover:text-ink" href={`/p/${projectId}/specs/${event.specId}#run-${event.runId}`}>View this test run</Link>}</li>)}</ol>;
+    return <ol className="space-y-4 border-l border-line pl-4" aria-label="What happened">{timeline.map((event) => <li key={event.id}><div className="flex flex-wrap items-baseline gap-x-3 gap-y-1"><h3 className="text-body font-medium text-ink">{event.label}</h3>{event.runId ? <time dateTime={event.createdAt} className="text-meta text-ink-subtle">{formatDateTime(event.createdAt, { seconds: true })}</time> : <RelativeTime value={event.createdAt} className="text-meta text-ink-subtle" />}</div>{event.detail && <p className="mt-1 text-body text-ink-muted">{event.detail}</p>}{event.specId && event.runId && <Link className="mt-1 inline-block text-meta text-ink-muted underline underline-offset-2 hover:text-ink" href={`/p/${projectId}/specs/${event.specId}#run-${event.runId}`}>View this test run</Link>}</li>)}</ol>;
 }
 
 export function StoryDetails({ story, projectId, onDecision, showDecisions = true }: { story: ActivityStory; projectId: string; onDecision: (id: string) => void; showDecisions?: boolean }) {

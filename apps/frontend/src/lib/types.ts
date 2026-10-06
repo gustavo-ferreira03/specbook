@@ -336,7 +336,7 @@ export interface ActivityStory {
 }
 
 export interface SpecHealth {
-    status: "passing" | "failing" | "flaky" | "not_checked" | "running";
+    status: "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
     label: string;
     runId?: string;
     lastCheckedAt: string | null;
@@ -354,6 +354,7 @@ export interface FailingSpec {
 
 export interface RecentRun extends ActivityStory {
     trigger: "deploy" | "ci" | "schedule" | "manual" | "spec_change";
+    occurrences: number;
     counts: { total: number; passed: number; failed: number; flaky: number; running: number };
 }
 
@@ -362,7 +363,7 @@ export interface OverviewResponse {
         verdict: string;
         nextCheck: string;
         nextCheckAt: string | null;
-        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number };
+        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; invalid: number };
     };
     specHealth: Record<string, SpecHealth>;
     needsYou: PresentedInboxItem[];

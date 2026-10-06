@@ -3,6 +3,7 @@ const LOCALE = "en-US";
 const dateFormatter = new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium" });
 const shortDateFormatter = new Intl.DateTimeFormat(LOCALE, { month: "short", day: "numeric" });
 const dateTimeFormatter = new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium", timeStyle: "short" });
+const preciseDateTimeFormatter = new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium", timeStyle: "medium" });
 const timeFormatter = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit" });
 const numberFormatter = new Intl.NumberFormat(LOCALE);
 
@@ -23,8 +24,8 @@ export function formatShortDate(value: DateInput): string {
 }
 
 /** "Sep 28, 2026, 3:04 PM" */
-export function formatDateTime(value: DateInput): string {
-    return dateTimeFormatter.format(toDate(value));
+export function formatDateTime(value: DateInput, options: { seconds?: boolean } = {}): string {
+    return (options.seconds ? preciseDateTimeFormatter : dateTimeFormatter).format(toDate(value));
 }
 
 /** "03:04 PM" */
