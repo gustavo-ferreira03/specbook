@@ -1,0 +1,5 @@
+{$SPECBOOK_HOST} {
+    reverse_proxy app:4001 {
+        flush_interval -1
+    }
+}
