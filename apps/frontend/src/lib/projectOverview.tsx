@@ -1,10 +1,9 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { getOverview } from "./api";
+import { getOverview, overviewEventsUrl } from "./api";
 import { invalidate, onInvalidate } from "./invalidation";
 import type { OverviewResponse, SpecStatus } from "./types";
-import { useVisiblePolling } from "./usePolling";
 
 interface ProjectOverview {
     data: OverviewResponse | null;
@@ -15,36 +14,71 @@ interface ProjectOverview {
 
 const ProjectOverviewContext = createContext<ProjectOverview | null>(null);
 
-/** One overview poll per project, shared by the Sidebar and the Overview page. */
+/** One overview subscription per project, shared by the Sidebar and the Overview page. */
 export function ProjectOverviewProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
     const [state, setState] = useState<{ projectId: string; data: OverviewResponse | null; failed: boolean }>({ projectId, data: null, failed: false });
     const generation = useRef(0);
 
     const specSet = useRef("");
 
+    const apply = useCallback((data: OverviewResponse) => {
+        setState({ projectId, data, failed: false });
+        // The agent saves and repairs Specs in the background; refresh the Spec tree when the set changes.
+        const specs = `${projectId}:${Object.entries(data.specHealth).map(([id, health]) => `${id}=${health.status}`).sort().join(",")}`;
+        if (specSet.current && specSet.current !== specs && specSet.current.startsWith(`${projectId}:`)) invalidate({ resource: "tree", projectId });
+        specSet.current = specs;
+    }, [projectId]);
+
     const reload = useCallback(async () => {
         const current = ++generation.current;
         try {
             const data = await getOverview(projectId);
-            if (current !== generation.current) return;
-            setState({ projectId, data, failed: false });
-            // The agent saves and repairs Specs in the background; refresh the Spec tree when the set changes.
-            const specs = `${projectId}:${Object.entries(data.specHealth).map(([id, health]) => `${id}=${health.status}`).sort().join(",")}`;
-            if (specSet.current && specSet.current !== specs && specSet.current.startsWith(`${projectId}:`)) invalidate({ resource: "tree", projectId });
-            specSet.current = specs;
+            if (current === generation.current) apply(data);
         } catch {
             if (current === generation.current) setState((previous) => ({ projectId, data: previous.projectId === projectId ? previous.data : null, failed: true }));
         }
-    }, [projectId]);
+    }, [projectId, apply]);
 
+    // The server pushes the overview whenever it changes; polling covers the gaps while the stream is down.
     useEffect(() => {
-        void reload();
+        let source: EventSource | null = null;
+        let live = false;
+        const open = () => {
+            if (source || document.hidden) return;
+            const current = new EventSource(overviewEventsUrl(projectId));
+            source = current;
+            current.addEventListener("overview", (event) => {
+                live = true;
+                generation.current++;
+                apply(JSON.parse((event as MessageEvent<string>).data) as OverviewResponse);
+            });
+            current.onerror = () => {
+                live = false;
+                if (current.readyState === EventSource.CLOSED && source === current) source = null;
+                void reload();
+            };
+        };
+        const close = () => {
+            source?.close();
+            source = null;
+            live = false;
+        };
+        const handleVisibility = () => document.hidden ? close() : open();
+        const fallback = window.setInterval(() => {
+            if (document.hidden || live) return;
+            void reload();
+            open();
+        }, 5000);
+        if (document.hidden) void reload();
+        open();
+        document.addEventListener("visibilitychange", handleVisibility);
         return () => {
+            close();
+            window.clearInterval(fallback);
+            document.removeEventListener("visibilitychange", handleVisibility);
             generation.current++;
         };
-    }, [reload]);
-
-    useVisiblePolling(() => void reload(), 5000);
+    }, [projectId, apply, reload]);
 
     useEffect(() => onInvalidate((event) => {
         if (!event.projectId || event.projectId === projectId) void reload();
