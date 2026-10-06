@@ -29,6 +29,7 @@ const TONES: Record<StatusTone, Pick<StatusMeta, "text" | "soft" | "chart">> = {
 };
 
 const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
+    draft: { label: "Draft", runLabel: "Draft", description: "Run manually and activate when ready. Automatic runs exclude drafts.", tone: "neutral", icon: CircleDashed },
     passed: { label: "Passed", runLabel: "Passed", description: "The last verification passed.", tone: "success", icon: Check },
     failed: { label: "Failing", runLabel: "Failed", description: "The last verification failed.", tone: "danger", icon: X },
     error: { label: "Error", runLabel: "Error", description: "The run could not complete.", tone: "danger", icon: X },

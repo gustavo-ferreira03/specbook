@@ -11,6 +11,7 @@ import { useTempStorage } from "../helpers/storage";
 
 useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
+const { environmentsRepository } = await import("../../src/infra/repositories/environments");
 const { projectsRepository } = await import("../../src/infra/repositories/projects");
 const { repoGit } = await import("../../src/core/repo/git");
 const { repoBare } = await import("../../src/core/repo/bare");
@@ -101,7 +102,7 @@ describe("executeSpec (real browser)", { skip: available ? false : "Chromium for
             const project = await projectsRepository.createProject("Redirect check", `http://127.0.0.1:${(preview.address() as AddressInfo).port}`);
             await repoGit.ensureProjectRepo(project.id, { create: true });
             const feature = await writer.createFeatureInRepo(project.id, null, "Redirect", "");
-            const { spec } = await writer.createSpecInRepo({
+            const { spec } = await writer.createSpecInRepo({ lifecycle: "active",
                 projectId: project.id, featureId: feature.id, title: "Open preview", description: "",
                 humanSpec: { preconditions: [], steps: ["Open preview"], expectedResult: "Preview opens", postconditions: [] },
                 testSource: 'import { test, expect } from "specbook"; test("Open preview", async ({ page, step }) => { await step("Open preview", async () => { await page.goto("/"); }); });',
@@ -135,7 +136,7 @@ test("Store", async ({ page, step, secret }) => {
     });
 });
 `;
-        const { spec } = await writer.createSpecInRepo({
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active",
             projectId: project.id,
             featureId: feature.id,
             title: "Store",
@@ -177,7 +178,7 @@ test("Store", async ({ page, step, secret }) => {
     test("a preview override cannot receive saved credentials until its origin is explicitly allowed", { timeout: 120_000 }, async () => {
         const { getProfileByName, updateProfile } = await import("../../src/core/credentials/profiles");
         const project = await projectsRepository.createProject("Preview credential boundary", "http://127.0.0.1:1");
-        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: [new URL(baseUrl).origin] });
+        await environmentsRepository.update((await environmentsRepository.list(project.id))[0]!, { ...(await environmentsRepository.list(project.id))[0]!, allowedOrigins: [new URL(baseUrl).origin] });
         await repoGit.ensureProjectRepo(project.id, { create: true });
         await createProfile(project.id, { name: "shopper", fields: [{ key: "password", value: "preview-trust-secret" }] });
         const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
@@ -196,7 +197,7 @@ test("Preview credentials", async ({ page, step, secret }) => {
     });
 });
 `;
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Preview credentials", description: "",
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Preview credentials", description: "",
             humanSpec: { preconditions: [], steps, expectedResult: "Credentials received", postconditions: [] }, testSource });
         assert.equal(spec.status, "unverified", spec.invalidReason ?? "");
         previewCredentials.length = 0;
@@ -212,6 +213,73 @@ test("Preview credentials", async ({ page, step, secret }) => {
         assert.ok(previewCredentials.some((body) => body === "preview-trust-secret" || body === "password=preview-trust-secret"), "explicitly trusted preview receives the credential");
         assert.equal((await projectsRepository.getProject(project.id))?.baseUrl, "http://127.0.0.1:1", "a run override does not change the canonical trusted origin");
     });
+
+    test("named environments select their credential overrides without trusting one-off previews", { timeout: 120_000 }, async () => {
+        const { getProfileByName, updateProfile } = await import("../../src/core/credentials/profiles");
+        const { createCiRouter } = await import("../../src/infra/web/routes/ci");
+        const { issueCiToken } = await import("../../src/core/ci/tokens");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const receivers = [[], []] as string[][];
+        const servers = receivers.map((received) => http.createServer(async (request, response) => {
+            response.setHeader("Content-Type", "text/html");
+            if (request.url === "/credential-receiver") {
+                let body = "";
+                for await (const chunk of request) body += chunk;
+                received.push(body);
+                response.end("Received");
+            } else response.end(`<label>Password <input type="password" oninput="fetch('/credential-receiver', { method: 'POST', body: this.value })"></label>`);
+        }));
+        for (const server of servers) await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const [stagingUrl, previewUrl] = servers.map((server) => `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+        try {
+            const project = await projectsRepository.createProject("Environment credentials", baseUrl);
+            await repoGit.ensureProjectRepo(project.id, { create: true });
+            await createProfile(project.id, { name: "shopper", fields: [{ key: "password", value: "production-secret-only" }] });
+            const stagingProfile = await createProfile(project.id, { name: "staging-shopper", fields: [{ key: "password", value: "staging-secret-only" }] });
+            await environmentsRepository.create(project.id, { name: "Staging", baseUrl: stagingUrl!, allowedOrigins: [previewUrl!], credentialOverrides: { shopper: stagingProfile.id } });
+            const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
+            const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Environment sign-in", description: "",
+                humanSpec: { preconditions: [], steps: ["Enter password"], expectedResult: "The password field accepts input", postconditions: [] },
+                testSource: 'import { test, expect } from "specbook"; test("Environment sign-in", async ({ page, step, secret }) => { await step("Enter password", async () => { await page.goto("/credential-preview"); await page.getByLabel("Password").fill(secret("shopper", "password")); await expect(page.getByLabel("Password")).toBeVisible(); }); });' });
+            previewCredentials.length = 0;
+            const productionRun = await executeSpec(spec.id);
+            assert.equal(productionRun.status, "passed", productionRun.failReason ?? "");
+            assert.equal(productionRun.environment?.name, "Production");
+            assert.ok(previewCredentials.includes("production-secret-only"));
+            const stagingRun = await executeSpec(spec.id, { environment: "staging" });
+            assert.equal(stagingRun.status, "passed", stagingRun.failReason ?? "");
+            assert.equal(stagingRun.environment?.name, "Staging");
+            assert.deepEqual(receivers[0], ["staging-secret-only"]);
+            const blocked = await executeSpec(spec.id, { environment: "Staging", baseUrl: previewUrl });
+            assert.equal(blocked.status, "failed");
+            assert.match(blocked.failReason ?? "", /current page origin is not allowed/);
+            assert.deepEqual(receivers[1], [], "a network allowlist does not authorize a credential override on previews");
+            const profile = (await getProfileByName(project.id, "staging-shopper"))!;
+            await updateProfile(profile, { allowedOrigins: [previewUrl!], fields: [{ key: "password" }] });
+            const allowed = await executeSpec(spec.id, { environment: "Staging", baseUrl: previewUrl });
+            assert.equal(allowed.status, "passed", allowed.failReason ?? "");
+            assert.deepEqual(receivers[1], ["staging-secret-only"]);
+            const evidence = await (await app.request(`/runs/${allowed.id}/evidence`)).json();
+            assert.equal(evidence.environment.name, "Staging");
+            assert.ok(!JSON.stringify(evidence).includes("staging-secret-only"));
+            const ci = new Hono().route("/", createCiRouter());
+            const { token } = await issueCiToken(project.id);
+            const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+            const started = await ci.request(`/ci/projects/${project.id}/runs`, { method: "POST", headers, body: JSON.stringify({ environment: "staging" }) });
+            assert.equal(started.status, 202, await started.clone().text());
+            const initial = await started.json();
+            assert.equal(initial.batch.environment.name, "Staging");
+            const completed = await (await ci.request(`/ci/runs/${initial.batch.id}?wait=true`, { headers })).json();
+            assert.equal(completed.qualityGate.passed, true);
+            assert.deepEqual(completed.results.map((result: { specId: string }) => result.specId), [spec.id]);
+            const run = await runsRepository.getRun(completed.results[0].runId);
+            assert.equal(run?.environment?.name, "Staging");
+            assert.deepEqual(receivers[0], ["staging-secret-only", "staging-secret-only"]);
+            assert.equal((await projectsRepository.getProject(project.id))?.baseUrl, baseUrl);
+        } finally {
+            for (const server of servers) { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
+        }
+    });
 });
 
 describe("proposal verification", { skip: available ? false : "Chromium is not installed" }, () => {
@@ -226,13 +294,14 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
         const project = await projectsRepository.createProject("Candidate", baseUrl);
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Candidate", "");
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Candidate", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Candidate", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const directory = path.join(repoGit.getRepoDir(project.id), spec.path);
         const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf8");
         const { runsRepository } = await import("../../src/infra/repositories/runs");
         const originalRun = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(project.id), sourceHash: spec.sourceHash, baseUrl });
         await runsRepository.finishRun(originalRun.id, "failed", 1, "Preview locator drift");
-        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1", ciAllowedOrigins: [new URL(baseUrl).origin] });
+        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1" });
+        await environmentsRepository.update((await environmentsRepository.list(project.id))[0]!, { ...(await environmentsRepository.list(project.id))[0]!, allowedOrigins: [new URL(baseUrl).origin] });
         const job = await jobsRepository.create({ projectId: project.id, runId: originalRun.id, chatId: "candidate-test", trigger: "manual", kind: "failure_triage", specId: spec.id, goal: "Heal", limits: jobLimitsSchema.parse({}) });
         const running = (await jobsRepository.claim(job.id))!;
         await jobsRepository.update(job.id, { classification: "test_drift" });
@@ -256,6 +325,61 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
 });
 
 describe("scheduled runs", () => {
+    test("Draft-only schedules advance quietly while manual Draft failures never trigger retry or healing", { skip: !available, timeout: 120_000 }, async () => {
+        const { schedulesRepository } = await import("../../src/infra/repositories/schedules");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { updateAutomation, processSchedules } = await import("../../src/core/jobs/schedules");
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { getRunBatch } = await import("../../src/core/runner/batch");
+        const { createCiRouter } = await import("../../src/infra/web/routes/ci");
+        const { issueCiToken } = await import("../../src/core/ci/tokens");
+        const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+        const project = await projectsRepository.createProject("Draft schedule", baseUrl);
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Store", "");
+        const { spec: draft } = await writer.createSpecInRepo({ lifecycle: "draft", projectId: project.id, featureId: feature.id, title: "Draft store", description: "", humanSpec: HUMAN_SPEC,
+            testSource: VALID_SPEC.replace("toBeVisible()", 'toHaveText("Not the store", { timeout: 500 })') });
+        await updateAutomation(project.id, { cron: "* * * * *", specIds: [draft.id] });
+        const at = new Date();
+        try {
+            for (const selected of [[draft.id], []]) {
+                await updateAutomation(project.id, { specIds: selected });
+                await schedulesRepository.update(project.id, { nextRunAt: new Date(at.getTime() - 300_000).toISOString() });
+                await processSchedules(at);
+                const schedule = (await schedulesRepository.get(project.id))!;
+                assert.ok(Date.parse(schedule.nextRunAt!) > at.getTime());
+                assert.equal(schedule.lastBatchId, null);
+                assert.equal(schedule.lastError, null);
+                assert.deepEqual(await runsRepository.listRuns(draft.id), []);
+                assert.deepEqual(await jobsRepository.inbox(project.id), []);
+            }
+            const manual = await executeSpec(draft.id, { automate: true });
+            assert.equal(manual.status, "failed");
+            assert.equal(manual.automationPending, false);
+            await processRunFailures();
+            assert.equal((await runsRepository.listRuns(draft.id)).length, 1);
+            assert.deepEqual(await jobsRepository.list(project.id), []);
+            const ci = new Hono().route("/", createCiRouter());
+            const { token } = await issueCiToken(project.id);
+            const rejected = await ci.request(`/ci/projects/${project.id}/runs`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ specIds: [draft.id] }) });
+            assert.equal(rejected.status, 400);
+            assert.match((await rejected.text()), /must be active/);
+            const { spec: active } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Active store", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+            await schedulesRepository.update(project.id, { nextRunAt: new Date(at.getTime() - 300_000).toISOString() });
+            await processSchedules(at);
+            const batchId = (await schedulesRepository.get(project.id))!.lastBatchId!;
+            let batch = await getRunBatch(batchId);
+            assert.deepEqual(batch?.specs.map((spec) => spec.specId), [active.id]);
+            const deadline = Date.now() + 60_000;
+            while (batch?.status === "running" && Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                batch = await getRunBatch(batchId);
+            }
+            assert.equal(batch?.status, "passed", batch?.failReason ?? "");
+            assert.equal((await runsRepository.listRuns(draft.id)).length, 1, "scheduled batches never rerun the failed Draft");
+        } finally { await updateAutomation(project.id, { cron: null }); }
+    });
+
     test("evaluates numeric cron expressions in UTC and rejects invalid or impossible dates", async () => {
         const { nextCronAt, automationSettingsSchema } = await import("../../src/core/jobs/schedules");
         assert.equal(nextCronAt("*/15 9-17 * * 1-5", new Date("2026-10-06T17:59:00Z")), "2026-10-07T09:00:00.000Z");
@@ -345,8 +469,8 @@ describe("scheduled runs", () => {
         const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
         const source = VALID_SPEC.replace("({ page, step })", "({ page, step, secret })")
             .replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByLabel("Password").fill(secret("shopper", "password"));');
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Scheduled sign-in", description: "", humanSpec: HUMAN_SPEC, testSource: source });
-        const { spec: unselected } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Unselected", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Scheduled sign-in", description: "", humanSpec: HUMAN_SPEC, testSource: source });
+        const { spec: unselected } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Unselected", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const head = await repoGit.getHeadSha(project.id);
         await updateAutomation(project.id, { cron: "* * * * *", specIds: [spec.id], healFailures: false, webhookUrl: new URL("/schedule-events", baseUrl).href, allowPrivateWebhook: true });
         const at = new Date();
@@ -443,7 +567,7 @@ describe("scheduled runs", () => {
             const project = await projectsRepository.createProject("Scheduled store", baseUrl);
             await repoGit.ensureProjectRepo(project.id, { create: true });
             const feature = await writer.createFeatureInRepo(project.id, null, "Scheduled", "");
-            const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+            const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
             await specsRepository.createSpecRecord({ projectId: project.id, featureId: feature.id, title: "Invalid", description: "", path: "specs/invalid", sourceHash: "", markdownHash: "", status: "invalid" });
             await updateAutomation(project.id, {
                 cron: "* * * * *", healFailures: false, allowPrivateWebhook: true,
@@ -530,7 +654,7 @@ test("Store", async ({ page, step }) => {
     });
 });`;
         const humanSpec = { preconditions: [], steps: ["See the store"], expectedResult: "Ready", postconditions: [] };
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec, testSource: source });
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec, testSource: source });
         return { project, spec, source, humanSpec };
     }
 
@@ -694,7 +818,8 @@ test("Store", async ({ page, step }) => {
         const { project, spec } = await failingSpec("/flaky-preview");
         const original = await executeSpec(spec.id, { automate: true, baseUrl });
         assert.equal(original.status, "failed");
-        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1", ciAllowedOrigins: [new URL(baseUrl).origin] });
+        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1" });
+        await environmentsRepository.update((await environmentsRepository.list(project.id))[0]!, { ...(await environmentsRepository.list(project.id))[0]!, allowedOrigins: [new URL(baseUrl).origin] });
         await processRunFailures();
         const retry = (await runsRepository.retryFor(original.id))!;
         assert.equal(retry.status, "passed", retry.failReason ?? "");
@@ -1175,7 +1300,7 @@ describe("autonomous pause and decisions", () => {
         const other = await projectWithWork();
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Checkout", "");
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const job = await createWork(project.id);
         const item = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/checkout")') });
         const directory = path.join(repoGit.getRepoDir(project.id), spec.path);
@@ -1203,7 +1328,7 @@ describe("autonomous pause and decisions", () => {
         const project = await projectWithWork();
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Checkout", "");
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const input = { kind: "regenerate", specIds: [spec.id], goal: "Repair checkout implementation", reason: "Checkout implementation is invalid" };
         const intent = await enqueueIntent(project.id, input, "first-check", "user");
         await processProjectSteward(project.id, false);
@@ -1390,14 +1515,14 @@ describe("autonomous pause and decisions", () => {
         const { getRunBatch } = await import("../../src/core/runner/batch");
         const { runsRepository } = await import("../../src/infra/repositories/runs");
         const project = await projectsRepository.createProject("Requested preview check", "http://127.0.0.1:1");
-        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: [new URL(baseUrl).origin] });
+        await environmentsRepository.update((await environmentsRepository.list(project.id))[0]!, { ...(await environmentsRepository.list(project.id))[0]!, allowedOrigins: [new URL(baseUrl).origin] });
         await stewardRepository.update(project.id, { autonomy: "observe" });
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
         const source = VALID_SPEC.replace("({ page, step })", "({ page, step, secret })")
             .replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByLabel("Password").fill(secret("shopper", "password"));');
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Sign in", description: "", humanSpec: HUMAN_SPEC, testSource: source });
-        const { spec: unselected } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Unselected check", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Sign in", description: "", humanSpec: HUMAN_SPEC, testSource: source });
+        const { spec: unselected } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Unselected check", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const head = await repoGit.getHeadSha(project.id);
         const intent = await enqueueIntent(project.id, { kind: "run_specs", goal: "Check sign-in on the preview", reason: "The user requested this preview check", specIds: [spec.id], baseUrl }, "chat:preview:run", "user");
         await processProjectSteward(project.id, false);
@@ -1481,7 +1606,7 @@ describe("run repository recovery", { skip: available ? false : "Chromium is not
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Home", "");
         const testSource = 'import { test, expect } from "specbook"; test("Home", async ({ page, step }) => { await step("Open", async () => { await page.goto("/"); await expect(page.getByRole("heading", { name: "Store" })).toBeVisible(); }); });';
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Home", description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "Store appears", postconditions: [] }, testSource });
+        const { spec } = await writer.createSpecInRepo({ lifecycle: "active", projectId: project.id, featureId: feature.id, title: "Home", description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "Store appears", postconditions: [] }, testSource });
         const sourceFile = path.join(repoGit.getRepoDir(project.id), spec.path, "spec.ts");
         const changed = testSource.replace('page.goto("/")', 'page.goto("/changed")');
         await fs.writeFile(sourceFile, changed);

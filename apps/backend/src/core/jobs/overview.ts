@@ -1,3 +1,4 @@
+import type { RunEnvironment } from "../../infra/db/schema";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { schedulesRepository } from "../../infra/repositories/schedules";
@@ -10,7 +11,7 @@ import { projectPresentation, type ActivityStory, type PresentedItem } from "./p
 import { sanitizeTechnicalDetails } from "./presentation-errors";
 import { matchesCurrentSpec } from "./current-run";
 
-export type SpecHealthStatus = "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
+export type SpecHealthStatus = "draft" | "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
 export interface SpecHealth {
     status: SpecHealthStatus;
     label: string;
@@ -19,6 +20,7 @@ export interface SpecHealth {
 }
 export interface RecentRun extends ActivityStory {
     trigger: RunBatchTrigger;
+    environment?: RunEnvironment;
     occurrences: number;
     counts: { total: number; passed: number; failed: number; flaky: number; running: number };
 }
@@ -43,13 +45,13 @@ export async function projectOverview(projectId: string) {
         return [spec.id, latest && await matchesCurrentSpec(latest, spec) ? latest : undefined] as const;
     })));
     const specHealth: Record<string, SpecHealth> = {};
-    const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, passing: 0, failing: 0, flaky: 0, not_checked: 0, running: 0, invalid: 0 };
+    const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, draft: 0, passing: 0, failing: 0, flaky: 0, not_checked: 0, running: 0, invalid: 0 };
     for (const spec of specs) {
         const current = currentRuns.get(spec.id);
-        const status: SpecHealthStatus = spec.status === "invalid" ? "invalid"
+        const status: SpecHealthStatus = spec.lifecycle === "draft" ? "draft" : spec.status === "invalid" ? "invalid"
             : current?.status === "running" ? "running" : !current ? "not_checked"
             : current.flaky ? "flaky" : current.status === "passed" ? "passing" : "failing";
-        const label = status === "invalid" ? "Check needs repairing"
+        const label = status === "draft" ? `Draft${current ? ` · first run ${current.status}` : " · not run yet"}` : status === "invalid" ? "Check needs repairing"
             : status === "running" ? "Check running"
             : status === "not_checked" ? "Current version not checked yet" : status === "flaky" ? "Passed on retry"
             : status === "passing" ? "Passing" : "Latest check failed";
@@ -115,7 +117,7 @@ export async function projectOverview(projectId: string) {
             ...results.flatMap(({ run, retry }) => run ? [finishedAt(retry ?? run)] : [])].sort().at(-1)!;
         const details = results.map(({ entry, run }) => `${entry.title}: ${run?.flaky ? "passed on retry" : run?.status ?? entry.status}${run?.failReason ? `\n${run.failReason}` : ""}`).join("\n\n");
         const story: RecentRun = {
-            id: `batch:${batch.id}`, subject: { type: trigger === "deploy" ? "deployment" : "project", id: batch.id, name: batch.label }, trigger, occurrences: 1,
+            environment: batch.environment, id: `batch:${batch.id}`, subject: { type: trigger === "deploy" ? "deployment" : "project", id: batch.id, name: batch.label }, trigger, occurrences: 1,
             counts: { total: results.length, passed, failed, flaky, running: runningCount },
             title, summary: "", status: running ? "working" : "completed", outcome: running ? undefined : failed ? "failed" : flaky ? "flaky" : "passed", nextStep: running ? "Results will appear here when the checks finish." : failed ? "Open a failed check to inspect its evidence." : "",
             createdAt: batch.startedAt, updatedAt, timeline: results.map(({ entry, run, retry }) => ({ id: entry.runId, label: entry.title, specId: entry.specId, runId: retry?.id ?? entry.runId,
@@ -132,7 +134,7 @@ export async function projectOverview(projectId: string) {
         const running = run.status === "running" || run.automationPending;
         const retry = run.automationPending || run.flaky || ["failed", "error"].includes(run.status) ? await runsRepository.retryFor(run.id) : null;
         const story: RecentRun = {
-            id: `run:${run.id}`, subject: { type: "spec", id: spec.id, name: spec.title }, specId: spec.id, runId: retry?.id ?? run.id,
+            environment: run.environment ?? undefined, id: `run:${run.id}`, subject: { type: "spec", id: spec.id, name: spec.title }, specId: spec.id, runId: retry?.id ?? run.id,
             trigger: "manual", occurrences: 1, counts: { total: 1, passed: !running && !run.flaky && run.status === "passed" ? 1 : 0, failed: !running && !run.flaky && run.status !== "passed" ? 1 : 0, flaky: !running && run.flaky ? 1 : 0, running: running ? 1 : 0 },
             title: running ? `Checking “${spec.title}”${run.status === "running" ? "" : " again after a failure"}`
                 : `“${spec.title}” ${run.flaky ? "passed on retry" : run.status === "passed" ? "passed" : "failed its test run"}`,
@@ -156,9 +158,10 @@ export async function projectOverview(projectId: string) {
     }
     recentRuns.sort(newestFirst);
     const lastCheckedAt = Object.values(specHealth).flatMap((health) => health.lastCheckedAt ? [health.lastCheckedAt] : []).sort().at(-1) ?? null;
-    const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length} checks passing` : "No checks yet",
+    const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length - healthCounts.draft} active checks passing` : "No checks yet",
         healthCounts.failing ? `${healthCounts.failing} failing` : "", healthCounts.flaky ? `${healthCounts.flaky} flaky` : "",
         healthCounts.invalid ? `${healthCounts.invalid} need repairing` : "",
+        healthCounts.draft ? `${healthCounts.draft} drafts` : "",
         healthCounts.not_checked ? `${healthCounts.not_checked} not run yet` : "", healthCounts.running ? `${healthCounts.running} running` : ""].filter(Boolean).join(" · ");
     const activeCount = recentRuns.filter((run) => run.status === "working").length + jobs.filter((job) => job.status === "running").length;
     const nextCheckAt = agentPaused ? null : schedule?.nextRunAt ?? null;

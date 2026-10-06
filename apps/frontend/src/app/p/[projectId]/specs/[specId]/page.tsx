@@ -7,12 +7,14 @@ import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, Info, PencilLine, Play, RefreshCw, RotateCcw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
+import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { RawFileEditor } from "@/components/RawFileEditor";
 import { RelativeTime } from "@/components/RelativeTime";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
+import { ApiRunEvidence } from "@/components/SpecRunDialog";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
+import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, setSpecLifecycle, updateSpec, updateSpecFiles } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -133,6 +135,7 @@ function VerificationBanner({
     latestRun,
     latestEvidence,
     running,
+    environment,
 }: {
     projectId: string;
     detail: SpecDetail;
@@ -140,6 +143,7 @@ function VerificationBanner({
     latestRun: Run | undefined;
     latestEvidence: LoadedRunEvidence | undefined;
     running: boolean;
+    environment: string;
 }) {
     const { canEdit } = useAuth();
     let status: string;
@@ -150,7 +154,7 @@ function VerificationBanner({
     if (running) {
         status = "running";
         headline = "Verifying now";
-        detail = "Running this Spec against the app. Results appear here when it finishes.";
+        detail = `Running this Spec against ${environment}. Results appear here when it finishes.`;
     } else if (spec.status === "invalid") {
         status = "invalid";
         headline = "This Spec can't run";
@@ -183,6 +187,7 @@ function VerificationBanner({
         detail = (
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                 <RelativeTime value={latestRun.startedAt} />
+                <Dot /><span title={latestRun.baseUrl ?? undefined}>{latestRun.environment?.name ?? "Production"}</span>
                 {latestRun.durationMs !== null && <><Dot /><span className="tabular">took {formatDuration(latestRun.durationMs)}</span></>}
                 {failedStep && <><Dot /><span>stopped at “{failedStep}”</span></>}
                 {lastStep && <><Dot /><span>last captured step {lastStep.number}: {lastStep.label}</span></>}
@@ -306,7 +311,7 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
     if (!loaded) return <Skeleton className="h-24 w-full rounded-lg" aria-label="Loading evidence" />;
     if (loaded.error) return <Alert variant="danger" role="alert"><AlertDescription>Could not load evidence: {loaded.error}</AlertDescription></Alert>;
     if (!evidence) return null;
-    const empty = evidence.steps.length === 0 && !evidence.video && !evidence.diagnostics?.length && !evidence.errorContext && !(run.status === "passed" && evidence.expectedResult);
+    const empty = evidence.steps.length === 0 && !evidence.apiSteps?.length && !evidence.video && !evidence.diagnostics?.length && !evidence.errorContext && !(run.status === "passed" && evidence.expectedResult);
     return (
         <div className="space-y-4">
             {run.status === "passed" && evidence.expectedResult && (
@@ -322,6 +327,7 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
                 </section>
             )}
             <EvidenceGallery runId={run.id} evidence={evidence} onSelect={(step) => onSelect({ runId: run.id, step })} />
+            <ApiRunEvidence evidence={evidence} />
             <RunDiagnostics evidence={evidence} />
             {empty && <p className="text-control text-ink-subtle">No evidence was recorded for this run.</p>}
             {!evidence.reportUrl && loaded.usedSecrets && (
@@ -373,6 +379,7 @@ function RunEntry({
                     {run.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
+                        <Dot /><span title={run.baseUrl ?? undefined}>{run.environment?.name ?? "Production"}</span>
                         {run.durationMs !== null && <><Dot /><span className="tabular">{formatDuration(run.durationMs)}</span></>}
                         {run.commitSha && <><Dot /><span className="font-mono" title="Commit">{run.commitSha.slice(0, 7)}</span></>}
                         {latest && <><Dot /><span className="font-medium text-ink">Latest</span></>}
@@ -431,6 +438,8 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const [actionError, setActionError] = useState("");
     const [runRefreshError, setRunRefreshError] = useState("");
     const [running, setRunning] = useState(false);
+    const [environment, setEnvironment] = useState("Production");
+    const [changingLifecycle, setChangingLifecycle] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
     const [editing, setEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
@@ -554,7 +563,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         setRunning(true);
         setActionError("");
         try {
-            await runSpec(specId);
+            await runSpec(specId, environment);
             const nextDetail = await reloadDetail();
             if (nextDetail) showDetail(nextDetail);
         } catch (error) {
@@ -562,6 +571,17 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         } finally {
             setRunning(false);
         }
+    }
+
+    async function changeLifecycle(lifecycle: "draft" | "active") {
+        setChangingLifecycle(true);
+        setActionError("");
+        try {
+            await setSpecLifecycle(specId, lifecycle);
+            const nextDetail = await reloadDetail();
+            if (nextDetail) showDetail(nextDetail);
+        } catch (error) { setActionError(errorMessage(error)); }
+        finally { setChangingLifecycle(false); }
     }
 
     function startEditing() {
@@ -661,15 +681,17 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 title={spec.title}
                 breadcrumbs={crumbs}
                 width="reading"
-                titleAdornment={<><StatusPill status={spec.status} />{latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}</>}
+                titleAdornment={<><StatusPill status={spec.status} /><Badge variant="neutral">{spec.lifecycle === "draft" ? "Draft" : "Active"}</Badge>{latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}</>}
                 description={spec.description || undefined}
                 meta={<span>Updated <RelativeTime value={spec.updatedAt} /></span>}
                 actions={
                     <>
                         <SpecHistoryDialog specId={specId} />
-                        {canEdit && <><Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
+                        {canEdit && <><Button type="button" variant="outline" size="sm" onClick={() => void changeLifecycle(spec.lifecycle === "draft" ? "active" : "draft")} disabled={changingLifecycle || running || saving || (spec.lifecycle === "draft" && spec.status === "invalid")}>{changingLifecycle ? "Saving..." : spec.lifecycle === "draft" ? "Activate" : "Make draft"}</Button>
+                        <Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
                             <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
                         </Button>
+                        <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
                         <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid"}>
                             <Play size={12} fill="currentColor" /> {running ? "Running..." : "Run Spec"}
                         </Button></>}
@@ -679,6 +701,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
             <PageContainer width="reading" className="min-w-0 [overflow-wrap:anywhere] lg:pb-14" innerClassName="space-y-9">
                 {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}{/pending file edits/.test(actionError) && <Link href={`/p/${projectId}/settings?tab=git`} className="mt-2 block font-medium underline underline-offset-2">Review pending edits</Link>}</AlertDescription></Alert>}
                 {runRefreshError && <Alert variant="warning" role="status"><AlertDescription>Run updates are delayed: {runRefreshError} Retrying…</AlertDescription></Alert>}
+                {spec.lifecycle === "draft" && <p className="text-control text-ink-muted">This draft can be run manually. Activate it when you trust the result to include it in scheduled runs and CI.</p>}
 
                 <div ref={bannerRef} className="scroll-mt-4 space-y-3">
                 {savedInvalid && spec.status === "invalid" && (
@@ -693,6 +716,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                     latestRun={latestRun}
                     latestEvidence={latestRun ? evidence[latestRun.id] : undefined}
                     running={running}
+                    environment={environment}
                 />
                 </div>
 
@@ -796,7 +820,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                         className="mb-4"
                     />
                     {runs.length === 0 ? (
-                        <p className="rounded-xl border border-dashed border-line-strong px-4 py-5 text-center text-control text-ink-subtle">No runs yet. Screenshots and recordings from each run appear here.</p>
+                        <p className="rounded-xl border border-dashed border-line-strong px-4 py-5 text-center text-control text-ink-subtle">No runs yet. Screenshots, API responses and recordings from each run appear here.</p>
                     ) : (
                         <ol aria-label="Runs, newest first">
                             {runs.map((run, index) => (

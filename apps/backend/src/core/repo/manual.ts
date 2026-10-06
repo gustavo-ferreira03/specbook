@@ -73,6 +73,7 @@ export async function editSpecFiles(spec: Spec, input: { yaml?: string; testSour
 export async function createManualSpec(projectId: string, featureId: string, title: string): Promise<Spec> {
     const template = manualSpecTemplate(title);
     const { spec } = await createSpecInRepo({
+        lifecycle: "draft",
         projectId,
         featureId,
         title,

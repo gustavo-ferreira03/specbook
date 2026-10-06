@@ -87,6 +87,19 @@ async function specDetail(spec: Spec, runLimit?: number) {
 export function createSpecsRouter(): Hono {
     const router = new Hono();
 
+    router.post("/projects/:id/specs/activate", access("editor"), zValidator("json", z.object({ specIds: z.array(z.string().uuid()).min(1).max(500) }).strict()), async (c) => {
+        const ids = [...new Set(c.req.valid("json").specIds)];
+        const available = await specsRepository.listSpecs(c.req.param("id"));
+        if (ids.some((id) => !available.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Select checks in this project" });
+        await Promise.all(ids.map((id) => specsRepository.updateSpecRecord(id, { lifecycle: "active" })));
+        return c.json({ activated: ids });
+    });
+    router.patch("/specs/:id/lifecycle", access("editor"), zValidator("json", z.object({ lifecycle: z.enum(["draft", "active"]) }).strict()), async (c) => {
+        if (!await specsRepository.getSpec(c.req.param("id"))) throw new HTTPException(404, { message: "Spec not found" });
+        await specsRepository.updateSpecRecord(c.req.param("id"), c.req.valid("json"));
+        return c.json({ spec: await specsRepository.getSpec(c.req.param("id")) });
+    });
+
     router.get("/specs/:id", access("viewer"), async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });

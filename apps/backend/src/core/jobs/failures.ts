@@ -14,7 +14,7 @@ const retryDelays = new Map<string, { attempts: number; retryAt: number }>();
 
 async function failureContent(run: Run): Promise<{ sourceHash: string; markdownHash: string } | null> {
     const spec = await specsRepository.getSpec(run.specId);
-    if (!spec || spec.sourceHash !== run.sourceHash) return null;
+    if (!spec || spec.lifecycle === "draft" || spec.sourceHash !== run.sourceHash) return null;
     const markdown = await fs.readFile(path.join(runsDir, run.id, "spec.yml"), "utf8").catch(() => null);
     if (markdown === null || markdownHashOf(markdown) !== spec.markdownHash) return null;
     return { sourceHash: run.sourceHash, markdownHash: spec.markdownHash };
@@ -47,7 +47,7 @@ export async function processRunFailures(): Promise<void> {
                     if ((retryDelays.get(run.id)?.retryAt ?? 0) > Date.now()) continue;
                     try {
                         retry = await executeSpec(run.specId, {
-                            automate: true, healOnFailure: false, retryOf: run.id, expected, baseUrl: run.baseUrl ?? undefined,
+                            automate: true, healOnFailure: false, retryOf: run.id, expected, baseUrl: run.baseUrl ?? undefined, environment: run.environment ?? undefined,
                         });
                     } catch (error) {
                         if (error instanceof StaleRunError) {

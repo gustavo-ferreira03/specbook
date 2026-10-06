@@ -82,7 +82,7 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
 function LastRunText({ run }: { run: Run | null | undefined }) {
     if (run === undefined) return <Skeleton className="ml-auto h-3 w-20" />;
     if (run === null) return <span className="text-ink-subtle">Never run</span>;
-    return <RelativeTime value={run.startedAt} />;
+    return <span className="inline-flex flex-wrap items-center gap-x-1.5 sm:flex-col sm:items-end"><RelativeTime value={run.startedAt} /><span className="text-meta text-ink-subtle" title={run.baseUrl ?? undefined}>{run.environment?.name ?? "Production"}</span></span>;
 }
 
 function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; spec: SpecSummary; run: Run | null | undefined; running: boolean; onRun?: (spec: SpecSummary) => void }) {
@@ -101,6 +101,7 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                     >
                         {spec.title}
                     </Link>
+                    {spec.lifecycle === "draft" && <Badge variant="neutral" size="sm">Draft</Badge>}
                     {run?.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted sm:hidden">
@@ -186,7 +187,7 @@ export function SpecTable({
 }) {
     return (
         <div className={cn("overflow-hidden rounded-xl border border-line bg-surface", className)}>
-            <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-label font-semibold tracking-[0.06em] text-ink-subtle uppercase sm:flex">
+            <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-meta font-semibold tracking-[0.06em] text-ink-subtle uppercase sm:flex">
                 <span className="w-24 shrink-0">Status</span>
                 <span className="flex-1">Spec</span>
                 <span className="w-32 shrink-0 text-right">Last run</span>
