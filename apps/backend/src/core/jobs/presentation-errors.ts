@@ -2,7 +2,8 @@ const INFRASTRUCTURE_FAILURE = /\bXvfb\b|\bX server\b|servidor X|display\s*:?\s*
 
 export function isInfrastructureFailure(text: string): boolean {
     return INFRASTRUCTURE_FAILURE.test(text)
-        || /\b(?:Your model provider|The model provider could not|Specbook could not reach your model provider|Specbook could not complete this conversation turn|The selected model is unavailable|This conversation turn took too long|The browser (?:could not start|did not start in time|process stopped before it was ready))\b/i.test(text);
+        || /\b(?:Your model provider|The model provider could not|Specbook could not reach your model provider|Specbook could not complete this conversation turn|The selected model is unavailable|This conversation turn took too long|The browser (?:could not start|did not start in time|process stopped before it was ready|could not inspect its open tabs|could not confirm (?:or inspect )?(?:the current|the application) page address)|The current browser snapshot could not be read|Browser is already in use)\b/i.test(text)
+        || /browser tool failed:.{0,200}(?:EROFS|EACCES|read-only file system|permission denied)/is.test(text);
 }
 
 export function providerFailure(error: unknown): { code: string; message: string; nextStep: string } {

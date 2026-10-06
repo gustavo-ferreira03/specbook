@@ -117,10 +117,12 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string;
         await client.connect(transport);
         const { tools } = await client.listTools();
         const ensureBrowser = async (signal?: AbortSignal) => {
-            await client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal });
+            const result = await client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal });
+            if (result.isError) throw new Error(`The browser could not start: ${extractMcpText(result as { content?: unknown })}`);
         };
         const navigate = async (url: string, signal?: AbortSignal) => {
-            await client.callTool({ name: "browser_navigate", arguments: { url } }, undefined, { signal });
+            const result = await client.callTool({ name: "browser_navigate", arguments: { url } }, undefined, { signal });
+            if (result.isError) throw new Error(`browser tool failed: ${extractMcpText(result as { content?: unknown })}`);
         };
         return {
             client,
@@ -186,19 +188,18 @@ export async function readBrowserSnapshot(mcp: BrowserMcp, signal?: AbortSignal)
 }
 
 export async function getActiveTabUrl(mcp: BrowserMcp, signal?: AbortSignal): Promise<string | null> {
-    try {
+    signal?.throwIfAborted();
+    const result = await mcp.client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal }).catch((error) => {
         signal?.throwIfAborted();
-        const result = await mcp.client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal });
-        const text = extractMcpText(result as { content?: unknown });
-        const pageUrl = text.match(/^- Page URL: (\S+)/m);
-        if (pageUrl) return pageUrl[1];
-        const currentTab = text.split("\n").find((line) => line.includes("(current)"));
-        const listedUrl = currentTab?.match(/\]\((\S+)\)/);
-        return listedUrl ? listedUrl[1] : null;
-    } catch {
-        signal?.throwIfAborted();
-        return null;
-    }
+        throw new Error(`The browser could not inspect its open tabs: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    });
+    const text = extractMcpText(result as { content?: unknown });
+    if (result.isError) throw new Error(`The browser could not inspect its open tabs: ${text}`);
+    const pageUrl = text.match(/^- Page URL: (\S+)/m);
+    if (pageUrl) return pageUrl[1];
+    const currentTab = text.split("\n").find((line) => line.includes("(current)"));
+    const listedUrl = currentTab?.match(/\]\((\S+)\)/);
+    return listedUrl ? listedUrl[1] : null;
 }
 
 export function bridgeBrowserTools(
@@ -226,6 +227,7 @@ export function bridgeBrowserTools(
                         content: [{ type: "text" as const, text: await clean(text) }],
                         details: undefined,
                         terminate: false,
+                        isError: true,
                     });
                     if (policy?.beforeCall) {
                         try {
@@ -241,6 +243,7 @@ export function bridgeBrowserTools(
                         signal?.throwIfAborted();
                         const result = await mcp.client.callTool({ name: tool.name, arguments: args }, undefined, { signal });
                         resultText = await renderMcpResult(result as { content?: unknown }, workDir);
+                        if (result.isError) callError = `browser tool failed: ${resultText || "The browser returned an error without details."}`;
                     } catch (error) {
                         callError = `browser tool failed: ${String(error)}`;
                         resultText = callError;
@@ -250,7 +253,8 @@ export function bridgeBrowserTools(
                             await policy.afterCall(tool.name, args, resultText, signal);
                         } catch (error) {
                             signal?.throwIfAborted();
-                            return toolError(error instanceof Error ? error.message : String(error));
+                            const message = error instanceof Error ? error.message : String(error);
+                            return toolError(callError ? `${callError}\n${message}` : message);
                         }
                     }
                     signal?.throwIfAborted();

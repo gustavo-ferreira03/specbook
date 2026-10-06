@@ -145,7 +145,7 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                             output = await tool.execute(id, params, signal, onUpdate, ctx);
                         }
                         const text = JSON.stringify(output);
-                        if (tool.name.startsWith("browser_") && (output as { isError?: boolean }).isError && isInfrastructureFailure(text)) {
+                        if ((output as { isError?: boolean }).isError && isInfrastructureFailure(text)) {
                             await retryInfrastructure(job, text);
                             abort();
                         }

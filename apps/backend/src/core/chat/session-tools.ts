@@ -4,7 +4,7 @@ import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
-import { getActiveTabUrl, type BrowserMcp } from "../browser/mcp";
+import { getActiveTabUrl, renderMcpResult, type BrowserMcp } from "../browser/mcp";
 import { decryptSecret, encryptSecret } from "../credentials/crypto";
 import { getProfileByName } from "../credentials/profiles";
 import { chatSessionsRepository } from "../../infra/repositories/chat-sessions";
@@ -13,11 +13,12 @@ import type { RunEnvironment } from "../../infra/db/schema";
 
 const sessionProfileSchema = z.object({ profile: z.string() });
 
-function text(value: string) {
+function text(value: string, isError = false) {
     return {
         content: [{ type: "text" as const, text: value }],
         details: undefined,
         terminate: false,
+        ...(isError ? { isError: true } : {}),
     };
 }
 
@@ -60,10 +61,11 @@ export function createSessionTools(options: SessionToolOptions) {
                 const filename = `session-save-${crypto.randomUUID()}.json`;
                 const filePath = path.join(options.workDir, filename);
                 try {
-                    await options.mcp.client.callTool({
+                    const saved = await options.mcp.client.callTool({
                         name: "browser_storage_state",
                         arguments: { filename },
                     }, undefined, { signal });
+                    if (saved.isError) throw new Error(`browser tool failed: ${await renderMcpResult(saved as { content?: unknown }, options.workDir)}`);
                     const raw = await fs.readFile(filePath, "utf8");
                     signal?.throwIfAborted();
                     await chatSessionsRepository.upsert({
@@ -76,7 +78,7 @@ export function createSessionTools(options: SessionToolOptions) {
                     return text(`Session saved for profile "${params.profile}".`);
                 } catch (error) {
                     signal?.throwIfAborted();
-                    return text(`save_session failed: ${error instanceof Error ? error.message : String(error)}`);
+                    return text(`save_session failed: ${error instanceof Error ? error.message : String(error)}`, true);
                 } finally {
                     await fs.rm(filePath, { force: true });
                 }
@@ -106,19 +108,20 @@ export function createSessionTools(options: SessionToolOptions) {
                 try {
                     signal?.throwIfAborted();
                     await fs.writeFile(filePath, decryptSecret(saved.state), "utf8");
-                    await options.mcp.client.callTool({
+                    const restored = await options.mcp.client.callTool({
                         name: "browser_set_storage_state",
                         arguments: { filename },
                     }, undefined, { signal });
+                    if (restored.isError) throw new Error(`browser tool failed: ${await renderMcpResult(restored as { content?: unknown }, options.workDir)}\nIf the saved session is invalid, sign in using the saved credential profile instead.`);
                     signal?.throwIfAborted();
-                    await options.mcp.client.callTool({
-                        name: "browser_navigate",
-                        arguments: { url: options.baseUrl },
-                    }, undefined, { signal });
+                    await options.mcp.navigate(options.baseUrl, signal);
+                    const activeUrl = await getActiveTabUrl(options.mcp, signal);
+                    if (!activeUrl) throw new Error("The browser could not confirm the current page address. Navigate to the application before continuing.");
+                    if (!allows(profile, params.profile, activeUrl)) throw new Error("The restored page origin is not allowed for this credential profile.");
                     return text(`Session restored for profile "${params.profile}"; navigated to ${options.baseUrl}.`);
                 } catch (error) {
                     signal?.throwIfAborted();
-                    return text(`resume_session failed: ${error instanceof Error ? error.message : String(error)}`);
+                    return text(`resume_session failed: ${error instanceof Error ? error.message : String(error)}`, true);
                 } finally {
                     await fs.rm(filePath, { force: true });
                 }

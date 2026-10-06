@@ -624,6 +624,125 @@ describe("autonomous job proposals", () => {
         assert.equal((await jobsRepository.get(job2.id))?.status, "queued");
     });
 
+    test("session restore confirms browser success and cleans up after runtime failures", async () => {
+        const { createSessionTools } = await import("../../src/core/chat/session-tools");
+        const { createProfile } = await import("../../src/core/credentials/profiles");
+        const { encryptSecret } = await import("../../src/core/credentials/crypto");
+        const { isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
+        const { chatSessionsRepository } = await import("../../src/infra/repositories/chat-sessions");
+        const projectId = await createProject("Session restore failures");
+        const profile = await createProfile(projectId, { name: "standard-user", fields: [{ key: "password", value: "temporary-password" }] });
+        await chatSessionsRepository.upsert({ id: crypto.randomUUID(), projectId, profileId: profile.id, state: encryptSecret(JSON.stringify({ cookies: [], origins: [] })), savedAt: new Date().toISOString() });
+        const workDir = tempDir();
+        let restoreError = true;
+        let navigateError = false;
+        let activeUrl: string | null = "https://app.example.com/";
+        let navigations = 0;
+        const mcp = { client: { async callTool(input: { name: string; arguments: { filename?: string } }) {
+            if (input.name === "browser_set_storage_state") {
+                assert.deepEqual(JSON.parse(await fs.readFile(path.join(workDir, input.arguments.filename!), "utf8")), { cookies: [], origins: [] });
+                return { isError: restoreError, content: [{ type: "text", text: restoreError ? "Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'" : "Restored" }] };
+            }
+            assert.equal(input.name, "browser_tabs");
+            return { content: [{ type: "text", text: activeUrl ? `- 0: (current) [Application](${activeUrl})` : "No open tabs" }] };
+        } }, async navigate(url: string) {
+            navigations++;
+            assert.equal(url, "https://app.example.com");
+            if (navigateError) throw new Error("browser tool failed: Browser is already in use for /tmp/profile");
+        } } as unknown as import("../../src/core/browser/mcp").BrowserMcp;
+        const tool = createSessionTools({ projectId, baseUrl: "https://app.example.com", mcp, workDir }).find((tool) => tool.name === "resume_session")!;
+        const restore = () => tool.execute("restore", { profile: profile.name }, undefined, undefined, {} as never);
+        const rejected = await restore();
+        assert.equal((rejected as { isError?: boolean }).isError, true);
+        assert.equal(navigations, 0);
+        assert.doesNotMatch(JSON.stringify(rejected), /Session restored/);
+        assert.match(JSON.stringify(rejected), /EROFS/);
+        assert.equal(isInfrastructureFailure(JSON.stringify(rejected)), true);
+        restoreError = false;
+        navigateError = true;
+        const navigationFailure = await restore();
+        assert.equal((navigationFailure as { isError?: boolean }).isError, true);
+        assert.doesNotMatch(JSON.stringify(navigationFailure), /Session restored/);
+        assert.equal(isInfrastructureFailure(JSON.stringify(navigationFailure)), true);
+        navigateError = false;
+        activeUrl = null;
+        const unconfirmed = await restore();
+        assert.equal((unconfirmed as { isError?: boolean }).isError, true);
+        assert.match(JSON.stringify(unconfirmed), /could not confirm the current page address/);
+        activeUrl = "https://other.example.com/";
+        assert.match(JSON.stringify(await restore()), /restored page origin is not allowed/);
+        activeUrl = "https://app.example.com/";
+        const restored = await restore();
+        assert.notEqual((restored as { isError?: boolean }).isError, true);
+        assert.match(JSON.stringify(restored), /Session restored/);
+        assert.equal(navigations, 4);
+        assert.deepEqual(await fs.readdir(workDir), [], "decrypted saved-session files are removed for every outcome");
+    });
+
+    test("browser and session infrastructure errors retry without asking for application access", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { createJobPolicy } = await import("../../src/core/jobs/policy");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const { bridgeBrowserTools } = await import("../../src/core/browser/mcp");
+        const { Type } = await import("@earendil-works/pi-ai");
+        const projectId = await createProject("Browser infrastructure retry");
+        for (const name of ["browser_navigate", "resume_session"]) {
+            const row = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Confirm inventory order", limits: jobLimitsSchema.parse({}) });
+            const job = (await jobsRepository.claim(row.id))!;
+            let aborted = false;
+            const mcp = { tools: [{ name: "browser_navigate", inputSchema: { type: "object", properties: {} } }], client: { async callTool() {
+                return { isError: true, content: [{ type: "text", text: "Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'" }] };
+            } } } as unknown as import("../../src/core/browser/mcp").BrowserMcp;
+            const browser = bridgeBrowserTools(mcp, "/tmp")[0]!;
+            const session = { name, label: name, description: "Restore", parameters: Type.Object({}), async execute() {
+                return { isError: true, content: [{ type: "text" as const, text: "resume_session failed: The browser could not confirm the current page address." }], details: undefined };
+            } };
+            const tool = createJobPolicy(job, () => { aborted = true; }).tools([name === "browser_navigate" ? browser : session])[0]!;
+            const output = await tool.execute("call", {}, undefined, undefined, {} as never);
+            assert.equal((output as { isError?: boolean }).isError, true);
+            assert.equal(aborted, true);
+            const retry = (await jobsRepository.get(job.id))!;
+            assert.equal(retry.status, "queued");
+            assert.equal(retry.infrastructureRetries, 1);
+            assert.ok(retry.retryAt);
+            assert.equal(retry.safetyRetries, 0);
+            assert.deepEqual(await jobsRepository.inbox(projectId), []);
+        }
+    });
+
+    test("startup retires existing browser-fault questions while preserving genuine access questions and an explicit pause", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const { startJobWorker, stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { AGENT_RULES_VERSION } = await import("../../src/core/jobs/policy");
+        const projectId = await createProject("Recover browser questions");
+        const makeBlocked = async (goal: string, body: string) => {
+            const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal, limits: jobLimitsSchema.parse({}) });
+            await jobsRepository.update(job.id, { status: "blocked" });
+            const question = await jobsRepository.addItem({ jobId: job.id, projectId, kind: "question", title: goal, body, payload: { rulesVersion: AGENT_RULES_VERSION } });
+            return { job, question };
+        };
+        const internal = await makeBlocked("Access needed to confirm default inventory order", "The saved standard-user session restored, but the browser could not confirm or inspect the application page address, so I cannot observe the inventory’s initial product order. Could you restore or allow browser access to https://www.saucedemo.com/ so I can verify the selected Spec’s expected behavior?");
+        const credentials = await makeBlocked("Sign-in details needed", "The saved session expired. Can you provide a valid account for the app?");
+        const paused = await settingsRepository.getAgentPaused();
+        await stopJobWorker();
+        await settingsRepository.setAgentPaused(true);
+        try {
+            await startJobWorker();
+            const recovered = (await jobsRepository.get(internal.job.id))!;
+            assert.equal(recovered.status, "paused", "internal recovery respects the user's existing pause");
+            assert.equal(recovered.infrastructureRetries, 1);
+            assert.equal((await jobsRepository.item(internal.question.id))?.status, "dismissed");
+            assert.equal((await jobsRepository.item(internal.question.id))?.payload.internalRecovery, true);
+            assert.equal((await jobsRepository.get(credentials.job.id))?.status, "blocked");
+            assert.equal((await jobsRepository.item(credentials.question.id))?.status, "pending");
+        } finally {
+            await stopJobWorker();
+            await settingsRepository.setAgentPaused(paused);
+        }
+    });
+
     test("concurrent approvals and recovery of a committed proposal produce one commit", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeMutation } = await import("../../src/core/jobs/proposals");

@@ -7,7 +7,7 @@ import { useTempStorage } from "../helpers/storage";
 useTempStorage();
 const { createSecretScrubber } = await import("../../src/core/credentials/scrub");
 const registry = await import("../../src/core/chat/chat-registry");
-const { bridgeBrowserTools } = await import("../../src/core/browser/mcp");
+const { bridgeBrowserTools, getActiveTabUrl } = await import("../../src/core/browser/mcp");
 const { createCredentialTools } = await import("../../src/core/chat/credential-tools");
 const { getPendingCredentialRequest } = await import("../../src/core/chat/credential-requests");
 
@@ -85,6 +85,17 @@ describe("conversation failure messages", () => {
         const details = sanitizeTechnicalDetails("Expected https://example.com/app/profile but got /home/server/storage/run/spec.ts\n    at click (/data/specbook/src/core/runner/guard.ts:1)");
         assert.match(details, /https:\/\/example.com\/app\/profile/);
         assert.doesNotMatch(details, /\/home\/server|\/data\/specbook|at click/);
+        for (const failure of [
+            "The browser could not confirm the current page address. Navigate to the application before continuing.",
+            "The saved standard-user session restored, but the browser could not confirm or inspect the application page address. Could you restore browser access?",
+            "The browser could not inspect its open tabs: Browser is already in use for /tmp/profile",
+            "browser tool failed: Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'",
+        ]) assert.equal(isInfrastructureFailure(failure), true, failure);
+        for (const question of [
+            "The saved session expired. Can you provide a valid account for the app?",
+            "The app redirected to an external origin. Can you allow this origin for the project?",
+            "The application rejected the password for the standard-user profile.",
+        ]) assert.equal(isInfrastructureFailure(question), false, question);
     });
 
     test("a timed out turn aborts its work before releasing the conversation", async () => {
@@ -240,7 +251,55 @@ describe("chat registry", () => {
     });
 });
 
-describe("browser tool cancellation", () => {
+describe("browser tool execution", () => {
+    test("reads the current MCP tab and preserves browser runtime failures", async () => {
+        let result: { content: { type: string; text: string }[]; isError?: boolean } = {
+            content: [{ type: "text", text: "### Result\n- 0: [Other tab](https://other.example.com/)\n- 1: (current) [Swag Labs](https://www.saucedemo.com/)" }],
+        };
+        const mcp = { client: { async callTool() { return result; } } } as unknown as BrowserMcp;
+        assert.equal(await getActiveTabUrl(mcp), "https://www.saucedemo.com/");
+        result = { content: [{ type: "text", text: "### Page\n- Page URL: about:blank" }] };
+        assert.equal(await getActiveTabUrl(mcp), "about:blank");
+        result = { content: [{ type: "text", text: "### Result\nNo open tabs" }] };
+        assert.equal(await getActiveTabUrl(mcp), null);
+        result = { isError: true, content: [{ type: "text", text: "### Error\nError: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'" }] };
+        await assert.rejects(() => getActiveTabUrl(mcp), /could not inspect its open tabs:.*EROFS/s);
+        const unavailable = { client: { async callTool() { throw new Error("Request timed out"); } } } as unknown as BrowserMcp;
+        await assert.rejects(() => getActiveTabUrl(unavailable), /could not inspect its open tabs: Request timed out/);
+        const controller = new AbortController();
+        const reason = new Error("User cancelled the conversation");
+        const cancelled = { client: { async callTool() { controller.abort(reason); throw new Error("Transport closed"); } } } as unknown as BrowserMcp;
+        await assert.rejects(() => getActiveTabUrl(cancelled, controller.signal), (error) => error === reason);
+    });
+
+    test("MCP and browser policy errors stay errors after sanitizing and cleanup", async () => {
+        const rawError = "Error: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'; secret-value";
+        let cleaned = false;
+        let called = false;
+        const mcp = {
+            tools: [{ name: "browser_navigate", inputSchema: { type: "object", properties: {} } }],
+            client: { async callTool() { called = true; return { isError: true, content: [{ type: "text", text: rawError }] }; } },
+        } as unknown as BrowserMcp;
+        const tool = bridgeBrowserTools(mcp, "/tmp", {
+            afterCall: async () => { cleaned = true; throw new Error("The browser could not confirm the current page address."); },
+            sanitizeResult: (value) => value.replaceAll("secret-value", "••••"),
+        })[0]!;
+        const result = await tool.execute("call", {}, undefined, undefined, {} as never);
+        assert.equal((result as { isError?: boolean }).isError, true);
+        assert.ok(called && cleaned);
+        assert.match(JSON.stringify(result), /EROFS/);
+        assert.match(JSON.stringify(result), /could not confirm the current page address/);
+        assert.doesNotMatch(JSON.stringify(result), /secret-value/);
+        called = false;
+        const denied = bridgeBrowserTools(mcp, "/tmp", { beforeCall: async () => { throw new Error("Origin is not allowed"); } })[0]!;
+        const deniedResult = await denied.execute("call", {}, undefined, undefined, {} as never);
+        assert.equal((deniedResult as { isError?: boolean }).isError, true);
+        assert.equal(called, false);
+        const failed = await bridgeBrowserTools(mcp, "/tmp")[0]!.execute("call", {}, undefined, undefined, {} as never);
+        assert.equal((failed as { isError?: boolean }).isError, true);
+        assert.match(JSON.stringify(failed), /EROFS/);
+    });
+
     test("aborts an in-flight MCP request and still runs policy cleanup", async () => {
         const controller = new AbortController();
         let markStarted!: () => void;
