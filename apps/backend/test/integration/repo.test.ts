@@ -1010,7 +1010,7 @@ describe("plain-language autonomous presentation", () => {
         assert.match(observing.summary.statusText, /is watching/);
         assert.doesNotMatch(observing.summary.statusText, /tomorrow/);
         assert.equal(observing.activity[0]?.status, "stopped");
-        assert.match(observing.activity[0]?.nextStep ?? "", /Discuss the check/);
+        assert.match(observing.activity[0]?.nextStep ?? "", /Discuss the Spec/);
         await jobsRepository.update(job.id, { status: "running" });
         const working = await projectPresentation(projectId);
         assert.equal(working.activity[0]?.status, "working");
@@ -1136,14 +1136,14 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
         assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
         assert.equal(view.specHealth[invalid!.id]?.status, "invalid");
-        assert.equal(view.specHealth[invalid!.id]?.label, "Check needs repairing");
+        assert.equal(view.specHealth[invalid!.id]?.label, "Needs repair");
         assert.equal(view.specHealth[flaky!.id]?.status, "flaky");
         assert.equal(view.recentRuns.length, 3, "recent activity contains actual runs, not completed agent sessions");
         assert.equal(view.stories.some((story) => story.inboxIds.includes(older.id)), true, "pending decisions retain a detail timeline");
         const finding = await jobsRepository.addItem({ projectId, jobId: previous.id, kind: "bug_report", title: "An export link is broken", body: "Opening export returns 404." });
         const withFinding = await projectOverview(projectId);
         const decision = withFinding.needsYou.find((item) => item.id === finding.id);
-        assert.match(decision?.presentation.title ?? "", /^Add a regression check.*\?$/);
+        assert.match(decision?.presentation.title ?? "", /^Add a regression Spec.*\?$/);
         assert.equal(withFinding.items.find((item) => item.id === finding.id)?.presentation.title, decision?.presentation.title);
         assert.equal(withFinding.summary.attentionCount, 4);
         assert.match(view.summary.nextCheck, /Resume Specbook/);
@@ -1156,7 +1156,7 @@ describe("plain-language autonomous presentation", () => {
         await runsRepository.finishRun(newFailure.id, "failed", 1, "A different element is missing");
         const uncheckedFailure = await projectOverview(projectId);
         const currentFailure = uncheckedFailure.failing.find((entry) => entry.specId === failing!.id)!;
-        assert.equal(currentFailure.triageStatus, "Latest check failed");
+        assert.equal(currentFailure.triageStatus, "Latest run failed");
         assert.equal(currentFailure.storyId, undefined, "old triage details do not stand in for the latest failure evidence");
         assert.ok(!currentFailure.inboxIds.includes(bug.id));
         const retry = await createOverviewRun({ specId: failing!.id, sourceHash: failing!.sourceHash, commitSha: await repoGit.getHeadSha(projectId), retryOf: newFailure.id });

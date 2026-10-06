@@ -149,7 +149,7 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
                         setError(`Lost contact with this run: ${errorMessage(caught)} It may still finish; check each Spec for its result.`);
                         break;
                     }
-                    setWarning(`Results are delayed: ${errorMessage(caught)} Retrying...`);
+                    setWarning(`Results are delayed: ${errorMessage(caught)} Retrying…`);
                 }
             }
         } catch (caught) {

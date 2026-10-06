@@ -234,7 +234,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                         {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || running} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${activatable.length} ${activatable.length === 1 ? "draft" : "drafts"}`}</Button>}
                         <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
                         <Button type="button" size="sm" onClick={() => runSpecs(scopedSpecs, `Run ${feature.title}`)} disabled={running || runnable.length === 0}>
-                            <RunningIcon running={running} /> {running ? "Running..." : "Run all"}
+                            <RunningIcon running={running} /> {running ? "Running…" : "Run all"}
                         </Button>
                         <Button
                             type="button"

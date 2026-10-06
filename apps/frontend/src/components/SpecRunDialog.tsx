@@ -186,7 +186,7 @@ export function SpecRunDialog({
                 <DialogFooter className="shrink-0 border-t border-line px-5 py-3">
                     {reportUrl && <Button asChild variant="outline"><a href={reportUrl} target="_blank" rel="noreferrer">Open report <ExternalLink size={13} /></a></Button>}
                     <DialogClose asChild>
-                        <Button type="button" disabled={running}>{running ? "Running..." : "Close"}</Button>
+                        <Button type="button" disabled={running}>{running ? "Running…" : "Close"}</Button>
                     </DialogClose>
                 </DialogFooter>
             </DialogContent>

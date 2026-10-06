@@ -282,7 +282,7 @@ export function GitRemoteAccess({
                     ? <>A new token will be created and the current one stops working immediately. Update any Git clients that use it.</>
                     : <>The current token stops working immediately. Git clients using it can no longer clone or push until you create a new token.</>}
                 confirmLabel={confirmation === "rotate" ? "Rotate token" : "Revoke token"}
-                busyLabel={confirmation === "rotate" ? "Rotating..." : "Revoking..."}
+                busyLabel={confirmation === "rotate" ? "Rotating…" : "Revoking…"}
                 busy={busy === "issue" || busy === "revoke"}
                 error={confirmError}
                 returnFocusRef={confirmTriggerRef}

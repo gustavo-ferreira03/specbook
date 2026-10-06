@@ -7,15 +7,11 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     AlertCircle,
-    ArrowRight,
-    BookOpenCheck,
-    Check,
     ChevronDown,
     ChevronRight,
     Compass,
     ExternalLink,
     LoaderCircle,
-    MessageSquareText,
     PencilLine,
     RefreshCw,
     SearchX,
@@ -42,8 +38,6 @@ import {
     ApiError,
     errorMessage,
     getProject,
-    getProjectTree,
-    listProjectChats,
     createContextDiscovery,
     discardProjectContext,
     getProjectContext,
@@ -51,9 +45,7 @@ import {
     patchProjectContext,
 } from "@/lib/api";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
-import { countStatuses } from "@/lib/status";
-import { useVisiblePolling } from "@/lib/usePolling";
-import type { Chat, Project, ProjectContext, ProjectContextRevision, ProjectContextState, ProjectTree, SpecStatus } from "@/lib/types";
+import type { Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
 
 function parseSafetyNotes(raw: string): string[] {
     return raw
@@ -142,168 +134,9 @@ function DiscoveryStartForm({
             </Collapsible>
             {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
             <Button type="submit" disabled={submitting}>
-                <Compass size={14} /> {submitting ? "Starting discovery..." : seedContext ? "Start update discovery" : "Start discovery"}
+                <Compass size={14} /> {submitting ? "Starting discovery…" : seedContext ? "Start update discovery" : "Start discovery"}
             </Button>
         </form>
-    );
-}
-
-const ATTENTION_STATUSES: SpecStatus[] = ["failed", "invalid"];
-const ATTENTION_LIMIT = 6;
-const CHAT_LIMIT = 5;
-
-function ListSkeleton({ rows }: { rows: number }) {
-    return (
-        <div className="rounded-xl border border-line">
-            {Array.from({ length: rows }, (_, index) => (
-                <div key={index} className="flex items-center gap-3 border-b border-line px-4 py-3 last:border-0">
-                    <Skeleton className="h-4 flex-1" />
-                    <Skeleton className="h-5 w-16 rounded-full" />
-                </div>
-            ))}
-        </div>
-    );
-}
-
-function SpecsOverview({ projectId, tree, error }: { projectId: string; tree: ProjectTree | null; error: string }) {
-    const { canEdit } = useAuth();
-    const specsHref = `/p/${projectId}/specs`;
-    if (!tree) {
-        return (
-            <section aria-labelledby="overview-specs-heading">
-                <SectionHeader id="overview-specs-heading" title="Specs" className="mb-3" />
-                {error ? (
-                    <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>
-                ) : (
-                    <div aria-busy="true" className="space-y-4">
-                        <Skeleton className="h-4 w-80 max-w-full" />
-                        <Skeleton className="h-1.5 w-full rounded-full" />
-                        <ListSkeleton rows={3} />
-                    </div>
-                )}
-            </section>
-        );
-    }
-
-    const counts = countStatuses(tree.specs);
-    const featureTitles = new Map(tree.features.map((feature) => [feature.id, feature.title]));
-    const attention = tree.specs
-        .filter((spec) => ATTENTION_STATUSES.includes(spec.status))
-        .sort((a, b) => ATTENTION_STATUSES.indexOf(a.status) - ATTENTION_STATUSES.indexOf(b.status));
-    const notRun = counts.unverified ?? 0;
-
-    return (
-        <section aria-labelledby="overview-specs-heading">
-            <SectionHeader
-                id="overview-specs-heading"
-                title="Specs"
-                actions={tree.specs.length > 0 && (
-                    <Button asChild variant="ghost" size="sm" className="-mr-2">
-                        <Link href={specsHref}>View all <ArrowRight size={14} /></Link>
-                    </Button>
-                )}
-                className="mb-3"
-            />
-            {tree.syncError && (
-                <Alert variant="warning" role="alert" className="mb-4">
-                    <AlertTitle>The repository could not be read</AlertTitle>
-                    <AlertDescription className="break-words">{tree.syncError}</AlertDescription>
-                </Alert>
-            )}
-            {tree.specs.length === 0 ? (
-                <div className="rounded-xl border border-line">
-                    <EmptyState
-                        size="compact"
-                        icon={BookOpenCheck}
-                        title="No Specs yet"
-                        description="Describe a behavior in a chat and the agent drafts an executable Spec for it."
-                        action={canEdit && <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Start chat</Link></Button>}
-                        className="py-8"
-                    />
-                </div>
-            ) : (
-                <>
-                    <SummaryStrip counts={counts} />
-                    <div className="mt-5">
-                        {attention.length > 0 ? (
-                            <>
-                                <h3 className="mb-2 text-control font-medium text-ink-muted">
-                                    Needs attention <span className="tabular font-normal text-ink-subtle">{attention.length}</span>
-                                </h3>
-                                <ul className="overflow-hidden rounded-xl border border-line">
-                                    {attention.slice(0, ATTENTION_LIMIT).map((spec) => (
-                                        <li key={spec.id} className="border-b border-line last:border-0">
-                                            <Link
-                                                href={`/p/${projectId}/specs/${spec.id}`}
-                                                className="flex min-h-12 items-center gap-3 px-4 py-2.5 transition-colors outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                                            >
-                                                <span className="min-w-0 flex-1">
-                                                    <span className="block truncate text-control font-medium text-ink">{spec.title}</span>
-                                                    {featureTitles.get(spec.featureId) && <span className="block truncate text-meta text-ink-subtle">{featureTitles.get(spec.featureId)}</span>}
-                                                </span>
-                                                <StatusPill status={spec.status} size="sm" />
-                                            </Link>
-                                        </li>
-                                    ))}
-                                </ul>
-                                {attention.length > ATTENTION_LIMIT && (
-                                    <p className="mt-2 text-meta text-ink-subtle">
-                                        And {attention.length - ATTENTION_LIMIT} more. <Link href={specsHref} className="text-ink underline-offset-2 hover:underline">Open Specs</Link>
-                                    </p>
-                                )}
-                            </>
-                        ) : (
-                            <p className="flex items-center gap-2 rounded-lg bg-success-soft px-3.5 py-2.5 text-control text-success" role="status">
-                                <Check size={14} strokeWidth={2.25} aria-hidden="true" />
-                                {notRun > 0 ? `Nothing is failing. ${notRun} ${notRun === 1 ? "Spec has" : "Specs have"} not been run yet.` : "Every Spec passed its last verification."}
-                            </p>
-                        )}
-                    </div>
-                </>
-            )}
-        </section>
-    );
-}
-
-function RecentChats({ projectId, chats, error }: { projectId: string; chats: Chat[] | null; error: string }) {
-    const recent = chats ? [...chats].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, CHAT_LIMIT) : [];
-    return (
-        <section aria-labelledby="overview-chats-heading">
-            <SectionHeader
-                id="overview-chats-heading"
-                title="Recent chats"
-                actions={chats && chats.length > 0 && (
-                    <Button asChild variant="ghost" size="sm" className="-mr-2">
-                        <Link href={`/p/${projectId}/chats`}>View all <ArrowRight size={14} /></Link>
-                    </Button>
-                )}
-                className="mb-3"
-            />
-            {!chats ? (
-                error ? <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert> : <div aria-busy="true"><ListSkeleton rows={3} /></div>
-            ) : recent.length === 0 ? (
-                <div className="rounded-xl border border-line">
-                    <EmptyState size="compact" icon={MessageSquareText} title="No chats yet" description="Start one to explore the app or describe a behavior." className="py-8" />
-                </div>
-            ) : (
-                <ul className="overflow-hidden rounded-xl border border-line">
-                    {recent.map((chat) => (
-                        <li key={chat.id} className="border-b border-line last:border-0">
-                            <Link
-                                href={`/p/${projectId}/chats/${chat.id}`}
-                                className="flex min-h-12 items-start gap-3 px-4 py-2.5 transition-colors outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                            >
-                                <MessageSquareText size={14} aria-hidden="true" className="mt-1 shrink-0 text-ink-subtle" />
-                                <span className="min-w-0 flex-1">
-                                    <span className="line-clamp-2 text-control text-ink">{chat.title || "Untitled chat"}</span>
-                                    <RelativeTime value={chat.createdAt} className="text-meta text-ink-subtle" />
-                                </span>
-                            </Link>
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </section>
     );
 }
 
@@ -479,7 +312,7 @@ function ContextPanel({
                                 title="Discard this discovery?"
                                 description="The discovery draft is discarded. The chat stays in your history, and any confirmed context stays active."
                                 confirmLabel="Discard discovery"
-                                busyLabel="Discarding..."
+                                busyLabel="Discarding…"
                                 busy={discardingDiscovery}
                                 error={discardDiscoveryError}
                                 returnFocusRef={discardDiscoveryTriggerRef}
@@ -544,40 +377,31 @@ function ContextPanel({
     );
 }
 
-function OverviewSkeleton() {
+function ContextSkeleton() {
     return (
         <div className="flex min-h-full flex-col bg-surface" aria-busy="true" role="status">
-            <span className="sr-only">Loading project</span>
+            <span className="sr-only">Loading project context</span>
             <div className="border-b border-line px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5">
-                <div className="mx-auto flex max-w-data items-start justify-between gap-6">
+                <div className="mx-auto flex max-w-reading items-start justify-between gap-6">
                     <div className="space-y-2.5 pt-1"><Skeleton className="h-6 w-48" /><Skeleton className="h-3.5 w-56" /></div>
                     <Skeleton className="h-9 w-28" />
                 </div>
             </div>
-            <PageContainer width="data">
-                <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
-                    <div className="space-y-10">
-                        <div className="space-y-4"><Skeleton className="h-5 w-20" /><Skeleton className="h-4 w-80 max-w-full" /><Skeleton className="h-1.5 w-full rounded-full" /><ListSkeleton rows={3} /></div>
-                        <Skeleton className="h-48 rounded-xl" />
-                    </div>
-                    <div className="space-y-4"><Skeleton className="h-5 w-32" /><ListSkeleton rows={4} /></div>
-                </div>
+            <PageContainer width="reading">
+                <Skeleton className="h-48 rounded-xl" />
             </PageContainer>
         </div>
     );
 }
 
-export default function ProjectHome({ params }: { params: Promise<{ projectId: string }> }) {
+/** What Specbook knows about the application: discovery, the draft to review and the confirmed context. */
+export default function ProjectContextPage({ params }: { params: Promise<{ projectId: string }> }) {
     const { canEdit } = useAuth();
     const { projectId } = use(params);
     const searchParams = useSearchParams();
     const discoveryFailed = searchParams.get("discovery") === "failed";
     const [project, setProject] = useState<Project | null>(null);
     const [contextState, setContextState] = useState<ProjectContextState | null>(null);
-    const [tree, setTree] = useState<ProjectTree | null>(null);
-    const [treeError, setTreeError] = useState("");
-    const [chats, setChats] = useState<Chat[] | null>(null);
-    const [chatsError, setChatsError] = useState("");
     const [loadError, setLoadError] = useState("");
     const [notFound, setNotFound] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
@@ -607,39 +431,11 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
         };
     }, [projectId, retryKey]);
 
-    const loadTree = useCallback(() => {
-        getProjectTree(projectId)
-            .then((result) => {
-                setTree(result);
-                setTreeError("");
-            })
-            .catch((error) => setTreeError(errorMessage(error)));
-    }, [projectId]);
-
-    const loadChats = useCallback(() => {
-        listProjectChats(projectId)
-            .then((result) => {
-                setChats(result.chats);
-                setChatsError("");
-            })
-            .catch((error) => setChatsError(errorMessage(error)));
-    }, [projectId]);
-
-    useEffect(() => {
-        setTree(null);
-        setChats(null);
-        loadTree();
-        loadChats();
-        return onInvalidate((event) => {
-            if (matchesInvalidation(event, "tree", projectId)) loadTree();
-            if (matchesInvalidation(event, "chats", projectId)) loadChats();
-            if (matchesInvalidation(event, "projects", projectId)) {
-                getProject(projectId).then((result) => setProject(result.project)).catch(() => undefined);
-            }
-        });
-    }, [projectId, loadTree, loadChats]);
-
-    useVisiblePolling(loadTree, 15_000);
+    useEffect(() => onInvalidate((event) => {
+        if (matchesInvalidation(event, "projects", projectId)) {
+            getProject(projectId).then((result) => setProject(result.project)).catch(() => undefined);
+        }
+    }), [projectId]);
 
     if (notFound) {
         return (
@@ -673,15 +469,13 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
         );
     }
 
-    if (!project || !contextState) return <OverviewSkeleton />;
-
-    const hasContext = Boolean(contextState.confirmed || contextState.draft);
+    if (!project || !contextState) return <ContextSkeleton />;
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader
-                title={project.name}
-                width="data"
+                title="Project context"
+                width="reading"
                 meta={
                     <a href={project.baseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-full items-center gap-1 rounded-sm font-mono text-meta text-ink-muted transition-colors hover:text-ink">
                         <span className="truncate">{project.baseUrl}</span>
@@ -689,41 +483,16 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                         <span className="sr-only">(opens in a new tab)</span>
                     </a>
                 }
-                actions={canEdit &&
-                    <>
-                        <Button asChild variant={hasContext ? "default" : "outline"}>
-                            <Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Start chat</Link>
-                        </Button>
-                    </>
-                }
             />
-            <PageContainer width="data" className="flex-1">
-                <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-12">
-                    <div className="min-w-0 space-y-10">
-                        {!hasContext && (
-                            <ContextPanel
-                                projectId={projectId}
-                                project={project}
-                                contextState={contextState}
-                                discoveryFailed={discoveryFailed}
-                                onReload={reload}
-                                onDraftSaved={(updated) => setContextState((current) => (current ? { ...current, draft: updated } : current))}
-                            />
-                        )}
-                        <SpecsOverview projectId={projectId} tree={tree} error={treeError} />
-                        {hasContext && (
-                            <ContextPanel
-                                projectId={projectId}
-                                project={project}
-                                contextState={contextState}
-                                discoveryFailed={discoveryFailed}
-                                onReload={reload}
-                                onDraftSaved={(updated) => setContextState((current) => (current ? { ...current, draft: updated } : current))}
-                            />
-                        )}
-                    </div>
-                    <RecentChats projectId={projectId} chats={chats} error={chatsError} />
-                </div>
+            <PageContainer width="reading" className="flex-1">
+                <ContextPanel
+                    projectId={projectId}
+                    project={project}
+                    contextState={contextState}
+                    discoveryFailed={discoveryFailed}
+                    onReload={reload}
+                    onDraftSaved={(updated) => setContextState((current) => (current ? { ...current, draft: updated } : current))}
+                />
             </PageContainer>
         </div>
     );

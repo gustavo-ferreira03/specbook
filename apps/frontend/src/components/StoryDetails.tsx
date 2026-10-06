@@ -16,7 +16,7 @@ export function StoryDetails({ story, projectId, onDecision, showDecisions = tru
         {story.summary && !story.timeline.some((event) => event.detail === story.summary) && <p className="text-body text-ink">{story.summary}</p>}
         <StoryTimeline story={story} projectId={projectId} />
         {story.nextStep && <p className="text-body text-ink"><span className="font-medium">Next: </span>{story.nextStep}</p>}
-        {((showDecisions && story.inboxIds.length > 0) || story.specId) && <div className="flex flex-wrap gap-2">{showDecisions && story.inboxIds.length > 0 && <Button variant="outline" size="sm" onClick={() => onDecision(story.inboxIds[0])}>View the decision</Button>}{story.specId && <Button asChild variant="ghost" size="sm"><Link href={`/p/${projectId}/specs/${story.specId}${story.runId ? `#run-${story.runId}` : ""}`}>View the check</Link></Button>}</div>}
+        {((showDecisions && story.inboxIds.length > 0) || story.specId) && <div className="flex flex-wrap gap-2">{showDecisions && story.inboxIds.length > 0 && <Button variant="outline" size="sm" onClick={() => onDecision(story.inboxIds[0])}>View the decision</Button>}{story.specId && <Button asChild variant="ghost" size="sm"><Link href={`/p/${projectId}/specs/${story.specId}${story.runId ? `#run-${story.runId}` : ""}`}>View the Spec</Link></Button>}</div>}
         {story.technicalDetails && <TechnicalDetails><pre tabIndex={0} aria-label="Technical activity details" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-canvas p-3 font-mono text-meta text-ink-muted">{story.technicalDetails}</pre></TechnicalDetails>}
     </div>;
 }

@@ -79,7 +79,7 @@ export function FeatureEditDialog({ feature, onSaved, renderTrigger }: {
                         {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
                         <DialogFooter className="pt-2">
                             <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={saving}>Cancel</Button>
-                            <Button type="submit" disabled={saving || !title.trim() || !dirty}>{saving ? "Saving..." : "Save changes"}</Button>
+                            <Button type="submit" disabled={saving || !title.trim() || !dirty}>{saving ? "Saving…" : "Save changes"}</Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>

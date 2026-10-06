@@ -9,6 +9,7 @@ import {
     ChartNoAxesCombined,
     ChevronRight,
     ChevronsUpDown,
+    Compass,
     FileCheck2,
     LoaderCircle,
     Menu,
@@ -40,6 +41,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { UserMenu } from "@/components/UserMenu";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { Chat, Feature, OverviewResponse, Project, RunBatch, SpecSummary } from "@/lib/types";
+import { NO_SPECS_DESCRIPTION } from "@/lib/status";
 import { useVisiblePolling } from "@/lib/usePolling";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { useRunBatch } from "@/lib/useRunBatch";
@@ -460,13 +462,11 @@ export function Sidebar({ projectId }: { projectId: string }) {
         );
     }
 
-    const runtimeCopy = {
-        checking: ["Checking model", "Connecting to services"],
-        online: ["Model ready", "Agent and runner online"],
-        setup: ["Model setup needed", isAdmin ? "Choose a provider" : "Ask an administrator"],
-        offline: ["Runtime unavailable", "Backend is not responding"],
-    }[runtime];
-    const runtimeDot = runtime === "online" ? "bg-success" : runtime === "setup" ? "bg-warning-chart" : runtime === "offline" ? "bg-danger" : "status-pulse bg-ink-subtle";
+    // Only problems the user can act on get a row; a healthy runtime stays silent.
+    const runtimeCopy = runtime === "setup"
+        ? ["Model setup needed", isAdmin ? "Choose a provider" : "Ask an administrator"]
+        : runtime === "offline" ? ["Runtime unavailable", "Backend is not responding"] : null;
+    const runtimeDot = runtime === "setup" ? "bg-warning-chart" : "bg-danger";
     const settingsHref = `/p/${projectId}/settings`;
     const onSettings = pathname === settingsHref;
 
@@ -498,13 +498,10 @@ export function Sidebar({ projectId }: { projectId: string }) {
         );
     }
 
-    function renderSectionLabel(label: string, count: number | null, action: React.ReactNode) {
+    function renderSectionLabel(label: string, action: React.ReactNode) {
         return (
             <div className="flex h-10 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
-                <h2 className="flex items-baseline gap-1.5 text-meta font-medium text-ink-subtle">
-                    {label}
-                    {count !== null && loaded && <span className="tabular font-normal text-ink-disabled">{count}</span>}
-                </h2>
+                <h2 className="text-meta font-medium text-ink-subtle">{label}</h2>
                 {canEdit && action}
             </div>
         );
@@ -517,7 +514,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
         return (
             <>
                 <div className="flex h-14 shrink-0 items-center gap-2 px-3">
-                    <Link href={`/p/${projectId}`} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Link href={`/p/${projectId}/overview`} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <LogoMark className="size-7 dark:invert" />
                         {mobile ? <SheetTitle asChild>{brandLabel}</SheetTitle> : brandLabel}
                     </Link>
@@ -582,10 +579,10 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </div>
 
                     <TabsContent value="chats" className="data-[state=active]:flex data-[state=active]:flex-col">
-                        {renderSectionLabel("Recent chats", chats.length, (
+                        {renderSectionLabel("Chats", (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button asChild variant="ghost" size="icon-xs" className="text-ink-subtle" aria-label="Start chat">
+                                    <Button asChild variant="ghost" size="icon-xs" className="text-ink-subtle" aria-label="New chat">
                                         <Link href={`/p/${projectId}/chats/new`}><Plus size={15} /></Link>
                                     </Button>
                                 </TooltipTrigger>
@@ -629,17 +626,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </TabsContent>
 
                     <TabsContent value="specs" className="data-[state=active]:flex data-[state=active]:flex-col">
-                        {renderSectionLabel("Specs by feature", specs.length, (
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => batchRunning ? runBatch.setOpen(true) : runSpecBatch("Run all Specs", specs)}
-                                disabled={specs.length === 0}
-                                className="h-7 gap-1 px-2 text-meta text-ink-muted"
-                            >
-                                {batchRunning ? <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" /> : <Play size={13} />}
-                                {batchRunning ? "View run" : "Run all"}
+                        {renderSectionLabel("Specs by feature", batchRunning && (
+                            <Button type="button" variant="ghost" size="sm" onClick={() => runBatch.setOpen(true)} className="h-7 gap-1 px-2 text-meta text-ink-muted">
+                                <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" /> View run
                             </Button>
                         ))}
                         {renderLoadError()}
@@ -649,7 +638,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                 {loaded && rootFeatures.map((feature) => renderFeature(feature))}
                                 {loaded && ungroupedSpecs.map((spec) => renderSpec(spec))}
                                 {loaded && features.length === 0 && specs.length === 0 && !loadError && (
-                                    <EmptyState size="compact" icon={FileCheck2} title="No Specs yet" description="Saved behavior from chats appears here." />
+                                    <EmptyState size="compact" icon={FileCheck2} title="No Specs yet" description={NO_SPECS_DESCRIPTION} />
                                 )}
                             </div>
                         </ScrollArea>
@@ -660,12 +649,16 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     <Link href={`/p/${projectId}/overview`} aria-current={pathname === `/p/${projectId}/overview` ? "page" : undefined}
                         className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}/overview` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}>
                         <LayoutDashboard size={15} /> Overview
-                        {attentionCount > 0 && <Badge variant="secondary" size="sm" className="ml-auto" aria-label={`${attentionCount} ${attentionCount === 1 ? "decision needs" : "decisions need"} you`} title={`${attentionCount} needs you`}>{attentionCount}</Badge>}
+                        {attentionCount > 0 && <Badge variant="secondary" size="sm" className="ml-auto" aria-label={`${attentionCount} ${attentionCount === 1 ? "item needs" : "items need"} you`} title={`${attentionCount} need${attentionCount === 1 ? "s" : ""} you`}>{attentionCount}</Badge>}
+                    </Link>
+                    <Link href={`/p/${projectId}`} aria-current={pathname === `/p/${projectId}` ? "page" : undefined}
+                        className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}>
+                        <Compass size={15} /> Project context
                     </Link>
                     <Link href={`/p/${projectId}/coverage`} onClick={() => setDrawerOpen(false)} aria-current={pathname.endsWith("/coverage") ? "page" : undefined} className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname.endsWith("/coverage") ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}><ChartNoAxesCombined size={15} /> Coverage</Link>
                     {canEdit && <div className="px-2 py-2"><EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} /></div>}
                     {(currentOverview?.summary.paused || currentOverview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{currentOverview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
-                    <Link
+                    {runtimeCopy && <Link
                         href={isAdmin ? "/settings?tab=model" : `/p/${projectId}/overview`}
                         className="flex min-h-10 items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring"
                     >
@@ -674,7 +667,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <span className="block truncate text-control font-medium text-ink">{runtimeCopy[0]}</span>
                             <span className="block truncate text-meta text-ink-subtle">{runtimeCopy[1]}</span>
                         </span>
-                    </Link>
+                    </Link>}
                     <UserMenu />
                     <div className="flex items-center justify-between gap-2">
                         {canEdit && <Link
@@ -700,7 +693,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <Menu size={19} />
                         </Button>
                     </SheetTrigger>
-                    <Link href={`/p/${projectId}`} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Link href={`/p/${projectId}/overview`} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <LogoMark className="size-7 dark:invert" />
                         <span className="truncate text-control font-semibold text-ink">{projectName}</span>
                     </Link>
@@ -724,7 +717,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         return <>The chat <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong>, its messages, and browser session will be permanently removed. Specs created from it will remain.</>;
                     }
                     if (deleteTarget.kind === "spec") {
-                        return <>The active files for <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong>, its verification history, and all evidence will be removed. Earlier file revisions remain in Git history.</>;
+                        return <>The active files for <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong>, its run history, and all evidence will be removed. Earlier file revisions remain in Git history.</>;
                     }
                     const featureIds = featureDeletionIds(deleteTarget.item.id);
                     const specCount = specs.filter((spec) => featureIds.has(spec.featureId)).length;

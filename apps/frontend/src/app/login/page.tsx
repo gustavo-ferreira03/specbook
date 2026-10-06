@@ -50,7 +50,7 @@ function LoginContent() {
                 {options?.passwordLoginEnabled && <form onSubmit={login}>
                     <SettingsRow label="Email" htmlFor="login-email"><Input id="login-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} /></SettingsRow>
                     <SettingsRow label="Password" htmlFor="login-password"><Input id="login-password" type="password" autoComplete="current-password" required maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} /></SettingsRow>
-                    <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}<ArrowRight size={14} /></Button></SettingsFooter>
+                    <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}<ArrowRight size={14} /></Button></SettingsFooter>
                 </form>}
                 {!options?.passwordLoginEnabled && error && <SettingsBlock><InlineFeedback feedback={{ type: "error", text: error }} /></SettingsBlock>}
                 {!options && error && <SettingsBlock><Button variant="outline" onClick={() => window.location.reload()}>Try again</Button></SettingsBlock>}

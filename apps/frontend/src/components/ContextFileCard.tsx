@@ -106,7 +106,7 @@ export function ContextFileCard({ projectId }: { projectId: string }) {
                             feedback={error ? <InlineFeedback feedback={{ type: "error", text: error }} /> : dirty ? <span className="text-control text-ink-muted">Unsaved changes</span> : saved ? <InlineFeedback feedback={{ type: "success", text: "context.yml saved and committed." }} /> : null}
                         >
                             {dirty && <Button type="button" variant="ghost" onClick={() => { setDraft(yaml); setError(""); }} disabled={busy}>Discard changes</Button>}
-                            <Button type="button" onClick={save} disabled={busy || !dirty || !draft.trim()}>{busy ? "Saving..." : "Save changes"}</Button>
+                            <Button type="button" onClick={save} disabled={busy || !dirty || !draft.trim()}>{busy ? "Saving…" : "Save changes"}</Button>
                         </SettingsFooter>
                     </>
                 )}

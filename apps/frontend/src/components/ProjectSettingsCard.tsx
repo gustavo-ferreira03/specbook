@@ -113,7 +113,7 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
                             feedback={error ? <InlineFeedback feedback={{ type: "error", text: error }} /> : saved && !dirty ? <InlineFeedback feedback={{ type: "success", text: "Project saved." }} /> : dirty ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}
                         >
                             {dirty && <Button type="button" variant="ghost" onClick={() => { setName(project.name); setBaseUrl(project.baseUrl); setError(""); }} disabled={saving}>Cancel</Button>}
-                            <Button type="submit" disabled={saving || !dirty || !name.trim() || !baseUrl.trim()}>{saving ? "Saving..." : "Save changes"}</Button>
+                            <Button type="submit" disabled={saving || !dirty || !name.trim() || !baseUrl.trim()}>{saving ? "Saving…" : "Save changes"}</Button>
                         </SettingsFooter>
                     </form>
                 )}

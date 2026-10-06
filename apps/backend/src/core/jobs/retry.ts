@@ -11,7 +11,7 @@ async function askAboutStalledWork(job: Job): Promise<void> {
     if (existing) return;
     const spec = job.specId ? await specsRepository.getSpec(job.specId) : null;
     await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "question",
-        title: `I couldn’t finish ${spec ? `the check for “${spec.title}”` : "this investigation"}. Look at it together?`,
+        title: `I couldn’t finish ${spec ? `the Spec “${spec.title}”` : "this investigation"}. Look at it together?`,
         body: await createProjectScrubber(job.projectId)(`${job.stopReason ?? "The investigation has not reached a confirmed result."}\nI tried another approach but still could not confirm the expected result. Your explanation of the flow or missing prerequisite can help me continue.`),
         payload: { waitingFor: "investigation", language: "en", specId: job.specId, runId: job.runId } });
 }

@@ -428,11 +428,11 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
                             </SettingsRow>
                             <SettingsFooter feedback={settingsFeedback ? <InlineFeedback feedback={settingsFeedback} /> : hasChanges ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}>
                                 <Button type="submit" variant="outline" disabled={testing || savingSettings || !hasChanges || !draft.provider || !draft.model}>
-                                    {savingSettings ? "Saving..." : "Save model"}
+                                    {savingSettings ? "Saving…" : "Save model"}
                                 </Button>
                                 <Button type="button" onClick={() => void testConnection()} disabled={testing || savingSettings || !selectedProvider?.configured || !draft.model}>
                                     {testing && <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />}
-                                    {testing ? "Testing connection..." : onConnectionTested ? "Test connection and continue" : "Test connection"}
+                                    {testing ? "Testing connection…" : onConnectionTested ? "Test connection and continue" : "Test connection"}
                                 </Button>
                             </SettingsFooter>
                         </form>
@@ -607,7 +607,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
                                                                     </Tooltip>
                                                                 </div>
                                                                 <Button type="submit" variant={provider.configured ? "outline" : "default"} disabled={!apiKey.trim() || busy}>
-                                                                    {busy ? "Saving..." : provider.configured ? "Replace" : "Save key"}
+                                                                    {busy ? "Saving…" : provider.configured ? "Replace" : "Save key"}
                                                                 </Button>
                                                             </div>
                                                         </form>
@@ -693,13 +693,13 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
                                                                         <Label htmlFor={`oauth-input-${provider.id}`}>{oauth.prompt.message}</Label>
                                                                         <div className="flex gap-2">
                                                                             <Input id={`oauth-input-${provider.id}`} type={oauth.prompt.type === "secret" ? "password" : "text"} value={manualOAuthInput} onChange={(event) => setManualOAuthInput(event.target.value)} className="min-w-0 flex-1" placeholder={oauth.prompt.placeholder} />
-                                                                            <Button type="submit" variant="outline" disabled={!manualOAuthInput.trim() || busy}>{busy ? "Submitting..." : "Submit"}</Button>
+                                                                            <Button type="submit" variant="outline" disabled={!manualOAuthInput.trim() || busy}>{busy ? "Submitting…" : "Submit"}</Button>
                                                                         </div>
                                                                     </form>
                                                                 )}
                                                                 <p className="flex items-center gap-2 text-meta text-ink-muted" role="status">
                                                                     <LoaderCircle size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                                                                    {!oauth.url && !oauth.userCode && !oauth.prompt ? "Waiting for authentication instructions..." : "Waiting for you to finish in the browser..."}
+                                                                    {!oauth.url && !oauth.userCode && !oauth.prompt ? "Waiting for authentication instructions…" : "Waiting for you to finish in the browser…"}
                                                                 </p>
                                                             </div>
                                                         )}

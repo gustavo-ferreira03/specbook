@@ -64,7 +64,7 @@ export function RepositoryRecovery({ projectId }: { projectId: string }) {
                 </div>
                 <div className="space-y-3 border-t border-line bg-surface-soft px-5 py-4">
                     <InlineFeedback feedback={feedback} />
-                    <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => void load()} disabled={saving || loading}><RefreshCw size={14} /> Refresh changes</Button><Button onClick={() => void save()} disabled={saving || loading || !recovery?.canSave}>{saving ? "Saving..." : "Save pending edits"}</Button></div>
+                    <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => void load()} disabled={saving || loading}><RefreshCw size={14} /> Refresh changes</Button><Button onClick={() => void save()} disabled={saving || loading || !recovery?.canSave}>{saving ? "Saving…" : "Save pending edits"}</Button></div>
                     <p className="flex items-start gap-2 text-meta text-ink-subtle"><AlertCircle size={13} className="mt-0.5 shrink-0" />Saving preserves the edited files. Specbook does not discard or rewrite your changes.</p>
                 </div>
             </SheetContent>
