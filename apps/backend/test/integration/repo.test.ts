@@ -287,6 +287,43 @@ describe("first-run setup", () => {
         assert.equal(await projectContextsRepository.getActiveProjectContextDraft(project.id), null);
     });
 
+    test("LLM settings expose provider authentication methods and support OpenAI subscription login", async (t) => {
+        const setup = await setupApp();
+        const { modelRuntimePromise } = await import("../../src/core/llm/runtime");
+        const runtime = await modelRuntimePromise;
+        const response = await setup.request("/settings/llm");
+        assert.equal(response.status, 200);
+        const { providers } = await response.json() as { providers: { id: string; authMethods: string[] }[] };
+        const openai = providers.find((provider) => provider.id === "openai");
+        const codex = providers.find((provider) => provider.id === "openai-codex");
+        assert.ok(openai);
+        assert.ok(codex);
+        assert.deepEqual(new Set(openai.authMethods), new Set(["oauth", "api_key"]));
+        assert.deepEqual(codex.authMethods, ["oauth"]);
+
+        const login = t.mock.method(runtime, "login", async (provider: string, type: string, interaction: Parameters<typeof runtime.login>[2]) => {
+            assert.equal(provider, "openai");
+            assert.equal(type, "oauth");
+            assert.ok(interaction.signal instanceof AbortSignal);
+            interaction.notify({ type: "auth_url", url: "https://auth.example.com/sign-in" });
+        });
+        const started = await setup.request("/settings/llm/providers/openai/oauth/start", { method: "POST" });
+        assert.equal(started.status, 200);
+        const { sessionId } = await started.json() as { sessionId: string };
+        assert.match(sessionId, /^[0-9a-f-]{36}$/);
+        const polled = await setup.request(`/settings/llm/providers/openai/oauth/poll?sessionId=${sessionId}`);
+        assert.equal(polled.status, 200);
+        assert.deepEqual(await polled.json(), { status: "done", url: "https://auth.example.com/sign-in" });
+        assert.equal(login.mock.callCount(), 1);
+
+        const apiOnly = providers.find((provider) => provider.authMethods.length === 1 && provider.authMethods[0] === "api_key");
+        assert.ok(apiOnly);
+        const unsupported = await setup.request(`/settings/llm/providers/${apiOnly.id}/oauth/start`, { method: "POST" });
+        assert.equal(unsupported.status, 400);
+        assert.match((await unsupported.json()).error, /OAuth is not supported/);
+        assert.equal(login.mock.callCount(), 1);
+    });
+
     test("test connection makes a bounded request and presents provider errors without raw secrets", async (t) => {
         const setup = await setupApp();
         const { settingsRepository } = await import("../../src/infra/repositories/settings");
