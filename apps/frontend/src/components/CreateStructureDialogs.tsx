@@ -67,21 +67,20 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
                 <FolderPlus size={13} /> New Feature
             </Button>
             <Dialog open={open} onOpenChange={changeOpen}>
-                <DialogContent className="max-w-[400px]">
-                    <DialogHeader className="pr-8">
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
                         <DialogTitle>New Feature</DialogTitle>
-                        <DialogDescription>Create a repository directory and its feature.yml file.</DialogDescription>
+                        <DialogDescription>Group related Specs under an area of the product, such as Checkout or Search.</DialogDescription>
                     </DialogHeader>
-                    {error && <Alert variant="destructive" className="mt-4" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
                     <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void create(); }}>
                         <div className="space-y-1.5">
                             <Label htmlFor="new-feature-title">Title</Label>
                             <Input id="new-feature-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Checkout" disabled={busy} />
                         </div>
                         <div className="space-y-1.5">
-                            <Label htmlFor="new-feature-parent">Parent Feature</Label>
+                            <Label htmlFor="new-feature-parent">Parent feature</Label>
                             <Select value={parentId} onValueChange={setParentId}>
-                                <SelectTrigger id="new-feature-parent" className="w-full" aria-label="Parent Feature">
+                                <SelectTrigger id="new-feature-parent" className="w-full" aria-label="Parent feature">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -91,8 +90,10 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
                                     ))}
                                 </SelectContent>
                             </Select>
+                            <p className="text-meta text-ink-subtle">Nest it inside another feature, or keep it at the top level.</p>
                         </div>
-                        <DialogFooter className="pt-1">
+                        {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+                        <DialogFooter className="pt-2">
                             <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={busy}>Cancel</Button>
                             <Button type="submit" disabled={busy || !title.trim()}>{busy ? "Creating..." : "Create Feature"}</Button>
                         </DialogFooter>
@@ -133,16 +134,15 @@ export function NewSpecDialog({ projectId, features }: { projectId: string; feat
 
     return (
         <>
-            <Button type="button" size="sm" onClick={() => changeOpen(true)} disabled={features.length === 0}>
+            <Button type="button" variant="outline" size="sm" onClick={() => changeOpen(true)} disabled={features.length === 0} title={features.length === 0 ? "Create a feature first" : undefined}>
                 <FilePlus2 size={13} /> New Spec
             </Button>
             <Dialog open={open} onOpenChange={changeOpen}>
-                <DialogContent className="max-w-[400px]">
-                    <DialogHeader className="pr-8">
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
                         <DialogTitle>New Spec</DialogTitle>
-                        <DialogDescription>Create spec.yml and spec.robot files inside the selected Feature.</DialogDescription>
+                        <DialogDescription>Start an empty Spec inside a feature, then fill in its steps. To have the agent write it, describe the behavior in a chat instead.</DialogDescription>
                     </DialogHeader>
-                    {error && <Alert variant="destructive" className="mt-4" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
                     <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void create(); }}>
                         <div className="space-y-1.5">
                             <Label htmlFor="new-spec-title">Title</Label>
@@ -161,7 +161,8 @@ export function NewSpecDialog({ projectId, features }: { projectId: string; feat
                                 </SelectContent>
                             </Select>
                         </div>
-                        <DialogFooter className="pt-1">
+                        {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+                        <DialogFooter className="pt-2">
                             <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={busy}>Cancel</Button>
                             <Button type="submit" disabled={busy || !title.trim() || !featureId}>{busy ? "Creating..." : "Create Spec"}</Button>
                         </DialogFooter>

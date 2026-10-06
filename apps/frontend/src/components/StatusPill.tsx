@@ -1,41 +1,18 @@
-import { AlertTriangle, Check, CircleDashed, GitMerge, LoaderCircle, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { statusMeta } from "@/lib/status";
+import { cn } from "@/lib/utils";
 
-const styles: Record<string, string> = {
-    passed: "success",
-    failed: "danger",
-    unverified: "pending",
-    invalid: "invalid",
-    conflict: "conflict",
-    running: "secondary",
-    error: "danger",
-};
-
-const labels: Record<string, string> = {
-    passed: "Passed",
-    failed: "Failed",
-    unverified: "Changed",
-    invalid: "Invalid",
-    conflict: "Conflict",
-    running: "Running",
-    error: "Error",
-};
-
-function StatusIcon({ status }: { status: string }) {
-    if (status === "passed") return <Check size={11} strokeWidth={2.4} />;
-    if (status === "failed" || status === "error") return <X size={11} strokeWidth={2.4} />;
-    if (status === "running") return <LoaderCircle size={11} className="animate-spin motion-reduce:animate-none" />;
-    if (status === "unverified") return <CircleDashed size={11} />;
-    if (status === "invalid") return <AlertTriangle size={11} />;
-    if (status === "conflict") return <GitMerge size={11} />;
-    return <CircleDashed size={11} />;
-}
-
-export function StatusPill({ status }: { status: string }) {
+/**
+ * Status as icon + text on a soft tinted background. `kind="run"` uses run wording
+ * ("Failed") instead of Spec wording ("Failing").
+ */
+export function StatusPill({ status, kind = "spec", size = "default", className }: { status: string; kind?: "spec" | "run"; size?: "default" | "sm"; className?: string }) {
+    const meta = statusMeta(status);
+    const Icon = meta.icon;
     return (
-        <Badge variant={(styles[status] ?? "secondary") as "success" | "danger" | "pending" | "secondary" | "invalid" | "conflict"}>
-            <StatusIcon status={status} />
-            {labels[status] ?? status}
+        <Badge variant="secondary" size={size} className={cn("gap-1 pr-2.5 pl-1.5", meta.soft, meta.text, className)} title={meta.description || undefined}>
+            <Icon size={size === "sm" ? 12 : 13} strokeWidth={2.25} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
+            {kind === "run" ? meta.runLabel : meta.label}
         </Badge>
     );
 }

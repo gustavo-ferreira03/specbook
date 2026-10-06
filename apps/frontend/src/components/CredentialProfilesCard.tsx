@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, KeyRound, Plus, Trash2, X } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { KeyRound, PencilLine, Plus, Trash2, X } from "lucide-react";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { InlineFeedback, SettingsBlock, SettingsSection } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
     createCredentialProfile,
     deleteCredentialProfile,
@@ -32,10 +37,15 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
     const [profiles, setProfiles] = useState<CredentialProfile[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [formError, setFormError] = useState("");
     const [openId, setOpenId] = useState<string | "new" | null>(null);
     const [name, setName] = useState("");
     const [fields, setFields] = useState<DraftField[]>([]);
     const [saving, setSaving] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<CredentialProfile | null>(null);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState("");
+    const triggerRef = useRef<HTMLElement | null>(null);
 
     const refresh = useCallback(async () => {
         setLoading(true);
@@ -51,7 +61,9 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
 
     useEffect(() => void refresh(), [refresh]);
 
-    function openNew() {
+    function openNew(trigger: HTMLElement) {
+        triggerRef.current = trigger;
+        setFormError("");
         setOpenId("new");
         setName("");
         setFields([
@@ -60,7 +72,9 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
         ]);
     }
 
-    function openEdit(profile: CredentialProfile) {
+    function openEdit(profile: CredentialProfile, trigger: HTMLElement) {
+        triggerRef.current = trigger;
+        setFormError("");
         setOpenId(profile.id);
         setName(profile.name);
         setFields(draftFromProfile(profile));
@@ -68,11 +82,11 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
 
     async function save() {
         if (!name.trim()) {
-            setError("Profile name is required.");
+            setFormError("Profile name is required.");
             return;
         }
         setSaving(true);
-        setError("");
+        setFormError("");
         const inputs: CredentialFieldInput[] = fields
             .filter((field) => field.key.trim())
             .map((field) => ({
@@ -85,146 +99,236 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             setOpenId(null);
             await refresh();
         } catch (err) {
-            setError(err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err));
+            setFormError(err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err));
         } finally {
             setSaving(false);
         }
     }
 
-    async function remove(profileId: string) {
-        setError("");
+    async function confirmRemove() {
+        if (!deleteTarget) return;
+        setDeleting(true);
+        setDeleteError("");
         try {
-            await deleteCredentialProfile(profileId);
+            await deleteCredentialProfile(deleteTarget.id);
+            setDeleteTarget(null);
             await refresh();
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            setDeleteError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setDeleting(false);
         }
     }
 
+    const editing = openId !== null && openId !== "new" ? profiles.find((profile) => profile.id === openId) : undefined;
+
     return (
-        <section className="space-y-3" aria-labelledby="credentials-heading">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <KeyRound className="size-4" aria-hidden />
-                    <h2 id="credentials-heading" className="text-[0.8125rem] font-bold">Credentials</h2>
-                </div>
-                {openId === null && (
-                    <Button type="button" size="sm" variant="outline" onClick={openNew}>
-                        <Plus size={13} /> New profile
+        <>
+            <SettingsSection
+                id="credentials-heading"
+                title="Credentials"
+                description="Login profiles the agent can use. Every field is encrypted and never shown again once saved."
+                actions={profiles.length > 0 &&
+                    <Button type="button" variant="outline" onClick={(event) => openNew(event.currentTarget)}>
+                        <Plus size={14} /> New profile
                     </Button>
+                }
+            >
+                {error && (
+                    <SettingsBlock>
+                        <InlineFeedback feedback={{ type: "error", text: error }} />
+                    </SettingsBlock>
                 )}
-            </div>
-            <p className="max-w-[68ch] text-[0.65625rem] leading-5 text-ink-faint">
-                Login profiles the agent can use. Every field is encrypted and never shown again once saved.
-            </p>
-            {error && (
-                <Alert variant="destructive">
-                    <AlertCircle className="size-4" aria-hidden />
-                    <AlertTitle>Credential error</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                </Alert>
-            )}
-            {!loading && profiles.length === 0 && openId === null && (
-                <p className="text-[0.6875rem] text-ink-faint">No credential profiles yet.</p>
-            )}
-            <div className="grid gap-2 empty:hidden">
-                {profiles.map((profile) => (
-                    <div
-                        key={profile.id}
-                        className="group flex items-start gap-3 rounded-[9px] border border-line-strong bg-surface p-3 transition-colors hover:bg-surface-hover cursor-pointer"
-                        onClick={() => openEdit(profile)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openEdit(profile); } }}
-                    >
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                                <span className="size-2 rounded-full bg-success shrink-0" />
-                                <p className="truncate text-[0.71875rem] font-bold">{profile.name}</p>
-                            </div>
-                            <p className="mt-1 truncate text-[0.625rem] text-ink-faint">
-                                {profile.fields.map((field) => `${field.key}: ••••`).join("  ·  ")}
-                            </p>
-                        </div>
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            aria-label={`Delete ${profile.name}`}
-                            onClick={(e) => { e.stopPropagation(); void remove(profile.id); }}
-                            className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
-                        >
-                            <Trash2 size={13} />
-                        </Button>
+                {loading && profiles.length === 0 && (
+                    <div aria-label="Loading credential profiles" aria-busy="true" role="status">
+                        {[0, 1].map((row) => (
+                            <SettingsBlock key={row} className="flex items-center gap-3">
+                                <Skeleton className="size-8 rounded-full" />
+                                <div className="flex-1 space-y-1.5"><Skeleton className="h-4 w-32" /><Skeleton className="h-3 w-48" /></div>
+                            </SettingsBlock>
+                        ))}
                     </div>
-                ))}
-            </div>
-            {openId && (
-                <form
-                    className="space-y-3 rounded-[9px] border border-line-strong bg-surface-soft p-4"
-                    onSubmit={(event) => {
+                )}
+                {!loading && profiles.length === 0 && !error && (
+                    <EmptyState
+                        size="compact"
+                        icon={KeyRound}
+                        title="No credential profiles yet"
+                        description="Add a login so the agent can sign in while it explores and verifies."
+                        action={<Button type="button" size="sm" onClick={(event) => openNew(event.currentTarget)}><Plus size={14} /> New profile</Button>}
+                        className="py-10"
+                    />
+                )}
+                {profiles.length > 0 && (
+                    <ul>
+                        {profiles.map((profile) => (
+                            <li key={profile.id} className="group relative flex min-h-16 items-center gap-3 border-b border-line px-4 py-3 transition-colors last:border-0 hover:bg-surface-soft sm:px-5">
+                                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-hover text-ink-muted">
+                                    <KeyRound size={15} aria-hidden="true" />
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                    <button
+                                        type="button"
+                                        onClick={(event) => openEdit(profile, event.currentTarget)}
+                                        className="block max-w-full truncate rounded-sm text-left text-control font-medium text-ink outline-none after:absolute after:inset-0 focus-visible:ring-2 focus-visible:ring-ring"
+                                    >
+                                        {profile.name}
+                                    </button>
+                                    <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-meta text-ink-subtle">
+                                        {profile.fields.length === 0 ? "No fields" : profile.fields.map((field) => (
+                                            <span key={field.key} className="inline-flex items-center gap-1">
+                                                <span className="font-mono">{field.key}</span>
+                                                <span aria-label={field.hasValue ? "saved" : "empty"}>{field.hasValue ? "••••" : "empty"}</span>
+                                            </span>
+                                        ))}
+                                    </p>
+                                </div>
+                                <div className="relative z-10 flex shrink-0 items-center gap-1">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button type="button" size="icon-sm" variant="ghost" aria-label={`Edit ${profile.name}`} onClick={(event) => openEdit(profile, event.currentTarget)}>
+                                                <PencilLine size={14} />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Edit</TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                size="icon-sm"
+                                                variant="ghost"
+                                                aria-label={`Delete ${profile.name}`}
+                                                className="hover:bg-danger-soft hover:text-danger"
+                                                onClick={(event) => {
+                                                    triggerRef.current = event.currentTarget;
+                                                    setDeleteError("");
+                                                    setDeleteTarget(profile);
+                                                }}
+                                            >
+                                                <Trash2 size={14} />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Delete</TooltipContent>
+                                    </Tooltip>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </SettingsSection>
+
+            <Dialog open={openId !== null} onOpenChange={(open) => { if (!open && !saving) setOpenId(null); }}>
+                <DialogContent
+                    className="max-w-xl"
+                    onCloseAutoFocus={(event) => {
+                        const trigger = triggerRef.current;
+                        if (!trigger?.isConnected) return;
                         event.preventDefault();
-                        void save();
+                        trigger.focus();
                     }}
                 >
-                    <div>
-                        <Label htmlFor="credential-name">Profile name</Label>
-                        <Input
-                            id="credential-name"
-                            value={name}
-                            disabled={openId !== "new"}
-                            onChange={(event) => setName(event.target.value)}
-                            placeholder="admin"
-                        />
-                    </div>
-                    {fields.map((field, index) => (
-                        <div key={index} className="flex items-end gap-2">
-                            <div className="w-40">
-                                <Label className="text-[0.625rem]">Field</Label>
-                                <Input
-                                    value={field.key}
-                                    onChange={(event) =>
-                                        setFields(fields.map((f, i) => (i === index ? { ...f, key: event.target.value } : f)))
-                                    }
-                                />
-                            </div>
-                            <div className="flex-1">
-                                <Label className="text-[0.625rem]">Value</Label>
-                                <Input
-                                    type="password"
-                                    autoComplete="off"
-                                    value={field.value}
-                                    placeholder={field.hasValue ? "•••• (keep current)" : ""}
-                                    onChange={(event) =>
-                                        setFields(fields.map((f, i) => (i === index ? { ...f, value: event.target.value } : f)))
-                                    }
-                                />
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setFields(fields.filter((_, i) => i !== index))}
-                                className="flex h-[34px] w-[34px] items-center justify-center rounded-md text-ink-faint hover:text-danger hover:bg-danger-soft transition-colors"
-                                aria-label={`Remove ${field.key || "field"}`}
-                            >
-                                <X size={13} />
-                            </button>
+                    <DialogHeader>
+                        <DialogTitle>{openId === "new" ? "New credential profile" : `Edit ${editing?.name ?? "profile"}`}</DialogTitle>
+                        <DialogDescription>
+                            {openId === "new" ? "Values are encrypted when saved and never shown again." : "Leave a saved value blank to keep it. The profile name cannot be changed."}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form
+                        className="mt-5 space-y-5"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            void save();
+                        }}
+                    >
+                        <div>
+                            <Label htmlFor="credential-name" className="mb-1.5">Profile name</Label>
+                            <Input
+                                id="credential-name"
+                                value={name}
+                                disabled={openId !== "new"}
+                                onChange={(event) => setName(event.target.value)}
+                                placeholder="admin"
+                                autoComplete="off"
+                            />
                         </div>
-                    ))}
-                    <div className="flex items-center gap-2">
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setFields([...fields, { key: "", value: "", hasValue: false }])}
-                        >
-                            <Plus size={13} /> Add field
-                        </Button>
-                        <div className="flex-1" />
-                        <Button type="button" size="sm" variant="outline" onClick={() => setOpenId(null)}>Cancel</Button>
-                        <Button type="submit" size="sm" disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
-                    </div>
-                </form>
-            )}
-        </section>
+                        <fieldset className="min-w-0">
+                            <legend className="mb-1.5 text-control font-medium text-ink">Fields</legend>
+                            <div className="space-y-2">
+                                {fields.length > 0 && (
+                                    <div className="hidden grid-cols-[10rem_minmax(0,1fr)_2rem] gap-2 text-meta text-ink-subtle sm:grid" aria-hidden="true">
+                                        <span>Name</span><span>Value</span><span />
+                                    </div>
+                                )}
+                                {fields.map((field, index) => (
+                                    <div key={index} className="grid grid-cols-[minmax(0,1fr)_2rem] gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_2rem]">
+                                        <Input
+                                            value={field.key}
+                                            aria-label={`Field ${index + 1} name`}
+                                            placeholder="field"
+                                            className="font-mono text-meta"
+                                            autoComplete="off"
+                                            onChange={(event) =>
+                                                setFields(fields.map((f, i) => (i === index ? { ...f, key: event.target.value } : f)))
+                                            }
+                                        />
+                                        <Input
+                                            type="password"
+                                            autoComplete="off"
+                                            aria-label={`${field.key || `Field ${index + 1}`} value`}
+                                            value={field.value}
+                                            placeholder={field.hasValue ? "Saved (leave blank to keep)" : "Value"}
+                                            className="col-start-1 row-start-2 sm:col-start-auto sm:row-start-auto"
+                                            onChange={(event) =>
+                                                setFields(fields.map((f, i) => (i === index ? { ...f, value: event.target.value } : f)))
+                                            }
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => setFields(fields.filter((_, i) => i !== index))}
+                                            className="col-start-2 row-start-1 size-9 hover:bg-danger-soft hover:text-danger sm:col-start-auto sm:row-start-auto"
+                                            aria-label={`Remove ${field.key || "field"}`}
+                                        >
+                                            <X size={14} />
+                                        </Button>
+                                    </div>
+                                ))}
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="-ml-1"
+                                    onClick={() => setFields([...fields, { key: "", value: "", hasValue: false }])}
+                                >
+                                    <Plus size={14} /> Add field
+                                </Button>
+                            </div>
+                        </fieldset>
+                        {formError && <InlineFeedback feedback={{ type: "error", text: formError }} />}
+                        <DialogFooter className="border-t border-line pt-4">
+                            <Button type="button" variant="outline" onClick={() => setOpenId(null)} disabled={saving}>Cancel</Button>
+                            <Button type="submit" disabled={saving}>{saving ? "Saving..." : openId === "new" ? "Create profile" : "Save changes"}</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            <ConfirmDeleteDialog
+                open={deleteTarget !== null}
+                title="Delete credential profile?"
+                description={<><strong className="font-semibold text-ink">{deleteTarget?.name}</strong> and its encrypted values are removed. The agent can no longer use it to sign in.</>}
+                confirmLabel="Delete profile"
+                busy={deleting}
+                error={deleteError}
+                returnFocusRef={triggerRef}
+                onCancel={() => {
+                    setDeleteTarget(null);
+                    setDeleteError("");
+                }}
+                onConfirm={() => void confirmRemove()}
+            />
+        </>
     );
 }

@@ -113,8 +113,8 @@ function AutoTextarea({ className, value, ...props }: React.ComponentProps<"text
 function SectionLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
     return (
         <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2">
-            <span className="text-[0.65625rem] font-bold text-ink-soft">{children}</span>
-            {hint && <span className="text-[0.625rem] text-ink-faint">{hint}</span>}
+            <span className="text-control font-medium text-ink">{children}</span>
+            {hint && <span className="text-meta text-ink-subtle">{hint}</span>}
         </div>
     );
 }
@@ -242,7 +242,7 @@ export function ProjectContextEditor({
                                 size="icon"
                                 onClick={() => removeRow(key, index)}
                                 aria-label={`Remove ${title.toLowerCase()} ${index + 1}`}
-                                className="mt-0.5 shrink-0 text-ink-faint hover:text-ink"
+                                className="mt-0.5 shrink-0 text-ink-subtle hover:text-ink"
                             >
                                 <X size={14} />
                             </Button>
@@ -271,9 +271,9 @@ export function ProjectContextEditor({
 
             <div>
                 <SectionLabel hint="One route per line">Areas</SectionLabel>
-                <div className="space-y-5">
+                <div className="space-y-3">
                     {state.areas.map((area, index) => (
-                        <div key={index} className={index > 0 ? "space-y-2 border-t border-line pt-5" : "space-y-2"}>
+                        <div key={index} className="space-y-2 rounded-lg border border-line bg-surface-soft p-3">
                             <div className="flex items-start gap-2">
                                 <Input
                                     data-focus={`areas-${index}-0`}
@@ -289,7 +289,7 @@ export function ProjectContextEditor({
                                     size="icon"
                                     onClick={() => removeRow("areas", index)}
                                     aria-label={`Remove area ${index + 1}`}
-                                    className="shrink-0 text-ink-faint hover:text-ink"
+                                    className="shrink-0 text-ink-subtle hover:text-ink"
                                 >
                                     <X size={14} />
                                 </Button>
@@ -341,7 +341,7 @@ export function ProjectContextEditor({
             {pairSection("sources", "Sources", "Pages the discovery visited", "URL", "Note", "Add source")}
 
             {error && (
-                <Alert variant="destructive" className="text-xs" role="alert">
+                <Alert variant="danger" role="alert">
                     <AlertDescription>{error}</AlertDescription>
                 </Alert>
             )}
@@ -350,7 +350,7 @@ export function ProjectContextEditor({
                 <Button type="button" onClick={() => void saveDraft()} disabled={saving}>
                     <Save size={14} /> {saving ? "Saving..." : "Save changes"}
                 </Button>
-                <Button type="button" variant="ghost" onClick={onCancel} disabled={saving} className="text-ink-soft">
+                <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>
                     Cancel
                 </Button>
             </div>

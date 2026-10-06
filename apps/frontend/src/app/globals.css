@@ -1,79 +1,278 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
-@theme {
-    --color-canvas: oklch(97.5% 0.003 260);
-    --color-sidebar: oklch(98.2% 0.002 260);
-    --color-surface: oklch(100% 0 0);
-    --color-surface-soft: oklch(97.2% 0.004 260);
-    --color-surface-hover: oklch(95.2% 0.006 260);
-    --color-line: oklch(91.8% 0.004 260);
-    --color-line-strong: oklch(86.8% 0.006 260);
-    --color-line-hover: oklch(75.5% 0.008 260);
-    --color-ink: oklch(27.5% 0 0);
-    --color-ink-soft: oklch(48.5% 0.004 260);
-    --color-ink-faint: oklch(44% 0.004 260);
-    --color-ink-disabled: oklch(73.5% 0.003 260);
-    --color-primary: oklch(26% 0 0);
-    --color-primary-foreground: #ffffff;
-    --color-primary-hover: oklch(35% 0 0);
-    --color-primary-soft: oklch(93.5% 0.004 260);
-    --color-surface-selected: oklch(91.8% 0.006 260);
-    --color-success: #1f8559;
-    --color-success-soft: #e9f8ef;
-    --color-success-chart: #2c9b68;
-    --color-danger: #bd5149;
-    --color-danger-soft: #fff0ed;
-    --color-danger-hover: #ffd9d4;
-    --color-danger-chart: #df6a61;
-    --color-pending: #9a6e00;
-    --color-pending-soft: #fff4d8;
-    --color-pending-chart: #f4bd4f;
-    --color-invalid: #aa5f16;
-    --color-invalid-soft: #fff1e4;
-    --color-invalid-chart: #ee9b46;
-    --color-conflict: #8062ae;
-    --color-conflict-soft: #f4efff;
-    --color-conflict-chart: #9577c4;
-    --color-info: #406b9f;
-    --color-info-soft: #edf3fa;
-    --color-background: oklch(100% 0 0);
-    --color-foreground: oklch(27.5% 0 0);
-    --color-card: oklch(100% 0 0);
-    --color-card-foreground: oklch(27.5% 0 0);
-    --color-popover: oklch(100% 0 0);
-    --color-popover-foreground: oklch(27.5% 0 0);
-    --color-secondary: oklch(97.2% 0.004 260);
-    --color-secondary-foreground: oklch(27.5% 0 0);
-    --color-muted: oklch(97.2% 0.004 260);
-    --color-muted-foreground: oklch(48.5% 0.004 260);
-    --color-accent: oklch(95.2% 0.006 260);
-    --color-accent-foreground: oklch(27.5% 0 0);
-    --color-destructive: #ba5751;
-    --color-destructive-foreground: #ffffff;
-    --color-border: oklch(91.8% 0.004 260);
-    --color-input: oklch(86.8% 0.006 260);
-    --color-ring: oklch(26% 0 0);
-    --color-overlay: rgb(24 24 22 / 42%);
-    --color-overlay-soft: rgb(0 0 0 / 35%);
-    --color-browser: #11110f;
-    --color-code-canvas: #f7f7f8;
-    --color-syntax-comment: #6d6d67;
-    --color-syntax-key: #315f87;
-    --color-syntax-string: #3f6b53;
-    --color-syntax-number: #8a4d27;
-    --color-syntax-keyword: #714f87;
-    --color-syntax-variable: #8a4d27;
-    --color-syntax-punctuation: #686862;
-    --shadow-composer: 0 4px 14px rgb(20 20 18 / 4%);
-    --font-sans: var(--font-inter);
+/*
+ * Specbook design tokens (monochrome: black, white, and neutral grays; color only for status). Every value that changes with the theme is a CSS variable defined on
+ * :root (light) and overridden on .dark (set on <html> by the theme script). Components only use
+ * the Tailwind utilities generated from these tokens (bg-surface, bg-primary, text-ink-muted, shadow-popover,
+ * text-body, rounded-lg, max-w-reading, font-mono, ...). Never hard-code colors in components.
+ */
+@theme static {
+    /* Neutrals */
+    --color-canvas: var(--sb-canvas);
+    --color-sidebar: var(--sb-sidebar);
+    --color-surface: var(--sb-surface);
+    --color-surface-soft: var(--sb-surface-soft);
+    --color-surface-hover: var(--sb-surface-hover);
+    --color-surface-selected: var(--sb-surface-selected);
+    --color-surface-raised: var(--sb-surface-raised);
+    /* Active thumb of segmented controls / switches */
+    --color-thumb: var(--sb-thumb);
+    --color-line: var(--sb-line);
+    --color-line-strong: var(--sb-line-strong);
+    --color-line-hover: var(--sb-line-hover);
+    --color-ink: var(--sb-ink);
+    --color-ink-muted: var(--sb-ink-muted);
+    --color-ink-subtle: var(--sb-ink-subtle);
+    --color-ink-disabled: var(--sb-ink-disabled);
+    --color-inverse: var(--sb-inverse);
+    --color-inverse-foreground: var(--sb-inverse-foreground);
+
+    /* Primary (monochrome): near-black in light, near-white in dark */
+    --color-primary: var(--sb-primary);
+    --color-primary-hover: var(--sb-primary-hover);
+    --color-primary-foreground: var(--sb-primary-foreground);
+    --color-primary-soft: var(--sb-primary-soft);
+
+    /* Status: text color, soft tinted background, chart fill */
+    --color-success: var(--sb-success);
+    --color-success-soft: var(--sb-success-soft);
+    --color-success-chart: var(--sb-success-chart);
+    --color-danger: var(--sb-danger);
+    --color-danger-soft: var(--sb-danger-soft);
+    --color-danger-soft-hover: var(--sb-danger-soft-hover);
+    --color-danger-chart: var(--sb-danger-chart);
+    --color-danger-solid: var(--sb-danger-solid);
+    --color-danger-solid-hover: var(--sb-danger-solid-hover);
+    --color-danger-solid-foreground: var(--sb-danger-solid-foreground);
+    /* warning = the original "pending" amber */
+    --color-warning: var(--sb-warning);
+    --color-warning-soft: var(--sb-warning-soft);
+    --color-warning-chart: var(--sb-warning-chart);
+    --color-warning-icon: var(--sb-warning-icon);
+    --color-invalid: var(--sb-invalid);
+    --color-invalid-soft: var(--sb-invalid-soft);
+    --color-invalid-chart: var(--sb-invalid-chart);
+    --color-conflict: var(--sb-conflict);
+    --color-conflict-soft: var(--sb-conflict-soft);
+    --color-conflict-chart: var(--sb-conflict-chart);
+    --color-info: var(--sb-info);
+    --color-info-soft: var(--sb-info-soft);
+    --color-neutral: var(--sb-ink-subtle);
+    --color-neutral-soft: var(--sb-surface-selected);
+    --color-neutral-chart: var(--sb-neutral-chart);
+    --color-running: var(--sb-ink);
+    --color-running-soft: var(--sb-surface-hover);
+    --color-running-chart: var(--sb-primary);
+
+    /* shadcn compatibility aliases */
+    --color-background: var(--sb-surface);
+    --color-foreground: var(--sb-ink);
+    --color-card: var(--sb-surface);
+    --color-card-foreground: var(--sb-ink);
+    --color-popover: var(--sb-surface-raised);
+    --color-popover-foreground: var(--sb-ink);
+    --color-secondary: var(--sb-surface-hover);
+    --color-secondary-foreground: var(--sb-ink);
+    --color-muted: var(--sb-surface-soft);
+    --color-muted-foreground: var(--sb-ink-muted);
+    --color-destructive: var(--sb-danger-solid);
+    --color-destructive-foreground: var(--sb-danger-solid-foreground);
+    --color-border: var(--sb-line);
+    --color-input: var(--sb-line-strong);
+    --color-ring: var(--sb-ring);
+
+    /* Overlays, live browser, code editor */
+    --color-overlay: var(--sb-overlay);
+    --color-browser: var(--sb-browser);
+    --color-code-canvas: var(--sb-code-canvas);
+    --color-syntax-comment: var(--sb-syntax-comment);
+    --color-syntax-key: var(--sb-syntax-key);
+    --color-syntax-string: var(--sb-syntax-string);
+    --color-syntax-number: var(--sb-syntax-number);
+    --color-syntax-keyword: var(--sb-syntax-keyword);
+    --color-syntax-variable: var(--sb-syntax-number);
+    --color-syntax-punctuation: var(--sb-syntax-punctuation);
+
+    /* Elevation: only popovers, dialogs, and the composer float */
+    --shadow-xs: var(--sb-shadow-xs);
+    --shadow-popover: var(--sb-shadow-popover);
+    --shadow-dialog: var(--sb-shadow-dialog);
+    --shadow-composer: var(--sb-shadow-composer);
+
+    /* Type */
+    --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --text-label: 0.6875rem;
+    --text-label--line-height: 1rem;
+    --text-label--letter-spacing: 0.06em;
+    --text-label--font-weight: 600;
+    --text-meta: 0.75rem;
+    --text-meta--line-height: 1.125rem;
+    --text-control: 0.8125rem;
+    --text-control--line-height: 1.25rem;
+    --text-body: 0.875rem;
+    --text-body--line-height: 1.375rem;
+    --text-section: 0.9375rem;
+    --text-section--line-height: 1.375rem;
+    --text-section--font-weight: 600;
+    --text-title: 1.3125rem;
+    --text-title--line-height: 1.75rem;
+    --text-title--letter-spacing: -0.015em;
+    --text-title--font-weight: 600;
+    --text-display: 1.75rem;
+    --text-display--line-height: 2.25rem;
+    --text-display--letter-spacing: -0.02em;
+    --text-display--font-weight: 600;
+
+    /* Geometry */
     --radius-sm: 6px;
     --radius-md: 8px;
-    --radius-lg: 9px;
-    --radius-xl: 11px;
-    --radius-2xl: 13px;
+    --radius-lg: 10px;
+    --radius-xl: 12px;
+    --radius-2xl: 14px;
+    --container-reading: 760px;
+    --container-data: 1080px;
+    --container-chat: 780px;
+    --spacing-sidebar: 272px;
+
+    --ease-out-soft: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+:root {
+    color-scheme: light;
+    --sb-canvas: oklch(97.5% 0.003 260);
+    --sb-sidebar: oklch(98.2% 0.002 260);
+    --sb-surface: oklch(100% 0 0);
+    --sb-surface-soft: oklch(97.2% 0.004 260);
+    --sb-surface-hover: oklch(95.2% 0.006 260);
+    --sb-surface-selected: oklch(91.8% 0.006 260);
+    --sb-surface-raised: oklch(100% 0 0);
+    --sb-thumb: oklch(100% 0 0);
+    --sb-line: oklch(91.8% 0.004 260);
+    --sb-line-strong: oklch(86.8% 0.006 260);
+    --sb-line-hover: oklch(75.5% 0.008 260);
+    --sb-ink: oklch(27.5% 0 0);
+    --sb-ink-muted: oklch(45% 0.004 260);
+    --sb-ink-subtle: oklch(51% 0.004 260);
+    --sb-ink-disabled: oklch(73.5% 0.003 260);
+    --sb-inverse: oklch(26% 0 0);
+    --sb-inverse-foreground: oklch(100% 0 0);
+
+    --sb-primary: oklch(26% 0 0);
+    --sb-primary-hover: oklch(35% 0 0);
+    --sb-primary-foreground: oklch(100% 0 0);
+    --sb-primary-soft: oklch(93.5% 0.004 260);
+    --sb-ring: oklch(26% 0 0);
+
+    --sb-success: #1f8559;
+    --sb-success-soft: #e9f8ef;
+    --sb-success-chart: #2c9b68;
+    --sb-danger: #bd5149;
+    --sb-danger-soft: #fff0ed;
+    --sb-danger-soft-hover: #ffd9d4;
+    --sb-danger-chart: #df6a61;
+    --sb-danger-solid: #ba5751;
+    --sb-danger-solid-hover: #a84b45;
+    --sb-danger-solid-foreground: #ffffff;
+    --sb-warning: #9a6e00;
+    --sb-warning-soft: #fff4d8;
+    --sb-warning-chart: #f4bd4f;
+    /* Amber text dark enough to read looks brown, so warnings keep neutral text and use this vivid amber for icons and dots. */
+    --sb-warning-icon: #d99a00;
+    --sb-invalid: #aa5f16;
+    --sb-invalid-soft: #fff1e4;
+    --sb-invalid-chart: #ee9b46;
+    --sb-conflict: #8062ae;
+    --sb-conflict-soft: #f4efff;
+    --sb-conflict-chart: #9577c4;
+    --sb-info: #406b9f;
+    --sb-info-soft: #edf3fa;
+    --sb-neutral-chart: oklch(84% 0.004 260);
+
+    --sb-overlay: rgb(24 24 22 / 42%);
+    --sb-browser: #11110f;
+    --sb-code-canvas: #f7f7f8;
+    --sb-syntax-comment: #6d6d67;
+    --sb-syntax-key: #315f87;
+    --sb-syntax-string: #3f6b53;
+    --sb-syntax-number: #8a4d27;
+    --sb-syntax-keyword: #714f87;
+    --sb-syntax-punctuation: #686862;
+
+    --sb-shadow-xs: 0 1px 2px rgb(20 20 18 / 5%);
+    --sb-shadow-popover: 0 1px 2px rgb(20 20 18 / 5%), 0 10px 28px -8px rgb(20 20 18 / 16%);
+    --sb-shadow-dialog: 0 2px 6px rgb(20 20 18 / 6%), 0 28px 56px -16px rgb(20 20 18 / 24%);
+    --sb-shadow-composer: 0 4px 14px rgb(20 20 18 / 4%);
+}
+
+/* Dark: the same monochrome system inverted. Neutral grays (no tint), near-white primary. */
+.dark {
+    color-scheme: dark;
+    --sb-canvas: oklch(16.5% 0 0);
+    --sb-sidebar: oklch(17.5% 0 0);
+    --sb-surface: oklch(20.5% 0 0);
+    --sb-surface-soft: oklch(22.5% 0 0);
+    --sb-surface-hover: oklch(25.5% 0 0);
+    --sb-surface-selected: oklch(29.5% 0 0);
+    --sb-surface-raised: oklch(23.5% 0 0);
+    --sb-thumb: oklch(33% 0 0);
+    --sb-line: oklch(28.5% 0 0);
+    --sb-line-strong: oklch(34% 0 0);
+    --sb-line-hover: oklch(46% 0 0);
+    --sb-ink: oklch(94.5% 0 0);
+    --sb-ink-muted: oklch(77% 0 0);
+    --sb-ink-subtle: oklch(68% 0 0);
+    --sb-ink-disabled: oklch(46% 0 0);
+    --sb-inverse: oklch(93% 0 0);
+    --sb-inverse-foreground: oklch(20% 0 0);
+
+    --sb-primary: oklch(93% 0 0);
+    --sb-primary-hover: oklch(84% 0 0);
+    --sb-primary-foreground: oklch(19% 0 0);
+    --sb-primary-soft: oklch(27% 0 0);
+    --sb-ring: oklch(88% 0 0);
+
+    --sb-success: oklch(77% 0.13 155);
+    --sb-success-soft: oklch(28.5% 0.045 155);
+    --sb-success-chart: oklch(66% 0.13 155);
+    --sb-danger: oklch(75% 0.13 27);
+    --sb-danger-soft: oklch(29% 0.06 27);
+    --sb-danger-soft-hover: oklch(33% 0.08 27);
+    --sb-danger-chart: oklch(66% 0.16 27);
+    --sb-danger-solid: oklch(56% 0.16 27);
+    --sb-danger-solid-hover: oklch(61% 0.16 27);
+    --sb-danger-solid-foreground: oklch(100% 0 0);
+    --sb-warning: oklch(83% 0.13 85);
+    --sb-warning-soft: oklch(29.5% 0.05 80);
+    --sb-warning-chart: oklch(80% 0.14 82);
+    --sb-warning-icon: oklch(80% 0.14 82);
+    --sb-invalid: oklch(79% 0.12 58);
+    --sb-invalid-soft: oklch(29.5% 0.05 50);
+    --sb-invalid-chart: oklch(72% 0.14 55);
+    --sb-conflict: oklch(78% 0.1 300);
+    --sb-conflict-soft: oklch(29.5% 0.05 300);
+    --sb-conflict-chart: oklch(67% 0.12 300);
+    --sb-info: oklch(78% 0.08 250);
+    --sb-info-soft: oklch(29% 0.04 250);
+    --sb-neutral-chart: oklch(42% 0 0);
+
+    --sb-overlay: rgb(0 0 0 / 62%);
+    --sb-browser: oklch(13% 0 0);
+    --sb-code-canvas: oklch(18.5% 0 0);
+    --sb-syntax-comment: oklch(64% 0 0);
+    --sb-syntax-key: oklch(79% 0.08 245);
+    --sb-syntax-string: oklch(79% 0.08 155);
+    --sb-syntax-number: oklch(80% 0.09 60);
+    --sb-syntax-keyword: oklch(79% 0.09 305);
+    --sb-syntax-punctuation: oklch(68% 0 0);
+
+    --sb-shadow-xs: 0 1px 2px rgb(0 0 0 / 30%);
+    --sb-shadow-popover: 0 0 0 1px rgb(255 255 255 / 3%), 0 12px 32px -8px rgb(0 0 0 / 55%);
+    --sb-shadow-dialog: 0 0 0 1px rgb(255 255 255 / 3%), 0 28px 64px -16px rgb(0 0 0 / 65%);
+    --sb-shadow-composer: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 28px -12px rgb(0 0 0 / 50%);
 }
 
 * {
@@ -94,13 +293,22 @@ body {
     overflow-x: hidden;
     background: var(--color-canvas);
     color: var(--color-ink);
-    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-    font-size: 0.875rem;
-    line-height: 1.5;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.55;
+    font-feature-settings: "cv11", "ss01";
     font-kerning: normal;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+}
+
+code,
+kbd,
+pre,
+samp {
+    font-family: var(--font-mono);
+    font-feature-settings: normal;
 }
 
 h1,
@@ -122,17 +330,29 @@ h4 {
     scrollbar-gutter: stable;
 }
 
-button,
-input,
-textarea,
-select {
-    font-family: inherit;
-}
+/* Element defaults live in the base layer so utilities (font-mono, text-*) still win. */
+@layer base {
+    /* Code must show what was typed: no "=>" to arrow ligatures. */
+    code,
+    pre,
+    kbd,
+    textarea.font-mono,
+    .font-mono {
+        font-variant-ligatures: none;
+    }
 
-input,
-textarea,
-select {
-    color: inherit;
+    button,
+    input,
+    textarea,
+    select {
+        font-family: inherit;
+    }
+
+    input,
+    textarea,
+    select {
+        color: inherit;
+    }
 }
 
 button,
@@ -150,29 +370,37 @@ textarea:disabled {
 
 input::placeholder,
 textarea::placeholder {
-    color: var(--color-ink-faint);
+    color: var(--color-ink-subtle);
     opacity: 1;
 }
 
 ::selection {
     background: var(--color-primary);
-    color: var(--color-surface);
-}
-
-a:focus-visible:not([data-slot="button"]),
-summary:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
-}
-
-.message-link-user:focus-visible {
-    outline-color: var(--color-primary-foreground);
-}
-
-.chat-message-user::selection,
-.chat-message-user *::selection {
-    background: rgb(255 255 255 / 32%);
     color: var(--color-primary-foreground);
+}
+
+/* Focus: 2px primary (ink) ring with a 2px offset everywhere. Components use the same recipe via
+ * `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-surface`. */
+a:focus-visible:not([data-slot]),
+summary:focus-visible,
+[role="treeitem"]:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.tabular {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Uppercase eyebrow label: use sparingly (section labels in the sidebar, table heads). */
+.eyebrow {
+    font-size: var(--text-label);
+    line-height: var(--text-label--line-height);
+    letter-spacing: var(--text-label--letter-spacing);
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--color-ink-subtle);
 }
 
 .skip-link {
@@ -181,12 +409,12 @@ summary:focus-visible {
     left: 8px;
     z-index: 100;
     transform: translateY(-150%);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--color-primary);
     padding: 10px 14px;
-    color: white;
-    font-size: 0.8125rem;
-    font-weight: 700;
+    color: var(--color-primary-foreground);
+    font-size: var(--text-control);
+    font-weight: 600;
 }
 
 .skip-link:focus {
@@ -207,28 +435,18 @@ summary:focus-visible {
     animation: status-pulse 1.35s ease-in-out infinite;
 }
 
-.chat-message-user {
-    box-shadow: 0 1px 0 rgb(0 0 0 / 8%);
-}
-
-@media (max-width: 767px) {
-    body {
-        font-size: 0.9375rem;
-    }
-}
-
 @media (pointer: coarse) {
     [data-slot="button"],
     [data-slot="input"],
-    [data-slot="textarea"],
     [data-slot="select-trigger"] {
-        min-height: 44px;
+        min-height: 40px;
     }
 
     [data-slot="button"][data-size="icon"],
     [data-slot="button"][data-size="icon-sm"],
+    [data-slot="button"][data-size="icon-xs"],
     [data-slot="button"][data-size="icon-lg"] {
-        min-width: 44px;
+        min-width: 40px;
     }
 }
 
@@ -260,26 +478,27 @@ summary:focus-visible {
     font-weight: 600;
 }
 
-.syntax-code .token.keyword,
-.syntax-code .token.section-header {
+.syntax-code .token.keyword {
     color: var(--color-syntax-keyword);
     font-weight: 700;
 }
 
 .syntax-code .token.function,
-.syntax-code .token.keyword-name,
-.syntax-code .token.test-name {
+.syntax-code .token.class-name {
     color: var(--color-syntax-key);
     font-weight: 600;
 }
 
 .syntax-code .token.string,
+.syntax-code .token.template-string,
+.syntax-code .token.regex,
 .syntax-code .token.attr-value {
     color: var(--color-syntax-string);
 }
 
 .syntax-code .token.number,
-.syntax-code .token.boolean {
+.syntax-code .token.boolean,
+.syntax-code .token.constant {
     color: var(--color-syntax-number);
 }
 
@@ -289,8 +508,14 @@ summary:focus-visible {
 }
 
 .syntax-code .token.punctuation,
+.syntax-code .token.template-punctuation,
+.syntax-code .token.interpolation-punctuation,
 .syntax-code .token.operator {
     color: var(--color-syntax-punctuation);
+}
+
+.syntax-code .token.template-string .token.interpolation {
+    color: var(--color-ink);
 }
 
 .syntax-code textarea {

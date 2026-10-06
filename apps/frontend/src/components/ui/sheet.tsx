@@ -12,10 +12,10 @@ const SheetClose = SheetPrimitive.Close;
 const SheetPortal = SheetPrimitive.Portal;
 
 function SheetOverlay({ className, ...props }: React.ComponentProps<typeof SheetPrimitive.Overlay>) {
-    return <SheetPrimitive.Overlay data-slot="sheet-overlay" className={cn("fixed inset-0 z-40 bg-overlay-soft data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0", className)} {...props} />;
+    return <SheetPrimitive.Overlay data-slot="sheet-overlay" className={cn("fixed inset-0 z-40 bg-overlay data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0", className)} {...props} />;
 }
 
-const sheetVariants = cva("fixed z-50 flex flex-col bg-sidebar outline-none transition duration-200 ease-out data-[state=open]:animate-in data-[state=closed]:animate-out motion-reduce:transition-none", {
+const sheetVariants = cva("fixed z-50 flex flex-col bg-sidebar shadow-dialog outline-none transition duration-200 ease-out data-[state=open]:animate-in data-[state=closed]:animate-out motion-reduce:transition-none", {
     variants: {
         side: {
             top: "inset-x-0 top-0 border-b border-line data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
@@ -33,7 +33,7 @@ function SheetContent({ side = "right", className, children, showCloseButton = t
             <SheetOverlay />
             <SheetPrimitive.Content data-slot="sheet-content" className={cn(sheetVariants({ side }), className)} {...props}>
                 {children}
-                {showCloseButton && <SheetPrimitive.Close className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-md text-ink-faint outline-none hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-ring/35"><X size={16} /><span className="sr-only">Close</span></SheetPrimitive.Close>}
+                {showCloseButton && <SheetPrimitive.Close className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-md text-ink-subtle outline-none transition-colors hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-ring"><X size={16} /><span className="sr-only">Close</span></SheetPrimitive.Close>}
             </SheetPrimitive.Content>
         </SheetPortal>
     );
@@ -48,11 +48,11 @@ function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 function SheetTitle({ className, ...props }: React.ComponentProps<typeof SheetPrimitive.Title>) {
-    return <SheetPrimitive.Title data-slot="sheet-title" className={cn("text-[0.8125rem] font-bold", className)} {...props} />;
+    return <SheetPrimitive.Title data-slot="sheet-title" className={cn("text-section font-semibold text-ink", className)} {...props} />;
 }
 
 function SheetDescription({ className, ...props }: React.ComponentProps<typeof SheetPrimitive.Description>) {
-    return <SheetPrimitive.Description data-slot="sheet-description" className={cn("text-[0.6875rem] text-ink-soft", className)} {...props} />;
+    return <SheetPrimitive.Description data-slot="sheet-description" className={cn("text-control text-ink-muted", className)} {...props} />;
 }
 
 export { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetOverlay, SheetPortal, SheetTitle, SheetTrigger };

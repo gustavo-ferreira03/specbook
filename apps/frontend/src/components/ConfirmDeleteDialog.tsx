@@ -51,8 +51,8 @@ export function ConfirmDeleteDialog({
                     if (busy) event.preventDefault();
                 }}
             >
-                <div className="flex items-start gap-3 border-b border-line px-4 py-4">
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-danger-soft text-danger">
+                <div className="flex items-start gap-3.5 px-5 pt-5">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-danger-soft text-danger">
                         <AlertTriangle size={16} />
                     </span>
                     <div className="min-w-0 flex-1">
@@ -61,14 +61,14 @@ export function ConfirmDeleteDialog({
                     </div>
                     <AlertDialogCancel
                         disabled={busy}
-                        className="size-8 border-0 bg-transparent p-0 text-ink-faint hover:bg-surface-hover hover:text-ink"
+                        className="size-8 border-0 bg-transparent p-0 shadow-none text-ink-subtle hover:bg-surface-hover hover:text-ink"
                         aria-label="Close confirmation"
                     >
                         <X size={15} />
                     </AlertDialogCancel>
                 </div>
-                {error && <Alert variant="destructive" className="mx-4 mt-3 w-auto" role="alert">{error}</Alert>}
-                <AlertDialogFooter className="px-4 py-3">
+                {error && <Alert variant="danger" className="mx-5 mt-4 w-auto" role="alert">{error}</Alert>}
+                <AlertDialogFooter className="px-5 pt-5 pb-5">
                     <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
                     <AlertDialogAction
                         disabled={busy}

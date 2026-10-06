@@ -6,14 +6,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { api, apiPath, errorMessage } from "@/lib/api";
 
 function NewChatContent({ projectId }: { projectId: string }) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
+    const intent = searchParams.get("intent");
     const [error, setError] = useState("");
     const [attempt, setAttempt] = useState(0);
     const requestRef = useRef<{ key: string; promise: Promise<{ chat: { id: string } }> } | null>(null);
@@ -23,7 +24,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
         if (requestRef.current?.key !== key) {
             requestRef.current = {
                 key,
-                promise: api<{ chat: { id: string } }>(`/projects/${projectId}/chats`, { method: "POST" }),
+                promise: api<{ chat: { id: string } }>(apiPath`/projects/${projectId}/chats`, { method: "POST" }),
             };
         }
         let active = true;
@@ -31,31 +32,33 @@ function NewChatContent({ projectId }: { projectId: string }) {
         requestRef.current.promise
             .then((result) => {
                 if (!active) return;
-                const query = specId ? `?specId=${encodeURIComponent(specId)}` : "";
+                const query = specId ? `?specId=${encodeURIComponent(specId)}${intent === "regenerate" ? "&intent=regenerate" : ""}` : "";
                 router.replace(`/p/${projectId}/chats/${result.chat.id}${query}`);
             })
             .catch((createError) => {
-                if (active) setError(createError instanceof Error ? createError.message : String(createError));
+                if (active) setError(errorMessage(createError));
             });
         return () => {
             active = false;
         };
-    }, [attempt, projectId, router, specId]);
+    }, [attempt, intent, projectId, router, specId]);
+
+    const crumbs = [{ label: "Chats", href: `/p/${projectId}/chats` }];
 
     if (error) {
         return (
             <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="New chat" eyebrow="Chats" />
-                <div className="flex flex-1 items-center justify-center px-5 py-10">
-                    <Alert variant="destructive" className="w-full max-w-sm bg-transparent p-0 text-center" role="alert">
-                        <span className="mx-auto flex size-9 items-center justify-center rounded-lg bg-danger-soft text-danger"><AlertCircle size={18} /></span>
-                        <h2 className="mt-4 text-sm font-bold text-ink">Chat could not start</h2>
-                        <AlertDescription className="mt-2 text-xs leading-5">{error}</AlertDescription>
-                        <div className="mt-5 flex justify-center gap-2">
-                            <Button type="button" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={14} /> Try again</Button>
-                            <Button asChild variant="outline"><Link href={`/p/${projectId}`}>Return to project</Link></Button>
-                        </div>
-                    </Alert>
+                <PageHeader title="New chat" breadcrumbs={crumbs} width="chat" />
+                <div className="flex flex-1 items-center justify-center">
+                    <EmptyState
+                        role="alert"
+                        tone="danger"
+                        icon={AlertCircle}
+                        title="Chat could not start"
+                        description={error}
+                        action={<Button type="button" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={14} /> Try again</Button>}
+                        secondaryAction={<Button asChild variant="outline"><Link href={`/p/${projectId}`}>Return to project</Link></Button>}
+                    />
                 </div>
             </div>
         );
@@ -63,9 +66,13 @@ function NewChatContent({ projectId }: { projectId: string }) {
 
     return (
         <div className="flex min-h-full flex-col bg-surface" role="status">
-            <PageHeader title="New chat" eyebrow="Chats" />
-            <div className="flex flex-1 items-center justify-center px-5 py-10 text-center">
-                <div><LogoMark className="status-pulse mx-auto size-9" /><h2 className="mt-4 text-[0.8125rem] font-bold">Starting chat</h2><p className="mt-1 text-[0.65625rem] text-ink-faint">Preparing the agent workspace</p></div>
+            <PageHeader title="New chat" breadcrumbs={crumbs} width="chat" />
+            <div className="flex flex-1 flex-col items-center justify-center px-5 py-12 text-center">
+                <span className="flex size-12 items-center justify-center rounded-full border border-line bg-surface" aria-hidden="true">
+                    <LogoMark className="status-pulse size-6 dark:invert" />
+                </span>
+                <p className="mt-4 text-section text-ink">Starting chat</p>
+                <p className="mt-1 text-control text-ink-muted">Preparing the agent workspace</p>
             </div>
         </div>
     );

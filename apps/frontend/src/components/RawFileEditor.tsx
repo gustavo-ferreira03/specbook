@@ -2,15 +2,21 @@
 
 import Prism from "prismjs";
 import "prismjs/components/prism-yaml";
-import "prismjs/components/prism-robotframework";
+import "prismjs/components/prism-typescript";
 import { FileCode2 } from "lucide-react";
 import Editor from "react-simple-code-editor";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-export type EditorLanguage = "yaml" | "robotframework";
+/** `text` renders the source without highlighting (used for the old, read-only automation format). */
+export type EditorLanguage = "yaml" | "typescript" | "text";
+
+function escapeHtml(source: string): string {
+    return source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 function highlightCode(source: string, language: EditorLanguage): string {
+    if (language === "text") return escapeHtml(source);
     return Prism.highlight(source, Prism.languages[language], language);
 }
 
@@ -33,7 +39,7 @@ export function RawFileEditor({
 }) {
     return (
         <div className="min-w-0">
-            <Label htmlFor={id} className="flex items-center gap-1.5 font-mono text-[0.6875rem] font-semibold text-ink-soft">
+            <Label htmlFor={id} className="flex items-center gap-1.5 font-mono text-control font-semibold text-ink-muted">
                 <FileCode2 size={12} aria-hidden />
                 <span>{label}</span>
             </Label>
@@ -52,7 +58,7 @@ export function RawFileEditor({
                     disabled={disabled}
                     padding={12}
                     textareaClassName="focus:outline-none"
-                    className="min-h-full font-mono text-[0.71875rem] leading-5 text-ink"
+                    className="min-h-full font-mono text-control leading-5 text-ink"
                     style={{ overflow: "visible", tabSize: 4 }}
                 />
             </div>
@@ -76,7 +82,7 @@ export function HighlightedCode({
             aria-label={label}
             tabIndex={0}
             className={cn(
-                "syntax-code max-w-full overflow-x-auto rounded-lg bg-code-canvas p-3 font-mono text-[0.65625rem] leading-5 text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring/20",
+                "syntax-code max-w-full overflow-x-auto rounded-lg bg-code-canvas p-3 font-mono text-meta leading-5 text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring/20",
                 className,
             )}
         >

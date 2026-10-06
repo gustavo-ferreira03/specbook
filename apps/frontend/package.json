@@ -2,9 +2,10 @@
     "name": "frontend",
     "private": true,
     "scripts": {
-        "dev": "next dev -p 4001",
+        "dev": "next dev --webpack -p 4001",
         "build": "next build --webpack",
-        "start": "next start -p 4001"
+        "start": "next start -p 4001",
+        "typecheck": "tsc --noEmit"
     },
     "dependencies": {
         "@novnc/novnc": "^1.7.0",
@@ -18,7 +19,6 @@
         "react-dom": "^19.0.0",
         "react-markdown": "^10.1.0",
         "react-simple-code-editor": "^0.14.1",
-        "recharts": "3.10.1",
         "remark-gfm": "^4.0.1",
         "tailwind-merge": "3.6.0"
     },

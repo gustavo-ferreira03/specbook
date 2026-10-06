@@ -5,11 +5,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
     AlertCircle,
-    ChevronDown,
     ChevronRight,
+    ChevronsUpDown,
     FileCheck2,
-    Folder,
-    FolderOpen,
     LoaderCircle,
     Menu,
     MessageSquare,
@@ -21,28 +19,44 @@ import {
     Trash2,
     X,
 } from "lucide-react";
-import { API_URL, api, getLlmRuntimeStatus, getRunBatch, startRunBatch } from "@/lib/api";
+import {
+    deleteChat,
+    deleteFeature,
+    deleteSpec,
+    errorMessage,
+    getHealth,
+    getLlmRuntimeStatus,
+    getProjectTree,
+    isAbortError,
+    listProjectChats,
+    listProjects,
+} from "@/lib/api";
+import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { Chat, Feature, Project, RunBatch, SpecSummary } from "@/lib/types";
+import { useVisiblePolling } from "@/lib/usePolling";
+import { useRunBatch } from "@/lib/useRunBatch";
 import { ConfirmDeleteDialog } from "./ConfirmDeleteDialog";
+import { EmptyState } from "./EmptyState";
 import { FeatureEditDialog } from "./FeatureEditDialog";
 import { LogoMark } from "./LogoMark";
-import { SpecRunDialog, type SpecBatchItem } from "./SpecRunDialog";
+import { RelativeTime } from "./RelativeTime";
+import { SpecRunDialog } from "./SpecRunDialog";
 import { StatusDot } from "./StatusDot";
+import { ThemeToggle } from "./ThemeToggle";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { ScrollArea } from "./ui/scroll-area";
-import { Separator } from "./ui/separator";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "./ui/sheet";
 import { Skeleton } from "./ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -55,21 +69,32 @@ type DeleteTarget =
     | { kind: "spec"; item: SpecSummary }
     | { kind: "feature"; item: Feature };
 
-function chatDate(value: string) {
-    const date = new Date(value);
-    const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-    const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-    const days = Math.round((start - target) / 86_400_000);
-    if (days === 0) return "Today";
-    if (days === 1) return "Yesterday";
-    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 function sectionFromPathname(pathname: string, projectId: string): SidebarTab | null {
     if (pathname === `/p/${projectId}/specs` || pathname.startsWith(`/p/${projectId}/specs/`)) return "specs";
+    if (pathname.startsWith(`/p/${projectId}/features/`)) return "specs";
     if (pathname === `/p/${projectId}/chats` || pathname.startsWith(`/p/${projectId}/chats/`)) return "chats";
     return null;
+}
+
+function RowAction({ label, tooltip, onClick, disabled, danger, children }: { label: string; tooltip: string; onClick: () => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={onClick}
+                    disabled={disabled}
+                    className={`text-ink-subtle ${danger ? "hover:bg-danger-soft hover:text-danger" : "hover:bg-surface-selected hover:text-ink"}`}
+                    aria-label={label}
+                >
+                    {children}
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent>{tooltip}</TooltipContent>
+        </Tooltip>
+    );
 }
 
 export function Sidebar({ projectId }: { projectId: string }) {
@@ -79,7 +104,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const [features, setFeatures] = useState<Feature[]>([]);
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
     const [chats, setChats] = useState<Chat[]>([]);
-    const [activeTab, setActiveTab] = useState<SidebarTab>(sectionFromPathname(pathname, projectId) ?? "chats");
+    const [activeTab, setActiveTab] = useState<SidebarTab>(sectionFromPathname(pathname, projectId) ?? "specs");
     const [loaded, setLoaded] = useState(false);
     const [loadError, setLoadError] = useState("");
     const [runtime, setRuntime] = useState<RuntimeState>("checking");
@@ -91,13 +116,22 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
     const [deletingItem, setDeletingItem] = useState(false);
     const [deleteError, setDeleteError] = useState("");
-    const [batchOpen, setBatchOpen] = useState(false);
-    const [batchTitle, setBatchTitle] = useState("Run Specs");
-    const [batchItems, setBatchItems] = useState<SpecBatchItem[]>([]);
-    const [batchRunning, setBatchRunning] = useState(false);
-    const [batchReportUrl, setBatchReportUrl] = useState<string | null>(null);
     const deleteTriggerRef = useRef<HTMLElement | null>(null);
-    const batchActiveRef = useRef(false);
+    const navigationRequestRef = useRef<AbortController | null>(null);
+    const tabNavigatedRef = useRef(false);
+    const tabPointerDownRef = useRef(false);
+    const runtimeRequestRef = useRef<AbortController | null>(null);
+    const runBatch = useRunBatch(projectId, {
+        onProgress: (batch: RunBatch) => {
+            setSpecs((current) => current.map((spec) => {
+                const result = batch.specs.find((item) => item.specId === spec.id);
+                return result?.status === "passed" || result?.status === "failed"
+                    ? { ...spec, status: result.status }
+                    : spec;
+            }));
+        },
+    });
+    const batchRunning = runBatch.running;
 
     useEffect(() => {
         localStorage.setItem("specbook:last-project", projectId);
@@ -121,53 +155,67 @@ export function Sidebar({ projectId }: { projectId: string }) {
         return () => query.removeEventListener("change", handleChange);
     }, []);
 
-    useEffect(() => {
-        let active = true;
-        async function refresh() {
-            try {
-                const [projectsResult, treeResult, chatsResult] = await Promise.all([
-                    api<{ projects: Project[] }>("/projects"),
-                    api<{ features: Feature[]; specs: SpecSummary[] }>(`/projects/${projectId}/tree`),
-                    api<{ chats: Chat[] }>(`/projects/${projectId}/chats`),
-                ]);
-                if (!active) return;
-                setProjects(projectsResult.projects);
-                setFeatures(treeResult.features);
-                setSpecs(treeResult.specs);
-                setChats(chatsResult.chats);
-                setLoadError("");
-                setLoaded(true);
-            } catch (error) {
-                if (!active) return;
-                setLoadError(error instanceof Error ? error.message : String(error));
-                setLoaded(true);
-            }
+    async function refreshNavigation() {
+        navigationRequestRef.current?.abort();
+        const controller = new AbortController();
+        navigationRequestRef.current = controller;
+        const { signal } = controller;
+        try {
+            const [projectsResult, treeResult, chatsResult] = await Promise.all([
+                listProjects(signal),
+                getProjectTree(projectId, signal),
+                listProjectChats(projectId, signal),
+            ]);
+            if (signal.aborted) return;
+            setProjects(projectsResult.projects);
+            setFeatures(treeResult.features);
+            setSpecs(treeResult.specs);
+            setChats(chatsResult.chats);
+            setLoadError("");
+            setLoaded(true);
+        } catch (error) {
+            if (signal.aborted || isAbortError(error)) return;
+            setLoadError(errorMessage(error));
+            setLoaded(true);
         }
-        void refresh();
-        const interval = window.setInterval(refresh, 5000);
-        return () => {
-            active = false;
-            window.clearInterval(interval);
-        };
-    }, [pathname, projectId, refreshKey]);
+    }
+
+    async function checkRuntime() {
+        runtimeRequestRef.current?.abort();
+        const controller = new AbortController();
+        runtimeRequestRef.current = controller;
+        const { signal } = controller;
+        try {
+            const [health, llm] = await Promise.all([getHealth(signal), getLlmRuntimeStatus()]);
+            if (!signal.aborted) setRuntime(!health.ok ? "offline" : llm.ready ? "online" : "setup");
+        } catch (error) {
+            if (!signal.aborted && !isAbortError(error)) setRuntime("offline");
+        }
+    }
 
     useEffect(() => {
-        let active = true;
-        async function checkRuntime() {
-            try {
-                const [health, llm] = await Promise.all([api<{ ok: boolean }>("/health"), getLlmRuntimeStatus()]);
-                if (active) setRuntime(!health.ok ? "offline" : llm.ready ? "online" : "setup");
-            } catch {
-                if (active) setRuntime("offline");
-            }
-        }
+        void refreshNavigation();
+        return () => navigationRequestRef.current?.abort();
+    }, [projectId, refreshKey]);
+
+    useEffect(() => {
         void checkRuntime();
-        const interval = window.setInterval(checkRuntime, 30000);
-        return () => {
-            active = false;
-            window.clearInterval(interval);
-        };
-    }, [pathname]);
+        return () => runtimeRequestRef.current?.abort();
+    }, []);
+
+    useVisiblePolling(() => void refreshNavigation(), 5000);
+    useVisiblePolling(() => void checkRuntime(), 30000);
+
+    useEffect(() => onInvalidate((event) => {
+        if (
+            matchesInvalidation(event, "projects", projectId) ||
+            matchesInvalidation(event, "tree", projectId) ||
+            matchesInvalidation(event, "chats", projectId)
+        ) {
+            void refreshNavigation();
+        }
+        if (event.resource === "settings") void checkRuntime();
+    }), [projectId]);
 
     const projectName = projects.find((project) => project.id === projectId)?.name ?? "Current project";
     const knownFeatureIds = new Set(features.map((feature) => feature.id));
@@ -224,6 +272,26 @@ export function Sidebar({ projectId }: { projectId: string }) {
         router.push(`/p/${id}`);
     }
 
+    function openSection(tab: SidebarTab) {
+        if (tab === "specs") {
+            router.push(`/p/${projectId}/specs`);
+            return;
+        }
+        const latest = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+        router.push(latest ? `/p/${projectId}/chats/${latest.id}` : `/p/${projectId}/chats`);
+    }
+
+    // Radix changes the value on pointer down, then the click follows. Navigate once: from
+    // onValueChange when the tab changes, or from the click when the tab was already active.
+    function handleTabClick(tab: SidebarTab) {
+        tabPointerDownRef.current = false;
+        if (tabNavigatedRef.current) {
+            tabNavigatedRef.current = false;
+            return;
+        }
+        if (sectionFromPathname(pathname, projectId) !== tab) openSection(tab);
+    }
+
     function openDelete(target: DeleteTarget) {
         deleteTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setDeleteError("");
@@ -236,13 +304,13 @@ export function Sidebar({ projectId }: { projectId: string }) {
         setDeleteError("");
         try {
             if (deleteTarget.kind === "chat") {
-                await api<void>(`/chats/${deleteTarget.item.id}`, { method: "DELETE" });
+                await deleteChat(deleteTarget.item.id);
                 setChats((current) => current.filter((item) => item.id !== deleteTarget.item.id));
                 if (pathname === `/p/${projectId}/chats/${deleteTarget.item.id}`) {
                     router.replace(`/p/${projectId}/chats`);
                 }
             } else if (deleteTarget.kind === "spec") {
-                await api<void>(`/specs/${deleteTarget.item.id}`, { method: "DELETE" });
+                await deleteSpec(deleteTarget.item.id);
                 setSpecs((current) => current.filter((item) => item.id !== deleteTarget.item.id));
                 if (pathname === `/p/${projectId}/specs/${deleteTarget.item.id}`) {
                     router.replace(`/p/${projectId}/specs`);
@@ -252,7 +320,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 const deletedSpecIds = new Set(
                     specs.filter((spec) => deletedFeatureIds.has(spec.featureId)).map((spec) => spec.id),
                 );
-                await api<void>(`/features/${deleteTarget.item.id}`, { method: "DELETE" });
+                await deleteFeature(deleteTarget.item.id);
                 setFeatures((current) => current.filter((feature) => !deletedFeatureIds.has(feature.id)));
                 setSpecs((current) => current.filter((spec) => !deletedSpecIds.has(spec.id)));
                 setExpandedFeatures((current) => new Set([...current].filter((id) => !deletedFeatureIds.has(id))));
@@ -268,234 +336,128 @@ export function Sidebar({ projectId }: { projectId: string }) {
             setDeleteTarget(null);
             setDeletingItem(false);
         } catch (error) {
-            setDeleteError(error instanceof Error ? error.message : String(error));
+            setDeleteError(errorMessage(error));
             setDeletingItem(false);
         }
     }
 
-    async function runSpecBatch(title: string, selectedSpecs: SpecSummary[]) {
-        if (batchActiveRef.current || selectedSpecs.length === 0) {
-            if (batchActiveRef.current) setBatchOpen(true);
-            return;
-        }
-        batchActiveRef.current = true;
-        setBatchTitle(title);
-        setBatchItems(selectedSpecs.map((spec) => ({
-            specId: spec.id,
-            title: spec.title,
-            status: "running",
-            durationMs: null,
-            failReason: null,
-        })));
-        setBatchReportUrl(null);
-        setBatchRunning(true);
-        setBatchOpen(true);
-
-        try {
-            const applyBatch = (batch: RunBatch) => {
-                setBatchItems(batch.specs.map((item) => ({
-                    specId: item.specId,
-                    title: item.title,
-                    status: item.status,
-                    durationMs: item.durationMs,
-                    failReason: item.failReason,
-                })));
-                setSpecs((current) => current.map((spec) => {
-                    const result = batch.specs.find((item) => item.specId === spec.id);
-                    return result?.status === "passed" || result?.status === "failed"
-                        ? { ...spec, status: result.status }
-                        : spec;
-                }));
-            };
-            let { batch } = await startRunBatch(projectId, selectedSpecs.map((spec) => spec.id), title);
-            applyBatch(batch);
-            do {
-                if (batch.status === "running") await new Promise((resolve) => window.setTimeout(resolve, 750));
-                const result = await getRunBatch(batch.id);
-                batch = result.batch;
-                applyBatch(batch);
-                setBatchReportUrl(result.reportUrl ? `${API_URL}${result.reportUrl}` : null);
-            } while (batch.status === "running");
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setBatchItems((current) => current.map((item) => item.status === "running" ? { ...item, status: "error", failReason: message } : item));
-        } finally {
-            batchActiveRef.current = false;
-            setBatchRunning(false);
-            setRefreshKey((key) => key + 1);
-        }
+    function runSpecBatch(title: string, selectedSpecs: SpecSummary[]) {
+        void runBatch.start(title, selectedSpecs.map((spec) => ({ id: spec.id, title: spec.title })));
     }
 
-    function renderSpec(spec: SpecSummary, depth: number) {
+    // Row actions are revealed on hover and whenever focus is inside the row, so they stay
+    // reachable by keyboard; on touch screens (no hover) they are always visible.
+    const rowActionsClass =
+        "flex shrink-0 items-center gap-0.5 pr-1 [@media(hover:hover)]:invisible [@media(hover:hover)]:absolute [@media(hover:hover)]:inset-y-0 [@media(hover:hover)]:right-0 [@media(hover:hover)]:bg-linear-to-l [@media(hover:hover)]:from-(--row-bg) [@media(hover:hover)]:from-65% [@media(hover:hover)]:to-transparent [@media(hover:hover)]:pl-7 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-focus-within:visible";
+    const rowClass = (selected: boolean) =>
+        `group relative flex min-h-10 w-full min-w-0 items-center rounded-md transition-colors duration-150 md:min-h-8 ${
+            selected
+                ? "bg-surface-selected text-ink [--row-bg:var(--color-surface-selected)]"
+                : "text-ink-muted [--row-bg:var(--color-sidebar)] hover:bg-surface-hover hover:text-ink hover:[--row-bg:var(--color-surface-hover)] focus-within:bg-surface-hover focus-within:[--row-bg:var(--color-surface-hover)]"
+        }`;
+    const rowLinkClass = "flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md text-control outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:min-h-8";
+
+    function renderSpec(spec: SpecSummary) {
         const href = `/p/${projectId}/specs/${spec.id}`;
         const selected = pathname === href;
         return (
-            <div
-                key={spec.id}
-                className={`group mb-0.5 flex min-h-10 w-full min-w-0 items-center overflow-hidden rounded-[8px] transition-colors md:min-h-[34px] ${
-                    selected ? "bg-surface-selected text-ink" : "text-ink-soft hover:bg-surface-hover hover:text-ink"
-                }`}
-            >
-                <Button
-                    asChild
-                    variant="ghost"
-                    className={`h-auto min-h-10 min-w-0 flex-1 justify-start overflow-hidden whitespace-normal rounded-[8px] py-2 pr-0 text-[0.71875rem] hover:bg-transparent md:min-h-[34px] ${selected ? "font-bold text-ink" : "font-normal text-ink-soft"}`}
-                    style={{ paddingLeft: 8 + depth * 12 }}
-                >
-                    <Link href={href} aria-current={selected ? "page" : undefined}>
-                        <StatusDot status={spec.status} />
-                        <span className="min-w-0 flex-1 break-words text-left leading-4">{spec.title}</span>
-                    </Link>
-                </Button>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => void runSpecBatch(`Run ${spec.title}`, [spec])}
-                            disabled={batchRunning}
-                            className="text-ink-faint opacity-70 hover:text-ink group-hover:opacity-100 focus:opacity-100"
-                            aria-label={`Run Spec ${spec.title}`}
-                        >
-                            <Play size={12} />
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Run Spec</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => openDelete({ kind: "spec", item: spec })}
-                            className="mr-1 text-ink-faint opacity-70 hover:bg-danger-soft hover:text-danger group-hover:opacity-100 focus:opacity-100"
-                            aria-label={`Delete Spec ${spec.title}`}
-                        >
-                            <Trash2 size={12} />
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Delete Spec</TooltipContent>
-                </Tooltip>
+            <div key={spec.id} className={rowClass(selected)}>
+                <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} pr-2 pl-2 ${selected ? "font-medium" : ""}`} title={spec.title}>
+                    <StatusDot status={spec.status} size={14} />
+                    <span className="min-w-0 flex-1 truncate">{spec.title}</span>
+                </Link>
+                <div className={rowActionsClass}>
+                    <RowAction label={`Run Spec ${spec.title}`} tooltip="Run Spec" onClick={() => runSpecBatch(`Run ${spec.title}`, [spec])} disabled={batchRunning}>
+                        <Play size={13} />
+                    </RowAction>
+                    <RowAction label={`Delete Spec ${spec.title}`} tooltip="Delete Spec" onClick={() => openDelete({ kind: "spec", item: spec })} danger>
+                        <Trash2 size={13} />
+                    </RowAction>
+                </div>
             </div>
         );
     }
 
-    function renderFeature(feature: Feature, depth: number): React.ReactNode {
+    function renderFeature(feature: Feature): React.ReactNode {
         const expanded = expandedFeatures.has(feature.id);
         const count = featureSpecCount(feature.id);
         const href = `/p/${projectId}/features/${feature.id}`;
         const selected = pathname === href;
+        const childSpecs = specs.filter((spec) => spec.featureId === feature.id);
+        const childFeatures = features.filter((child) => child.parentId === feature.id);
         return (
-            <Collapsible key={feature.id} open={expanded} onOpenChange={(open) => setFeatureExpanded(feature.id, open)} className="w-full min-w-0 overflow-hidden">
-                <div
-                    className={`group flex min-h-10 items-center rounded-[8px] pr-1 transition-colors md:min-h-[34px] ${
-                        selected ? "bg-surface-selected text-ink" : "text-ink-soft hover:bg-surface-hover hover:text-ink focus-within:bg-surface-hover"
-                    }`}
-                    style={{ paddingLeft: 6 + depth * 12 }}
-                >
+            <Collapsible key={feature.id} open={expanded} onOpenChange={(open) => setFeatureExpanded(feature.id, open)} className="w-full min-w-0">
+                <div className={rowClass(selected)}>
                     <CollapsibleTrigger asChild>
                         <Button
                             type="button"
                             variant="ghost"
-                            size="icon-sm"
-                            className="shrink-0 text-ink-faint hover:bg-transparent hover:text-ink"
+                            size="icon-xs"
+                            className="ml-0.5 size-7 shrink-0 text-ink-subtle hover:bg-transparent hover:text-ink"
                             aria-label={expanded ? `Collapse ${feature.title}` : `Expand ${feature.title}`}
                         >
-                            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            <ChevronRight size={14} className={`transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} />
                         </Button>
                     </CollapsibleTrigger>
-                    <Button
-                        asChild
-                        variant="ghost"
-                        className={`h-auto min-h-10 min-w-0 flex-1 justify-start gap-1.5 rounded-[8px] px-0 text-left text-[0.6875rem] hover:bg-transparent hover:text-ink md:min-h-[34px] ${selected ? "font-bold text-ink" : "font-normal text-ink-soft"}`}
-                    >
-                        <Link href={href} aria-current={selected ? "page" : undefined}>
-                            {expanded ? <FolderOpen size={13} className="text-ink-faint" /> : <Folder size={13} className="text-ink-faint" />}
-                            <span className="min-w-0 flex-1 truncate">{feature.title}</span>
-                            <Badge variant="secondary" className="px-1.5 py-0.5 text-[0.5625rem] text-ink-faint">{count}</Badge>
-                        </Link>
-                    </Button>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => {
-                                    const featureIds = featureDeletionIds(feature.id);
-                                    void runSpecBatch(`Run ${feature.title}`, specs.filter((spec) => featureIds.has(spec.featureId)));
-                                }}
-                                disabled={batchRunning || count === 0}
-                                className="text-ink-faint opacity-70 hover:text-ink group-hover:opacity-100 focus:opacity-100"
-                                aria-label={`Run all Specs in feature ${feature.title}`}
-                            >
-                                <Play size={12} />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Run feature</TooltipContent>
-                    </Tooltip>
-                    <FeatureEditDialog
-                        feature={feature}
-                        onSaved={() => setRefreshKey((key) => key + 1)}
-                        renderTrigger={(onClick) => (
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        onClick={onClick}
-                                        className="text-ink-faint opacity-70 hover:text-ink group-hover:opacity-100 focus:opacity-100"
-                                        aria-label={`Edit feature ${feature.title}`}
-                                    >
-                                        <Pencil size={12} />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Edit feature</TooltipContent>
-                            </Tooltip>
-                        )}
-                    />
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => openDelete({ kind: "feature", item: feature })}
-                                className="text-ink-faint opacity-70 hover:bg-danger-soft hover:text-danger group-hover:opacity-100 focus:opacity-100"
-                                aria-label={`Delete feature ${feature.title}`}
-                            >
-                                <Trash2 size={12} />
-                            </Button>
-                        </TooltipTrigger>
-                            <TooltipContent>Delete feature</TooltipContent>
-                    </Tooltip>
+                    <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} pr-2 font-medium ${selected ? "text-ink" : "text-ink"}`} title={feature.title}>
+                        <span className="min-w-0 flex-1 truncate">{feature.title}</span>
+                        <span className="tabular text-meta font-normal text-ink-subtle" aria-label={`${count} ${count === 1 ? "Spec" : "Specs"}`}>{count}</span>
+                    </Link>
+                    <div className={rowActionsClass}>
+                        <RowAction
+                            label={`Run all Specs in ${feature.title}`} tooltip="Run feature"
+                            onClick={() => {
+                                const featureIds = featureDeletionIds(feature.id);
+                                runSpecBatch(`Run ${feature.title}`, specs.filter((spec) => featureIds.has(spec.featureId)));
+                            }}
+                            disabled={batchRunning || count === 0}
+                        >
+                            <Play size={13} />
+                        </RowAction>
+                        <FeatureEditDialog
+                            feature={feature}
+                            onSaved={() => setRefreshKey((key) => key + 1)}
+                            renderTrigger={(onClick) => (
+                                <RowAction label={`Edit feature ${feature.title}`} tooltip="Edit feature" onClick={onClick}>
+                                    <Pencil size={13} />
+                                </RowAction>
+                            )}
+                        />
+                        <RowAction label={`Delete feature ${feature.title}`} tooltip="Delete feature" onClick={() => openDelete({ kind: "feature", item: feature })} danger>
+                            <Trash2 size={13} />
+                        </RowAction>
+                    </div>
                 </div>
                 <CollapsibleContent>
-                    {specs.filter((spec) => spec.featureId === feature.id).map((spec) => renderSpec(spec, depth + 1))}
-                    {features.filter((child) => child.parentId === feature.id).map((child) => renderFeature(child, depth + 1))}
+                    {(childSpecs.length > 0 || childFeatures.length > 0) && (
+                        <div className="relative ml-[15px] space-y-px border-l border-line py-0.5 pl-1.5">
+                            {childSpecs.map((spec) => renderSpec(spec))}
+                            {childFeatures.map((child) => renderFeature(child))}
+                        </div>
+                    )}
                 </CollapsibleContent>
             </Collapsible>
         );
     }
 
     const runtimeCopy = {
-        checking: ["Checking runtime", "Connecting to services"],
-        online: ["Runtime online", "Agent and runner ready"],
-        setup: ["Model setup needed", "Choose a provider in Settings"],
+        checking: ["Checking model", "Connecting to services"],
+        online: ["Model ready", "Agent and runner online"],
+        setup: ["Model setup needed", "Choose a provider"],
         offline: ["Runtime unavailable", "Backend is not responding"],
     }[runtime];
+    const runtimeDot = runtime === "online" ? "bg-success" : runtime === "setup" ? "bg-warning-chart" : runtime === "offline" ? "bg-danger" : "status-pulse bg-ink-subtle";
+    const settingsHref = `/p/${projectId}/settings`;
+    const onSettings = pathname === settingsHref;
 
     function renderLoadError() {
         if (!loadError) return null;
         return (
-            <Alert variant="destructive" className="mx-3 mt-3 w-auto">
-                <AlertTitle className="flex items-center gap-1.5"><AlertCircle size={13} /> Navigation could not update</AlertTitle>
+            <Alert variant="danger" className="mx-3 mb-2 w-auto">
+                <AlertTitle className="flex items-center gap-1.5"><AlertCircle size={14} /> Navigation could not update</AlertTitle>
                 <AlertDescription>
-                    <Button type="button" variant="link" size="sm" onClick={() => setRefreshKey((key) => key + 1)} className="mt-1 h-9 p-0 text-danger">
-                        <RefreshCw size={12} /> Try again
+                    <Button type="button" variant="link" size="sm" onClick={() => setRefreshKey((key) => key + 1)} className="mt-1 text-danger">
+                        <RefreshCw size={13} /> Try again
                     </Button>
                 </AlertDescription>
             </Alert>
@@ -505,9 +467,25 @@ export function Sidebar({ projectId }: { projectId: string }) {
     function renderLoading() {
         if (loaded) return null;
         return (
-            <div className="space-y-2 px-1" aria-label="Loading navigation" aria-busy="true" role="status">
-                <Skeleton className="h-12 rounded-[9px]" />
-                <Skeleton className="h-12 w-4/5 rounded-[9px]" />
+            <div className="space-y-1 px-2 pt-1" aria-label="Loading navigation" aria-busy="true" role="status">
+                {[72, 58, 84, 64, 50].map((width, index) => (
+                    <div key={index} className="flex h-8 items-center gap-2 px-2">
+                        <Skeleton className="size-3.5 rounded-full" />
+                        <Skeleton className="h-3 rounded-sm" style={{ width: `${width}%` }} />
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    function renderSectionLabel(label: string, count: number | null, action: React.ReactNode) {
+        return (
+            <div className="flex h-10 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
+                <h2 className="flex items-baseline gap-1.5 text-meta font-medium text-ink-subtle">
+                    {label}
+                    {count !== null && loaded && <span className="tabular font-normal text-ink-disabled">{count}</span>}
+                </h2>
+                {action}
             </div>
         );
     }
@@ -515,52 +493,48 @@ export function Sidebar({ projectId }: { projectId: string }) {
     function renderNavigationContent(mobile = false) {
         const projectMenuOpen = mobile ? mobileProjectMenuOpen : desktopProjectMenuOpen;
         const setProjectMenuOpen = mobile ? setMobileProjectMenuOpen : setDesktopProjectMenuOpen;
+        const brandLabel = <span className="truncate text-section font-semibold tracking-[-0.01em] text-ink">Specbook</span>;
         return (
             <>
-                <div className="flex h-[72px] shrink-0 items-center gap-3 border-b border-line bg-sidebar px-[17px]">
-                    <Button asChild variant="ghost" className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none p-0 hover:bg-transparent">
-                        <Link href={`/p/${projectId}`}>
-                            <LogoMark className="size-[34px] shrink-0" />
-                            {mobile ? (
-                                <SheetTitle asChild>
-                                    <span className="truncate text-base font-bold tracking-[-0.022em]">Specbook</span>
-                                </SheetTitle>
-                            ) : (
-                                <span className="truncate text-base font-bold tracking-[-0.022em]">Specbook</span>
-                            )}
-                        </Link>
-                    </Button>
+                <div className="flex h-14 shrink-0 items-center gap-2 px-3">
+                    <Link href={`/p/${projectId}`} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <LogoMark className="size-7 dark:invert" />
+                        {mobile ? <SheetTitle asChild>{brandLabel}</SheetTitle> : brandLabel}
+                    </Link>
                     {mobile && (
                         <SheetClose asChild>
-                            <Button type="button" variant="ghost" size="icon-lg" className="size-11" aria-label="Close navigation">
+                            <Button type="button" variant="ghost" size="icon-lg" aria-label="Close navigation">
                                 <X size={18} />
                             </Button>
                         </SheetClose>
                     )}
                 </div>
 
-                <div className="px-[13px] pt-[13px] pb-2">
+                <div className="px-3 pb-3">
                     <DropdownMenu open={projectMenuOpen} onOpenChange={setProjectMenuOpen}>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="h-10 w-full justify-between gap-3 rounded-[10px] border-line-strong bg-surface px-2.5 text-left text-[0.71875rem] shadow-none hover:border-line-hover hover:bg-surface">
-                                <span className="flex min-w-0 items-center gap-2.5">
-                                    <span className="size-2 shrink-0 rounded-[3px] bg-primary" />
-                                    <span className="truncate">{projectName}</span>
+                            <Button variant="outline" className="h-10 w-full justify-between gap-2 rounded-lg bg-surface px-2 text-left md:h-9">
+                                <span className="flex min-w-0 items-center gap-2">
+                                    <span className="flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-surface-selected text-label text-ink uppercase" aria-hidden="true">
+                                        {projectName.trim().charAt(0) || "P"}
+                                    </span>
+                                    <span className="truncate font-medium text-ink">{projectName}</span>
                                 </span>
-                                <ChevronDown size={14} className={`text-ink-faint transition-transform ${projectMenuOpen ? "rotate-180" : ""}`} />
+                                <ChevronsUpDown size={14} className="text-ink-subtle" />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" sideOffset={4} className="max-h-72 w-[var(--radix-dropdown-menu-trigger-width)]">
+                            <DropdownMenuLabel>Projects</DropdownMenuLabel>
                             <DropdownMenuRadioGroup value={projectId} onValueChange={chooseProject}>
                                 {projects.map((project) => (
-                                    <DropdownMenuRadioItem key={project.id} value={project.id} className={project.id === projectId ? "font-bold" : undefined}>
+                                    <DropdownMenuRadioItem key={project.id} value={project.id} className={project.id === projectId ? "font-medium" : undefined}>
                                         <span className="truncate">{project.name}</span>
                                     </DropdownMenuRadioItem>
                                 ))}
                             </DropdownMenuRadioGroup>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem asChild className="font-semibold">
-                                <Link href="/?new=1"><Plus size={12} /> Create project</Link>
+                            <DropdownMenuItem asChild>
+                                <Link href="/?new=1"><Plus size={14} /> Create project</Link>
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -571,125 +545,118 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     onValueChange={(value) => {
                         const tab = value as SidebarTab;
                         setActiveTab(tab);
-                        router.push(`/p/${projectId}/${tab}`);
+                        tabNavigatedRef.current = tabPointerDownRef.current;
+                        openSection(tab);
                     }}
                     className="min-h-0 flex-1"
                 >
-                    <TabsList className="grid grid-cols-2 gap-1.5 px-[13px] pt-1 pb-[13px]" aria-label="Project content">
-                        <TabsTrigger value="chats" className="min-h-10 px-2 md:min-h-[34px]" onClick={() => {
-                            const latest = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-                            router.push(latest ? `/p/${projectId}/chats/${latest.id}` : `/p/${projectId}/chats`);
-                        }}>
-                            <MessageSquare size={15} /> Chats
-                        </TabsTrigger>
-                        <TabsTrigger value="specs" className="min-h-10 px-2 md:min-h-[34px]" onClick={() => router.push(`/p/${projectId}/specs`)}>
-                            <FileCheck2 size={15} /> Specs
-                        </TabsTrigger>
-                    </TabsList>
-                    <Separator />
+                    <div className="px-3 pb-2">
+                        <TabsList variant="segmented" className="grid w-full grid-cols-2" aria-label="Project content">
+                            <TabsTrigger value="chats" className="h-9 md:h-8" onPointerDown={() => { tabPointerDownRef.current = true; }} onClick={() => handleTabClick("chats")}>
+                                <MessageSquare size={14} /> Chats
+                            </TabsTrigger>
+                            <TabsTrigger value="specs" className="h-9 md:h-8" onPointerDown={() => { tabPointerDownRef.current = true; }} onClick={() => handleTabClick("specs")}>
+                                <FileCheck2 size={14} /> Specs
+                            </TabsTrigger>
+                        </TabsList>
+                    </div>
 
                     <TabsContent value="chats" className="data-[state=active]:flex data-[state=active]:flex-col">
+                        {renderSectionLabel("Recent chats", chats.length, (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button asChild variant="ghost" size="icon-xs" className="text-ink-subtle" aria-label="Start chat">
+                                        <Link href={`/p/${projectId}/chats/new`}><Plus size={15} /></Link>
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>New chat</TooltipContent>
+                            </Tooltip>
+                        ))}
                         {renderLoadError()}
-                        <div className="flex h-12 shrink-0 items-center justify-between px-[14px]">
-                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Conversation history</span>
-                            <Button asChild variant="ghost" size="icon" className="text-ink-faint" aria-label="Start chat">
-                                <Link href={`/p/${projectId}/chats/new`}><Plus size={14} /></Link>
-                            </Button>
-                        </div>
                         <ScrollArea className="min-h-0 flex-1">
-                            <div className="w-full min-w-0 overflow-hidden px-[9px] pb-3">
+                            <div className="w-full min-w-0 space-y-px px-2 pb-3">
                                 {renderLoading()}
                                 {loaded && chats.map((chat) => {
                                     const href = `/p/${projectId}/chats/${chat.id}`;
                                     const selected = pathname === href;
                                     return (
-                                        <div key={chat.id} className={`group mb-0.5 flex items-center rounded-[9px] transition-colors ${selected ? "bg-surface-selected" : "hover:bg-surface-hover"}`}>
-                                            <Button asChild variant="ghost" className="block h-auto min-w-0 flex-1 overflow-hidden whitespace-normal rounded-[9px] px-2.5 py-2.5 text-left hover:bg-transparent">
-                                                <Link href={href} aria-current={selected ? "page" : undefined}>
-                                                    <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                                                        <span className={`size-2 shrink-0 rounded-full ${selected ? "bg-primary" : "bg-ink-disabled"}`} />
-                                                        <span className={`block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.78125rem] ${selected ? "font-bold text-ink" : "font-semibold text-ink-soft"}`}>{chat.title}</span>
-                                                    </span>
-                                                    <span className="mt-1 block truncate pl-4 text-[0.625rem] font-normal text-ink-faint">Created {chatDate(chat.createdAt)}</span>
-                                                </Link>
-                                            </Button>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon-sm"
-                                                        onClick={() => openDelete({ kind: "chat", item: chat })}
-                                                        className="mr-1 text-ink-faint opacity-70 hover:bg-danger-soft hover:text-danger group-hover:opacity-100 focus:opacity-100"
-                                                        aria-label={`Delete chat ${chat.title}`}
-                                                    >
-                                                        <Trash2 size={12} />
-                                                    </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent>Delete chat</TooltipContent>
-                                            </Tooltip>
+                                        <div key={chat.id} className={rowClass(selected)}>
+                                            <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} flex-col items-stretch justify-center gap-0 px-2.5 py-1.5`} title={chat.title}>
+                                                <span className={`block truncate ${selected ? "font-medium text-ink" : "text-ink"}`}>{chat.title}</span>
+                                                <span className={`block truncate text-meta ${selected ? "text-ink-muted" : "text-ink-subtle"}`}>
+                                                    <RelativeTime value={chat.createdAt} />
+                                                </span>
+                                            </Link>
+                                            <div className={rowActionsClass}>
+                                                <RowAction label={`Delete chat ${chat.title}`} tooltip="Delete chat" onClick={() => openDelete({ kind: "chat", item: chat })} danger>
+                                                    <Trash2 size={13} />
+                                                </RowAction>
+                                            </div>
                                         </div>
                                     );
                                 })}
                                 {loaded && chats.length === 0 && !loadError && (
-                                    <div className="mx-1 rounded-[10px] border border-dashed border-line-strong px-3 py-4">
-                                        <p className="text-[0.75rem] font-bold">No chats yet</p>
-                                        <p className="mt-1 text-[0.6875rem] leading-5 text-ink-faint">Start one to describe a behavior.</p>
-                                    </div>
+                                    <EmptyState
+                                        size="compact"
+                                        icon={MessageSquare}
+                                        title="No chats yet"
+                                        description="Describe a behavior to start."
+                                        action={<Button asChild size="sm" variant="outline"><Link href={`/p/${projectId}/chats/new`}><Plus size={14} /> New chat</Link></Button>}
+                                    />
                                 )}
                             </div>
                         </ScrollArea>
                     </TabsContent>
 
                     <TabsContent value="specs" className="data-[state=active]:flex data-[state=active]:flex-col">
-                        {renderLoadError()}
-                        <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-[14px]">
-                            <span className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Verified Specs</span>
+                        {renderSectionLabel("Specs by feature", specs.length, (
                             <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => batchRunning ? setBatchOpen(true) : void runSpecBatch("Run all Specs", specs)}
+                                onClick={() => batchRunning ? runBatch.setOpen(true) : runSpecBatch("Run all Specs", specs)}
                                 disabled={specs.length === 0}
-                                className="text-ink-soft"
+                                className="h-7 gap-1 px-2 text-meta text-ink-muted"
                             >
-                                {batchRunning ? <LoaderCircle size={12} className="animate-spin motion-reduce:animate-none" /> : <Play size={12} />}
+                                {batchRunning ? <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" /> : <Play size={13} />}
                                 {batchRunning ? "View run" : "Run all"}
                             </Button>
-                        </div>
+                        ))}
+                        {renderLoadError()}
                         <ScrollArea className="min-h-0 flex-1">
-                            <div className="w-full min-w-0 overflow-hidden px-[9px] pb-3">
+                            <div className="w-full min-w-0 space-y-px px-2 pb-3">
                                 {renderLoading()}
-                                {loaded && rootFeatures.map((feature) => renderFeature(feature, 0))}
-                                {loaded && ungroupedSpecs.map((spec) => renderSpec(spec, 0))}
+                                {loaded && rootFeatures.map((feature) => renderFeature(feature))}
+                                {loaded && ungroupedSpecs.map((spec) => renderSpec(spec))}
                                 {loaded && features.length === 0 && specs.length === 0 && !loadError && (
-                                    <div className="mx-1 rounded-[10px] border border-dashed border-line-strong px-3 py-4">
-                                        <p className="text-[0.75rem] font-bold">No Specs yet</p>
-                                        <p className="mt-1 text-[0.6875rem] leading-5 text-ink-faint">Saved behavior will appear here.</p>
-                                    </div>
+                                    <EmptyState size="compact" icon={FileCheck2} title="No Specs yet" description="Saved behavior from chats appears here." />
                                 )}
                             </div>
                         </ScrollArea>
                     </TabsContent>
                 </Tabs>
 
-                <div className="shrink-0 p-3 pt-0">
-                    <Button
-                        asChild
-                        variant="outline"
-                        className={`h-auto w-full justify-start gap-3 whitespace-normal rounded-xl p-3 ${
-                            pathname === `/p/${projectId}/settings` ? "border-line-strong bg-primary-soft" : "border-line bg-surface hover:border-line-strong"
-                        }`}
+                <div className="shrink-0 space-y-1 border-t border-line p-2">
+                    <Link
+                        href={`${settingsHref}?tab=model`}
+                        className="flex min-h-10 items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                        <Link href={`/p/${projectId}/settings`} aria-current={pathname === `/p/${projectId}/settings` ? "page" : undefined}>
-                            <span className={`size-2 rounded-full ${runtime === "online" ? "bg-success" : runtime === "setup" ? "bg-pending" : runtime === "offline" ? "bg-danger" : "status-pulse bg-ink-faint"}`} />
-                            <span className="min-w-0 flex-1 text-left">
-                                <span className="block truncate text-[0.65625rem] font-bold">{runtimeCopy[0]}</span>
-                                <span className="mt-0.5 block truncate text-[0.59375rem] font-normal text-ink-faint">{runtimeCopy[1]}</span>
-                            </span>
-                            <Settings size={14} className="text-ink-faint" />
+                        <span className={`size-2 shrink-0 rounded-full ${runtimeDot}`} aria-hidden="true" />
+                        <span className="min-w-0 flex-1">
+                            <span className="block truncate text-control font-medium text-ink">{runtimeCopy[0]}</span>
+                            <span className="block truncate text-meta text-ink-subtle">{runtimeCopy[1]}</span>
+                        </span>
+                    </Link>
+                    <div className="flex items-center justify-between gap-2">
+                        <Link
+                            href={settingsHref}
+                            aria-current={onSettings ? "page" : undefined}
+                            className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:h-8 ${onSettings ? "bg-surface-selected font-medium text-ink" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
+                        >
+                            <Settings size={15} /> Settings
                         </Link>
-                    </Button>
+                        <ThemeToggle />
+                    </div>
                 </div>
             </>
         );
@@ -698,28 +665,26 @@ export function Sidebar({ projectId }: { projectId: string }) {
     return (
         <>
             <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-                <header className="flex h-16 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 md:hidden">
+                <header className="flex h-14 shrink-0 items-center gap-1 border-b border-line bg-sidebar px-2 md:hidden">
                     <SheetTrigger asChild>
-                        <Button type="button" variant="ghost" size="icon-lg" className="size-11 hover:bg-canvas" aria-label="Open navigation">
+                        <Button type="button" variant="ghost" size="icon-lg" aria-label="Open navigation">
                             <Menu size={19} />
                         </Button>
                     </SheetTrigger>
-                    <Button asChild variant="ghost" className="h-auto min-w-0 flex-1 justify-start gap-2.5 px-1 hover:bg-transparent">
-                        <Link href={`/p/${projectId}`}>
-                            <LogoMark className="size-7 shrink-0" />
-                            <span className="truncate text-[0.8125rem] font-bold">{projectName}</span>
-                        </Link>
-                    </Button>
-                    <Button asChild variant="ghost" size="icon-lg" className="size-11 hover:bg-canvas" aria-label="Open settings">
-                        <Link href={`/p/${projectId}/settings`}><Settings size={18} /></Link>
+                    <Link href={`/p/${projectId}`} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <LogoMark className="size-7 dark:invert" />
+                        <span className="truncate text-control font-semibold text-ink">{projectName}</span>
+                    </Link>
+                    <Button asChild variant="ghost" size="icon-lg" aria-label="Open settings">
+                        <Link href={settingsHref}><Settings size={18} /></Link>
                     </Button>
                 </header>
-                <SheetContent side="left" showCloseButton={false} className="w-[min(276px,88vw)] p-0 md:hidden">
+                <SheetContent side="left" showCloseButton={false} className="w-[min(288px,88vw)] p-0 md:hidden">
                     <SheetDescription className="sr-only">Project navigation</SheetDescription>
                     {renderNavigationContent(true)}
                 </SheetContent>
             </Sheet>
-            <aside id="project-navigation" aria-label="Project navigation" className="hidden h-dvh w-[276px] shrink-0 flex-col border-r border-line bg-sidebar md:flex">
+            <aside id="project-navigation" aria-label="Project navigation" className="hidden h-dvh w-sidebar shrink-0 flex-col border-r border-line bg-sidebar md:flex">
                 {renderNavigationContent()}
             </aside>
             <ConfirmDeleteDialog
@@ -727,16 +692,16 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 title={deleteTarget?.kind === "chat" ? "Delete chat?" : deleteTarget?.kind === "spec" ? "Delete Spec?" : "Delete feature?"}
                 description={deleteTarget ? (() => {
                     if (deleteTarget.kind === "chat") {
-                        return <>The chat <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, its messages, and browser session will be permanently removed. Specs created from it will remain.</>;
+                        return <>The chat <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong>, its messages, and browser session will be permanently removed. Specs created from it will remain.</>;
                     }
                     if (deleteTarget.kind === "spec") {
-                        return <>The active files for <strong className="font-bold text-ink">{deleteTarget.item.title}</strong>, its verification history, and all evidence will be removed. Earlier file revisions remain in Git history.</>;
+                        return <>The active files for <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong>, its verification history, and all evidence will be removed. Earlier file revisions remain in Git history.</>;
                     }
                     const featureIds = featureDeletionIds(deleteTarget.item.id);
                     const specCount = specs.filter((spec) => featureIds.has(spec.featureId)).length;
                     const childCount = featureIds.size - 1;
                     return <>
-                        <strong className="font-bold text-ink">{deleteTarget.item.title}</strong> will be removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {specCount} active {specCount === 1 ? "Spec" : "Specs"}, run history, and evidence inside it. Earlier file revisions remain in Git history.
+                        <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong> will be removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {specCount} active {specCount === 1 ? "Spec" : "Specs"}, run history, and evidence inside it. Earlier file revisions remain in Git history.
                     </>;
                 })() : null}
                 confirmLabel={deleteTarget?.kind === "chat" ? "Delete chat" : deleteTarget?.kind === "spec" ? "Delete Spec" : "Delete feature"}
@@ -750,12 +715,14 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 onConfirm={() => void deleteItem()}
             />
             <SpecRunDialog
-                open={batchOpen}
-                onOpenChange={setBatchOpen}
-                title={batchTitle}
-                items={batchItems}
-                running={batchRunning}
-                reportUrl={batchReportUrl}
+                open={runBatch.open}
+                onOpenChange={runBatch.setOpen}
+                title={runBatch.title}
+                items={runBatch.items}
+                running={runBatch.running}
+                reportUrl={runBatch.reportUrl}
+                error={runBatch.error}
+                warning={runBatch.warning}
             />
         </>
     );

@@ -1,46 +1,83 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
-import { Pie, PieChart } from "recharts";
-import { AlertTriangle, ArrowRight, Check, CircleDashed, FileCheck2, GitMerge, Play, RefreshCw, X } from "lucide-react";
+import { use, useEffect, useMemo, useState } from "react";
+import { ChevronDown, FileCheck2, MessageSquarePlus, RefreshCw, Search, X } from "lucide-react";
 import { NewFeatureDialog, NewSpecDialog } from "@/components/CreateStructureDialogs";
-import { LogoMark } from "@/components/LogoMark";
-import { PageHeader } from "@/components/PageHeader";
-import { StatusPill } from "@/components/StatusPill";
+import { EmptyState } from "@/components/EmptyState";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { SpecRunDialog } from "@/components/SpecRunDialog";
+import { SummaryStrip } from "@/components/SummaryStrip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, getProjectContext, startRunBatch } from "@/lib/api";
+import { errorMessage, getProject, getProjectContext, getProjectTree, isAbortError } from "@/lib/api";
+import { formatNumber } from "@/lib/format";
+import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
+import { countStatuses, statusMeta } from "@/lib/status";
+import { useRunBatch } from "@/lib/useRunBatch";
+import { cn } from "@/lib/utils";
 import type { Feature, Project, ProjectContextState, SpecStatus, SpecSummary } from "@/lib/types";
+import { RunningIcon, SpecTable, SpecTableSkeleton, orderFeatures, lastRunsOf, type SpecGroup } from "./_components/spec-table";
 
-const STATUS_ORDER: SpecStatus[] = ["passed", "failed", "invalid", "conflict", "unverified"];
+type StatusFilter = "all" | SpecStatus;
 
-const STATUS_CHART_CONFIG: ChartConfig = {
-    passed: { label: "Passed", color: "var(--color-success-chart)" },
-    failed: { label: "Failed", color: "var(--color-danger-chart)" },
-    unverified: { label: "Unverified", color: "var(--color-pending-chart)" },
-    invalid: { label: "Invalid", color: "var(--color-invalid-chart)" },
-    conflict: { label: "Conflict", color: "var(--color-conflict-chart)" },
-};
+const FILTERS: { value: StatusFilter; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "failed", label: "Failing" },
+    { value: "invalid", label: "Invalid" },
+    { value: "conflict", label: "Conflict" },
+    { value: "unverified", label: "Not run" },
+    { value: "passed", label: "Passing" },
+];
 
-const STATUS_ICON: Record<SpecStatus, React.ComponentType<{ size?: number; className?: string }>> = {
-    passed: Check,
-    failed: X,
-    unverified: CircleDashed,
-    invalid: AlertTriangle,
-    conflict: GitMerge,
-};
+/** Batches that can be started from the Run menu, problems first. */
+const RUN_SUBSETS: { status: SpecStatus; label: string }[] = [
+    { status: "failed", label: "Failing" },
+    { status: "unverified", label: "Not run" },
+];
 
-function StatTile({ label, value, tone }: { label: string; value: number; tone?: "success" | "danger" | "pending" }) {
-    const toneClass = tone === "success" ? "text-success" : tone === "danger" ? "text-danger" : tone === "pending" ? "text-pending" : "text-ink";
+function plural(count: number, noun: string) {
+    return `${formatNumber(count)} ${count === 1 ? noun : `${noun}s`}`;
+}
+
+function ContextLine({ projectId, project, contextState }: { projectId: string; project: Project | null; contextState: ProjectContextState | null }) {
+    const confirmed = contextState?.confirmed;
+    let context: React.ReactNode = null;
+    if (contextState && !confirmed) {
+        context = (
+            <span>
+                No project context yet.{" "}
+                <Link href={`/p/${projectId}`} className="font-medium text-ink underline underline-offset-2 hover:no-underline">Set up context</Link>
+            </span>
+        );
+    } else if (confirmed) {
+        const ctx = confirmed.context;
+        const stats = [
+            ctx.areas.length > 0 && plural(ctx.areas.length, "area"),
+            ctx.terminology.length > 0 && plural(ctx.terminology.length, "term"),
+            ctx.roles.length > 0 && plural(ctx.roles.length, "role"),
+            ctx.businessRules.length > 0 && plural(ctx.businessRules.length, "rule"),
+        ].filter(Boolean);
+        context = (
+            <Link href={`/p/${projectId}`} className="hover:text-ink hover:underline hover:underline-offset-2">
+                Project context{stats.length > 0 ? `: ${stats.join(", ")}` : ""}
+            </Link>
+        );
+    }
+    if (!project && !context) return null;
     return (
-        <div className="rounded-[13px] border border-line bg-surface p-4">
-            <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">{label}</p>
-            <p className={`mt-1.5 text-xl font-bold tracking-[-0.02em] tabular-nums ${toneClass}`}>{value}</p>
-        </div>
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            {project && (
+                <a href={project.baseUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 font-mono text-meta [overflow-wrap:anywhere] hover:text-ink hover:underline hover:underline-offset-2">
+                    {project.baseUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                </a>
+            )}
+            {project && context && <span aria-hidden="true" className="text-ink-disabled">·</span>}
+            {context}
+        </span>
     );
 }
 
@@ -53,45 +90,60 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const [syncWarning, setSyncWarning] = useState("");
     const [loadError, setLoadError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
-    const [isRunning, setIsRunning] = useState(false);
+    const [filter, setFilter] = useState<StatusFilter>("all");
+    const [query, setQuery] = useState("");
+    const runBatch = useRunBatch(projectId);
+    const isRunning = runBatch.running;
 
     useEffect(() => {
-        let active = true;
+        const controller = new AbortController();
+        const { signal } = controller;
         setLoadError("");
-        api<{ features: Feature[]; specs: SpecSummary[]; syncError: string | null }>(`/projects/${projectId}/tree`)
+        getProjectTree(projectId, signal)
             .then((result) => {
-                if (!active) return;
                 setFeatures(result.features);
                 setSpecs(result.specs);
                 setSyncWarning(result.syncError ?? "");
             })
             .catch((error) => {
-                if (!active) return;
-                setLoadError(error instanceof Error ? error.message : String(error));
+                if (isAbortError(error)) return;
+                setLoadError(errorMessage(error));
             });
-        api<{ project: Project }>(`/projects/${projectId}`)
-            .then((result) => { if (active) setProject(result.project); })
+        getProject(projectId, signal)
+            .then((result) => setProject(result.project))
             .catch(() => undefined);
         getProjectContext(projectId)
-            .then((result) => { if (active) setContextState(result); })
+            .then((result) => { if (!signal.aborted) setContextState(result); })
             .catch(() => undefined);
-        return () => {
-            active = false;
-        };
+        return () => controller.abort();
     }, [projectId, retryKey]);
+
+    useEffect(() => onInvalidate((event) => {
+        if (matchesInvalidation(event, "tree", projectId)) setRetryKey((key) => key + 1);
+    }), [projectId]);
+
+    const lastRuns = useMemo(() => lastRunsOf(specs ?? []), [specs]);
+
+    const crumbs = [{ label: project?.name ?? "Project", href: `/p/${projectId}` }];
+    const createActions = features ? (
+        <>
+            <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
+            <NewSpecDialog projectId={projectId} features={features} />
+        </>
+    ) : null;
 
     if (loadError) {
         return (
             <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="Specs" eyebrow="Project" />
-                <div className="flex flex-1 items-center justify-center px-5 py-10">
-                    <Alert variant="destructive" className="w-full max-w-sm bg-transparent text-center" role="alert">
-                        <AlertDescription className="text-xs leading-5">{loadError}</AlertDescription>
-                        <Button type="button" onClick={() => setRetryKey((key) => key + 1)} className="mx-auto mt-4">
-                            <RefreshCw size={14} /> Try again
-                        </Button>
-                    </Alert>
-                </div>
+                <PageHeader title="Specs" breadcrumbs={crumbs} width="data" />
+                <EmptyState
+                    role="alert"
+                    tone="danger"
+                    icon={FileCheck2}
+                    title="Specs could not load"
+                    description={loadError}
+                    action={<Button type="button" onClick={() => setRetryKey((key) => key + 1)}><RefreshCw size={14} /> Try again</Button>}
+                />
             </div>
         );
     }
@@ -99,17 +151,12 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     if (!features || !specs) {
         return (
             <div className="flex min-h-full flex-col bg-surface" aria-busy="true" role="status">
-                <span className="sr-only">Loading Specs dashboard</span>
-                <PageHeader title="Specs" eyebrow="Project" />
-                <div className="mx-auto w-full max-w-[1040px] space-y-4 px-5 py-8">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-20 rounded-[13px]" />)}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-[280px_1fr]">
-                        <Skeleton className="h-64 rounded-[13px]" />
-                        <Skeleton className="h-64 rounded-[13px]" />
-                    </div>
-                </div>
+                <span className="sr-only">Loading Specs</span>
+                <PageHeader title="Specs" breadcrumbs={crumbs} width="data" />
+                <PageContainer width="data" innerClassName="space-y-6">
+                    <div className="space-y-3"><Skeleton className="h-4 w-80 max-w-full" /><Skeleton className="h-1.5 w-full rounded-full" /></div>
+                    <SpecTableSkeleton />
+                </PageContainer>
             </div>
         );
     }
@@ -117,210 +164,178 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     if (specs.length === 0) {
         return (
             <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="Specs" eyebrow="Project" />
-                <div className="flex flex-1 items-center justify-center px-5 py-10">
-                    <div className="max-w-[420px] text-center">
-                        <LogoMark className="mx-auto size-9" />
-                        <h2 className="mt-4 text-sm font-bold">No Specs yet</h2>
-                        <p className="mt-2 text-xs leading-5 text-ink-soft">
-                            Describe a behavior in a chat and the agent will save it as a verified Spec here.
-                        </p>
-                        <Button asChild className="mt-5">
-                            <Link href={`/p/${projectId}/chats/new`}>
-                                <FileCheck2 size={13} /> Start a chat
-                            </Link>
+                <PageHeader title="Specs" breadcrumbs={crumbs} width="data" meta={<ContextLine projectId={projectId} project={project} contextState={contextState} />} actions={createActions} />
+                <EmptyState
+                    icon={FileCheck2}
+                    title="No Specs yet"
+                    description="Describe a behavior in a chat and the agent saves it here as a Spec you can verify."
+                    action={
+                        <Button asChild>
+                            <Link href={`/p/${projectId}/chats/new`}><MessageSquarePlus size={14} /> Start a chat</Link>
                         </Button>
-                        <div className="mt-4 flex justify-center gap-2">
-                            <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
-                            <NewSpecDialog projectId={projectId} features={features} />
-                        </div>
-                    </div>
-                </div>
+                    }
+                />
             </div>
         );
     }
 
-    const featureById = new Map(features.map((feature) => [feature.id, feature]));
-    const counts = STATUS_ORDER.reduce<Record<SpecStatus, number>>(
-        (acc, status) => ({ ...acc, [status]: 0 }),
-        { passed: 0, failed: 0, unverified: 0, invalid: 0, conflict: 0 },
-    );
-    for (const spec of specs) counts[spec.status] += 1;
+    const counts = countStatuses(specs);
+    const needle = query.trim().toLowerCase();
+    const visible = (spec: SpecSummary) => (filter === "all" || spec.status === filter) && (!needle || spec.title.toLowerCase().includes(needle));
+    const filtering = filter !== "all" || needle.length > 0;
 
-    const chartData = STATUS_ORDER.filter((status) => counts[status] > 0).map((status) => ({
-        status,
-        count: counts[status],
-        fill: `var(--color-${status})`,
-    }));
+    const knownFeatureIds = new Set(features.map((feature) => feature.id));
+    const groups: SpecGroup[] = orderFeatures(features)
+        .map(({ feature, label }) => ({
+            id: feature.id,
+            title: label,
+            href: `/p/${projectId}/features/${feature.id}`,
+            specs: specs.filter((spec) => spec.featureId === feature.id && visible(spec)),
+            emptyText: "No Specs in this feature yet.",
+            hasChildren: features.some((item) => item.parentId === feature.id),
+        }))
+        // Hide empty groups while filtering, and structural parents that only hold sub-features.
+        .filter((group) => group.specs.length > 0 || (!filtering && !group.hasChildren));
+    const orphans = specs.filter((spec) => !knownFeatureIds.has(spec.featureId) && visible(spec));
+    if (orphans.length > 0) groups.push({ id: "__orphans__", title: "Without a feature", specs: orphans });
+    const visibleCount = groups.reduce((sum, group) => sum + group.specs.length, 0);
 
-    const listPriority: Record<SpecStatus, number> = {
-        conflict: 0,
-        invalid: 1,
-        failed: 2,
-        unverified: 3,
-        passed: 4,
-    };
-    const orderedSpecs = [...specs].sort((a, b) => listPriority[a.status] - listPriority[b.status]);
-
-    const passRate = specs.length > 0 ? Math.round((counts.passed / specs.length) * 100) : 0;
-    const passRateTone = counts.failed > 0 || counts.invalid > 0
-        ? "text-danger"
-        : counts.conflict > 0 || counts.unverified > 0
-          ? "text-pending"
-          : "text-success";
-
-
-    async function handleRun(specIds: string[], label: string) {
-        if (specIds.length === 0 || isRunning) return;
-        setIsRunning(true);
-        try {
-            await startRunBatch(projectId, specIds, label);
-            setRetryKey((k) => k + 1);
-        } catch {
-            // batch errors surface via the tree fetch
-        } finally {
-            setIsRunning(false);
-        }
+    function handleRun(selected: SpecSummary[], label: string) {
+        const runnable = selected.filter((spec) => spec.status !== "invalid" && spec.status !== "conflict");
+        if (runnable.length === 0) return;
+        void runBatch.start(label, runnable.map((spec) => ({ id: spec.id, title: spec.title })));
     }
+
+    const runnableCount = specs.filter((spec) => spec.status !== "invalid" && spec.status !== "conflict").length;
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader
                 title="Specs"
-                eyebrow="Project"
+                breadcrumbs={crumbs}
+                width="data"
+                meta={<ContextLine projectId={projectId} project={project} contextState={contextState} />}
                 actions={
-                    <div className="flex items-center gap-2">
-                        <NewFeatureDialog projectId={projectId} features={features} onCreated={() => setRetryKey((key) => key + 1)} />
-                        <NewSpecDialog projectId={projectId} features={features} />
-                    </div>
-                }
-            />
-            <div className="mx-auto w-full max-w-[1040px] flex-1 px-5 py-8">
-                {syncWarning && <Alert variant="warning" className="mb-4" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
-                {project && (
-                    <div className="mb-6 flex items-start justify-between gap-4 border-b border-line pb-4">
-                        <div className="min-w-0 flex-1">
-                            <div className="flex items-baseline gap-2">
-                                <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">{project.name}</h2>
-                                <a href={project.baseUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-[0.625rem] text-ink-faint underline-offset-2 hover:underline [overflow-wrap:anywhere]">{project.baseUrl}</a>
-                            </div>
-                            {(() => {
-                                const confirmed = contextState?.confirmed;
-                                if (!confirmed) {
-                                    return (
-                                        <p className="mt-1 text-xs text-ink-faint">
-                                            No project context yet.{" "}
-                                            <Link href={`/p/${projectId}`} className="underline underline-offset-2 hover:text-ink">Set up context</Link>
-                                        </p>
-                                    );
-                                }
-                                const ctx = confirmed.context;
-                                const stats = [
-                                    ctx.areas.length > 0 && `${ctx.areas.length} ${ctx.areas.length === 1 ? "area" : "areas"}`,
-                                    ctx.terminology.length > 0 && `${ctx.terminology.length} ${ctx.terminology.length === 1 ? "term" : "terms"}`,
-                                    ctx.roles.length > 0 && `${ctx.roles.length} ${ctx.roles.length === 1 ? "role" : "roles"}`,
-                                    ctx.businessRules.length > 0 && `${ctx.businessRules.length} ${ctx.businessRules.length === 1 ? "rule" : "rules"}`,
-                                ].filter(Boolean);
-                                return (
-                                    <>
-                                        {ctx.summary && <p className="mt-1 line-clamp-1 text-xs leading-5 text-ink-soft">{ctx.summary}</p>}
-                                        {stats.length > 0 && <p className="mt-1.5 text-[0.625rem] text-ink-faint">{stats.join(" · ")}</p>}
-                                    </>
-                                );
-                            })()}
-                        </div>
-                        <Link href={`/p/${projectId}`} className="mt-0.5 shrink-0 text-ink-faint transition-colors hover:text-ink" aria-label="Project overview">
-                            <ArrowRight size={14} />
-                        </Link>
-                    </div>
-                )}
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <StatTile label="Total Specs" value={specs.length} />
-                    <StatTile label="Passed" value={counts.passed} tone="success" />
-                    <StatTile label="Failed" value={counts.failed} tone="danger" />
-                    <StatTile label="Unverified" value={counts.unverified} tone="pending" />
-                </div>
-
-                <div className="mt-4 grid gap-4 md:grid-cols-[280px_1fr] md:items-start">
-                    <div className="rounded-[13px] border border-line bg-surface p-4">
-                        <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Status breakdown</p>
-                        <p className="mt-1 text-xs text-ink-soft">
-                            <span className={`font-bold ${passRateTone}`}>{passRate}%</span> of Specs are passing
-                        </p>
-                        <ChartContainer config={STATUS_CHART_CONFIG} className="mx-auto mt-3 aspect-square max-h-[170px]">
-                            <PieChart>
-                                <ChartTooltip content={<ChartTooltipContent nameKey="status" hideLabel />} />
-                                <Pie data={chartData} dataKey="count" nameKey="status" innerRadius="55%" outerRadius="85%" strokeWidth={2} stroke="var(--color-surface)" />
-                            </PieChart>
-                        </ChartContainer>
-                        {chartData.length > 1 && (
-                            <ul className="mt-4 space-y-1.5 border-t border-line pt-3">
-                                {STATUS_ORDER.filter((status) => counts[status] > 0).map((status) => {
-                                    const Icon = STATUS_ICON[status];
-                                    return (
-                                        <li key={status} className="flex items-center justify-between gap-2 text-[0.6875rem]">
-                                            <span className="flex items-center gap-1.5 text-ink-soft">
-                                                <Icon size={11} className="text-ink-faint" />
-                                                {STATUS_CHART_CONFIG[status].label}
-                                            </span>
-                                            <span className="font-bold text-ink">{counts[status]}</span>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
-                        )}
-                    </div>
-
-                    <div className="rounded-[13px] border border-line bg-surface p-4 md:flex md:max-h-80 md:flex-col">
-                        <div className="shrink-0 flex items-center justify-between">
-                            <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">All Specs</p>
+                    <>
+                        {createActions}
+                        <div className="flex items-center">
+                            <Button type="button" size="sm" className="rounded-r-none" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>
+                                <RunningIcon running={isRunning} size={13} /> {isRunning ? "Running..." : "Run all"}
+                            </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" disabled={isRunning}>
-                                        <Play size={12} /> Run
+                                    <Button type="button" size="sm" className="w-8 rounded-l-none border-l border-primary-foreground/20 px-0" disabled={isRunning} aria-label="More run options">
+                                        <ChevronDown size={14} />
                                     </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="min-w-36">
-                                    <DropdownMenuItem onClick={() => handleRun(specs.map((s) => s.id), "Run all")}>
-                                        Run All
+                                <DropdownMenuContent align="end" className="min-w-48">
+                                    <DropdownMenuLabel>Run a subset</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => handleRun(specs, "Run all Specs")}>
+                                        All Specs <span className="ml-auto tabular text-ink-subtle">{runnableCount}</span>
                                     </DropdownMenuItem>
-                                    {STATUS_ORDER.filter((status) => status !== "passed").map((status) => {
-                                        const count = specs.filter((s) => s.status === status).length;
-                                        if (count === 0) return null;
+                                    {RUN_SUBSETS.map(({ status, label }) => {
+                                        const count = counts[status] ?? 0;
                                         return (
-                                            <DropdownMenuItem
-                                                key={status}
-                                                onClick={() => handleRun(specs.filter((s) => s.status === status).map((s) => s.id), `Run ${status}`)}
-                                            >
-                                                Run {STATUS_CHART_CONFIG[status].label}
+                                            <DropdownMenuItem key={status} disabled={count === 0} onClick={() => handleRun(specs.filter((spec) => spec.status === status), `Run ${label.toLowerCase()} Specs`)}>
+                                                {label} <span className="ml-auto tabular text-ink-subtle">{count}</span>
                                             </DropdownMenuItem>
                                         );
                                     })}
+                                    {filtering && visibleCount > 0 && (
+                                        <DropdownMenuItem onClick={() => handleRun(groups.flatMap((group) => group.specs), "Run filtered Specs")}>
+                                            Shown in the list <span className="ml-auto tabular text-ink-subtle">{visibleCount}</span>
+                                        </DropdownMenuItem>
+                                    )}
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </div>
-                        <ul aria-label="All Specs" className="mt-2 -mx-2.5 space-y-0.5 md:min-h-0 md:flex-1 md:overflow-y-auto md:overscroll-contain md:px-2.5">
-                            {orderedSpecs.map((spec) => {
-                                const feature = featureById.get(spec.featureId);
+                    </>
+                }
+            />
+            <PageContainer width="data" innerClassName="space-y-6">
+                {syncWarning && <Alert variant="warning" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
+
+                <SummaryStrip counts={counts} />
+
+                <div className="space-y-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div role="group" aria-label="Filter by status" className="-mx-1 flex flex-wrap items-center gap-1">
+                            {FILTERS.filter((item) => item.value === "all" || (counts[item.value] ?? 0) > 0).map((item) => {
+                                const active = filter === item.value;
+                                const count = item.value === "all" ? specs.length : counts[item.value] ?? 0;
+                                const Icon = item.value === "all" ? null : statusMeta(item.value).icon;
                                 return (
-                                    <li key={spec.id}>
-                                        <Link
-                                            href={`/p/${projectId}/specs/${spec.id}`}
-                                            className="flex items-center justify-between gap-3 rounded-[9px] px-2.5 py-2.5 transition-colors hover:bg-surface-hover"
-                                        >
-                                            <span className="min-w-0 flex-1">
-                                                <span className="block truncate text-xs font-semibold text-ink">{spec.title}</span>
-                                                {feature && <span className="mt-0.5 block truncate text-[0.625rem] text-ink-faint">{feature.title}</span>}
-                                            </span>
-                                            <StatusPill status={spec.status} />
-                                        </Link>
-                                    </li>
+                                    <Button
+                                        key={item.value}
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        aria-pressed={active}
+                                        onClick={() => setFilter(item.value)}
+                                        className={cn("h-8 gap-1.5 rounded-full px-3", active && "bg-surface-selected text-ink hover:bg-surface-selected")}
+                                    >
+                                        {Icon && <Icon size={12} strokeWidth={2.25} aria-hidden="true" className={statusMeta(item.value).text} />}
+                                        {item.label}
+                                        <span className="tabular text-ink-subtle">{count}</span>
+                                    </Button>
                                 );
                             })}
-                        </ul>
+                        </div>
+                        <div className="relative sm:w-64">
+                            <Search size={14} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-subtle" />
+                            <Input
+                                type="search"
+                                value={query}
+                                onChange={(event) => setQuery(event.target.value)}
+                                placeholder="Filter by title"
+                                aria-label="Filter Specs by title"
+                                className="h-8 pr-8 pl-8 [&::-webkit-search-cancel-button]:hidden"
+                            />
+                            {query && (
+                                <button type="button" onClick={() => setQuery("")} aria-label="Clear filter" className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-subtle outline-none transition-colors hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-ring">
+                                    <X size={13} />
+                                </button>
+                            )}
+                        </div>
                     </div>
+
+                    {visibleCount === 0 && filtering ? (
+                        <div className="rounded-xl border border-line">
+                            <EmptyState
+                                size="compact"
+                                icon={Search}
+                                title="No Specs match"
+                                description="Try another status or a different title."
+                                action={<Button type="button" variant="outline" size="sm" onClick={() => { setFilter("all"); setQuery(""); }}>Clear filters</Button>}
+                            />
+                        </div>
+                    ) : (
+                        <SpecTable
+                            projectId={projectId}
+                            label="Specs by feature"
+                            groups={groups}
+                            lastRuns={lastRuns}
+                            running={isRunning}
+                            onRunSpec={(spec) => handleRun([spec], `Run ${spec.title}`)}
+                            onRunGroup={(group) => handleRun(group.specs, `Run ${typeof group.title === "string" ? group.title : "feature"}`)}
+                        />
+                    )}
+                    {filtering && visibleCount > 0 && (
+                        <p className="text-meta text-ink-subtle" aria-live="polite">Showing {plural(visibleCount, "Spec")} of {formatNumber(specs.length)}.</p>
+                    )}
                 </div>
-            </div>
+            </PageContainer>
+            <SpecRunDialog
+                open={runBatch.open}
+                onOpenChange={runBatch.setOpen}
+                title={runBatch.title}
+                items={runBatch.items}
+                running={runBatch.running}
+                reportUrl={runBatch.reportUrl}
+                error={runBatch.error}
+                warning={runBatch.warning}
+            />
         </div>
     );
 }

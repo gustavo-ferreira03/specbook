@@ -61,22 +61,23 @@ export function FeatureEditDialog({ feature, onSaved, renderTrigger }: {
         <>
             {renderTrigger(openDialog)}
             <Dialog open={open} onOpenChange={changeOpen}>
-                <DialogContent className="max-w-[400px]">
-                    <DialogHeader className="pr-8">
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
                         <DialogTitle>Edit feature</DialogTitle>
-                        <DialogDescription>Update the name and description of this feature.</DialogDescription>
+                        <DialogDescription>Rename this feature or change how it is described.</DialogDescription>
                     </DialogHeader>
-                    {error && <Alert variant="destructive" className="mt-4" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
                     <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
                         <div className="space-y-1.5">
                             <Label htmlFor="edit-feature-title">Title</Label>
-                            <Input id="edit-feature-title" value={title} onChange={(event) => setTitle(event.target.value)} disabled={saving} />
+                            <Input id="edit-feature-title" value={title} onChange={(event) => setTitle(event.target.value)} disabled={saving} aria-invalid={!title.trim() || undefined} />
                         </div>
                         <div className="space-y-1.5">
                             <Label htmlFor="edit-feature-description">Description</Label>
-                            <Textarea id="edit-feature-description" value={description} onChange={(event) => setDescription(event.target.value)} disabled={saving} rows={4} />
+                            <Textarea id="edit-feature-description" value={description} onChange={(event) => setDescription(event.target.value)} disabled={saving} rows={4} placeholder="What this area of the product does" aria-describedby="edit-feature-description-hint" />
+                            <p id="edit-feature-description-hint" className="text-meta text-ink-subtle">Shown on the feature page. Optional.</p>
                         </div>
-                        <DialogFooter className="pt-1">
+                        {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+                        <DialogFooter className="pt-2">
                             <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={saving}>Cancel</Button>
                             <Button type="submit" disabled={saving || !title.trim() || !dirty}>{saving ? "Saving..." : "Save changes"}</Button>
                         </DialogFooter>

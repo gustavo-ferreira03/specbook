@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, Check, GitBranch, GitMerge, RefreshCw, Unplug } from "lucide-react";
+import { Check, GitMerge, RefreshCw, Unplug } from "lucide-react";
+import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     connectProjectGit,
@@ -64,9 +65,17 @@ export function GitHubConnection({ projectId }: { projectId: string }) {
 
     if (!git && !error) {
         return (
-            <section aria-labelledby="github-heading" aria-busy="true">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="mt-3 h-20 rounded-[9px]" />
+            <section aria-label="Loading GitHub mirror" aria-busy="true" role="status">
+                <Skeleton className="mb-2 h-5 w-32" />
+                <Skeleton className="mb-4 h-3.5 w-64" />
+                <div className="rounded-xl border border-line">
+                    {[0, 1].map((row) => (
+                        <div key={row} className="grid gap-3 border-b border-line px-5 py-4 last:border-0 md:grid-cols-[13rem_1fr] md:gap-8">
+                            <Skeleton className="h-4 w-24 md:mt-2.5" />
+                            <Skeleton className="h-9" />
+                        </div>
+                    ))}
+                </div>
             </section>
         );
     }
@@ -75,61 +84,125 @@ export function GitHubConnection({ projectId }: { projectId: string }) {
     const conflicts = git?.conflictPaths ?? [];
     const reusingSavedToken = Boolean(git?.hasToken && remoteUrl.trim() === git.remoteUrl);
 
-    return (
-        <section aria-labelledby="github-heading">
-            <div className="flex items-end justify-between gap-4">
-                <div>
-                    <h2 id="github-heading" className="flex items-center gap-1.5 text-[0.8125rem] font-bold">
-                        <GitBranch size={14} /> GitHub repository
-                    </h2>
-                    <p className="mt-1 text-[0.65625rem] text-ink-faint">
-                        Specs always use local git history. Connect a remote to sync them with GitHub.
-                    </p>
-                </div>
-                {connected && <span className="shrink-0 text-[0.625rem] font-bold text-success">Connected</span>}
-            </div>
+    function resolveAll(keep: "local" | "remote") {
+        return run(`resolve-${keep}`, async () => {
+            const { outcome } = await resolveProjectGit(
+                projectId,
+                conflicts.map((path) => ({ path, keep })),
+            );
+            if (outcome.status === "conflict") {
+                throw new Error("More conflicting files need an explicit choice.");
+            }
+        }, keep === "local" ? "Conflicts resolved with local files." : "Conflicts resolved with remote files.");
+    }
 
-            <div className="mt-3 border-y border-line py-4">
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)]">
-                    <div>
-                        <Label htmlFor="git-remote-url" className="mb-1.5">Repository URL</Label>
-                        <Input
-                            id="git-remote-url"
-                            value={remoteUrl}
-                            onChange={(event) => setRemoteUrl(event.target.value)}
-                            placeholder="https://github.com/org/repo.git"
-                            disabled={Boolean(busy)}
-                        />
-                    </div>
-                    <div>
-                        <Label htmlFor="git-token" className="mb-1.5">
-                            Fine-grained token{reusingSavedToken ? " (saved)" : ""}
-                        </Label>
-                        <Input
-                            id="git-token"
-                            type="password"
-                            value={token}
-                            onChange={(event) => setToken(event.target.value)}
-                            placeholder={reusingSavedToken ? "Leave blank to keep it" : "github_pat_..."}
-                            autoComplete="off"
-                            disabled={Boolean(busy)}
-                        />
+    const alerts = [
+        git?.pushError && <Alert key="push" variant="danger" role="alert"><AlertTitle>Push failed</AlertTitle><AlertDescription className="break-words">{git.pushError}</AlertDescription></Alert>,
+        git?.externalSyncError && <Alert key="external" variant="warning" role="alert"><AlertTitle>Pushed changes need attention</AlertTitle><AlertDescription className="break-words">{git.externalSyncError}</AlertDescription></Alert>,
+        git?.contextSyncError && <Alert key="context" variant="warning" role="alert"><AlertTitle>context.yml is invalid</AlertTitle><AlertDescription className="break-words">{git.contextSyncError}</AlertDescription></Alert>,
+        conflicts.length > 0 && (
+            <Alert key="conflict" variant="conflict" role="alert">
+                <div className="flex items-start gap-2.5">
+                    <GitMerge size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                        <AlertTitle>Git sync conflict</AlertTitle>
+                        <AlertDescription>Choose which side to keep for these files.</AlertDescription>
+                        <ul className="mt-2 space-y-0.5 font-mono text-meta text-ink [overflow-wrap:anywhere]">
+                            {conflicts.map((path) => <li key={path}>{path}</li>)}
+                        </ul>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <Button type="button" size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => resolveAll("local")}>
+                                Keep all local
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => resolveAll("remote")}>
+                                Keep all remote
+                            </Button>
+                        </div>
                     </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Button
-                        type="button"
-                        disabled={Boolean(busy) || !remoteUrl.trim()}
-                        onClick={() => run("connect", async () => {
-                            const nextToken = token.trim() || undefined;
-                            await connectProjectGit(projectId, remoteUrl.trim(), nextToken);
-                            setToken("");
-                        }, connected ? "Connection updated." : "Repository connected.")}
-                    >
-                        <Check size={13} /> {busy === "connect" ? "Checking..." : connected ? "Update connection" : "Connect repository"}
-                    </Button>
+            </Alert>
+        ),
+    ].filter(Boolean);
+
+    return (
+        <SettingsSection
+            id="github-heading"
+            title="GitHub mirror"
+            description="Optionally mirror the Specbook repository to GitHub. Specbook pushes changes automatically."
+            actions={connected
+                ? <Badge variant="success"><Check size={13} strokeWidth={2.25} aria-hidden="true" /> Connected</Badge>
+                : <Badge variant="secondary">Not connected</Badge>}
+        >
+            <form
+                onSubmit={(event) => {
+                    event.preventDefault();
+                    if (busy || !remoteUrl.trim()) return;
+                    void run("connect", async () => {
+                        const nextToken = token.trim() || undefined;
+                        await connectProjectGit(projectId, remoteUrl.trim(), nextToken);
+                        setToken("");
+                    }, connected ? "Connection updated." : "Repository connected.");
+                }}
+            >
+                {alerts.length > 0 && <SettingsBlock className="space-y-2">{alerts}</SettingsBlock>}
+                <SettingsRow label="Repository URL" htmlFor="git-remote-url">
+                    <Input
+                        id="git-remote-url"
+                        value={remoteUrl}
+                        onChange={(event) => setRemoteUrl(event.target.value)}
+                        placeholder="https://github.com/org/repo.git"
+                        disabled={Boolean(busy)}
+                        className="font-mono text-meta"
+                        inputMode="url"
+                        autoComplete="off"
+                    />
+                </SettingsRow>
+                <SettingsRow
+                    label="Fine-grained token"
+                    htmlFor="git-token"
+                    description={reusingSavedToken ? "A token is saved for this URL." : "Used to push to and pull from the mirror."}
+                >
+                    <Input
+                        id="git-token"
+                        type="password"
+                        value={token}
+                        onChange={(event) => setToken(event.target.value)}
+                        placeholder={reusingSavedToken ? "Leave blank to keep the saved token" : "github_pat_..."}
+                        autoComplete="off"
+                        disabled={Boolean(busy)}
+                        className="font-mono text-meta"
+                    />
+                    {reusingSavedToken && (
+                        <Button
+                            type="button"
+                            variant="link"
+                            className="mt-2 text-meta text-ink-muted"
+                            disabled={Boolean(busy)}
+                            onClick={() => run(
+                                "remove-token",
+                                async () => void (await connectProjectGit(projectId, remoteUrl.trim(), null)),
+                                "Saved token removed.",
+                            )}
+                        >
+                            Remove saved token
+                        </Button>
+                    )}
+                </SettingsRow>
+                <SettingsFooter
+                    feedback={error
+                        ? <InlineFeedback feedback={{ type: "error", text: git ? `Git operation failed: ${error}` : `${error} Reload this page to retry.` }} />
+                        : notice ? <InlineFeedback feedback={{ type: "success", text: notice }} /> : null}
+                >
                     {connected && (
                         <>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                disabled={Boolean(busy)}
+                                onClick={() => run("disconnect", () => disconnectProjectGit(projectId), "Repository disconnected.")}
+                            >
+                                <Unplug size={14} /> Disconnect
+                            </Button>
                             <Button
                                 type="button"
                                 variant="outline"
@@ -141,88 +214,16 @@ export function GitHubConnection({ projectId }: { projectId: string }) {
                                     }
                                 }, "Local and remote histories reconciled.")}
                             >
-                                <RefreshCw size={13} className={busy === "sync" ? "animate-spin motion-reduce:animate-none" : ""} />
+                                <RefreshCw size={14} className={busy === "sync" ? "animate-spin motion-reduce:animate-none" : ""} />
                                 {busy === "sync" ? "Syncing..." : "Sync now"}
                             </Button>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                disabled={Boolean(busy)}
-                                onClick={() => run("disconnect", () => disconnectProjectGit(projectId), "Repository disconnected.")}
-                            >
-                                <Unplug size={13} /> Disconnect
-                            </Button>
-                            {reusingSavedToken && (
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    disabled={Boolean(busy)}
-                                    onClick={() => run(
-                                        "remove-token",
-                                        async () => void (await connectProjectGit(projectId, remoteUrl.trim(), null)),
-                                        "Saved token removed.",
-                                    )}
-                                >
-                                    Remove token
-                                </Button>
-                            )}
                         </>
                     )}
-                </div>
-            </div>
-
-            {notice && <p className="mt-3 flex items-center gap-1.5 text-[0.65625rem] font-bold text-success" role="status"><Check size={12} /> {notice}</p>}
-            {error && <Alert variant="destructive" className="mt-3" role="alert"><AlertTitle>Git operation failed</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
-            {git?.pushError && <Alert variant="destructive" className="mt-3" role="alert"><AlertTitle>Push failed</AlertTitle><AlertDescription className="break-words">{git.pushError}</AlertDescription></Alert>}
-            {git?.contextSyncError && <Alert variant="warning" className="mt-3" role="alert"><AlertTitle>context.yml is invalid</AlertTitle><AlertDescription>{git.contextSyncError}</AlertDescription></Alert>}
-            {conflicts.length > 0 && (
-                <Alert variant="conflict" className="mt-3" role="alert">
-                    <div className="flex items-start gap-2">
-                        <GitMerge size={14} className="mt-0.5 shrink-0" />
-                        <div className="min-w-0 flex-1">
-                            <AlertTitle>Git sync conflict</AlertTitle>
-                            <AlertDescription className="mt-1 break-words">{conflicts.join(", ")}</AlertDescription>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={Boolean(busy)}
-                                    onClick={() => run("resolve-local", async () => {
-                                        const { outcome } = await resolveProjectGit(
-                                            projectId,
-                                            conflicts.map((path) => ({ path, keep: "local" as const })),
-                                        );
-                                        if (outcome.status === "conflict") {
-                                            throw new Error("More conflicting files need an explicit choice.");
-                                        }
-                                    }, "Conflicts resolved with local files.")}
-                                >
-                                    Keep all local
-                                </Button>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={Boolean(busy)}
-                                    onClick={() => run("resolve-remote", async () => {
-                                        const { outcome } = await resolveProjectGit(
-                                            projectId,
-                                            conflicts.map((path) => ({ path, keep: "remote" as const })),
-                                        );
-                                        if (outcome.status === "conflict") {
-                                            throw new Error("More conflicting files need an explicit choice.");
-                                        }
-                                    }, "Conflicts resolved with remote files.")}
-                                >
-                                    Keep all remote
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
-                </Alert>
-            )}
-            {!git && error && <p className="mt-3 flex items-center gap-1.5 text-[0.65625rem] text-danger"><AlertCircle size={12} /> Retry by reloading this page.</p>}
-        </section>
+                    <Button type="submit" disabled={Boolean(busy) || !remoteUrl.trim()}>
+                        {busy === "connect" ? "Checking..." : connected ? "Update connection" : "Connect repository"}
+                    </Button>
+                </SettingsFooter>
+            </form>
+        </SettingsSection>
     );
 }

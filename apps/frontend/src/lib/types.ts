@@ -14,6 +14,22 @@ export interface GitStatus {
     pushError: string | null;
     conflictPaths: string[] | null;
     contextSyncError: string | null;
+    externalSyncError: string | null;
+}
+
+export interface GitAccessTokenInfo {
+    hasToken: boolean;
+    prefix: string | null;
+    createdAt: string | null;
+    lastUsedAt: string | null;
+}
+
+export interface GitRemoteAccess {
+    cloneUrl: string;
+    branch: string;
+    headSha: string | null;
+    token: GitAccessTokenInfo;
+    externalSyncError: string | null;
 }
 
 export interface GitSyncOutcome {
@@ -36,6 +52,15 @@ export interface SpecSummary {
     featureId: string;
     title: string;
     status: SpecStatus;
+    /** Most recent run, or null when the Spec was never run. */
+    lastRun: Run | null;
+}
+
+/** Response of GET /projects/:id/tree, shared by the Sidebar and the Specs screens. */
+export interface ProjectTree {
+    features: Feature[];
+    specs: SpecSummary[];
+    syncError: string | null;
 }
 
 export interface HumanSpec {
@@ -49,7 +74,7 @@ export interface Run {
     id: string;
     specId: string;
     commitSha: string;
-    robotHash: string;
+    sourceHash: string;
     status: RunStatus;
     startedAt: string;
     durationMs: number | null;
@@ -65,14 +90,20 @@ export interface SpecDetail {
         description: string;
         status: SpecStatus;
         path: string;
-        robotHash: string;
+        sourceHash: string;
         markdownHash: string;
         invalidReason: string | null;
         createdAt: string;
         updatedAt: string;
     };
     feature: Feature | null;
-    content: { humanSpec: HumanSpec | null; robotSource: string; yamlSource: string } | null;
+    content: {
+        humanSpec: HumanSpec | null;
+        testSource: string;
+        yamlSource: string;
+        /** Set only while the Spec folder still has the old spec.robot and no spec.ts. */
+        legacyRobotSource: string | null;
+    } | null;
     runs: Run[];
 }
 
@@ -162,6 +193,8 @@ export interface RunEvidence {
     expectedResult: string;
     steps: { number: number; label: string; file: string }[];
     video: string | null;
+    /** Title of the step() that failed, when the run failed inside one. */
+    failedStep: string | null;
     reportAvailable: boolean;
     reportUrl: string | null;
 }
@@ -170,7 +203,7 @@ export interface RunBatchItem {
     runId: string;
     specId: string;
     commitSha: string;
-    robotHash: string;
+    sourceHash: string;
     markdownHash: string;
     title: string;
     status: RunStatus;

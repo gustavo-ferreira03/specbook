@@ -16,7 +16,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { confirmProjectContext, discardProjectContext } from "@/lib/api";
+import { confirmProjectContext, discardProjectContext, errorMessage } from "@/lib/api";
 import type { ProjectContextRevision } from "@/lib/types";
 
 export function DraftReview({
@@ -54,7 +54,7 @@ export function DraftReview({
             onConfirmed(confirmed);
         } catch (err) {
             setConfirmOpen(false);
-            setError(err instanceof Error ? err.message : String(err));
+            setError(errorMessage(err));
         } finally {
             setConfirming(false);
         }
@@ -68,7 +68,7 @@ export function DraftReview({
             setDiscardOpen(false);
             onDiscarded(discarded);
         } catch (err) {
-            setDiscardError(err instanceof Error ? err.message : String(err));
+            setDiscardError(errorMessage(err));
         } finally {
             setDiscarding(false);
         }
@@ -88,17 +88,17 @@ export function DraftReview({
     }
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-5">
             <ContextReadout context={context} />
 
             {error && (
-                <Alert variant="destructive" className="text-xs" role="alert">
+                <Alert variant="destructive" role="alert">
                     <AlertDescription>{error}</AlertDescription>
                 </Alert>
             )}
 
             {!confirmable && (
-                <p className="text-[0.625rem] leading-4 text-ink-faint">
+                <p className="text-meta text-ink-subtle">
                     Confirming needs a summary and at least one area or unknown.
                 </p>
             )}
@@ -127,7 +127,7 @@ export function DraftReview({
                     variant="ghost"
                     onClick={() => setDiscardOpen(true)}
                     disabled={discarding}
-                    className="text-ink-soft"
+                    className="text-ink-muted sm:ml-auto"
                 >
                     <Trash2 size={14} /> {discarding ? "Discarding..." : "Discard draft"}
                 </Button>
@@ -157,7 +157,7 @@ export function DraftReview({
                         </div>
                         <AlertDialogCancel
                             disabled={confirming}
-                            className="size-8 border-0 bg-transparent p-0 text-ink-faint hover:bg-surface-hover hover:text-ink"
+                            className="size-8 border-0 bg-transparent p-0 text-ink-subtle hover:bg-surface-hover hover:text-ink"
                             aria-label="Close confirmation"
                         >
                             <X size={15} />

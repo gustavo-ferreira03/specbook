@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, ChevronDown, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, BookOpenCheck, ChevronRight, Compass, Globe, KeyRound, LoaderCircle, RefreshCw } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
 import { LogoMark } from "@/components/LogoMark";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -136,10 +137,15 @@ function HomeContent() {
         return (
             <main className="min-h-dvh bg-canvas" aria-label="Loading projects" aria-busy="true" role="status">
                 <span className="sr-only">Loading projects</span>
-                <div className="h-[72px] border-b border-line bg-surface" />
-                <div className="mx-auto grid w-full max-w-[860px] gap-12 px-5 py-16 md:grid-cols-[0.8fr_1fr] md:px-8 md:py-24">
-                    <div className="space-y-3"><Skeleton className="h-5 w-36" /><Skeleton className="h-3 w-64" /></div>
-                    <Skeleton className="h-72 rounded-[13px] border border-line bg-surface" />
+                <div className="flex h-14 items-center border-b border-line bg-surface px-4 sm:px-6"><Skeleton className="h-6 w-28" /></div>
+                <div className="mx-auto grid w-full max-w-[1040px] items-start gap-10 px-4 py-10 sm:px-8 md:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] md:gap-16 md:py-20">
+                    <div className="space-y-4 md:pt-6">
+                        <Skeleton className="h-3.5 w-24" />
+                        <Skeleton className="h-8 w-80 max-w-full" />
+                        <Skeleton className="h-4 w-96 max-w-full" />
+                        <div className="space-y-3 pt-4">{[0, 1, 2].map((row) => <Skeleton key={row} className="h-10 w-full max-w-sm" />)}</div>
+                    </div>
+                    <Skeleton className="h-[26rem] rounded-xl" />
                 </div>
             </main>
         );
@@ -147,116 +153,159 @@ function HomeContent() {
 
     if (loadError) {
         return (
-            <main className="flex min-h-dvh items-center justify-center bg-canvas px-5">
-                <Alert variant="destructive" className="w-full max-w-sm bg-transparent p-0 text-center" role="alert">
-                    <LogoMark className="mx-auto size-9" />
-                    <h1 className="mt-4 text-sm font-bold text-ink">Specbook could not load</h1>
-                    <AlertDescription className="mt-2 text-xs leading-5">{loadError}</AlertDescription>
-                    <Button type="button" onClick={() => setRetryKey((key) => key + 1)} className="mt-5"><RefreshCw size={14} /> Try again</Button>
-                </Alert>
+            <main className="flex min-h-dvh items-center justify-center bg-canvas px-4">
+                <div className="w-full max-w-sm rounded-xl border border-line bg-surface p-2 shadow-xs">
+                    <EmptyState
+                        icon={AlertCircle}
+                        tone="danger"
+                        role="alert"
+                        title="Specbook could not load"
+                        description={loadError}
+                        action={<Button type="button" onClick={() => setRetryKey((key) => key + 1)}><RefreshCw size={14} /> Try again</Button>}
+                        className="py-8"
+                    />
+                </div>
             </main>
         );
     }
 
     const returnProject = projects.find((project) => project.id === lastProjectId) ?? projects[0];
+    const busy = submitting !== false;
+    const steps = [
+        { icon: Globe, title: "Point it at your app", text: "Any URL the self-hosted runtime can reach, such as a staging site." },
+        { icon: Compass, title: "Let the agent explore", text: "A bounded browser maps areas, terms, and roles into a context you review." },
+        { icon: BookOpenCheck, title: "Write executable Specs", text: "Describe behavior in a chat. Specs stay readable and run on demand." },
+    ];
 
     return (
         <main className="min-h-dvh bg-canvas">
-            <header className="flex h-[72px] items-center justify-between border-b border-line bg-surface px-4 sm:px-6">
-                <div className="flex items-center gap-3">
-                    <LogoMark className="size-8" />
-                    <span><span className="block text-sm font-bold tracking-[-0.015em]">Specbook</span><span className="mt-0.5 block text-[0.625rem] text-ink-faint">living, executable specs</span></span>
+            <header className="flex h-14 items-center justify-between border-b border-line bg-surface px-4 sm:px-6">
+                <div className="flex items-center gap-2.5">
+                    <LogoMark className="size-7 dark:invert" />
+                    <span className="text-section text-ink">Specbook</span>
                 </div>
                 {returnProject && (
-                    <Button asChild variant="ghost" className="hover:bg-canvas">
-                        <Link href={`/p/${returnProject.id}`}><ArrowLeft size={14} /> Return to project</Link>
+                    <Button asChild variant="ghost" size="sm">
+                        <Link href={`/p/${returnProject.id}`}><ArrowLeft size={14} /> <span className="max-w-[12rem] truncate">Back to {returnProject.name}</span></Link>
                     </Button>
                 )}
             </header>
 
-            <div className="mx-auto grid w-full max-w-[860px] items-start gap-10 px-5 py-12 sm:px-8 md:grid-cols-[0.78fr_minmax(22rem,1fr)] md:gap-16 md:py-20">
-                <div className="pt-2 md:pt-5">
-                    <p className="text-[0.625rem] font-bold tracking-[0.08em] text-ink-faint uppercase">New project</p>
-                    <h1 className="mt-2 max-w-sm text-xl font-bold tracking-[-0.025em] text-balance">
+            <div className="mx-auto grid w-full max-w-[1040px] items-start gap-10 px-4 py-10 sm:px-8 md:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] md:gap-16 md:py-20">
+                <div className="md:pt-6">
+                    <p className="eyebrow text-ink-subtle">{returnProject ? "New project" : "Welcome to Specbook"}</p>
+                    <h1 className="mt-2 max-w-md text-display text-balance text-ink">
                         {returnProject ? "Add another application" : "Connect your first application"}
                     </h1>
-                    <p className="mt-3 max-w-[44ch] text-xs leading-5 text-ink-soft">
-                        Give Specbook an application URL. Chats, browser sessions, and Specs stay grouped inside the project.
+                    <p className="mt-3 max-w-[46ch] text-body text-ink-muted">
+                        Living, executable Specs for web applications. Chats, browser sessions, and Specs stay grouped inside the project.
                     </p>
+                    <ol className="mt-8 hidden max-w-md space-y-5 md:block">
+                        {steps.map((step) => (
+                            <li key={step.title} className="flex gap-3.5">
+                                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface text-ink ring-1 ring-line">
+                                    <step.icon size={16} aria-hidden="true" />
+                                </span>
+                                <div className="min-w-0">
+                                    <p className="text-control font-medium text-ink">{step.title}</p>
+                                    <p className="mt-0.5 text-control text-ink-muted">{step.text}</p>
+                                </div>
+                            </li>
+                        ))}
+                    </ol>
                 </div>
 
-                <form onSubmit={createWithDiscovery} className="rounded-[13px] border border-line bg-surface p-5">
-                    <h2 className="text-[0.8125rem] font-bold">Project details</h2>
-                    <p className="mt-1 text-[0.65625rem] leading-4 text-ink-faint">Use a URL the self-hosted runtime can reach.</p>
-                    <div className="mt-5">
-                        <Label className="mb-1.5" htmlFor="project-name">Project name</Label>
-                        <Input id="project-name" value={name} onChange={(event) => setName(event.target.value)} required autoFocus autoComplete="off" placeholder="Customer portal" />
+                <form onSubmit={createWithDiscovery} className="overflow-hidden rounded-xl border border-line bg-surface shadow-xs" aria-labelledby="new-project-heading">
+                    <div className="border-b border-line px-5 py-4">
+                        <h2 id="new-project-heading" className="text-section text-ink">Project details</h2>
+                        <p className="mt-0.5 text-control text-ink-muted">You can change these later in settings.</p>
                     </div>
-                    <div className="mt-4">
-                        <Label className="mb-1.5" htmlFor="base-url">Base URL</Label>
-                        <Input
-                            id="base-url"
-                            value={baseUrl}
-                            onChange={(event) => {
-                                setBaseUrl(event.target.value);
-                                if (!startUrlEdited) setStartUrl(event.target.value);
-                            }}
-                            required
-                            type="url"
-                            inputMode="url"
-                            placeholder="https://staging.example.com"
-                        />
+                    <div className="space-y-5 px-5 py-5">
+                        <div>
+                            <Label className="mb-1.5" htmlFor="project-name">Project name</Label>
+                            <Input id="project-name" value={name} onChange={(event) => setName(event.target.value)} required autoFocus autoComplete="off" placeholder="Customer portal" disabled={busy} />
+                        </div>
+                        <div>
+                            <Label className="mb-1.5" htmlFor="base-url">Base URL</Label>
+                            <Input
+                                id="base-url"
+                                value={baseUrl}
+                                onChange={(event) => {
+                                    setBaseUrl(event.target.value);
+                                    if (!startUrlEdited) setStartUrl(event.target.value);
+                                }}
+                                required
+                                type="url"
+                                inputMode="url"
+                                placeholder="https://staging.example.com"
+                                className="font-mono text-meta"
+                                aria-describedby="base-url-help"
+                                disabled={busy}
+                            />
+                            <p id="base-url-help" className="mt-1.5 text-meta text-ink-subtle">Use a URL the self-hosted runtime can reach. Chats and runs start here.</p>
+                        </div>
+                        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                            <CollapsibleTrigger asChild>
+                                <Button type="button" variant="ghost" size="sm" className="-ml-2 text-ink-muted">
+                                    <ChevronRight size={14} aria-hidden className={`transition-transform duration-150 motion-reduce:transition-none ${advancedOpen ? "rotate-90" : ""}`} />
+                                    Discovery settings
+                                    <span className="font-normal text-ink-subtle">Optional</span>
+                                </Button>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                                <div className="mt-2 space-y-4 rounded-lg border border-line bg-surface-soft p-4">
+                                    <div>
+                                        <Label className="mb-1.5" htmlFor="discovery-goal">Focus</Label>
+                                        <Input id="discovery-goal" value={goal} onChange={(event) => setGoal(event.target.value)} autoComplete="off" placeholder="e.g. Focus on the checkout flow" disabled={busy} />
+                                        <p className="mt-1.5 text-meta text-ink-subtle">Leave empty to let the agent explore everything it can reach.</p>
+                                    </div>
+                                    <div>
+                                        <Label className="mb-1.5" htmlFor="start-url">Start URL</Label>
+                                        <Input
+                                            id="start-url"
+                                            value={startUrl}
+                                            onChange={(event) => {
+                                                setStartUrl(event.target.value);
+                                                setStartUrlEdited(true);
+                                            }}
+                                            type="url"
+                                            inputMode="url"
+                                            placeholder={baseUrl || "Same as base URL"}
+                                            className="font-mono text-meta"
+                                            disabled={busy}
+                                        />
+                                        <p className="mt-1.5 text-meta text-ink-subtle">Must stay on the base URL origin.</p>
+                                    </div>
+                                    <div>
+                                        <Label className="mb-1.5" htmlFor="safety-notes">Safety notes</Label>
+                                        <Textarea id="safety-notes" value={safetyNotes} onChange={(event) => setSafetyNotes(event.target.value)} rows={3} placeholder={"Do not submit contact forms\nStay out of the checkout"} disabled={busy} />
+                                        <p className="mt-1.5 text-meta text-ink-subtle">One rule per line. The agent follows them during discovery.</p>
+                                    </div>
+                                </div>
+                            </CollapsibleContent>
+                        </Collapsible>
+                        {!llmReady && (
+                            <Alert variant="warning" role="status" className="flex items-start gap-2.5">
+                                <KeyRound size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
+                                <div className="min-w-0">
+                                    <AlertTitle>No agent model is configured</AlertTitle>
+                                    <AlertDescription>
+                                        You can create the project now. Discovery needs a model before it can run
+                                        {returnProject ? <>: <Link href={`/p/${returnProject.id}/settings?tab=model`}>set one up in Settings</Link>.</> : "; set one up in the project settings under Model."}
+                                    </AlertDescription>
+                                </div>
+                            </Alert>
+                        )}
+                        {createError && <Alert variant="danger" role="alert"><AlertDescription>{createError}</AlertDescription></Alert>}
                     </div>
-                    <p className="mt-4 text-[0.65625rem] leading-4 text-ink-faint">The agent explores the app on its own with a bounded browser, drafts a project context, and asks for help only when it gets stuck.</p>
-                    <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="mt-4">
-                        <CollapsibleTrigger asChild>
-                            <Button type="button" variant="outline" className="w-full justify-between text-ink-soft hover:text-ink">
-                                Advanced discovery settings
-                                <ChevronDown size={14} aria-hidden className={`transition-transform duration-150 motion-reduce:transition-none ${advancedOpen ? "rotate-180" : ""}`} />
-                            </Button>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                            <div className="mt-3 space-y-4 rounded-md border border-line bg-canvas p-3">
-                                <div>
-                                    <Label className="mb-1.5" htmlFor="discovery-goal">Discovery focus (optional)</Label>
-                                    <Input id="discovery-goal" value={goal} onChange={(event) => setGoal(event.target.value)} autoComplete="off" placeholder="e.g. Focus on the checkout flow" />
-                                    <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">Leave empty to let the agent explore everything it can reach.</p>
-                                </div>
-                                <div>
-                                    <Label className="mb-1.5" htmlFor="start-url">Start URL</Label>
-                                    <Input
-                                        id="start-url"
-                                        value={startUrl}
-                                        onChange={(event) => {
-                                            setStartUrl(event.target.value);
-                                            setStartUrlEdited(true);
-                                        }}
-                                        type="url"
-                                        inputMode="url"
-                                        placeholder={baseUrl || "Same as base URL"}
-                                    />
-                                    <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">Must stay on the base URL origin.</p>
-                                </div>
-                                <div>
-                                    <Label className="mb-1.5" htmlFor="safety-notes">Additional safety notes</Label>
-                                    <Textarea id="safety-notes" value={safetyNotes} onChange={(event) => setSafetyNotes(event.target.value)} rows={3} placeholder={"Do not submit contact forms\nStay out of the checkout"} />
-                                    <p className="mt-1.5 text-[0.65625rem] leading-4 text-ink-faint">One rule per line. The agent follows them during discovery.</p>
-                                </div>
-                            </div>
-                        </CollapsibleContent>
-                    </Collapsible>
-                    {!llmReady && (
-                        <Alert className="mt-4 text-xs" role="status">
-                            <AlertDescription>No agent model is configured yet. You can create the project now; discovery will need the agent set up in Settings before it can run.</AlertDescription>
-                        </Alert>
-                    )}
-                    {createError && <Alert variant="destructive" className="mt-4 text-xs" role="alert"><AlertDescription>{createError}</AlertDescription></Alert>}
-                    <Button type="submit" disabled={submitting !== false} className="mt-5 w-full">
-                        {submitting === "discovery" ? "Creating project..." : "Create project and explore"}{submitting === false && <ArrowRight size={14} />}
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={createWithoutDiscovery} disabled={submitting !== false} className="mt-2 w-full text-ink-soft hover:bg-canvas">
-                        {submitting === "plain" ? "Creating project..." : "Create without discovery"}
-                    </Button>
+                    <div className="flex flex-col gap-2 border-t border-line bg-surface-soft px-5 py-4">
+                        <Button type="submit" size="lg" disabled={busy} className="w-full">
+                            {submitting === "discovery" ? <><LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" /> Creating project...</> : <>Create project and explore <ArrowRight size={15} /></>}
+                        </Button>
+                        <Button type="button" variant="outline" onClick={createWithoutDiscovery} disabled={busy} className="w-full">
+                            {submitting === "plain" ? "Creating project..." : "Create without discovery"}
+                        </Button>
+                    </div>
                 </form>
             </div>
         </main>
@@ -264,5 +313,5 @@ function HomeContent() {
 }
 
 export default function Home() {
-    return <Suspense fallback={<span className="sr-only" role="status">Loading Specbook</span>}><HomeContent /></Suspense>;
+    return <Suspense fallback={<main className="min-h-dvh bg-canvas" role="status"><span className="sr-only">Loading Specbook</span></main>}><HomeContent /></Suspense>;
 }

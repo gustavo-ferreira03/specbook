@@ -1,14 +1,15 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { usePathname, useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 import {
     AlertCircle,
+    AlertTriangle,
     Check,
-    ChevronDown,
     ChevronRight,
     Clipboard,
     ExternalLink,
+    LoaderCircle,
     Eye,
     EyeOff,
     KeyRound,
@@ -16,12 +17,16 @@ import {
     RefreshCw,
     Search,
     Settings2,
+    Unplug,
     X,
 } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { InlineFeedback, SettingsRow, SettingsSection, SettingsFooter } from "@/components/SettingsLayout";
 import { ContextFileCard } from "@/components/ContextFileCard";
 import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
 import { GitHubConnection } from "@/components/GitHubConnection";
+import { GitRemoteAccess } from "@/components/GitRemoteAccess";
 import { ProjectSettingsCard } from "@/components/ProjectSettingsCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +51,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
     getLlmSettings,
+    getProject,
     pollLlmProviderOAuth,
     removeLlmProviderAuth,
     saveLlmProviderApiKey,
@@ -53,6 +59,8 @@ import {
     submitLlmProviderOAuthInput,
     updateLlmSettings,
 } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
+import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { LlmAuthMethod, LlmCurrentSettings, LlmOAuthPrompt, LlmProvider, LlmSettingsResponse } from "@/lib/types";
 
 interface Feedback {
@@ -81,12 +89,47 @@ function providerAuthLabel(provider: LlmProvider) {
     return "API key";
 }
 
+function StepNumber({ children }: { children: React.ReactNode }) {
+    return <span aria-hidden="true" className="tabular flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-selected text-meta font-semibold text-ink">{children}</span>;
+}
+
 function modelCountLabel(count: number) {
     return `${count} ${count === 1 ? "model" : "models"}`;
 }
 
+const SETTINGS_TABS = ["general", "model", "git", "context", "credentials"] as const;
+type SettingsTab = (typeof SETTINGS_TABS)[number];
+
+const TAB_LABELS: [SettingsTab, string][] = [
+    ["general", "General"],
+    ["model", "Model"],
+    ["git", "Git"],
+    ["context", "Context"],
+    ["credentials", "Credentials"],
+];
+
+function parseSettingsTab(value: string | null): SettingsTab {
+    // `github` was the Git tab's previous query value; keep old links working.
+    if (value === "github") return "git";
+    return SETTINGS_TABS.includes(value as SettingsTab) ? (value as SettingsTab) : "general";
+}
+
 export default function SettingsPage() {
+    return (
+        <Suspense fallback={<span className="sr-only" role="status">Loading settings</span>}>
+            <SettingsContent />
+        </Suspense>
+    );
+}
+
+function SettingsContent() {
     const { projectId } = useParams<{ projectId: string }>();
+    const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
+    const activeTab = parseSettingsTab(searchParams.get("tab"));
+    const [gitOneTimeToken, setGitOneTimeToken] = useState<string | null>(null);
+    const [projectName, setProjectName] = useState<string | null>(null);
     const [settings, setSettings] = useState<LlmSettingsResponse | null>(null);
     const [draft, setDraft] = useState<LlmCurrentSettings | null>(null);
     const [search, setSearch] = useState("");
@@ -142,6 +185,25 @@ export default function SettingsPage() {
             stopOAuthPolling();
         };
     }, [retryKey]);
+
+    useEffect(() => {
+        let active = true;
+        const load = () => {
+            getProject(projectId)
+                .then((result) => {
+                    if (active) setProjectName(result.project.name);
+                })
+                .catch(() => undefined);
+        };
+        load();
+        const unsubscribe = onInvalidate((event) => {
+            if (matchesInvalidation(event, "projects", projectId)) load();
+        });
+        return () => {
+            active = false;
+            unsubscribe();
+        };
+    }, [projectId]);
 
     function handleProvidersOpenChange(open: boolean) {
         setProvidersOpen(open);
@@ -297,217 +359,211 @@ export default function SettingsPage() {
     }
 
     async function copyDeviceCode(code: string) {
-        try {
-            await navigator.clipboard.writeText(code);
-            if (oauthState) setProviderFeedback({ providerId: oauthState.providerId, type: "success", text: "Device code copied." });
-        } catch {
-            if (oauthState) setProviderFeedback({ providerId: oauthState.providerId, type: "error", text: "Device code could not be copied." });
-        }
+        const copied = await copyText(code);
+        if (!oauthState) return;
+        setProviderFeedback(copied
+            ? { providerId: oauthState.providerId, type: "success", text: "Device code copied." }
+            : { providerId: oauthState.providerId, type: "error", text: "Device code could not be copied. Select it and copy it manually." });
     }
 
-    if (loadError) {
-        return (
-            <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="Agent settings" eyebrow="Settings" />
-                <div className="flex flex-1 items-center justify-center px-5 py-10">
-                    <Alert variant="destructive" className="max-w-sm bg-transparent p-0 text-center" role="alert">
-                        <span className="mx-auto flex size-9 items-center justify-center rounded-lg bg-danger-soft text-danger">
-                            <AlertCircle size={18} />
-                        </span>
-                        <AlertTitle className="mt-4 text-sm text-ink">Settings could not load</AlertTitle>
-                        <AlertDescription className="mt-2 text-xs leading-5">{loadError}</AlertDescription>
-                        <Button type="button" onClick={() => setRetryKey((key) => key + 1)} className="mt-5">
-                            <RefreshCw size={13} /> Try again
-                        </Button>
-                    </Alert>
-                </div>
-            </div>
-        );
+    function selectTab(value: string) {
+        const tab = parseSettingsTab(value);
+        const params = new URLSearchParams(searchParams.toString());
+        if (tab === "general") params.delete("tab");
+        else params.set("tab", tab);
+        const query = params.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     }
 
-    if (!settings || !draft) {
-        return (
-            <div className="min-h-full bg-surface" aria-label="Loading agent settings" aria-busy="true" role="status">
-                <div className="h-16 border-b border-line md:h-[72px]" />
-                <div className="mx-auto w-full max-w-[720px] space-y-4 px-5 py-8">
-                    <Skeleton className="h-4 w-28 rounded-sm" />
-                    <Skeleton className="h-28 rounded-[11px] bg-surface-soft" />
-                    <Skeleton className="h-20 rounded-[11px] bg-surface-soft" />
-                </div>
-            </div>
-        );
-    }
-
-    const configuredProviders = settings.providers.filter((provider) => provider.configured);
-    const selectedProvider = settings.providers.find((provider) => provider.id === draft.provider);
-    const selectableProviders = configuredProviders.some((provider) => provider.id === draft.provider)
+    const configuredProviders = settings?.providers.filter((provider) => provider.configured) ?? [];
+    const selectedProvider = draft ? settings?.providers.find((provider) => provider.id === draft.provider) : undefined;
+    const selectableProviders = configuredProviders.some((provider) => provider.id === draft?.provider)
         ? configuredProviders
         : selectedProvider
           ? [selectedProvider, ...configuredProviders]
           : configuredProviders;
-    const filteredProviders = settings.providers.filter((provider) => {
+    const filteredProviders = (settings?.providers ?? []).filter((provider) => {
         const query = search.trim().toLowerCase();
         return !query || provider.name.toLowerCase().includes(query) || provider.id.toLowerCase().includes(query) || provider.models.some((model) => model.label.toLowerCase().includes(query));
     });
-    const hasChanges = draft.provider !== settings.current.provider || draft.model !== settings.current.model;
+    const hasChanges = Boolean(settings && draft && (draft.provider !== settings.current.provider || draft.model !== settings.current.model));
+
+    function renderModelUnavailable() {
+        if (loadError) {
+            return (
+                <div className="rounded-xl border border-line">
+                    <EmptyState
+                        icon={AlertCircle}
+                        tone="danger"
+                        role="alert"
+                        title="Model settings could not load"
+                        description={loadError}
+                        action={<Button type="button" onClick={() => setRetryKey((key) => key + 1)}><RefreshCw size={14} /> Try again</Button>}
+                    />
+                </div>
+            );
+        }
+        return (
+            <div className="space-y-10" aria-label="Loading model settings" aria-busy="true" role="status">
+                {[2, 1].map((rows, index) => (
+                    <div key={index}>
+                        <Skeleton className="mb-2 h-5 w-32" />
+                        <Skeleton className="mb-4 h-3.5 w-64" />
+                        <div className="rounded-xl border border-line">
+                            {Array.from({ length: rows }, (_, row) => (
+                                <div key={row} className="grid gap-3 border-b border-line px-5 py-4 last:border-0 md:grid-cols-[13rem_1fr] md:gap-8">
+                                    <Skeleton className="h-4 w-20 md:mt-2.5" />
+                                    <Skeleton className="h-9" />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    const modelReady = Boolean(selectedProvider?.configured && settings?.current.model);
 
     return (
         <Dialog open={providersOpen} onOpenChange={handleProvidersOpenChange}>
-            <div className="min-h-full bg-surface">
-                <PageHeader title="Agent settings" eyebrow="Settings" />
-                <Tabs defaultValue="general" className="mx-auto w-full max-w-[720px] px-4 py-7 sm:px-6 sm:py-8">
-                    <TabsList className="w-full justify-start gap-0 border-b border-line">
-                        <TabsTrigger value="general" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
-                            General
-                        </TabsTrigger>
-                        <TabsTrigger value="model" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
-                            Model
-                        </TabsTrigger>
-                        <TabsTrigger value="github" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
-                            GitHub
-                        </TabsTrigger>
-                        <TabsTrigger value="context" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
-                            Context
-                        </TabsTrigger>
-                        <TabsTrigger value="credentials" className="min-h-9 rounded-none px-3 text-[0.75rem] font-bold text-ink-soft data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]">
-                            Credentials
-                        </TabsTrigger>
-                    </TabsList>
+            <div className="flex min-h-full flex-col bg-surface">
+                <PageHeader
+                    title="Project settings"
+                    breadcrumbs={[{ label: projectName ?? "Project", href: `/p/${projectId}` }]}
+                    width="reading"
+                    bordered={false}
+                    className="pb-2 md:pb-3"
+                />
+                <Tabs value={activeTab} onValueChange={selectTab} className="flex-1">
+                    <div className="border-b border-line bg-surface px-4 md:px-8">
+                        <TabsList aria-label="Settings sections" className="mx-auto w-full max-w-reading border-b-0">
+                            {TAB_LABELS.map(([value, label]) => (
+                                <TabsTrigger key={value} value={value}>{label}</TabsTrigger>
+                            ))}
+                        </TabsList>
+                    </div>
 
-                    <TabsContent value="general" className="mt-6 flex-none">
-                        <ProjectSettingsCard projectId={projectId} />
-                    </TabsContent>
+                    <PageContainer width="reading" className="pb-16">
+                        <TabsContent value="general" className="flex-none">
+                            <ProjectSettingsCard projectId={projectId} />
+                        </TabsContent>
 
-                    <TabsContent value="model" className="mt-6 flex-none">
-                        <section aria-labelledby="agent-model-heading">
-                            <div className="flex items-end justify-between gap-4">
-                                <div>
-                                    <h2 id="agent-model-heading" className="text-[0.8125rem] font-bold">Agent model</h2>
-                                    <p className="mt-1 text-[0.65625rem] text-ink-faint">Provider and model used for every chat.</p>
-                                </div>
-                                <Badge variant={selectedProvider?.configured ? "success" : "pending"} className="gap-1.5 rounded-none bg-transparent p-0">
-                                    <span className={`size-1.5 rounded-full ${selectedProvider?.configured ? "bg-success" : "bg-pending"}`} />
-                                    {selectedProvider?.configured ? "Ready" : "Setup needed"}
-                                </Badge>
-                            </div>
-                            <Separator className="mt-3" />
-                            <form onSubmit={saveCurrentSettings} className="py-4">
-                                {configuredProviders.length === 0 && (
-                                    <Alert variant="warning" className="mb-3 flex items-center gap-2 py-2">
-                                        <KeyRound size={13} />
-                                        <AlertDescription>Connect a provider before selecting a model.</AlertDescription>
-                                    </Alert>
-                                )}
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    <div>
-                                        <Label htmlFor="current-provider" className="mb-1.5">Provider</Label>
-                                        <Select
-                                            value={selectableProviders.some((provider) => provider.id === draft.provider) ? draft.provider : ""}
-                                            onValueChange={selectProvider}
-                                            disabled={savingSettings || selectableProviders.length === 0}
-                                        >
-                                            <SelectTrigger id="current-provider">
-                                                <SelectValue placeholder={selectableProviders.length ? "Select provider" : "No provider connected"} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {selectableProviders.map((provider) => (
-                                                    <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                        <TabsContent value="model" className="flex-none">
+                            {!settings || !draft ? renderModelUnavailable() : (
+                                <div className="space-y-10">
+                                    <SettingsSection
+                                        id="agent-model-heading"
+                                        title="Agent model"
+                                        description="The provider and model every chat and discovery uses. Shared by all projects on this server."
+                                        actions={modelReady
+                                            ? <Badge variant="success"><Check size={13} strokeWidth={2.25} aria-hidden="true" /> Ready</Badge>
+                                            : <Badge variant="warning"><AlertTriangle size={13} strokeWidth={2.25} aria-hidden="true" /> Setup needed</Badge>}
+                                    >
+                                        <form onSubmit={saveCurrentSettings}>
+                                            <SettingsRow label="Provider" htmlFor="current-provider" description="Only connected providers are listed.">
+                                                <Select
+                                                    value={selectableProviders.some((provider) => provider.id === draft.provider) ? draft.provider : ""}
+                                                    onValueChange={selectProvider}
+                                                    disabled={savingSettings || selectableProviders.length === 0}
+                                                >
+                                                    <SelectTrigger id="current-provider">
+                                                        <SelectValue placeholder={selectableProviders.length ? "Select provider" : "No provider connected"} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {selectableProviders.map((provider) => (
+                                                            <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </SettingsRow>
+                                            <SettingsRow label="Model" htmlFor="current-model">
+                                                <Select
+                                                    value={selectedProvider?.models.some((model) => model.id === draft.model) ? draft.model : ""}
+                                                    onValueChange={(model) => {
+                                                        setDraft((current) => current ? { ...current, model } : current);
+                                                        setSettingsFeedback(null);
+                                                    }}
+                                                    disabled={savingSettings || !selectedProvider?.models.length}
+                                                >
+                                                    <SelectTrigger id="current-model">
+                                                        <SelectValue placeholder={selectedProvider?.models.length ? "Select model" : "No models available"} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {selectedProvider?.models.map((model) => (
+                                                            <SelectItem key={model.id} value={model.id}>{model.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </SettingsRow>
+                                            <SettingsFooter feedback={settingsFeedback ? <InlineFeedback feedback={settingsFeedback} /> : hasChanges ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}>
+                                                <Button type="submit" disabled={savingSettings || !hasChanges || !draft.provider || !draft.model}>
+                                                    {savingSettings ? "Saving..." : "Save model"}
+                                                </Button>
+                                            </SettingsFooter>
+                                        </form>
+                                    </SettingsSection>
+
+                                    <SettingsSection
+                                        id="providers-heading"
+                                        title="Connected providers"
+                                        description="API keys and subscription tokens stay in the self-hosted runtime."
+                                        actions={
+                                            <Button ref={manageProvidersRef} type="button" variant="outline" onClick={openProviders}>
+                                                <Settings2 size={14} /> Manage providers
+                                            </Button>
+                                        }
+                                    >
+                                        {configuredProviders.length ? (
+                                            <ul>
+                                                {configuredProviders.map((provider) => (
+                                                    <li key={provider.id} className="flex min-h-14 items-center gap-3 border-b border-line px-4 py-2.5 last:border-0 sm:px-5">
+                                                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-success-soft text-success">
+                                                            <Check size={15} strokeWidth={2.25} aria-hidden="true" />
+                                                        </span>
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="truncate text-control font-medium text-ink">{provider.name}</p>
+                                                            <p className="truncate text-meta text-ink-subtle">{modelCountLabel(provider.models.length)} · {providerAuthLabel(provider)}</p>
+                                                        </div>
+                                                        {provider.id === settings.current.provider && <Badge variant="secondary" size="sm">In use</Badge>}
+                                                    </li>
                                                 ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="current-model" className="mb-1.5">Model</Label>
-                                        <Select
-                                            value={selectedProvider?.models.some((model) => model.id === draft.model) ? draft.model : ""}
-                                            onValueChange={(model) => {
-                                                setDraft((current) => current ? { ...current, model } : current);
-                                                setSettingsFeedback(null);
-                                            }}
-                                            disabled={savingSettings || !selectedProvider?.models.length}
-                                        >
-                                            <SelectTrigger id="current-model">
-                                                <SelectValue placeholder={selectedProvider?.models.length ? "Select model" : "No models available"} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {selectedProvider?.models.map((model) => (
-                                                    <SelectItem key={model.id} value={model.id}>{model.label}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                                <div className="mt-3 flex min-h-8 items-center justify-between gap-3">
-                                    <div className="min-w-0 flex-1">
-                                        {settingsFeedback && (
-                                            <Alert
-                                                variant={settingsFeedback.type === "error" ? "destructive" : "default"}
-                                                className={`bg-transparent p-0 text-[0.65625rem] ${settingsFeedback.type === "success" ? "text-success" : ""}`}
-                                                role={settingsFeedback.type === "error" ? "alert" : "status"}
-                                            >
-                                                <AlertDescription className="flex items-center gap-1.5">
-                                                    {settingsFeedback.type === "success" ? <Check size={12} /> : <AlertCircle size={12} />}
-                                                    {settingsFeedback.text}
-                                                </AlertDescription>
-                                            </Alert>
+                                            </ul>
+                                        ) : (
+                                            <EmptyState
+                                                size="compact"
+                                                icon={KeyRound}
+                                                title="No provider connected"
+                                                description="Connect one to let the agent chat, explore, and write Specs."
+                                                action={<Button type="button" variant="outline" size="sm" onClick={openProviders}>Open provider manager</Button>}
+                                            />
                                         )}
-                                    </div>
-                                    <Button type="submit" disabled={savingSettings || !hasChanges || !draft.provider || !draft.model}>
-                                        {savingSettings ? "Saving..." : "Save model"}
-                                    </Button>
+                                    </SettingsSection>
                                 </div>
-                            </form>
-                            <Separator />
-                        </section>
+                            )}
+                        </TabsContent>
 
-                        <section className="mt-7" aria-labelledby="providers-heading">
-                            <div className="flex items-end justify-between gap-4">
-                                <div>
-                                    <h2 id="providers-heading" className="text-[0.8125rem] font-bold">Connected providers</h2>
-                                    <p className="mt-1 text-[0.65625rem] text-ink-faint">Credentials stay in the self-hosted runtime.</p>
-                                </div>
-                                <Button ref={manageProvidersRef} type="button" variant="outline" onClick={openProviders} className="shrink-0">
-                                    <Settings2 size={13} />
-                                    <span className="sm:hidden">Manage</span>
-                                    <span className="hidden sm:inline">Manage providers</span>
-                                </Button>
+                        <TabsContent value="git" className="flex-none">
+                            <div className="space-y-10">
+                                <GitRemoteAccess projectId={projectId} oneTimeToken={gitOneTimeToken} onOneTimeTokenChange={setGitOneTimeToken} />
+                                <GitHubConnection projectId={projectId} />
                             </div>
-                            <div className="mt-3 border-y border-line">
-                                {configuredProviders.length ? configuredProviders.map((provider) => (
-                                    <div key={provider.id} className="flex min-h-11 items-center gap-3 border-b border-line px-1 last:border-0">
-                                        <span className="size-2 rounded-full bg-success" />
-                                        <span className="min-w-0 flex-1 truncate text-[0.71875rem] font-bold">{provider.name}</span>
-                                        <span className="text-[0.625rem] text-ink-faint">{modelCountLabel(provider.models.length)}</span>
-                                    </div>
-                                )) : (
-                                    <div className="py-5 text-center">
-                                        <p className="text-[0.71875rem] font-bold">No provider connected</p>
-                                        <Button type="button" variant="link" size="sm" onClick={openProviders} className="mt-1 h-auto p-0 text-[0.65625rem] text-ink-soft">
-                                            Open provider manager
-                                        </Button>
-                                    </div>
-                                )}
-                            </div>
-                        </section>
-                    </TabsContent>
+                        </TabsContent>
 
-                    <TabsContent value="github" className="mt-6 flex-none">
-                        <GitHubConnection projectId={projectId} />
-                    </TabsContent>
+                        <TabsContent value="context" className="flex-none">
+                            <ContextFileCard projectId={projectId} />
+                        </TabsContent>
 
-                    <TabsContent value="context" className="mt-6 flex-none">
-                        <ContextFileCard projectId={projectId} />
-                    </TabsContent>
-
-                    <TabsContent value="credentials" className="mt-6 flex-none">
-                        <CredentialProfilesCard projectId={projectId} />
-                    </TabsContent>
+                        <TabsContent value="credentials" className="flex-none">
+                            <CredentialProfilesCard projectId={projectId} />
+                        </TabsContent>
+                    </PageContainer>
                 </Tabs>
             </div>
 
             <DialogContent
                 showCloseButton={false}
-                className="h-[min(82dvh,660px)] w-[min(640px,calc(100%-24px))] max-w-[640px] overflow-hidden p-0"
+                className="h-[min(82dvh,660px)] w-[min(640px,calc(100%-24px))] max-w-[640px] overflow-hidden p-0 sm:p-0"
                 onPointerDownOutside={(event) => event.preventDefault()}
                 onOpenAutoFocus={(event) => {
                     event.preventDefault();
@@ -522,18 +578,18 @@ export default function SettingsPage() {
                 }}
             >
                 <div className="flex h-full min-h-0 flex-col">
-                    <DialogHeader className="shrink-0 gap-0 bg-surface px-4 py-3.5">
+                    <DialogHeader className="shrink-0 gap-0 px-5 pt-5 pb-4 pr-5">
                         <div className="flex items-start justify-between gap-4">
                             <div>
                                 <DialogTitle>Provider manager</DialogTitle>
-                                <DialogDescription className="mt-1 text-[0.65625rem] leading-normal text-ink-faint">
-                                    Connect an API key or supported subscription.
+                                <DialogDescription className="mt-1">
+                                    Connect an API key or a supported subscription.
                                 </DialogDescription>
                             </div>
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <DialogClose asChild>
-                                        <Button type="button" variant="ghost" size="icon" aria-label="Close provider manager">
+                                        <Button type="button" variant="ghost" size="icon-sm" aria-label="Close provider manager" className="-mt-1 -mr-1">
                                             <X size={16} />
                                         </Button>
                                     </DialogClose>
@@ -543,14 +599,14 @@ export default function SettingsPage() {
                         </div>
                         <div className="relative mt-3">
                             <Label className="sr-only" htmlFor="provider-search">Search providers</Label>
-                            <Search size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-ink-faint" />
+                            <Search size={14} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-subtle" />
                             <Input
                                 ref={searchInputRef}
                                 id="provider-search"
                                 type="search"
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                className="pl-8"
+                                className="pl-9"
                                 placeholder="Search providers or models"
                             />
                         </div>
@@ -572,26 +628,22 @@ export default function SettingsPage() {
                                             if (open !== expanded) toggleProvider(provider);
                                         }}
                                     >
-                                        <section className="border-b border-line last:border-0">
+                                        <section className="border-b border-line py-1 last:border-0">
                                             <CollapsibleTrigger asChild>
-                                                <Button type="button" variant="ghost" className="h-auto min-h-11 w-full justify-start gap-2.5 px-2 text-left">
-                                                    <span className={`size-2 shrink-0 rounded-full ${provider.configured ? "bg-success" : "bg-line-strong"}`} />
+                                                <Button type="button" variant="ghost" className="h-auto min-h-14 w-full justify-start gap-3 rounded-lg px-3 py-2.5 text-left text-ink hover:text-ink">
                                                     <span className="min-w-0 flex-1">
-                                                        <span className="block truncate text-[0.71875rem] font-bold">{provider.name}</span>
-                                                        <span className="mt-0.5 block text-[0.59375rem] font-normal text-ink-faint">
-                                                            <span className="block truncate">{modelCountLabel(provider.models.length)} · {providerAuthLabel(provider)}</span>
-                                                        </span>
+                                                        <span className="block truncate text-control font-medium">{provider.name}</span>
+                                                        <span className="mt-0.5 block truncate text-meta font-normal text-ink-subtle">{modelCountLabel(provider.models.length)} · {providerAuthLabel(provider)}</span>
                                                     </span>
-                                                    <Badge
-                                                        variant={provider.configured ? "success" : "secondary"}
-                                                        className={`rounded-none bg-transparent p-0 text-[0.59375rem] ${provider.configured ? "text-success" : "text-ink-faint"}`}
-                                                    >
-                                                        {provider.configured ? "Connected" : "Not connected"}
-                                                    </Badge>
-                                                    {expanded ? <ChevronDown size={13} className="text-ink-faint" /> : <ChevronRight size={13} className="text-ink-faint" />}
+                                                    {provider.configured ? (
+                                                        <Badge variant="success" size="sm"><Check size={12} strokeWidth={2.25} aria-hidden="true" /> Connected</Badge>
+                                                    ) : (
+                                                        <span className="text-meta font-normal text-ink-subtle">Not connected</span>
+                                                    )}
+                                                    <ChevronRight size={14} aria-hidden="true" className={`text-ink-subtle transition-transform duration-150 motion-reduce:transition-none ${expanded ? "rotate-90" : ""}`} />
                                                 </Button>
                                             </CollapsibleTrigger>
-                                            <CollapsibleContent className="mx-2 mb-2 rounded-lg bg-surface-soft p-3">
+                                            <CollapsibleContent className="mx-1 mb-2 rounded-lg border border-line bg-surface-soft p-4">
                                                 <Tabs
                                                     value={authMethod}
                                                     onValueChange={(method) => {
@@ -600,12 +652,11 @@ export default function SettingsPage() {
                                                     }}
                                                 >
                                                     {provider.authMethods.length > 1 && (
-                                                        <TabsList className="mb-3 w-full justify-start gap-1 border-b border-line">
+                                                        <TabsList variant="segmented" aria-label="Authentication method" className="mb-4 w-fit self-start">
                                                             {provider.authMethods.map((method) => (
                                                                 <TabsTrigger
                                                                     key={method}
                                                                     value={method}
-                                                                    className="min-h-8 rounded-none px-2 text-[0.65625rem] data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--color-primary)]"
                                                                 >
                                                                     {method === "api_key" ? "API key" : "Subscription"}
                                                                 </TabsTrigger>
@@ -641,7 +692,7 @@ export default function SettingsPage() {
                                                                         <TooltipContent>{showApiKey ? "Hide API key" : "Show API key"}</TooltipContent>
                                                                     </Tooltip>
                                                                 </div>
-                                                                <Button type="submit" disabled={!apiKey.trim() || busy}>
+                                                                <Button type="submit" variant={provider.configured ? "outline" : "default"} disabled={!apiKey.trim() || busy}>
                                                                     {busy ? "Saving..." : provider.configured ? "Replace" : "Save key"}
                                                                 </Button>
                                                             </div>
@@ -649,138 +700,141 @@ export default function SettingsPage() {
                                                     </TabsContent>
                                                     <TabsContent value="oauth">
                                                         {!oauth && (
-                                                            <Button type="button" onClick={() => startOAuth(provider.id)}>
-                                                                <Link2 size={13} /> Connect subscription
-                                                            </Button>
+                                                            <div className="space-y-3">
+                                                                <p className="text-control text-ink-muted">Sign in with your {provider.name} subscription in a new browser tab. Specbook stores the resulting token in the runtime.</p>
+                                                                <Button type="button" onClick={() => startOAuth(provider.id)}>
+                                                                    <Link2 size={14} /> Connect subscription
+                                                                </Button>
+                                                            </div>
                                                         )}
                                                         {oauth?.status === "starting" && (
-                                                            <p className="flex items-center gap-2 text-[0.65625rem] text-ink-soft">
-                                                                <span className="status-pulse size-1.5 rounded-full bg-ink" /> Starting authentication
+                                                            <p className="flex items-center gap-2 text-control text-ink-muted" role="status">
+                                                                <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> Starting authentication...
                                                             </p>
                                                         )}
-                                                         {oauth?.status === "pending" && (
-                                                             <div className="space-y-3">
-                                                                 {oauth.url && (
-                                                                     <Button asChild>
-                                                                         <a href={oauth.url} target="_blank" rel="noopener noreferrer">
-                                                                             Open authorization page <ExternalLink size={12} />
-                                                                         </a>
-                                                                     </Button>
-                                                                 )}
-                                                                 {oauth.userCode && (
-                                                                     <div className="max-w-sm">
-                                                                         <p className="text-[0.65625rem] font-bold">Device code</p>
-                                                                         <div className="mt-2 flex gap-2">
-                                                                             <code className="flex min-h-9 min-w-0 flex-1 items-center justify-center break-all rounded-md bg-primary-soft px-3 font-mono text-[0.875rem] font-bold tracking-[0.14em]">
-                                                                                 {oauth.userCode}
-                                                                             </code>
-                                                                             <Tooltip>
-                                                                                 <TooltipTrigger asChild>
-                                                                                     <Button type="button" variant="outline" size="icon-lg" onClick={() => copyDeviceCode(oauth.userCode!)} className="size-9" aria-label="Copy device code">
-                                                                                         <Clipboard size={13} />
-                                                                                     </Button>
-                                                                                 </TooltipTrigger>
-                                                                                 <TooltipContent>Copy device code</TooltipContent>
-                                                                             </Tooltip>
-                                                                         </div>
-                                                                     </div>
-                                                                 )}
-                                                                 {oauth.verificationUri && (
-                                                                     <Button asChild variant="link" className="h-8 px-0 text-[0.65625rem]">
-                                                                         <a href={oauth.verificationUri} target="_blank" rel="noopener noreferrer">
-                                                                             Open verification page <ExternalLink size={11} />
-                                                                         </a>
-                                                                     </Button>
-                                                                 )}
-                                                                 {oauth.prompt?.type === "select" && oauth.sessionId && (
-                                                                     <div className="max-w-sm space-y-1.5">
-                                                                         <Label>{oauth.prompt.message}</Label>
-                                                                         <Select onValueChange={(value) => selectOAuthOption(provider.id, oauth.sessionId!, value)}>
-                                                                             <SelectTrigger>
-                                                                                 <SelectValue placeholder="Choose an option" />
-                                                                             </SelectTrigger>
-                                                                             <SelectContent>
-                                                                                 {oauth.prompt.options.map((option) => (
-                                                                                     <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
-                                                                                 ))}
-                                                                             </SelectContent>
-                                                                         </Select>
-                                                                     </div>
-                                                                 )}
-                                                                 {(oauth.prompt?.type === "text" || oauth.prompt?.type === "secret" || oauth.prompt?.type === "manual_code") && oauth.sessionId && (
-                                                                     <form onSubmit={(event) => submitOAuthInput(event, provider.id, oauth.sessionId!)} className="max-w-sm space-y-1.5">
-                                                                         <Label htmlFor={`oauth-input-${provider.id}`}>{oauth.prompt.message}</Label>
-                                                                         <div className="flex gap-2">
-                                                                             <Input id={`oauth-input-${provider.id}`} type={oauth.prompt.type === "secret" ? "password" : "text"} value={manualOAuthInput} onChange={(event) => setManualOAuthInput(event.target.value)} className="min-w-0 flex-1" placeholder={oauth.prompt.placeholder} />
-                                                                             <Button type="submit" variant="outline" disabled={!manualOAuthInput.trim() || busy}>{busy ? "Submitting..." : "Submit"}</Button>
-                                                                         </div>
-                                                                     </form>
-                                                                 )}
-                                                                 {!oauth.url && !oauth.userCode && !oauth.prompt && (
-                                                                     <p className="text-[0.65625rem] text-ink-faint">Waiting for authentication instructions...</p>
-                                                                 )}
-                                                             </div>
-                                                         )}
+                                                        {oauth?.status === "pending" && (
+                                                            <div className="space-y-4">
+                                                                {(oauth.url || oauth.verificationUri) && (
+                                                                    <div className="flex gap-3">
+                                                                        <StepNumber>1</StepNumber>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <p className="text-control font-medium text-ink">Open the authorization page</p>
+                                                                            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                                                                                {oauth.url && (
+                                                                                    <Button asChild>
+                                                                                        <a href={oauth.url} target="_blank" rel="noopener noreferrer">
+                                                                                            Open authorization page <ExternalLink size={13} />
+                                                                                        </a>
+                                                                                    </Button>
+                                                                                )}
+                                                                                {oauth.verificationUri && (
+                                                                                    <Button asChild variant={oauth.url ? "link" : "default"} className={oauth.url ? "text-control" : undefined}>
+                                                                                        <a href={oauth.verificationUri} target="_blank" rel="noopener noreferrer">
+                                                                                            Open verification page <ExternalLink size={13} />
+                                                                                        </a>
+                                                                                    </Button>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {oauth.userCode && (
+                                                                    <div className="flex gap-3">
+                                                                        <StepNumber>{oauth.url || oauth.verificationUri ? 2 : 1}</StepNumber>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <p className="text-control font-medium text-ink">Enter this device code</p>
+                                                                            <div className="mt-2 flex max-w-sm gap-2">
+                                                                                <code className="flex min-h-11 min-w-0 flex-1 select-all items-center justify-center break-all rounded-md border border-line-strong bg-surface px-3 font-mono text-section tracking-[0.18em] text-ink">
+                                                                                    {oauth.userCode}
+                                                                                </code>
+                                                                                <Tooltip>
+                                                                                    <TooltipTrigger asChild>
+                                                                                        <Button type="button" variant="outline" size="icon" onClick={() => copyDeviceCode(oauth.userCode!)} className="size-11" aria-label="Copy device code">
+                                                                                            <Clipboard size={15} />
+                                                                                        </Button>
+                                                                                    </TooltipTrigger>
+                                                                                    <TooltipContent>Copy device code</TooltipContent>
+                                                                                </Tooltip>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {oauth.prompt?.type === "select" && oauth.sessionId && (
+                                                                    <div className="max-w-sm space-y-1.5">
+                                                                        <Label>{oauth.prompt.message}</Label>
+                                                                        <Select onValueChange={(value) => selectOAuthOption(provider.id, oauth.sessionId!, value)}>
+                                                                            <SelectTrigger>
+                                                                                <SelectValue placeholder="Choose an option" />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {oauth.prompt.options.map((option) => (
+                                                                                    <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </div>
+                                                                )}
+                                                                {(oauth.prompt?.type === "text" || oauth.prompt?.type === "secret" || oauth.prompt?.type === "manual_code") && oauth.sessionId && (
+                                                                    <form onSubmit={(event) => submitOAuthInput(event, provider.id, oauth.sessionId!)} className="max-w-sm space-y-1.5">
+                                                                        <Label htmlFor={`oauth-input-${provider.id}`}>{oauth.prompt.message}</Label>
+                                                                        <div className="flex gap-2">
+                                                                            <Input id={`oauth-input-${provider.id}`} type={oauth.prompt.type === "secret" ? "password" : "text"} value={manualOAuthInput} onChange={(event) => setManualOAuthInput(event.target.value)} className="min-w-0 flex-1" placeholder={oauth.prompt.placeholder} />
+                                                                            <Button type="submit" variant="outline" disabled={!manualOAuthInput.trim() || busy}>{busy ? "Submitting..." : "Submit"}</Button>
+                                                                        </div>
+                                                                    </form>
+                                                                )}
+                                                                <p className="flex items-center gap-2 text-meta text-ink-muted" role="status">
+                                                                    <LoaderCircle size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                                                                    {!oauth.url && !oauth.userCode && !oauth.prompt ? "Waiting for authentication instructions..." : "Waiting for you to finish in the browser..."}
+                                                                </p>
+                                                            </div>
+                                                        )}
                                                         {oauth?.status === "done" && (
-                                                            <Alert className="bg-transparent p-0 text-[0.65625rem] font-bold text-success" role="status">
-                                                                <AlertDescription className="flex items-center gap-1.5">
-                                                                    <Check size={12} /> Provider connected
-                                                                </AlertDescription>
-                                                            </Alert>
+                                                            <InlineFeedback feedback={{ type: "success", text: "Provider connected." }} />
                                                         )}
                                                         {oauth?.status === "error" && (
-                                                            <div>
-                                                                <Alert variant="destructive" className="bg-transparent p-0 text-[0.65625rem]" role="alert">
-                                                                    <AlertDescription>{oauth.error ?? "Authentication failed."}</AlertDescription>
+                                                            <div className="space-y-3">
+                                                                <Alert variant="danger" role="alert">
+                                                                    <AlertTitle>Authentication failed</AlertTitle>
+                                                                    <AlertDescription>{oauth.error ?? "The provider did not complete the sign-in."}</AlertDescription>
                                                                 </Alert>
-                                                                <Button type="button" variant="outline" onClick={() => startOAuth(provider.id)} className="mt-2">
-                                                                    <RefreshCw size={12} /> Try again
+                                                                <Button type="button" variant="outline" onClick={() => startOAuth(provider.id)}>
+                                                                    <RefreshCw size={14} /> Try again
                                                                 </Button>
                                                             </div>
                                                         )}
                                                     </TabsContent>
                                                 </Tabs>
-                                                <div className="mt-3 flex min-h-7 items-center justify-between gap-3 border-t border-line pt-2">
-                                                    <div className="min-w-0 flex-1">
-                                                        {feedback && (
-                                                            <Alert
-                                                                variant={feedback.type === "error" ? "destructive" : "default"}
-                                                                className={`bg-transparent p-0 text-[0.625rem] ${feedback.type === "success" ? "text-success" : ""}`}
-                                                                role={feedback.type === "error" ? "alert" : "status"}
+                                                {(feedback || provider.configured) && (
+                                                    <div className="mt-4 flex min-h-8 flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+                                                        <div className="min-w-0 flex-1">
+                                                            {feedback && !(oauth?.status === "done" && feedback.type === "success") && <InlineFeedback feedback={feedback} />}
+                                                        </div>
+                                                        {provider.configured && (
+                                                            <Button
+                                                                type="button"
+                                                                variant="destructive-soft"
+                                                                size="sm"
+                                                                onClick={() => removeProvider(provider.id)}
+                                                                disabled={busy}
                                                             >
-                                                                <AlertDescription>{feedback.text}</AlertDescription>
-                                                            </Alert>
+                                                                <Unplug size={13} /> Remove authentication
+                                                            </Button>
                                                         )}
                                                     </div>
-                                                    {provider.configured && (
-                                                        <Button
-                                                            type="button"
-                                                            variant="link"
-                                                            size="sm"
-                                                            onClick={() => removeProvider(provider.id)}
-                                                            disabled={busy}
-                                                            className="px-1 text-[0.625rem] text-danger"
-                                                        >
-                                                            Remove authentication
-                                                        </Button>
-                                                    )}
-                                                </div>
+                                                )}
                                             </CollapsibleContent>
                                         </section>
                                     </Collapsible>
                                 );
                             })}
                             {filteredProviders.length === 0 && (
-                                <div className="py-10 text-center">
-                                    <Search size={18} className="mx-auto text-ink-faint" />
-                                    <p className="mt-3 text-xs font-bold">No providers found</p>
-                                    <p className="mt-1 text-[0.65625rem] text-ink-faint">Try another name or model.</p>
-                                </div>
+                                <EmptyState size="compact" icon={Search} title="No providers found" description="Try another provider or model name." className="py-10" />
                             )}
                         </div>
                     </ScrollArea>
                     <Separator />
-                    <DialogFooter className="flex-row justify-end gap-0 bg-surface px-4 py-3">
+                    <DialogFooter className="flex-row justify-end gap-0 bg-surface-soft px-5 py-3">
                         <DialogClose asChild>
                             <Button type="button" variant="outline">Close</Button>
                         </DialogClose>

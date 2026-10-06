@@ -6,9 +6,11 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { WS_URL } from "@/lib/api";
 
-export function VncViewer({ vncSessionId }: { vncSessionId: string }) {
+export type VncStatus = "connecting" | "connected" | "error";
+
+export function VncViewer({ vncSessionId, onStatusChange }: { vncSessionId: string; onStatusChange?: (status: VncStatus) => void }) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
+    const [status, setStatus] = useState<VncStatus>("connecting");
     const [error, setError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
 
@@ -42,7 +44,7 @@ export function VncViewer({ vncSessionId }: { vncSessionId: string }) {
                 const { default: noVNC } = await import("@novnc/novnc");
                 if (cancelled || !containerRef.current) return;
                 connection = new noVNC(containerRef.current, `${WS_URL}/vnc/${encodeURIComponent(vncSessionId)}`, { shared: true });
-                connection.background = getComputedStyle(document.documentElement).getPropertyValue("--color-browser").trim() || "#11110f";
+                connection.background = getComputedStyle(document.documentElement).getPropertyValue("--color-browser").trim() || "black";
                 connection.scaleViewport = true;
                 connection.viewOnly = true;
                 connection.addEventListener("connect", handleConnect);
@@ -68,24 +70,35 @@ export function VncViewer({ vncSessionId }: { vncSessionId: string }) {
         };
     }, [retryKey, vncSessionId]);
 
+    useEffect(() => {
+        onStatusChange?.(status);
+    }, [onStatusChange, status]);
+
     return (
         <div className="relative h-full min-h-0 w-full overflow-hidden bg-browser">
             <div ref={containerRef} className="h-full w-full overflow-hidden" />
             {status === "connecting" && (
-                <div className="absolute inset-0 flex items-center justify-center bg-browser text-[0.6875rem] font-medium text-white/75" role="status">
-                    <span className="status-pulse mr-2 size-1.5 rounded-full bg-white" />
-                    Connecting to live browser
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-browser text-control text-white/70" role="status">
+                    <span className="flex gap-1" aria-hidden="true">
+                        <span className="status-pulse size-1.5 rounded-full bg-white/80" />
+                        <span className="status-pulse size-1.5 rounded-full bg-white/80 [animation-delay:200ms]" />
+                        <span className="status-pulse size-1.5 rounded-full bg-white/80 [animation-delay:400ms]" />
+                    </span>
+                    Connecting to the live browser
                 </div>
             )}
             {status === "error" && (
                 <div className="absolute inset-0 flex items-center justify-center bg-browser px-5 text-center">
-                    <Alert className="max-w-sm bg-transparent p-0 text-white" role="alert">
-                        <AlertCircle className="mx-auto mb-3 text-white/70" size={22} />
-                        <p className="mb-4 text-[0.71875rem] leading-5 text-white/80">{error}</p>
+                    <Alert className="max-w-xs border-0 bg-transparent p-0 text-white" role="alert">
+                        <span className="mx-auto mb-3 flex size-9 items-center justify-center rounded-full bg-white/10">
+                            <AlertCircle className="text-white/80" size={18} aria-hidden="true" />
+                        </span>
+                        <p className="mb-4 text-control text-white/80">{error}</p>
                         <Button
                             type="button"
+                            size="sm"
                             onClick={() => setRetryKey((key) => key + 1)}
-                            className="min-h-11 bg-white px-3 text-xs text-ink hover:bg-canvas md:min-h-9"
+                            className="bg-white text-black shadow-none hover:bg-white/85 focus-visible:ring-white focus-visible:ring-offset-browser"
                         >
                             <RefreshCw size={13} /> Reconnect
                         </Button>

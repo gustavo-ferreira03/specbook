@@ -19,9 +19,9 @@ function TooltipTrigger(props: React.ComponentProps<typeof TooltipPrimitive.Trig
 function TooltipContent({ className, sideOffset = 6, children, ...props }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
     return (
         <TooltipPrimitive.Portal>
-            <TooltipPrimitive.Content data-slot="tooltip-content" sideOffset={sideOffset} className={cn("z-[70] rounded-md bg-primary px-2 py-1 text-[0.625rem] font-semibold text-white data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0 data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1", className)} {...props}>
+            <TooltipPrimitive.Content data-slot="tooltip-content" sideOffset={sideOffset} className={cn("z-[70] max-w-64 rounded-md bg-inverse px-2 py-1 text-meta font-medium text-inverse-foreground shadow-popover data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0 data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1", className)} {...props}>
                 {children}
-                <TooltipPrimitive.Arrow className="fill-primary" />
+                <TooltipPrimitive.Arrow className="fill-inverse" />
             </TooltipPrimitive.Content>
         </TooltipPrimitive.Portal>
     );

@@ -1,32 +1,117 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
-import { MessageSquareText } from "lucide-react";
-import { LogoMark } from "@/components/LogoMark";
-import { PageHeader } from "@/components/PageHeader";
+import { use, useEffect, useState } from "react";
+import { AlertCircle, ChevronRight, MessageSquareText, Plus, RefreshCw } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { RelativeTime } from "@/components/RelativeTime";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { errorMessage, isAbortError, listProjectChats } from "@/lib/api";
+import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
+import type { Chat } from "@/lib/types";
 
 export default function ChatsHome({ params }: { params: Promise<{ projectId: string }> }) {
     const { projectId } = use(params);
+    const [chats, setChats] = useState<Chat[] | null>(null);
+    const [error, setError] = useState("");
+    const [refreshKey, setRefreshKey] = useState(0);
+    const newChatHref = `/p/${projectId}/chats/new`;
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const load = () => {
+            listProjectChats(projectId, controller.signal)
+                .then(({ chats: result }) => {
+                    setChats(result);
+                    setError("");
+                })
+                .catch((loadError) => {
+                    if (!isAbortError(loadError)) setError(errorMessage(loadError));
+                });
+        };
+        load();
+        const stop = onInvalidate((event) => {
+            if (matchesInvalidation(event, "chats", projectId)) load();
+        });
+        return () => {
+            controller.abort();
+            stop();
+        };
+    }, [projectId, refreshKey]);
+
+    const newChatButton = (
+        <Button asChild>
+            <Link href={newChatHref}><Plus size={14} /> New chat</Link>
+        </Button>
+    );
+
     return (
         <div className="flex min-h-full flex-col bg-surface">
-            <PageHeader title="Chats" eyebrow="Project" description="Describe behavior, clarify intent, and turn the result into a Spec." />
-            <div className="flex flex-1 items-center justify-center px-5 py-10">
-                <div className="max-w-[420px] text-center">
-                    <LogoMark className="mx-auto size-9" />
-                    <h2 className="mt-4 text-xl font-bold tracking-[-0.03em]">Choose a conversation</h2>
-                    <p className="mt-2 text-xs leading-5 text-ink-soft">
-                        Describe a behavior in a chat while the agent operates a live browser, or pick up an
-                        existing one from the sidebar.
-                    </p>
-                    <Button asChild className="mt-5">
-                        <Link href={`/p/${projectId}/chats/new`}>
-                            <MessageSquareText size={13} /> Start chat
-                        </Link>
-                    </Button>
+            <PageHeader
+                title="Chats"
+                description="Describe behavior, clarify intent, and turn the result into a Spec."
+                actions={chats && chats.length > 0 ? newChatButton : undefined}
+                width="chat"
+            />
+            {error && !chats ? (
+                <div className="flex flex-1 items-center justify-center">
+                    <EmptyState
+                        role="alert"
+                        tone="danger"
+                        icon={AlertCircle}
+                        title="Chats could not load"
+                        description={error}
+                        action={
+                            <Button type="button" onClick={() => setRefreshKey((key) => key + 1)}>
+                                <RefreshCw size={14} /> Try again
+                            </Button>
+                        }
+                    />
                 </div>
-            </div>
+            ) : !chats ? (
+                <PageContainer width="chat">
+                    <div className="space-y-2" aria-busy="true" aria-label="Loading chats" role="status">
+                        {[0, 1, 2].map((row) => <Skeleton key={row} className="h-[60px] w-full rounded-lg" />)}
+                    </div>
+                </PageContainer>
+            ) : chats.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center">
+                    <EmptyState
+                        icon={MessageSquareText}
+                        title="No chats yet"
+                        description="Describe a behavior while the agent operates a live browser, and save the result as a Spec."
+                        action={
+                            <Button asChild>
+                                <Link href={newChatHref}><MessageSquareText size={14} /> Start chat</Link>
+                            </Button>
+                        }
+                    />
+                </div>
+            ) : (
+                <PageContainer width="chat">
+                    <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line" aria-label="Chats">
+                        {chats.map((chat) => (
+                            <li key={chat.id}>
+                                <Link
+                                    href={`/p/${projectId}/chats/${chat.id}`}
+                                    className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+                                >
+                                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-hover text-ink-muted" aria-hidden="true">
+                                        <MessageSquareText size={14} />
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-body font-medium text-ink">{chat.title}</span>
+                                        <RelativeTime value={chat.createdAt} prefix="Started" className="block text-meta text-ink-subtle" />
+                                    </span>
+                                    <ChevronRight size={15} className="shrink-0 text-ink-disabled transition-colors group-hover:text-ink-muted" aria-hidden="true" />
+                                </Link>
+                            </li>
+                        ))}
+                    </ul>
+                </PageContainer>
+            )}
         </div>
     );
 }

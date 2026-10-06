@@ -1,8 +1,12 @@
+import { invalidate, resourceForPath } from "./invalidation";
 import type {
+    Chat,
+    ChatState,
     CredentialFieldInput,
     CredentialProfile,
     Feature,
     GitStatus,
+    GitRemoteAccess,
     GitSyncOutcome,
     HumanSpec,
     LlmCurrentSettings,
@@ -14,29 +18,139 @@ import type {
     ProjectContext,
     ProjectContextRevision,
     ProjectContextState,
+    ProjectTree,
+    Run,
     RunBatch,
+    RunEvidence,
     SpecDetail,
 } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
 export const WS_URL = API_URL.replace(/^http/, "ws");
 
+export class ApiError extends Error {
+    readonly status: number;
+    readonly code?: string;
+
+    constructor(message: string, status: number, code?: string) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+        this.code = code;
+    }
+}
+
+export const SERVER_UNREACHABLE_MESSAGE = "Can't reach the Specbook server. Check that the backend is running, then try again.";
+
+export function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === "AbortError";
+}
+
+export function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+/** Builds an API path, encoding every interpolated value: apiPath`/specs/${id}/run`. */
+export function apiPath(strings: TemplateStringsArray, ...values: (string | number)[]): string {
+    return strings.reduce((path, part, index) => path + part + (index < values.length ? encodeURIComponent(String(values[index])) : ""), "");
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+    const method = (init?.method ?? "GET").toUpperCase();
     const headers = new Headers(init?.headers);
     if (init?.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+    if (method !== "GET" && method !== "HEAD") headers.set("X-Specbook-Request", "1");
 
-    const response = await fetch(`${API_URL}${path}`, { ...init, headers });
-    if (!response.ok) {
-        const text = await response.text();
-        let message = text;
-        try {
-            const body = JSON.parse(text) as { error?: string; message?: string };
-            message = body.error ?? body.message ?? text;
-        } catch {}
-        throw new Error(message || `Request failed with status ${response.status}`);
+    let response: Response;
+    try {
+        response = await fetch(`${API_URL}${path}`, { ...init, headers });
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0, "network_error");
     }
+    if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        let message = text;
+        let code: string | undefined;
+        try {
+            const body = JSON.parse(text) as { error?: string; message?: string; code?: string };
+            message = body.error ?? body.message ?? text;
+            code = typeof body.code === "string" ? body.code : undefined;
+        } catch {}
+        throw new ApiError(message || `Request failed with status ${response.status}`, response.status, code);
+    }
+    if (method !== "GET" && method !== "HEAD") invalidate({ resource: resourceForPath(path) });
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
+}
+
+export function listProjects(signal?: AbortSignal): Promise<{ projects: Project[] }> {
+    return api("/projects", { signal });
+}
+
+export function getProject(projectId: string, signal?: AbortSignal): Promise<{ project: Project }> {
+    return api(apiPath`/projects/${projectId}`, { signal });
+}
+
+export function getProjectTree(projectId: string, signal?: AbortSignal): Promise<ProjectTree> {
+    return api(apiPath`/projects/${projectId}/tree`, { signal });
+}
+
+export function listProjectChats(projectId: string, signal?: AbortSignal): Promise<{ chats: Chat[] }> {
+    return api(apiPath`/projects/${projectId}/chats`, { signal });
+}
+
+export function getHealth(signal?: AbortSignal): Promise<{ ok: boolean }> {
+    return api("/health", { signal });
+}
+
+export function getChat(chatId: string, signal?: AbortSignal): Promise<ChatState> {
+    return api(apiPath`/chats/${chatId}`, { signal });
+}
+
+export function sendChatMessage(chatId: string, text: string): Promise<{ ok: true }> {
+    return api(apiPath`/chats/${chatId}/message`, { method: "POST", body: JSON.stringify({ text }) });
+}
+
+export function chatEventsUrl(chatId: string): string {
+    return `${API_URL}${apiPath`/chats/${chatId}/events`}`;
+}
+
+export function deleteChat(chatId: string): Promise<void> {
+    return api(apiPath`/chats/${chatId}`, { method: "DELETE" });
+}
+
+export function getSpec(specId: string, options: { limit?: number; signal?: AbortSignal } = {}): Promise<SpecDetail> {
+    const query = options.limit ? `?limit=${options.limit}` : "";
+    return api(`${apiPath`/specs/${specId}`}${query}`, { signal: options.signal });
+}
+
+export function runSpec(specId: string): Promise<{ run: Run }> {
+    return api(apiPath`/specs/${specId}/run`, { method: "POST" });
+}
+
+export function deleteSpec(specId: string): Promise<void> {
+    return api(apiPath`/specs/${specId}`, { method: "DELETE" });
+}
+
+export function deleteFeature(featureId: string): Promise<void> {
+    return api(apiPath`/features/${featureId}`, { method: "DELETE" });
+}
+
+export function getRunEvidence(runId: string, signal?: AbortSignal): Promise<RunEvidence> {
+    return api(apiPath`/runs/${runId}/evidence`, { signal });
+}
+
+/** Reads a small text artifact of a run (such as its spec.ts); null when the run did not keep it. */
+export async function getRunArtifactText(runId: string, file: string, signal?: AbortSignal): Promise<string | null> {
+    let response: Response;
+    try {
+        response = await fetch(`${API_URL}${apiPath`/runs/${runId}/artifacts/`}${file.split("/").map(encodeURIComponent).join("/")}`, { signal });
+    } catch (error) {
+        if (isAbortError(error)) throw error;
+        return null;
+    }
+    return response.ok ? response.text() : null;
 }
 
 export interface DiscoveryBriefInput {
@@ -84,8 +198,8 @@ export function startRunBatch(projectId: string, specIds: string[], label: strin
     });
 }
 
-export function getRunBatch(batchId: string): Promise<{ batch: RunBatch; reportUrl: string | null }> {
-    return api(`/run-batches/${encodeURIComponent(batchId)}`);
+export function getRunBatch(batchId: string, signal?: AbortSignal): Promise<{ batch: RunBatch; reportUrl: string | null }> {
+    return api(`/run-batches/${encodeURIComponent(batchId)}`, { signal });
 }
 
 export function updateProject(
@@ -131,6 +245,18 @@ export function getProjectGit(projectId: string): Promise<{ git: GitStatus }> {
     return api(`/projects/${encodeURIComponent(projectId)}/git`);
 }
 
+export function getProjectGitRemote(projectId: string): Promise<{ remote: GitRemoteAccess }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git/remote`);
+}
+
+export function issueProjectGitRemoteToken(projectId: string): Promise<{ token: string; remote: GitRemoteAccess }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git/remote/token`, { method: "POST" });
+}
+
+export function revokeProjectGitRemoteToken(projectId: string): Promise<{ remote: GitRemoteAccess }> {
+    return api(`/projects/${encodeURIComponent(projectId)}/git/remote/token`, { method: "DELETE" });
+}
+
 export function connectProjectGit(
     projectId: string,
     remoteUrl: string,
@@ -169,7 +295,7 @@ export function getSpecHistory(specId: string): Promise<{
 export function getSpecAtCommit(
     specId: string,
     sha: string,
-): Promise<{ yaml: string | null; robot: string | null }> {
+): Promise<{ yaml: string | null; testSource: string | null; legacyRobotSource: string | null }> {
     return api(`/specs/${encodeURIComponent(specId)}/history/${encodeURIComponent(sha)}`);
 }
 
@@ -220,7 +346,7 @@ export function submitLlmProviderOAuthInput(providerId: string, sessionId: strin
     });
 }
 
-export function updateSpecFiles(specId: string, input: { yaml?: string; robot?: string }): Promise<SpecDetail> {
+export function updateSpecFiles(specId: string, input: { yaml?: string; testSource?: string }): Promise<SpecDetail> {
     return api(`/specs/${encodeURIComponent(specId)}/files`, {
         method: "PUT",
         body: JSON.stringify(input),

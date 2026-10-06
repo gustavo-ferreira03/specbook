@@ -25,7 +25,7 @@ function AlertDialogContent({ className, ...props }: React.ComponentProps<typeof
     return (
         <AlertDialogPortal>
             <AlertDialogOverlay />
-            <AlertDialogPrimitive.Content data-slot="alert-dialog-content" className={cn("fixed top-1/2 left-1/2 z-[60] max-h-[calc(100dvh-24px)] w-[calc(100%-24px)] max-w-[430px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[13px] border border-line-strong bg-surface text-ink outline-none [overflow-wrap:anywhere] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95", className)} {...props} />
+            <AlertDialogPrimitive.Content data-slot="alert-dialog-content" className={cn("fixed top-1/2 left-1/2 z-[60] max-h-[calc(100dvh-24px)] w-[calc(100%-24px)] max-w-[430px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-line bg-surface-raised text-ink shadow-dialog outline-none duration-150 [overflow-wrap:anywhere] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95", className)} {...props} />
         </AlertDialogPortal>
     );
 }
@@ -39,11 +39,11 @@ function AlertDialogFooter({ className, ...props }: React.ComponentProps<"div">)
 }
 
 function AlertDialogTitle({ className, ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Title>) {
-    return <AlertDialogPrimitive.Title data-slot="alert-dialog-title" className={cn("text-[0.8125rem] font-bold", className)} {...props} />;
+    return <AlertDialogPrimitive.Title data-slot="alert-dialog-title" className={cn("text-section font-semibold text-ink", className)} {...props} />;
 }
 
 function AlertDialogDescription({ className, ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Description>) {
-    return <AlertDialogPrimitive.Description data-slot="alert-dialog-description" className={cn("text-[0.6875rem] leading-5 text-ink-soft", className)} {...props} />;
+    return <AlertDialogPrimitive.Description data-slot="alert-dialog-description" className={cn("text-control leading-5 text-ink-muted", className)} {...props} />;
 }
 
 function AlertDialogAction({ className, ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
