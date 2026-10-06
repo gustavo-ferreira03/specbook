@@ -83,8 +83,6 @@ function Dot() {
     return <span aria-hidden="true" className="text-ink-disabled">·</span>;
 }
 
-/* ------------------------------------------------------------------ status banner */
-
 function FailureReason({ reason, tone = "danger" }: { reason: string; tone?: "danger" | "invalid" }) {
     return (
         <pre className={cn("mt-3 max-h-48 overflow-auto rounded-lg px-3 py-2.5 font-mono text-meta whitespace-pre-wrap break-words", tone === "invalid" ? "bg-invalid-soft text-invalid" : "bg-danger-soft text-danger")}>
@@ -213,8 +211,6 @@ function VerificationBanner({
     );
 }
 
-/* ------------------------------------------------------------------ specification */
-
 function BulletList({ items, empty }: { items: string[]; empty: string }) {
     if (items.length === 0) return <p className="mt-2 text-body text-ink-subtle">{empty}</p>;
     return (
@@ -278,8 +274,6 @@ function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
         </div>
     );
 }
-
-/* ------------------------------------------------------------------ verification history */
 
 function EvidenceGallery({ runId, evidence, onSelect }: { runId: string; evidence: RunEvidence; onSelect: (step: RunEvidence["steps"][number]) => void }) {
     if (evidence.steps.length === 0) return null;
@@ -414,8 +408,6 @@ function RunEntry({
         </li>
     );
 }
-
-/* ------------------------------------------------------------------ edit form */
 
 function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: React.ReactNode }) {
     return (

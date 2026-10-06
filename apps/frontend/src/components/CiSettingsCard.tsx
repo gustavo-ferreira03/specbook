@@ -18,7 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { API_URL, api, apiPath, errorMessage, isAbortError } from "@/lib/api";
 import { CI_PROVIDERS, ciSnippet, type CiProvider } from "@/lib/ci-snippets";
 import { copyText, selectElementText } from "@/lib/clipboard";
-import { formatDuration } from "@/lib/format";
+import { countLabel, formatDuration } from "@/lib/format";
 
 interface CiAccess {
     configured: boolean;
@@ -229,9 +229,9 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                             {result.batch.ci.buildUrl && <a href={result.batch.ci.buildUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-ink-muted hover:underline">View build<ExternalLink size={12} /></a>}
                         </div>
                         <p className="break-all font-mono text-meta text-ink-subtle">{result.batch.baseUrl}</p>
-                        {(result.qualityGate.flaky > 0 || result.qualityGate.knownBugs > 0) && <p className="text-meta text-ink-muted">{[result.qualityGate.flaky > 0 && `${result.qualityGate.flaky} flaky`, result.qualityGate.knownBugs > 0 && `${result.qualityGate.knownBugs} known ${result.qualityGate.knownBugs === 1 ? "bug" : "bugs"}`].filter(Boolean).join(" · ")}</p>}
+                        {(result.qualityGate.flaky > 0 || result.qualityGate.knownBugs > 0) && <p className="text-meta text-ink-muted">{[result.qualityGate.flaky > 0 && `${result.qualityGate.flaky} flaky`, result.qualityGate.knownBugs > 0 && countLabel(result.qualityGate.knownBugs, "known bug")].filter(Boolean).join(" · ")}</p>}
                         <details className="text-body">
-                            <summary className="cursor-pointer text-ink-muted hover:text-ink">{result.results.length} {result.results.length === 1 ? "Spec" : "Specs"} · View evidence</summary>
+                            <summary className="cursor-pointer text-ink-muted hover:text-ink">{countLabel(result.results.length, "Spec")} · View evidence</summary>
                             <ul className="mt-2 space-y-2">{result.results.map((item) => <li key={item.runId} className="flex flex-wrap items-center justify-between gap-2"><a href={item.url} className="min-w-0 break-words text-ink hover:underline">{item.title}</a><StatusPill status={item.status} kind="run" size="sm" /></li>)}</ul>
                         </details>
                     </li>

@@ -24,8 +24,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { RelativeTime } from "@/components/RelativeTime";
 import { SectionHeader } from "@/components/SectionHeader";
-import { StatusPill } from "@/components/StatusPill";
-import { SummaryStrip } from "@/components/SummaryStrip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -43,6 +41,7 @@ import {
     getLlmRuntimeStatus,
     patchProjectContext,
 } from "@/lib/api";
+import { countLabel } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
 
@@ -259,7 +258,7 @@ function ContextPanel({
                         {draft.brief.goal && <p className="mt-2 line-clamp-2 text-body text-ink-muted" title={draft.brief.goal}>{draft.brief.goal}</p>}
                         {draft.brief.safetyNotes.length > 0 && (
                             <div className="mt-3">
-                                <p className="text-meta text-ink-subtle">{draft.brief.safetyNotes.length} safety {draft.brief.safetyNotes.length === 1 ? "note" : "notes"}</p>
+                                <p className="text-meta text-ink-subtle">{countLabel(draft.brief.safetyNotes.length, "safety note")}</p>
                                 <ul className="mt-1 list-disc space-y-0.5 pl-4 text-meta text-ink-muted">
                                     {draft.brief.safetyNotes.map((note, index) => <li key={index}>{note}</li>)}
                                 </ul>
@@ -368,7 +367,6 @@ function ContextSkeleton() {
     );
 }
 
-/** What Specbook knows about the application: discovery, the draft to review and the confirmed context. */
 export default function ProjectContextPage({ params }: { params: Promise<{ projectId: string }> }) {
     const { canEdit } = useAuth();
     const { projectId } = use(params);

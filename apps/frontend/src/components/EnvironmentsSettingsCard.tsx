@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
-import { InlineFeedback, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
+import { InlineFeedback, SettingsFooter, SettingsRow, SettingsSection, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, apiPath, errorMessage, getEnvironments } from "@/lib/api";
+import { api, apiPath, errorMessage, getEnvironments, listCredentialProfiles } from "@/lib/api";
 import type { CredentialProfile, ProjectEnvironment } from "@/lib/types";
 
 const blank = { name: "", baseUrl: "", allowedOrigins: [], credentialOverrides: {} };
@@ -20,12 +20,12 @@ export function EnvironmentsSettingsCard({ projectId }: { projectId: string }) {
     const [draft, setDraft] = useState<Omit<ProjectEnvironment, "id" | "projectId">>(blank);
     const [origins, setOrigins] = useState("");
     const [busy, setBusy] = useState(false);
-    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [feedback, setFeedback] = useState<InlineFeedbackValue | null>(null);
     const [deleting, setDeleting] = useState<ProjectEnvironment | null>(null);
     const returnFocusRef = useRef<HTMLElement | null>(null);
     const load = useCallback(async () => {
         try {
-            const [saved, credentials] = await Promise.all([getEnvironments(projectId), api<{ profiles: CredentialProfile[] }>(apiPath`/projects/${projectId}/credentials`)]);
+            const [saved, credentials] = await Promise.all([getEnvironments(projectId), listCredentialProfiles(projectId)]);
             setEnvironments(saved.environments);
             setProfiles(credentials.profiles);
         } catch (error) { setFeedback({ type: "error", text: errorMessage(error) }); }

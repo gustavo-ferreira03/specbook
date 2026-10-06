@@ -37,6 +37,11 @@ export function formatNumber(value: number): string {
     return numberFormatter.format(value);
 }
 
+/** "1 Spec", "3 Specs" */
+export function countLabel(count: number, noun: string, plural = `${noun}s`): string {
+    return `${count} ${count === 1 ? noun : plural}`;
+}
+
 const relativeFormatter = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
 const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
     ["second", 60],

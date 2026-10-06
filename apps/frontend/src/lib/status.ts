@@ -44,7 +44,6 @@ const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
     not_checked: { label: "Not run", runLabel: "Not run", description: "There is no completed run for the current Spec.", tone: "neutral", icon: CircleDashed },
 };
 
-/** Shared empty-state copy for every Spec list. */
 export const NO_SPECS_DESCRIPTION = "Describe a behavior in a chat and the agent saves it here as a Spec.";
 
 export function statusMeta(status: string): StatusMeta {

@@ -34,6 +34,7 @@ import {
     sendChatMessage,
 } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { countLabel } from "@/lib/format";
 import type { ChatMessage, ChatState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { LiveBrowser, originOf, useWideLayout } from "./live-browser";
@@ -92,7 +93,6 @@ const MessageContent = memo(function MessageContent({ content }: { content: stri
     );
 });
 
-/** The assistant's small label: the plain logo mark in a hairline circle. */
 function AgentAvatar() {
     return (
         <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-line bg-surface" aria-hidden="true">
@@ -993,7 +993,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                         <span>
                                             {activeTool ? activeToolLabel(activeTool) : agentStatus || "Thinking through the request"}
                                             {state.queue.followUp > 0 && (
-                                                <span className="text-ink-subtle"> · {state.queue.followUp} follow-up{state.queue.followUp === 1 ? "" : "s"} queued</span>
+                                                <span className="text-ink-subtle"> · {countLabel(state.queue.followUp, "follow-up")} queued</span>
                                             )}
                                         </span>
                                     </div>
