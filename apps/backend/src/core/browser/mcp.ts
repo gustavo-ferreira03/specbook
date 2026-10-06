@@ -5,6 +5,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { SPEC_VIEWPORT } from "../runner/playwright";
 import { minimalChildEnv } from "../runner/process";
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./vnc";
 
@@ -24,6 +25,14 @@ const ALLOWED_TOOLS = new Set([
     "browser_wait_for",
     "browser_handle_dialog",
     "browser_tabs",
+    "browser_drag",
+    "browser_take_screenshot",
+    "browser_mouse_move_xy",
+    "browser_mouse_click_xy",
+    "browser_mouse_drag_xy",
+    "browser_mouse_down",
+    "browser_mouse_up",
+    "browser_mouse_wheel",
 ]);
 
 export interface BrowserToolPolicy {
@@ -31,6 +40,8 @@ export interface BrowserToolPolicy {
     beforeCall?: (toolName: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<void>;
     afterCall?: (toolName: string, args: Record<string, unknown>, result: string, signal?: AbortSignal) => Promise<void>;
     sanitizeResult?: (text: string) => Promise<string> | string;
+    /** Screenshots reach the model only when this resolves to true. */
+    sendScreenshots?: () => Promise<boolean>;
 }
 
 export interface BrowserMcp {
@@ -80,7 +91,8 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string;
     const config = {
         browser: {
             browserName: "chromium",
-            ...(opts.navigationOrigins ? { initPage: [initPage], contextOptions: { serviceWorkers: "block" } } : {}),
+            ...(opts.navigationOrigins ? { initPage: [initPage] } : {}),
+            contextOptions: { viewport: SPEC_VIEWPORT, ...(opts.navigationOrigins ? { serviceWorkers: "block" } : {}) },
             userDataDir,
             launchOptions: {
                 headless: false,
@@ -96,7 +108,7 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string;
                 ],
             },
         },
-        capabilities: ["core", "storage"],
+        capabilities: ["core", "storage", "vision"],
     };
     const configPath = path.join(opts.workDir, "mcp-config.json");
     await fs.writeFile(configPath, JSON.stringify(config), "utf8");
@@ -175,6 +187,13 @@ function extractMcpText(result: { content?: unknown }): string {
         .trim();
 }
 
+function mcpImages(result: { content?: unknown }): { type: "image"; data: string; mimeType: string }[] {
+    const content = Array.isArray(result.content) ? (result.content as { type?: string; data?: unknown; mimeType?: unknown }[]) : [];
+    return content
+        .filter((item) => item.type === "image" && typeof item.data === "string" && typeof item.mimeType === "string")
+        .map((item) => ({ type: "image" as const, data: item.data as string, mimeType: item.mimeType as string }));
+}
+
 export async function renderMcpResult(result: { content?: unknown }, workDir: string): Promise<string> {
     return inlineSnapshots(extractMcpText(result), workDir);
 }
@@ -221,6 +240,8 @@ export function bridgeBrowserTools(
                 async execute(_id, params, signal) {
                     signal?.throwIfAborted();
                     const args = (params ?? {}) as Record<string, unknown>;
+                    // A named screenshot is only written to disk; without a name it is returned as an image.
+                    if (tool.name === "browser_take_screenshot") delete args.filename;
                     const clean = async (value: string) =>
                         policy?.sanitizeResult ? await policy.sanitizeResult(value) : value;
                     const toolError = async (text: string) => ({
@@ -239,10 +260,12 @@ export function bridgeBrowserTools(
                     }
                     let resultText = "";
                     let callError = "";
+                    let images: { type: "image"; data: string; mimeType: string }[] = [];
                     try {
                         signal?.throwIfAborted();
                         const result = await mcp.client.callTool({ name: tool.name, arguments: args }, undefined, { signal });
                         resultText = await renderMcpResult(result as { content?: unknown }, workDir);
+                        images = mcpImages(result as { content?: unknown });
                         if (result.isError) callError = `browser tool failed: ${resultText || "The browser returned an error without details."}`;
                     } catch (error) {
                         callError = `browser tool failed: ${String(error)}`;
@@ -259,8 +282,10 @@ export function bridgeBrowserTools(
                     }
                     signal?.throwIfAborted();
                     if (callError) return toolError(callError);
+                    const sendImages = images.length > 0 && (await policy?.sendScreenshots?.()) === true;
+                    if (images.length > 0 && !sendImages) resultText += "\nThe screenshot was withheld: screenshots are not sent to the model in this instance's security settings.";
                     return {
-                        content: [{ type: "text" as const, text: (await clean(resultText)) || "(no output)" }],
+                        content: [{ type: "text" as const, text: (await clean(resultText)) || "(no output)" }, ...(sendImages ? images : [])],
                         details: undefined,
                         terminate: false,
                     };
