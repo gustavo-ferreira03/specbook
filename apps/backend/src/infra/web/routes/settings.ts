@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { configuredModel, llmCredentials, modelRegistryPromise, modelRuntimePromise } from "../../../core/llm/runtime";
-import { providerFailure, providerFailureMessage } from "../../../core/jobs/presentation-errors";
+import { providerFailure, oauthFailureMessage } from "../../../core/jobs/presentation-errors";
 import { settingsRepository } from "../../repositories/settings";
 import { pauseAgentJobs, resumeAgentJobs } from "../../../core/jobs/worker";
 
@@ -121,7 +121,7 @@ async function saveOAuthCredentials(id: string): Promise<void> {
 }
 
 function failOAuthSession(id: string, error: unknown): void {
-    finishOAuthSession(id, "error", providerFailureMessage(error));
+    finishOAuthSession(id, "error", oauthFailureMessage(error));
 }
 
 function waitForPromptInput(session: OAuthSession): Promise<string> {
@@ -173,8 +173,8 @@ function createOAuthInteraction(id: string, session: OAuthSession): AuthInteract
 }
 
 function startOAuthLogin(id: string, session: OAuthSession, modelRuntime: ModelRuntime): void {
-    void modelRuntime
-        .login(session.provider, "oauth", createOAuthInteraction(id, session))
+    void settingsRepository.getLlmDeviceId()
+        .then((deviceId) => modelRuntime.login(session.provider, "oauth", createOAuthInteraction(id, session), { getDeviceId: () => deviceId }))
         .then(() => saveOAuthCredentials(id))
         .catch((error) => failOAuthSession(id, error));
 }

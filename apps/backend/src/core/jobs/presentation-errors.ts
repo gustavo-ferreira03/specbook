@@ -27,6 +27,29 @@ export function providerFailureMessage(error: unknown): string {
     return `${failure.message} ${failure.nextStep}`;
 }
 
+export function oauthFailureMessage(error: unknown): string {
+    const text = error instanceof Error ? error.message : String(error);
+    if (/EADDRINUSE|Port 1455 is in use/i.test(text)) {
+        return "Another sign-in is using the callback port (1455). Finish or cancel it, then try again.";
+    }
+    if (/OAuth state mismatch/i.test(text)) {
+        return "This sign-in link has been replaced or expired. Start sign-in again and use the new link.";
+    }
+    if (/callback URL|Missing authorization code|Missing OAuth state|callback did not contain an issued client ID/i.test(text)) {
+        return "Paste the complete address from the final sign-in page, then try again.";
+    }
+    if (/requires a device ID/i.test(text)) {
+        return "Specbook could not initialize sign-in. Restart Specbook and try again.";
+    }
+    if (/cancelled|canceled|session expired|AbortError/i.test(text)) {
+        return "Sign-in was cancelled or expired. Start sign-in again.";
+    }
+    const failure = providerFailure(error);
+    if (failure.code === "provider_auth") return "The provider could not authorize sign-in. Start sign-in again and check your account's access.";
+    if (failure.code !== "provider_error") return `${failure.message} ${failure.nextStep}`;
+    return "Sign-in could not be completed. Start sign-in again.";
+}
+
 export function browserFailureMessage(error: unknown): string {
     const text = error instanceof Error ? `${error.message} ${error.cause ?? ""}` : String(error);
     if (/ENOENT|executable doesn't exist|command not found/i.test(text)) {

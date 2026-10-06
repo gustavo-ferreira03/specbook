@@ -1,0 +1,1 @@
+ALTER TABLE `app_settings` ADD `llm_device_id` text;

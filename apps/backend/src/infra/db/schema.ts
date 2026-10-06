@@ -203,6 +203,7 @@ export const chatSessions = sqliteTable(
 export const appSettings = sqliteTable("app_settings", {
     id: integer("id").primaryKey(),
     llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),
+    llmDeviceId: text("llm_device_id"),
     agentPaused: integer("agent_paused", { mode: "boolean" }).notNull().default(false),
     sso: text("sso", { mode: "json" }).$type<import("../../core/accounts/schemas").SsoSettings>(),
     retention: text("retention", { mode: "json" }).$type<import("../../core/operations/schemas").RetentionSettings>(),

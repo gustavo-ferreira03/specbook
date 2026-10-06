@@ -1,6 +1,7 @@
 import type { SecuritySettings } from "../../core/chat/safety-settings";
 import { retentionSettingsSchema, type RetentionCleanup, type RetentionSettings } from "../../core/operations/schemas";
-import { eq } from "drizzle-orm";
+import crypto from "node:crypto";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { appSettings, type LlmSettings } from "../db/schema";
 
@@ -59,6 +60,15 @@ class SettingsRepository {
             provider: typeof llm?.provider === "string" ? llm.provider : this.defaults.provider,
             model: typeof llm?.model === "string" ? llm.model : this.defaults.model,
         };
+    }
+
+    async getLlmDeviceId(): Promise<string> {
+        const deviceId = crypto.randomUUID();
+        const [row] = await db.insert(appSettings)
+            .values({ id: SETTINGS_ID, llm: this.defaults, llmDeviceId: deviceId, updatedAt: new Date().toISOString() })
+            .onConflictDoUpdate({ target: appSettings.id, set: { llmDeviceId: sql`coalesce(${appSettings.llmDeviceId}, ${deviceId})` } })
+            .returning({ deviceId: appSettings.llmDeviceId });
+        return row.deviceId!;
     }
 
     async updateLlmSettings(llm: LlmSettings): Promise<LlmSettings> {

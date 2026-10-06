@@ -64,7 +64,7 @@ describe("environment credential profiles", () => {
 
 describe("conversation failure messages", () => {
     test("provider and browser errors give a next step without exposing their raw response", async () => {
-        const { providerFailure, browserFailureMessage, sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
+        const { providerFailure, oauthFailureMessage, browserFailureMessage, sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
         for (const [input, code] of [["429 quota exceeded", "provider_limit"], ["401 invalid API key sk-secret", "provider_auth"], ["model_not_found", "provider_model"], ["ETIMEDOUT /home/server/private", "provider_connection"]]) {
             const failure = providerFailure(input);
             assert.equal(failure.code, code);
@@ -76,6 +76,12 @@ describe("conversation failure messages", () => {
         assert.match(browserFailureMessage(new Error("Server is already active for display 118")), /display is already in use/);
         assert.match(browserFailureMessage(new Error("EACCES /var/private")), /denied permission/);
         assert.doesNotMatch(browserFailureMessage(new Error("Xvfb failed")), /retry automatically/);
+        assert.match(oauthFailureMessage(new Error("Sign in with ChatGPT requires a device ID (UUID) for this installation")), /initialize sign-in/);
+        assert.match(oauthFailureMessage(new Error("Port 1455 is in use")), /Finish or cancel it/);
+        assert.match(oauthFailureMessage(new Error("OAuth state mismatch")), /new link/);
+        assert.equal(oauthFailureMessage(new Error("Paste the full callback URL from the browser")), "Paste the complete address from the final sign-in page, then try again.");
+        assert.match(oauthFailureMessage(new Error("OAuth session expired")), /Start sign-in again/);
+        assert.doesNotMatch(oauthFailureMessage(new Error("OpenAI OAuth token request failed (401): sk-secret /home/server/private")), /sk-secret|\/home\/server|complete this response|global Settings/);
         const details = sanitizeTechnicalDetails("Expected https://example.com/app/profile but got /home/server/storage/run/spec.ts\n    at click (/data/specbook/src/core/runner/guard.ts:1)");
         assert.match(details, /https:\/\/example.com\/app\/profile/);
         assert.doesNotMatch(details, /\/home\/server|\/data\/specbook|at click/);

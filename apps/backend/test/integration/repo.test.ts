@@ -338,9 +338,15 @@ describe("first-run setup", () => {
         assert.equal(started.status, 200);
         const { sessionId } = await started.json() as { sessionId: string };
         assert.match(sessionId, /^[0-9a-f-]{36}$/);
-        const polled = await setup.request(`/settings/llm/providers/openai/oauth/poll?sessionId=${sessionId}`);
-        assert.equal(polled.status, 200);
-        assert.deepEqual(await polled.json(), { status: "done", url: "https://auth.example.com/sign-in" });
+        let result: { status: string; url?: string } | undefined;
+        for (let attempt = 0; attempt < 100; attempt++) {
+            const polled = await setup.request(`/settings/llm/providers/openai/oauth/poll?sessionId=${sessionId}`);
+            assert.equal(polled.status, 200);
+            result = await polled.json() as { status: string; url?: string };
+            if (result.status !== "pending") break;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.deepEqual(result, { status: "done", url: "https://auth.example.com/sign-in" });
         assert.equal(login.mock.callCount(), 1);
 
         const apiOnly = providers.find((provider) => provider.authMethods.length === 1 && provider.authMethods[0] === "api_key");
