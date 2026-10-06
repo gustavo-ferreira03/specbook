@@ -62,6 +62,7 @@ const markdown = (value: string) => value.replace(/[\\`*_{}[\]<>|]/g, "\\$&").re
 
 export function markdownResult(result: CiResult): string {
     const lines = [`## Specbook: ${result.status}`, "", `[View results](${result.url})`, ""];
+    if (result.batch.environment) lines.push(`Environment: ${markdown(result.batch.environment.name)}`, "");
     if (result.batch.ci?.commitSha) lines.push(`Commit: ${markdown(result.batch.ci.commitSha)}`, "");
     if (result.batch.ci?.ref) lines.push(`Ref: ${markdown(result.batch.ci.ref)}`, "");
     lines.push("| Spec | Result |", "| --- | --- |");

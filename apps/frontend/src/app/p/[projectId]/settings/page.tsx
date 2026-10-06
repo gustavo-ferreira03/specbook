@@ -13,15 +13,16 @@ import { GitRemoteAccess } from "@/components/GitRemoteAccess";
 import { RepositoryRecovery } from "@/components/RepositoryRecovery";
 import { ProjectSettingsCard } from "@/components/ProjectSettingsCard";
 import { AutomationSettingsCard } from "@/components/AutomationSettingsCard";
+import { EnvironmentsSettingsCard } from "@/components/EnvironmentsSettingsCard";
 import { CiSettingsCard } from "@/components/CiSettingsCard";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProject } from "@/lib/api";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 
-const SETTINGS_TABS = ["general", "git", "context", "credentials", "automation", "ci"] as const;
+const SETTINGS_TABS = ["general", "environments", "git", "context", "credentials", "automation", "ci"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
-const TAB_LABELS: [SettingsTab, string][] = [["general", "General"], ["git", "Git"], ["context", "Context"], ["credentials", "Credentials"], ["automation", "Automation"], ["ci", "CI/CD"]];
+const TAB_LABELS: [SettingsTab, string][] = [["general", "General"], ["environments", "Environments"], ["git", "Git"], ["context", "Context"], ["credentials", "Credentials"], ["automation", "Automation"], ["ci", "CI/CD"]];
 
 function SettingsContent() {
     const { canEdit, isAdmin } = useAuth();
@@ -62,6 +63,7 @@ function SettingsContent() {
             </div>
             <PageContainer width="reading" className="pb-16">
                 <TabsContent value="general"><ProjectSettingsCard projectId={projectId} /></TabsContent>
+                <TabsContent value="environments"><EnvironmentsSettingsCard projectId={projectId} /></TabsContent>
                 <TabsContent value="git"><div className="space-y-10"><RepositoryRecovery projectId={projectId} /><GitRemoteAccess projectId={projectId} oneTimeToken={gitToken} onOneTimeTokenChange={setGitToken} /></div></TabsContent>
                 <TabsContent value="context"><ContextFileCard projectId={projectId} /></TabsContent>
                 <TabsContent value="credentials"><CredentialProfilesCard projectId={projectId} /></TabsContent>

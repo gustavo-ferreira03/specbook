@@ -1,0 +1,1 @@
+ALTER TABLE `specs` ADD `lifecycle` text DEFAULT 'active' NOT NULL;

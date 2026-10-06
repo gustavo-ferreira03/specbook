@@ -156,6 +156,8 @@ export async function createFeatureInRepo(
 }
 
 export async function createSpecInRepo(input: {
+    id?: string;
+    lifecycle?: "draft" | "active";
     projectId: string;
     featureId: string;
     title: string;
@@ -171,7 +173,7 @@ export async function createSpecInRepo(input: {
             async () => {
                 const feature = await featuresRepository.getFeature(input.featureId);
                 if (!feature || feature.projectId !== input.projectId) throw new Error("Feature not found");
-                const id = crypto.randomUUID();
+                const id = input.id ?? crypto.randomUUID();
                 const slug = uniqueSlug(input.title, await siblingNames(input.projectId, feature.path), id);
                 const specPath = `${feature.path}/${slug}`;
                 const markdown = serializeSpecYaml({
@@ -190,6 +192,7 @@ export async function createSpecInRepo(input: {
                     title: input.title,
                     description: input.description,
                     status: validation.ok ? "unverified" : "invalid",
+                    lifecycle: input.lifecycle ?? "active",
                     path: specPath,
                     sourceHash: sourceHashOf(input.testSource),
                     markdownHash: markdownHashOf(markdown),

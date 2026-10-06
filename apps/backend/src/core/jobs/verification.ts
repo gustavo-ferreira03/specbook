@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { jobBaseUrl } from "./environment";
+import { jobBaseUrl, jobEnvironment } from "./environment";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
@@ -46,7 +46,8 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     if (stepsError) throw new Error(stepsError);
     const project = await projectsRepository.getProject(job.projectId);
     if (!project) throw new Error("Project not found");
-    const baseUrl = await jobBaseUrl(job) ?? project.baseUrl;
+    const environment = await jobEnvironment(job);
+    const baseUrl = environment.baseUrl;
     const spec = await specsRepository.getSpec(patch.specId);
     if (!spec || spec.projectId !== job.projectId) throw new Error("Spec no longer exists");
     const raw = await repoGit.withRepoLock(job.projectId, () => readSpecRawFiles(spec));
@@ -55,9 +56,9 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         throw new Error("Proposal is stale; inspect the current Spec and propose again");
     }
     const refs = analysis.analysis.secretRefs.map((ref) => ref.envName);
-    const { env: secretEnv, missing } = await resolveSecretEnv(job.projectId, refs);
+    const { env: secretEnv, missing } = await resolveSecretEnv(job.projectId, refs, environment.credentialOverrides);
     if (missing.length) throw new Error(`Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`);
-    const secretOrigins = await resolveSecretOriginPolicy(job.projectId, refs);
+    const secretOrigins = await resolveSecretOriginPolicy(job.projectId, refs, environment);
     const scrub = await projectSecretScrubber(job.projectId);
     const id = crypto.randomUUID();
     const directory = proposalDirectory(item, id);
@@ -70,7 +71,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         if (!current || current.status !== "running" || await isAgentPaused(job.projectId)) throw new Error("Job is no longer running");
         const remaining = current.limits.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
         if (remaining <= 0) throw new Error("The investigation has not reached a confirmed result");
-        return runPlaywrightSuite({ projectId: job.projectId, directory, baseUrl,
+        return runPlaywrightSuite({ projectId: job.projectId, directory, baseUrl, environment,
             specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, outputDir: directory }],
             timeoutMs: Math.min(120_000, remaining), secretEnv, secretOrigins, scrub, signal });
     }, signal);

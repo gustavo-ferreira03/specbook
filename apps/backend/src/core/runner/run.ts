@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { RunStatus } from "../../infra/db/schema";
+import { resolveRunEnvironment } from "../environments";
+import type { RunEnvironment, RunStatus } from "../../infra/db/schema";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
@@ -51,6 +52,7 @@ interface RunOptions {
     retryOf?: string;
     expected?: { sourceHash: string; markdownHash: string };
     baseUrl?: string;
+    environment?: string | RunEnvironment;
     signal?: AbortSignal;
 }
 
@@ -83,20 +85,21 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
     }
     const analysis = analyzeForRun(spec.title, testSource, markdown);
 
+    const environment = typeof options.environment === "object" ? options.environment : await resolveRunEnvironment(project.id, options.environment, options.baseUrl);
     const refs = analysis.secretRefs.map((ref) => ref.envName);
-    const { env: secretEnv, missing } = await resolveSecretEnv(spec.projectId, refs);
+    const { env: secretEnv, missing } = await resolveSecretEnv(spec.projectId, refs, environment.credentialOverrides);
     if (missing.length > 0) {
         throw new Error(
             `Spec "${spec.title}" references credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
         );
     }
-    const baseUrl = options.baseUrl ?? project.baseUrl;
-    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, refs);
+    const baseUrl = environment.baseUrl;
+    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, refs, environment);
     const scrub = await projectSecretScrubber(spec.projectId);
 
     const run = await runsRepository.createRun({
-        specId: spec.id, commitSha, sourceHash, automate: options.automate,
-        healOnFailure: options.healOnFailure, retryOf: options.retryOf, baseUrl,
+        specId: spec.id, commitSha, sourceHash, automate: spec.lifecycle === "active" && options.automate,
+        healOnFailure: spec.lifecycle === "active" && options.healOnFailure !== false, retryOf: options.retryOf, baseUrl, environment,
     });
     try {
         await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
@@ -124,6 +127,7 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
                 projectId: spec.projectId,
                 directory: outputDir,
                 baseUrl,
+                environment,
                 specs: [{ key: run.id, source: testSource, analysis, outputDir }],
                 timeoutMs: RUN_TIMEOUT_MS,
                 secretEnv,

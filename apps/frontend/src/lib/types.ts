@@ -8,6 +8,32 @@ export interface Project {
     createdAt: string;
 }
 
+export interface ProjectEnvironment {
+    id: string;
+    projectId: string;
+    name: string;
+    baseUrl: string;
+    allowedOrigins: string[];
+    credentialOverrides: Record<string, string>;
+}
+
+export interface SpecCandidate {
+    id: string;
+    title: string;
+    goal: string;
+    feature: string;
+    featureId?: string;
+    why: string;
+    selected?: boolean;
+    lifecycle?: "draft" | "active";
+    jobId?: string;
+    specId?: string;
+    runId?: string;
+    questionId?: string;
+    error?: string;
+    state: "proposed" | "queued" | "generating" | "needs_answer" | "passed" | "failed" | "stopped";
+}
+
 export interface GitAccessTokenInfo {
     hasToken: boolean;
     prefix: string | null;
@@ -38,6 +64,7 @@ export interface SpecSummary {
     featureId: string;
     title: string;
     status: SpecStatus;
+    lifecycle: "draft" | "active";
     /** Most recent run, or null when the Spec was never run. */
     lastRun: Run | null;
 }
@@ -57,6 +84,8 @@ export interface HumanSpec {
 }
 
 export interface Run {
+    baseUrl?: string | null;
+    environment?: ProjectEnvironment | null;
     id: string;
     retryOf: string | null;
     flaky: boolean;
@@ -78,6 +107,7 @@ export interface SpecDetail {
         title: string;
         description: string;
         status: SpecStatus;
+    lifecycle: "draft" | "active";
         path: string;
         sourceHash: string;
         markdownHash: string;
@@ -177,6 +207,8 @@ export interface ArtifactListing {
 }
 
 export interface RunEvidence {
+    environment?: ProjectEnvironment | null;
+    apiSteps?: { number: number; label: string; requests: { method: string; url: string; status: number | null; requestHeaders: Record<string, string>; requestBody?: string; responseHeaders?: Record<string, string>; responseBody?: string; error?: string }[] }[];
     expectedResult: string;
     steps: { number: number; label: string; file: string }[];
     video: string | null;
@@ -201,6 +233,8 @@ export interface RunBatchItem {
 }
 
 export interface RunBatch {
+    environment?: ProjectEnvironment;
+    baseUrl?: string;
     id: string;
     projectId: string;
     label: string;
@@ -280,11 +314,11 @@ export interface CredentialFieldInput {
 export interface InboxItem {
     id: string;
     jobId: string;
-    kind: "new_spec" | "spec_fix" | "feature" | "question" | "bug_report" | "note";
+    kind: "spec_batch" | "new_spec" | "spec_fix" | "feature" | "question" | "bug_report" | "note";
     status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
     title: string;
     body: string;
-    payload: { files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; checkTitles?: string[]; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
+    payload: { specBatch?: { sourceChatId: string; contextRevisionId?: string; contextReviewRequired?: boolean; candidates: SpecCandidate[] }; files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; checkTitles?: string[]; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
     answer: string | null;
     commitSha: string | null;
     createdAt: string;
@@ -303,7 +337,7 @@ export interface AgentSummary {
 
 export interface PresentedInboxItem extends InboxItem {
     presentation: {
-        type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
+        type: "batch" | "update" | "new_check" | "feature" | "bug" | "question" | "help";
         title: string;
         summary: string;
         workDone: string;
@@ -336,7 +370,7 @@ export interface ActivityStory {
 }
 
 export interface SpecHealth {
-    status: "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
+    status: "draft" | "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
     label: string;
     runId?: string;
     lastCheckedAt: string | null;
@@ -353,6 +387,7 @@ export interface FailingSpec {
 }
 
 export interface RecentRun extends ActivityStory {
+    environment?: ProjectEnvironment;
     trigger: "deploy" | "ci" | "schedule" | "manual" | "spec_change";
     occurrences: number;
     counts: { total: number; passed: number; failed: number; flaky: number; running: number };
@@ -363,7 +398,7 @@ export interface OverviewResponse {
         verdict: string;
         nextCheck: string;
         nextCheckAt: string | null;
-        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; invalid: number };
+        specHealth: { total: number; draft: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; invalid: number };
     };
     specHealth: Record<string, SpecHealth>;
     needsYou: PresentedInboxItem[];

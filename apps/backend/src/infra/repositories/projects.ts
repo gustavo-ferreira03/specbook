@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import { asc, eq } from "drizzle-orm";
-import { db } from "../db/client";
-import { projects } from "../db/schema";
+import { and, asc, eq } from "drizzle-orm";
+import { db, runBatch } from "../db/client";
+import { environments, projects } from "../db/schema";
 
 export type Project = typeof projects.$inferSelect;
 
@@ -11,7 +11,6 @@ class ProjectsRepository {
             id: crypto.randomUUID(),
             name,
             baseUrl,
-            ciAllowedOrigins: [],
             contextSyncError: null,
             gitAccessTokenHash: null,
             gitAccessTokenPrefix: null,
@@ -20,7 +19,7 @@ class ProjectsRepository {
             gitExternalSyncError: null,
             createdAt: new Date().toISOString(),
         };
-        await db.insert(projects).values(row);
+        await runBatch([db.insert(projects).values(row), db.insert(environments).values({ id: crypto.randomUUID(), projectId: row.id, name: "Production", baseUrl, allowedOrigins: [], credentialOverrides: {} })]);
         return row;
     }
 
@@ -51,8 +50,8 @@ class ProjectsRepository {
         await db.update(projects).set({ gitAccessTokenLastUsedAt: usedAt }).where(eq(projects.id, id));
     }
 
-    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl" | "ciAllowedOrigins">>): Promise<void> {
-        await db.update(projects).set(patch).where(eq(projects.id, id));
+    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl">>): Promise<void> {
+        await runBatch([db.update(projects).set(patch).where(eq(projects.id, id)), ...(patch.baseUrl ? [db.update(environments).set({ baseUrl: patch.baseUrl }).where(and(eq(environments.projectId, id), eq(environments.name, "Production")))] : [])]);
     }
 
     async listProjects(): Promise<Project[]> {

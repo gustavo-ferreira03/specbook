@@ -27,7 +27,8 @@ export interface RunBatchController {
     error: string;
     /** Transient problem while polling; the hook keeps retrying. */
     warning: string;
-    start: (title: string, targets: RunBatchTarget[]) => Promise<void>;
+    environment: RunBatch["environment"] | null;
+    start: (title: string, targets: RunBatchTarget[], environment?: string) => Promise<void>;
 }
 
 function itemsFromBatch(batch: RunBatch): SpecBatchItem[] {
@@ -72,6 +73,7 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
     const [reportUrl, setReportUrl] = useState<string | null>(null);
     const [error, setError] = useState("");
     const [warning, setWarning] = useState("");
+    const [environment, setEnvironment] = useState<RunBatch["environment"] | null>(null);
     const controllerRef = useRef<AbortController | null>(null);
     const onProgressRef = useRef(options.onProgress);
     useEffect(() => {
@@ -80,7 +82,7 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
 
     useEffect(() => () => controllerRef.current?.abort(), []);
 
-    const start = useCallback(async (nextTitle: string, targets: RunBatchTarget[]) => {
+    const start = useCallback(async (nextTitle: string, targets: RunBatchTarget[], environmentName = "Production") => {
         if (controllerRef.current) {
             setOpen(true);
             return;
@@ -100,12 +102,14 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
         setReportUrl(null);
         setError("");
         setWarning("");
+        setEnvironment(null);
         setRunning(true);
         setOpen(true);
 
         const apply = (batch: RunBatch) => {
             if (signal.aborted) return;
             setItems(itemsFromBatch(batch));
+            setEnvironment(batch.environment ?? null);
             onProgressRef.current?.(batch);
         };
         const markUnknown = () => setItems((current) => current.map((item) =>
@@ -114,7 +118,7 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
 
         let started = false;
         try {
-            let { batch } = await startRunBatch(projectId, targets.map((target) => target.id), nextTitle);
+            let { batch } = await startRunBatch(projectId, targets.map((target) => target.id), nextTitle, environmentName);
             started = true;
             apply(batch);
             const deadline = Date.now() + MAX_BATCH_DURATION_MS;
@@ -167,5 +171,5 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
         }
     }, [projectId]);
 
-    return { open, setOpen, title, items, running, reportUrl, error, warning, start };
+    return { open, setOpen, title, items, running, reportUrl, error, warning, environment, start };
 }

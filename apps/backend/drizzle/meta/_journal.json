@@ -169,6 +169,20 @@
       "when": 1791280630585,
       "tag": "0023_mean_sage",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791283633475,
+      "tag": "0024_late_vapor",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791283689003,
+      "tag": "0025_amused_christian_walker",
+      "breakpoints": true
     }
   ]
 }

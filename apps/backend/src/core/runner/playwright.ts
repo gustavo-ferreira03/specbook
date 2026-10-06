@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RunStatus } from "../../infra/db/schema";
+import type { RunEnvironment, RunStatus } from "../../infra/db/schema";
 import { runNetworkPolicy } from "../ci/targets";
 import { createRunProxy } from "../network/proxy";
 import { sanitizeTechnicalDetails } from "../jobs/presentation-errors";
@@ -48,6 +48,7 @@ export interface SuiteOutcome {
 
 export interface SuiteOptions {
     projectId?: string;
+    environment?: RunEnvironment;
     signal?: AbortSignal;
     /** Directory of this execution: work/, report/ and results.json are created here. */
     directory: string;
@@ -168,7 +169,7 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
     const withHtmlReport = !usesSecrets;
     await fs.rm(workDir, { recursive: true, force: true });
     await fs.rm(reportDir, { recursive: true, force: true });
-    const policy = options.projectId ? await runNetworkPolicy(options.projectId, options.baseUrl) : undefined;
+    const policy = options.projectId ? await runNetworkPolicy(options.projectId, options.baseUrl, options.environment) : undefined;
     const proxy = policy ? await createRunProxy(policy.allowPrivate ? policy.origins : []) : undefined;
     const runtime: SpecbookRuntime = { baseURL: options.baseUrl, secretOrigins: options.secretOrigins, navigationOrigins: policy?.origins };
     const results = new Map<string, SuiteSpecResult>();

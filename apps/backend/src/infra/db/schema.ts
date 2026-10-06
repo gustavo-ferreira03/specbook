@@ -8,7 +8,17 @@ export interface HumanSpec {
 }
 
 export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
+export type SpecLifecycle = "draft" | "active";
 export type RunStatus = "running" | "passed" | "failed" | "error";
+
+export interface RunEnvironment {
+    configuredBaseUrl: string;
+    id: string;
+    name: string;
+    baseUrl: string;
+    allowedOrigins: string[];
+    credentialOverrides: Record<string, string>;
+}
 
 export interface LlmSettings {
     provider: string;
@@ -52,7 +62,6 @@ export const projects = sqliteTable("projects", {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
-    ciAllowedOrigins: text("ci_allowed_origins", { mode: "json" }).$type<string[]>().notNull().default([]),
     contextSyncError: text("context_sync_error"),
     gitAccessTokenHash: text("git_access_token_hash"),
     gitAccessTokenPrefix: text("git_access_token_prefix"),
@@ -61,6 +70,15 @@ export const projects = sqliteTable("projects", {
     gitExternalSyncError: text("git_external_sync_error"),
     createdAt: text("created_at").notNull(),
 });
+
+export const environments = sqliteTable("environments", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    baseUrl: text("base_url").notNull(),
+    allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull().default([]),
+    credentialOverrides: text("credential_overrides", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+}, (table) => [uniqueIndex("environments_project_name_idx").on(table.projectId, table.name)]);
 
 export const features = sqliteTable(
     "features",
@@ -90,7 +108,8 @@ export const specs = sqliteTable(
             .references(() => features.id),
         title: text("title").notNull(),
         description: text("description").notNull().default(""),
-        status: text("status").$type<SpecStatus>().notNull().default("unverified"),
+    status: text("status").$type<SpecStatus>().notNull().default("unverified"),
+    lifecycle: text("lifecycle").$type<SpecLifecycle>().notNull().default("active"),
         path: text("path").notNull(),
         sourceHash: text("source_hash").notNull(),
         markdownHash: text("markdown_hash").notNull().default(""),
@@ -142,7 +161,8 @@ export const runs = sqliteTable(
         healOnFailure: integer("heal_on_failure", { mode: "boolean" }).notNull().default(true),
         retryOf: text("retry_of"),
         flaky: integer("flaky", { mode: "boolean" }).notNull().default(false),
-        baseUrl: text("base_url"),
+    baseUrl: text("base_url"),
+    environment: text("environment", { mode: "json" }).$type<RunEnvironment>(),
     },
     (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt), uniqueIndex("runs_retry_of_unique").on(table.retryOf)],
 );
