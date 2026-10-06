@@ -4,7 +4,8 @@ import { projectContextsRepository, type ProjectContextRevisionRow } from "../..
 import { projectsRepository } from "../../infra/repositories/projects";
 import { isAgentPaused } from "../jobs/pause";
 import { configuredModel } from "../llm/runtime";
-import { writeContextToRepo } from "../repo/writer";
+import { createAreaFeatures, writeContextToRepo } from "../repo/writer";
+import { isChatBusy } from "./chat-registry";
 import { createChat } from "./session-store";
 import { startChatTurn } from "./turn-runner";
 
@@ -62,12 +63,26 @@ export async function discoverProjectContext(projectId: string): Promise<string 
     }
 }
 
-/** Starts discovery in the background for every project still without context, for example when a model becomes ready. */
+let pendingDiscovery: Promise<void> | null = null;
+
+/**
+ * Explores every project still without context, one at a time (each discovery drives a browser and the
+ * model), for example when a model becomes ready or the backend starts.
+ */
 export function discoverPendingProjectContexts(): void {
-    void (async () => {
+    if (pendingDiscovery) return;
+    pendingDiscovery = (async () => {
         if (!(await configuredModel()).ready) return;
-        for (const project of await projectsRepository.listProjects()) await discoverProjectContext(project.id);
-    })().catch((error) => logger.error("automatic discovery failed", { error }));
+        for (const project of await projectsRepository.listProjects()) {
+            const chatId = await discoverProjectContext(project.id);
+            if (chatId) await chatIdle(chatId);
+        }
+    })().catch((error) => logger.error("automatic discovery failed", { error })).finally(() => { pendingDiscovery = null; });
+}
+
+async function chatIdle(chatId: string, timeoutMs = 30 * 60_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (isChatBusy(chatId) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5000));
 }
 
 export function contextProposalProblem(context: ProjectContext): string | null {
@@ -86,5 +101,6 @@ export async function confirmDiscoveredContext(revisionId: string): Promise<void
         const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
         if (revision?.status !== "draft" || contextProposalProblem(revision.context)) return;
         await writeContextToRepo(revision.projectId, revision.context, { confirmRevisionId: revision.id });
+        await createAreaFeatures(revision.projectId, revision.context);
     });
 }

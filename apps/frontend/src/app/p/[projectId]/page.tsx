@@ -4,7 +4,7 @@ import { useAuth } from "@/components/AuthProvider";
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
     AlertCircle,
     ChevronRight,
@@ -66,12 +66,10 @@ function parseSafetyNotes(raw: string): string[] {
 function DiscoveryStartForm({
     projectId,
     baseUrl,
-    initialError,
     seedContext,
 }: {
     projectId: string;
     baseUrl: string;
-    initialError?: string;
     seedContext?: ProjectContext;
 }) {
     const router = useRouter();
@@ -79,7 +77,7 @@ function DiscoveryStartForm({
     const [startUrl, setStartUrl] = useState("");
     const [safetyNotes, setSafetyNotes] = useState("");
     const [advancedOpen, setAdvancedOpen] = useState(false);
-    const [error, setError] = useState(initialError ?? "");
+    const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
     async function startDiscovery(event: React.FormEvent<HTMLFormElement>) {
@@ -192,7 +190,6 @@ function ContextPanel({
     project,
     contextState,
     coverage,
-    discoveryFailed,
     onReload,
     onDraftSaved,
 }: {
@@ -200,7 +197,6 @@ function ContextPanel({
     project: Project;
     contextState: ProjectContextState;
     coverage: CoverageResponse | null;
-    discoveryFailed: boolean;
     onReload: () => void;
     onDraftSaved: (draft: ProjectContextRevision) => void;
 }) {
@@ -269,10 +265,10 @@ function ContextPanel({
                     <div className="min-w-0 flex-1">
                         <h2 id="overview-context-heading" className="text-section text-ink">Teach Specbook this application</h2>
                         <p className="mt-1 max-w-[62ch] text-body text-ink-muted">
-                            The agent explores the app in a bounded browser and drafts a structured project context. You review and confirm it, and every future chat receives it.
+                            The agent explores the app in a bounded browser and saves what it learns as the project context. Every future chat receives it, and you can edit it at any time.
                         </p>
                         <ol className="mt-4 grid gap-2 text-control text-ink-muted sm:grid-cols-3">
-                            {["Agent explores the app", "You review the draft", "Chats use the context"].map((step, index) => (
+                            {["Agent explores the app", "Context is saved", "Chats use the context"].map((step, index) => (
                                 <li key={step} className="flex items-center gap-2">
                                     <span aria-hidden="true" className="tabular flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-selected text-label text-ink">{index + 1}</span>
                                     {step}
@@ -289,7 +285,6 @@ function ContextPanel({
                             <DiscoveryStartForm
                                 projectId={projectId}
                                 baseUrl={project.baseUrl}
-                                initialError={discoveryFailed ? "Discovery setup failed after the project was created. Retry it here." : undefined}
                             />
                         </div>
                     </div>
@@ -300,9 +295,6 @@ function ContextPanel({
 
     return (
         <div className="space-y-6">
-            {discoveryFailed && !draft && (
-                <Alert variant="danger" role="alert"><AlertDescription>Discovery setup failed after the project was created.</AlertDescription></Alert>
-            )}
 
             {draft && !draftHasProposal && (
                 <section aria-labelledby="overview-context-heading">
@@ -401,7 +393,7 @@ function ContextPanel({
                         {updateMode && !draft && (
                             <div className="border-b border-line bg-surface-soft p-4 sm:p-5">
                                 <p className="mb-3 max-w-[64ch] text-control text-ink-muted">
-                                    A new discovery drafts an updated context seeded with the confirmed one. The current context stays active until you confirm the replacement.
+                                    A new discovery explores the app again, starting from the current context, and replaces it when it finishes.
                                 </p>
                                 <DiscoveryStartForm projectId={projectId} baseUrl={project.baseUrl} seedContext={confirmed.context} />
                             </div>
@@ -436,8 +428,6 @@ function ContextSkeleton() {
 export default function AppPage({ params }: { params: Promise<{ projectId: string }> }) {
     const { canEdit } = useAuth();
     const { projectId } = use(params);
-    const searchParams = useSearchParams();
-    const discoveryFailed = searchParams.get("discovery") === "failed";
     const [project, setProject] = useState<Project | null>(null);
     const [contextState, setContextState] = useState<ProjectContextState | null>(null);
     const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
@@ -536,7 +526,6 @@ export default function AppPage({ params }: { params: Promise<{ projectId: strin
                     project={project}
                     contextState={contextState}
                     coverage={coverage}
-                    discoveryFailed={discoveryFailed}
                     onReload={reload}
                     onDraftSaved={(updated) => setContextState((current) => (current ? { ...current, draft: updated } : current))}
                 />
