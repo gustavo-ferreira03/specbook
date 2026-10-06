@@ -41,11 +41,23 @@ export function analyzeForRun(title: string, testSource: string, markdown: strin
     return analysis.analysis;
 }
 
-async function executeSpecLocked(specId: string, options: { persistFailures?: boolean }): Promise<ExecutedRun> {
+export class StaleRunError extends Error {}
+
+interface RunOptions {
+    persistFailures?: boolean;
+    automate?: boolean;
+    healOnFailure?: boolean;
+    retryOf?: string;
+    expected?: { sourceHash: string; markdownHash: string };
+    baseUrl?: string;
+    signal?: AbortSignal;
+}
+
+async function executeSpecLocked(specId: string, options: RunOptions): Promise<ExecutedRun> {
+    options.signal?.throwIfAborted();
     const spec = await specsRepository.getSpec(specId);
     if (!spec) throw new Error("Spec not found");
     if (spec.status === "invalid") throw new Error(`Spec is invalid: ${spec.invalidReason ?? "unknown reason"}`);
-    if (spec.status === "conflict") throw new Error("Spec has a git sync conflict; resolve it before running");
     const project = await projectsRepository.getProject(spec.projectId);
     if (!project) throw new Error("Project not found");
     const snapshot = await repoGit.withRepoLock(spec.projectId, async () => {
@@ -65,6 +77,9 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
         throw new Error("Spec files changed without being reindexed");
     }
+    if (options.expected && (sourceHash !== options.expected.sourceHash || markdownHash !== options.expected.markdownHash)) {
+        throw new StaleRunError("Spec changed after the failed run; retry skipped");
+    }
     const analysis = analyzeForRun(spec.title, testSource, markdown);
 
     const refs = analysis.secretRefs.map((ref) => ref.envName);
@@ -74,10 +89,14 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
             `Spec "${spec.title}" references credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
         );
     }
-    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, project.baseUrl, refs);
+    const baseUrl = options.baseUrl ?? project.baseUrl;
+    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, refs);
     const scrub = await projectSecretScrubber(spec.projectId);
 
-    const run = await runsRepository.createRun({ specId: spec.id, commitSha, sourceHash });
+    const run = await runsRepository.createRun({
+        specId: spec.id, commitSha, sourceHash, automate: options.automate,
+        healOnFailure: options.healOnFailure, retryOf: options.retryOf, baseUrl,
+    });
     try {
         await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
     } catch (error) {
@@ -101,15 +120,17 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
         const outcome = await withRunSlot(() => {
             started = Date.now();
             return runPlaywrightSuite({
+                projectId: spec.projectId,
                 directory: outputDir,
-                baseUrl: project.baseUrl,
+                baseUrl,
                 specs: [{ key: run.id, source: testSource, analysis, outputDir }],
                 timeoutMs: RUN_TIMEOUT_MS,
                 secretEnv,
                 secretOrigins,
                 scrub,
+                signal: options.signal,
             });
-        });
+        }, options.signal);
         const result = outcome.results.get(run.id);
         if (outcome.processFailure || !result) {
             failReason = outcome.processFailure ?? result?.failReason ?? "Playwright produced no result";
@@ -142,7 +163,8 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     return finished;
 }
 
-export async function executeSpec(specId: string, options: { persistFailures?: boolean } = {}): Promise<ExecutedRun> {
+export async function executeSpec(specId: string, options: RunOptions = {}): Promise<ExecutedRun> {
+    options.signal?.throwIfAborted();
     return withSpecLock(specId, () => executeSpecLocked(specId, options));
 }
 

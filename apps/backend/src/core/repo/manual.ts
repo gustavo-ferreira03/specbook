@@ -1,43 +1,26 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
-import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { withSpecLock } from "../specs/lifecycle";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
-import { repoRemote } from "./remote";
-import { assertRepoPathSafe, readOptionalRepoFile, writeRepoFile } from "./safe-fs";
-import { createSpecInRepo, featureYamlFile, legacyRobotFile, specTestFile, specYamlFile } from "./writer";
-
-export class RepoConflictError extends Error {}
-
-async function assertNoSyncConflict(projectId: string): Promise<void> {
-    const project = await projectsRepository.getProject(projectId);
-    if (project?.gitConflictPaths?.length) {
-        throw new RepoConflictError("Resolve the git sync conflict before editing this project");
-    }
-}
+import { readOptionalRepoFile, writeRepoFile } from "./safe-fs";
+import { createSpecInRepo, featureYamlFile, specTestFile, specYamlFile } from "./writer";
 
 async function commitAndReindex(projectId: string, message: string): Promise<void> {
     await repoGit.commitAll(projectId, message);
-    repoRemote.schedulePush(projectId);
     await reindexProjectUnlocked(projectId);
 }
 
 export async function readSpecRawFiles(
     spec: Spec,
-): Promise<{ yaml: string | null; testSource: string | null; legacyRobotSource: string | null }> {
+): Promise<{ yaml: string | null; testSource: string | null }> {
     const root = repoGit.getRepoDir(spec.projectId);
     const [yaml, testSource] = await Promise.all([
         readOptionalRepoFile(root, path.join(root, specYamlFile(spec.path))),
         readOptionalRepoFile(root, path.join(root, specTestFile(spec.path))),
     ]);
-    // Shown only so an old Robot Framework Spec can be regenerated as spec.ts.
-    const legacyRobotSource = testSource === null
-        ? await readOptionalRepoFile(root, path.join(root, legacyRobotFile(spec.path)))
-        : null;
-    return { yaml, testSource, legacyRobotSource };
+    return { yaml, testSource };
 }
 
 /** A minimal valid spec.ts whose single step matches the template's spec.yml. */
@@ -70,7 +53,6 @@ export async function readContextRaw(projectId: string): Promise<string | null> 
 export async function editSpecFiles(spec: Spec, input: { yaml?: string; testSource?: string }): Promise<Spec> {
     return withSpecLock(spec.id, () =>
         repoGit.withRepoLock(spec.projectId, async () => {
-            await assertNoSyncConflict(spec.projectId);
             await repoGit.assertRepoWritableUnlocked(spec.projectId);
             const root = repoGit.getRepoDir(spec.projectId);
             if (input.yaml !== undefined) {
@@ -78,9 +60,7 @@ export async function editSpecFiles(spec: Spec, input: { yaml?: string; testSour
             }
             if (input.testSource !== undefined) {
                 await writeRepoFile(root, path.join(root, specTestFile(spec.path)), input.testSource);
-                // spec.ts supersedes a Robot Framework file left from before; remove only the entry itself.
-                await assertRepoPathSafe(root, path.join(root, spec.path));
-                await fs.rm(path.join(root, legacyRobotFile(spec.path)), { force: true });
+
             }
             await commitAndReindex(spec.projectId, `spec: edit "${spec.title}"`);
             const updated = await specsRepository.getSpec(spec.id);
@@ -105,7 +85,6 @@ export async function createManualSpec(projectId: string, featureId: string, tit
 
 export async function editFeatureFile(feature: Feature, yaml: string): Promise<Feature> {
     return repoGit.withRepoLock(feature.projectId, async () => {
-        await assertNoSyncConflict(feature.projectId);
         await repoGit.assertRepoWritableUnlocked(feature.projectId);
         const root = repoGit.getRepoDir(feature.projectId);
         await writeRepoFile(root, path.join(root, featureYamlFile(feature.path)), yaml);
@@ -118,7 +97,6 @@ export async function editFeatureFile(feature: Feature, yaml: string): Promise<F
 
 export async function editContextFile(projectId: string, yaml: string): Promise<void> {
     await repoGit.withRepoLock(projectId, async () => {
-        await assertNoSyncConflict(projectId);
         await repoGit.assertRepoWritableUnlocked(projectId);
         const root = repoGit.getRepoDir(projectId);
         await writeRepoFile(root, path.join(root, "context.yml"), yaml);

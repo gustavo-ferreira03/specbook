@@ -146,7 +146,7 @@ function DiscoveryStartForm({
     );
 }
 
-const ATTENTION_STATUSES: SpecStatus[] = ["failed", "invalid", "conflict"];
+const ATTENTION_STATUSES: SpecStatus[] = ["failed", "invalid"];
 const ATTENTION_LIMIT = 6;
 const CHAT_LIMIT = 5;
 

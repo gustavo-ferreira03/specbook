@@ -1,0 +1,1 @@
+ALTER TABLE `project_stewards` ADD `auto_approve_fixes` integer DEFAULT false NOT NULL;

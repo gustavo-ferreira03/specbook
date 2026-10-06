@@ -149,7 +149,7 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
                     open={deleteOpen}
                     title="Delete project?"
                     description={<>
-                        <strong className="font-semibold text-ink">{project.name}</strong> and everything in it will be permanently removed: every Feature, Spec, run history, evidence, chat, and saved credential. The local repository is deleted too. A connected GitHub remote is left untouched.
+                        <strong className="font-semibold text-ink">{project.name}</strong> and everything in it will be permanently removed: every Feature, Spec, run history, evidence, chat, and saved credential. The local repository is deleted too.
                     </>}
                     confirmLabel="Delete project"
                     busy={deleting}

@@ -32,6 +32,7 @@ export interface RunBatchController {
 
 function itemsFromBatch(batch: RunBatch): SpecBatchItem[] {
     return batch.specs.map((item) => ({
+        runId: item.runId,
         specId: item.specId,
         title: item.title,
         status: item.status,

@@ -25,9 +25,10 @@ import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { InlineFeedback, SettingsRow, SettingsSection, SettingsFooter } from "@/components/SettingsLayout";
 import { ContextFileCard } from "@/components/ContextFileCard";
 import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
-import { GitHubConnection } from "@/components/GitHubConnection";
 import { GitRemoteAccess } from "@/components/GitRemoteAccess";
 import { ProjectSettingsCard } from "@/components/ProjectSettingsCard";
+import { AutomationSettingsCard } from "@/components/AutomationSettingsCard";
+import { CiSettingsCard } from "@/components/CiSettingsCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,7 +98,7 @@ function modelCountLabel(count: number) {
     return `${count} ${count === 1 ? "model" : "models"}`;
 }
 
-const SETTINGS_TABS = ["general", "model", "git", "context", "credentials"] as const;
+const SETTINGS_TABS = ["general", "model", "git", "context", "credentials", "automation", "ci"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 const TAB_LABELS: [SettingsTab, string][] = [
@@ -106,11 +107,11 @@ const TAB_LABELS: [SettingsTab, string][] = [
     ["git", "Git"],
     ["context", "Context"],
     ["credentials", "Credentials"],
+    ["automation", "Automation"],
+    ["ci", "CI/CD"],
 ];
 
 function parseSettingsTab(value: string | null): SettingsTab {
-    // `github` was the Git tab's previous query value; keep old links working.
-    if (value === "github") return "git";
     return SETTINGS_TABS.includes(value as SettingsTab) ? (value as SettingsTab) : "general";
 }
 
@@ -129,6 +130,7 @@ function SettingsContent() {
     const searchParams = useSearchParams();
     const activeTab = parseSettingsTab(searchParams.get("tab"));
     const [gitOneTimeToken, setGitOneTimeToken] = useState<string | null>(null);
+    const [ciOneTimeToken, setCiOneTimeToken] = useState<{ projectId: string; token: string | null } | null>(null);
     const [projectName, setProjectName] = useState<string | null>(null);
     const [settings, setSettings] = useState<LlmSettingsResponse | null>(null);
     const [draft, setDraft] = useState<LlmCurrentSettings | null>(null);
@@ -546,7 +548,6 @@ function SettingsContent() {
                         <TabsContent value="git" className="flex-none">
                             <div className="space-y-10">
                                 <GitRemoteAccess projectId={projectId} oneTimeToken={gitOneTimeToken} onOneTimeTokenChange={setGitOneTimeToken} />
-                                <GitHubConnection projectId={projectId} />
                             </div>
                         </TabsContent>
 
@@ -556,6 +557,14 @@ function SettingsContent() {
 
                         <TabsContent value="credentials" className="flex-none">
                             <CredentialProfilesCard projectId={projectId} />
+                        </TabsContent>
+
+                        <TabsContent value="automation" className="flex-none">
+                            <AutomationSettingsCard projectId={projectId} />
+                        </TabsContent>
+
+                        <TabsContent value="ci" className="flex-none">
+                            <CiSettingsCard key={projectId} projectId={projectId} oneTimeToken={ciOneTimeToken?.projectId === projectId ? ciOneTimeToken.token : null} onOneTimeTokenChange={(token) => setCiOneTimeToken({ projectId, token })} />
                         </TabsContent>
                     </PageContainer>
                 </Tabs>

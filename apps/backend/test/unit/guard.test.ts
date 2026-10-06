@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createGuard, createSecret, isSafeRelativePath, isSecret, parseRuntime, unwrap, type RawPage } from "../../src/core/runner/specbook/guard";
+import { runNodeCli, withRunSlot } from "../../src/core/runner/process";
+import { tempDir } from "../helpers/storage";
 
 const BASE = "https://app.example.com/shop/";
 const runtime = {
@@ -205,5 +208,50 @@ describe("function constructor hardening", () => {
         const lines = result.stdout.trim().split("\n");
         const outcomes = JSON.parse(lines[lines.length - 1]) as string[];
         assert.deepEqual(outcomes, Array(4).fill("Code generation is not available to Specs"));
+    });
+});
+
+describe("run cancellation", () => {
+    test("cancels a queued run without occupying or losing a concurrency slot", { timeout: 5000 }, async () => {
+        const previous = process.env.SPECBOOK_MAX_CONCURRENT_RUNS;
+        process.env.SPECBOOK_MAX_CONCURRENT_RUNS = "1";
+        let release!: () => void;
+        const held = withRunSlot(() => new Promise<void>((resolve) => { release = resolve; }));
+        try {
+            const controller = new AbortController();
+            let executed = false;
+            const cancelled = withRunSlot(async () => { executed = true; }, controller.signal);
+            const rejected = assert.rejects(cancelled, /cancelled/);
+            controller.abort(new Error("cancelled"));
+            await rejected;
+            assert.equal(executed, false);
+            let nextStarted = false;
+            const next = withRunSlot(async () => { nextStarted = true; });
+            await Promise.resolve();
+            assert.equal(nextStarted, false);
+            release();
+            await held;
+            await next;
+            assert.equal(nextStarted, true);
+            assert.equal(await withRunSlot(async () => "released"), "released");
+        } finally {
+            release();
+            await held;
+            if (previous === undefined) delete process.env.SPECBOOK_MAX_CONCURRENT_RUNS;
+            else process.env.SPECBOOK_MAX_CONCURRENT_RUNS = previous;
+        }
+    });
+
+    test("aborting a running process stops it before its configured timeout", { timeout: 5000 }, async () => {
+        const directory = tempDir("specbook-abort-");
+        const script = path.join(directory, "wait.mjs");
+        await fs.writeFile(script, "setInterval(() => {}, 1000);\n");
+        const controller = new AbortController();
+        const running = runNodeCli(script, [], { cwd: directory, timeoutMs: 30_000, signal: controller.signal });
+        controller.abort();
+        const result = await running;
+        assert.equal(result.timedOut, false);
+        assert.equal(result.code, null);
+        await assert.rejects(() => runNodeCli(script, [], { cwd: directory, timeoutMs: 30_000, signal: controller.signal }), /aborted/);
     });
 });

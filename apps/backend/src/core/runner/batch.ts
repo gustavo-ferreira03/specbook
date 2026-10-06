@@ -11,7 +11,7 @@ import { repoGit } from "../repo/git";
 import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "../repo/writer";
 import { resolveSecretEnv } from "../credentials/profiles";
 import { projectSecretScrubber } from "../credentials/scrub";
-import { acquireSpecLocks } from "../specs/lifecycle";
+import { acquireSpecLocks, ResourceBusyError } from "../specs/lifecycle";
 import { runPlaywrightSuite } from "./playwright";
 import { withRunSlot } from "./process";
 import { analyzeForRun, MAX_FAIL_REASON_CHARS, RUN_TIMEOUT_MS } from "./run";
@@ -19,6 +19,7 @@ import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
 import type { SpecAnalysis } from "./validate";
 
 type FinalRunStatus = Exclude<RunStatus, "running">;
+export type RunBatchTrigger = "deploy" | "ci" | "schedule" | "manual" | "spec_change";
 
 export interface RunBatchItem {
     runId: string;
@@ -32,10 +33,21 @@ export interface RunBatchItem {
     failReason: string | null;
 }
 
+export interface CiBatchMetadata {
+    commitSha?: string;
+    ref?: string;
+    buildUrl?: string;
+    qualityGate: { failOnFlaky: boolean; failOnKnownBugs: boolean };
+    knownBugSpecIds: string[];
+}
+
 export interface RunBatch {
     id: string;
     projectId: string;
     label: string;
+    trigger?: RunBatchTrigger;
+    baseUrl?: string;
+    ci?: CiBatchMetadata;
     status: RunStatus;
     startedAt: string;
     durationMs: number | null;
@@ -142,6 +154,7 @@ async function executeBatch(
         const outcome = await withRunSlot(() => {
             started = Date.now();
             return runPlaywrightSuite({
+                projectId: batch.projectId,
                 directory: batchDir,
                 baseUrl,
                 specs: prepared.map((entry) => ({
@@ -190,6 +203,9 @@ async function prepareSpecBatch(
     ids: string[],
     label: string,
     baseUrl: string,
+    healOnFailure: boolean,
+    ci?: CiBatchMetadata,
+    trigger: RunBatchTrigger = "manual",
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
         if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
@@ -209,9 +225,6 @@ async function prepareSpecBatch(
             if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
             if (spec.status === "invalid") {
                 throw new Error(`Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
-            }
-            if (spec.status === "conflict") {
-                throw new Error(`Spec "${spec.title}" has a git sync conflict`);
             }
             const [markdown, testSource] = await Promise.all([
                 fs.readFile(path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)), "utf8"),
@@ -247,7 +260,7 @@ async function prepareSpecBatch(
     }
     const secrets: BatchSecrets = {
         env: secretEnv,
-        origins: await resolveSecretOriginPolicy(projectId, baseUrl, refs),
+        origins: await resolveSecretOriginPolicy(projectId, refs),
         scrub: await projectSecretScrubber(projectId),
     };
 
@@ -258,6 +271,9 @@ async function prepareSpecBatch(
                 specId: definition.spec.id,
                 commitSha,
                 sourceHash: definition.sourceHash,
+                automate: true,
+                healOnFailure,
+                baseUrl,
             });
             createdRuns.push(run);
             await repoGit.withRepoLock(projectId, () => repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha));
@@ -272,6 +288,9 @@ async function prepareSpecBatch(
         id: crypto.randomUUID(),
         projectId,
         label: label.trim().slice(0, 120) || "Run Specs",
+        trigger,
+        baseUrl,
+        ...(ci ? { ci } : {}),
         status: "running",
         startedAt: new Date().toISOString(),
         durationMs: null,
@@ -305,22 +324,36 @@ async function prepareSpecBatch(
     return { batch, prepared, secrets };
 }
 
-export async function startSpecBatch(projectId: string, specIds: string[], label: string): Promise<RunBatch> {
+export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { baseUrl?: string; ci?: CiBatchMetadata; trigger?: RunBatchTrigger; healFailures?: boolean; rejectIfBusy?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {
     const project = await projectsRepository.getProject(projectId);
     if (!project) throw new Error("Project not found");
     const ids = [...new Set(specIds)];
     if (ids.length === 0) throw new Error("Select at least one Spec");
-    const releaseSpecLocks = await acquireSpecLocks(ids);
+    if (options.rejectIfBusy && await runsRepository.hasRunningRuns(ids)) throw new ResourceBusyError("Selected Specs are already running; retry after they finish");
+    const releaseSpecLocks = await acquireSpecLocks(ids, { wait: !options.rejectIfBusy });
     let batch: RunBatch;
     let prepared: PreparedSpec[];
     let secrets: BatchSecrets;
     try {
-        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, project.baseUrl));
+        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, options.baseUrl ?? project.baseUrl, options.healFailures !== false, options.ci, options.trigger ?? (options.ci ? "ci" : "manual")));
+        try {
+            await options.onPrepared?.(batch);
+        } catch (error) {
+            for (const entry of prepared) {
+                await finishPreparedSpec(batch.id, entry, { status: "error", durationMs: 0, failReason: "Batch could not start" }, secrets.scrub);
+                await runsRepository.acknowledgeAutomation(entry.run.id);
+            }
+            batch.status = "error";
+            batch.failReason = "Batch could not start";
+            batch.durationMs = 0;
+            await writeBatch(batch);
+            throw error;
+        }
     } catch (error) {
         await releaseSpecLocks();
         throw error;
     }
-    const task = executeBatch(batch, prepared, project.baseUrl, secrets).finally(releaseSpecLocks);
+    const task = executeBatch(batch, prepared, options.baseUrl ?? project.baseUrl, secrets).finally(releaseSpecLocks);
     activeBatches.set(batch.id, task);
     void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
     return batch;
@@ -343,4 +376,22 @@ export async function markInterruptedBatches(): Promise<void> {
         batch.specs = batch.specs.map((spec) => spec.status === "running" ? { ...spec, status: "error", failReason: batch.failReason } : spec);
         await writeBatch(batch);
     }
+}
+
+export async function listRunBatches(projectId: string, limit = 100, ciOnly = false): Promise<RunBatch[]> {
+    const entries = await fs.readdir(runBatchesDir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+    });
+    const batches: RunBatch[] = [];
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const batch = await getRunBatch(entry.name);
+        if (batch?.projectId === projectId && (!ciOnly || batch.ci)) batches.push(batch);
+    }
+    return batches.sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, limit);
+}
+
+export async function listCiBatches(projectId: string, limit = 20): Promise<RunBatch[]> {
+    return listRunBatches(projectId, limit, true);
 }

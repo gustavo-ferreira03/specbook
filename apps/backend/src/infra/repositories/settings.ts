@@ -10,6 +10,18 @@ class SettingsRepository {
         model: "",
     };
 
+    async getAgentPaused(): Promise<boolean> {
+        const rows = await db.select({ paused: appSettings.agentPaused }).from(appSettings).where(eq(appSettings.id, SETTINGS_ID)).limit(1);
+        return rows[0]?.paused ?? false;
+    }
+
+    async setAgentPaused(paused: boolean): Promise<boolean> {
+        const updatedAt = new Date().toISOString();
+        await db.insert(appSettings).values({ id: SETTINGS_ID, llm: this.defaults, agentPaused: paused, updatedAt })
+            .onConflictDoUpdate({ target: appSettings.id, set: { agentPaused: paused, updatedAt } });
+        return paused;
+    }
+
     async getLlmSettings(): Promise<LlmSettings> {
         const rows = await db.select().from(appSettings).where(eq(appSettings.id, SETTINGS_ID)).limit(1);
         const llm = rows[0]?.llm;

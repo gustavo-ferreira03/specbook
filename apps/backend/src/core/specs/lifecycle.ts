@@ -27,9 +27,11 @@ export async function withSpecLocks<T>(specIds: string[], work: () => Promise<T>
     return acquire(0);
 }
 
-export async function acquireSpecLocks(specIds: string[]): Promise<() => Promise<void>> {
+export async function acquireSpecLocks(specIds: string[], options: { wait?: boolean } = {}): Promise<() => Promise<void>> {
+    const ids = [...new Set(specIds)].sort();
+    if (options.wait === false && areSpecsLocked(ids)) throw new ResourceBusyError("Selected Specs are already in use; retry after their current operation finishes");
     const acquired: { id: string; current: Promise<unknown>; release: () => void }[] = [];
-    for (const id of [...new Set(specIds)].sort()) {
+    for (const id of ids) {
         const previous = locks.get(id) ?? Promise.resolve();
         let release: () => void = () => {};
         const hold = new Promise<void>((resolve) => {
@@ -37,7 +39,7 @@ export async function acquireSpecLocks(specIds: string[]): Promise<() => Promise
         });
         const current = previous.catch(() => undefined).then(() => hold);
         locks.set(id, current);
-        await previous.catch(() => undefined);
+        if (options.wait !== false) await previous.catch(() => undefined);
         acquired.push({ id, current, release });
     }
     return async () => {

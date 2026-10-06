@@ -87,6 +87,14 @@ The sidebar has, from top to bottom: brand (56px), project switcher, segmented C
 - Row actions (run, edit, delete) appear on hover and on `focus-within`, over a fade in the row color. On touch devices (`hover: none`) they are always visible.
 - Under 768px the sidebar becomes a focus-trapped drawer, opened from a 56px top bar.
 
+## Project Overview
+
+Overview is the single entry for autonomous activity and review. Its sidebar badge counts decisions that need an answer, including requests to turn an uncovered bug into a regression check. The header states the current check results and last check; the same per-Spec health feeds the status dots in the feature tree.
+
+Sections stay in this order: Needs you, Failing, Recent runs. Use compact rows with one sentence, an icon, time and one action. Failing lists the current triage state per Spec. Recent runs group by trigger: deployment, CI, schedule, manual or check changes. Empty sections are hidden; an empty project gets the existing EmptyState. Pause is a minor header control; coverage analysis and exploration live in the Actions menu and require an explicit request.
+
+Open evidence, a chronological timeline and decision actions in the existing right-side Sheet. Questions explain what accepting them will change. Keep screenshots and readable behavior visible inside the sheet; put file diffs and logs under collapsed Technical details. Do not repeat the row title as a timeline event or add generic investigation narration.
+
 ## Dark mode
 
 `.dark` on `<html>` switches every token. The default follows `prefers-color-scheme`. The user's choice (`light`, `dark`, or `system`) is stored in `localStorage["specbook:theme"]`, and every access is wrapped in try/catch. An inline script in `app/layout.tsx` (`lib/theme-script.ts`) applies it before first paint. `lib/theme.ts` provides `useThemePreference` and `setThemePreference`. In dark mode the main surface is near-black, the sidebar and canvas are slightly darker, and elevation comes from lighter raised surfaces and stronger shadows. Primary buttons are near-white with near-black text.

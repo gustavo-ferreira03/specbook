@@ -9,7 +9,7 @@ export const DEFAULT_RUN_LIST_LIMIT = 50;
 export const MAX_RUN_LIST_LIMIT = 200;
 
 class RunsRepository {
-    async createRun(input: { specId: string; commitSha: string; sourceHash: string }): Promise<Run> {
+    async createRun(input: { specId: string; commitSha: string; sourceHash: string; automate?: boolean; healOnFailure?: boolean; retryOf?: string; baseUrl?: string }): Promise<Run> {
         const row: Run = {
             id: crypto.randomUUID(),
             specId: input.specId,
@@ -19,6 +19,11 @@ class RunsRepository {
             startedAt: new Date().toISOString(),
             durationMs: null,
             failReason: null,
+            automationPending: input.automate ?? false,
+            healOnFailure: input.healOnFailure ?? true,
+            retryOf: input.retryOf ?? null,
+            flaky: false,
+            baseUrl: input.baseUrl ?? null,
         };
         await db.insert(runs).values(row);
         return row;
@@ -69,6 +74,22 @@ class RunsRepository {
             .innerJoin(newest, and(eq(runs.specId, newest.specId), eq(runs.startedAt, newest.startedAt)));
         for (const { run } of rows) latest.set(run.specId, run);
         return latest;
+    }
+
+    async pendingAutomation(): Promise<Run[]> {
+        return db.select().from(runs).where(and(eq(runs.automationPending, true), inArray(runs.status, ["passed", "failed", "error"]))).limit(100);
+    }
+
+    async retryFor(runId: string): Promise<Run | null> {
+        return (await db.select().from(runs).where(eq(runs.retryOf, runId)))[0] ?? null;
+    }
+
+    async markFlaky(originalId: string, retryId: string): Promise<void> {
+        await db.update(runs).set({ flaky: true }).where(inArray(runs.id, [originalId, retryId]));
+    }
+
+    async acknowledgeAutomation(id: string): Promise<void> {
+        await db.update(runs).set({ automationPending: false }).where(eq(runs.id, id));
     }
 
     async getRun(id: string): Promise<Run | null> {

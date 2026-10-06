@@ -12,7 +12,7 @@ export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([
     "browser_tabs",
 ]);
 
-const DESTRUCTIVE_CLICK_PATTERN =
+export const DESTRUCTIVE_CLICK_PATTERN =
     /\b(add|create|delete|edit|remove|erase|destroy|save|confirm|pay|payment|purchase|buy|checkout|refund|unsubscribe|cancel|logout|log out|sign out|publish|submit|send|place order|adicionar|criar|editar|salvar|confirmar|excluir|apagar|remover|deletar|pagar|pagamento|comprar|estornar|reembolso|cancelar|sair|desconectar|encerrar|publicar|enviar|submeter|finalizar)\b/i;
 
 function isWithinDiscoveryOrigin(url: string, origin: string): boolean {
@@ -27,13 +27,14 @@ function isWithinDiscoveryOrigin(url: string, origin: string): boolean {
 }
 
 export function createDiscoveryBrowserPolicy(
-    revision: ProjectContextRevisionRow,
+    revision: Pick<ProjectContextRevisionRow, "brief">,
     mcp: BrowserMcp,
 ): BrowserToolPolicy {
     const origin = new URL(revision.brief.startUrl).origin;
     return {
         allowedTools: DISCOVERY_BROWSER_TOOLS,
-        beforeCall: async (toolName, args) => {
+        beforeCall: async (toolName, args, signal) => {
+            signal?.throwIfAborted();
             if (toolName === "browser_navigate") {
                 const target = String(args.url ?? "");
                 let parsed: URL;
@@ -64,17 +65,32 @@ export function createDiscoveryBrowserPolicy(
                 }
             }
         },
-        afterCall: async () => {
-            const active = await getActiveTabUrl(mcp);
+        afterCall: async (_name, _args, _result, signal) => {
+            signal?.throwIfAborted();
+            const active = await getActiveTabUrl(mcp, signal);
             if (!active || isWithinDiscoveryOrigin(active, origin)) return;
-            await mcp.client.callTool({ name: "browser_navigate_back", arguments: {} }).catch(() => undefined);
-            const afterBack = await getActiveTabUrl(mcp);
+            await mcp.client.callTool({ name: "browser_navigate_back", arguments: {} }, undefined, { signal }).catch(() => undefined);
+            const afterBack = await getActiveTabUrl(mcp, signal);
             if (afterBack && !isWithinDiscoveryOrigin(afterBack, origin)) {
-                await mcp.navigate(revision.brief.startUrl).catch(() => undefined);
+                await mcp.navigate(revision.brief.startUrl, signal).catch(() => undefined);
             }
+            signal?.throwIfAborted();
             throw new Error(
                 `The page left the discovery origin ${origin} (it reached ${active}). The browser returned to the allowed origin; the external destination was not inspected.`,
             );
         },
+    };
+}
+
+/** Keep the browser capabilities visible; enforce autonomous exploration policy at execution. */
+export function createAutonomousBrowserPolicy(startUrl: string, mcp: BrowserMcp): BrowserToolPolicy {
+    const policy = createDiscoveryBrowserPolicy({ brief: { startUrl } as ProjectContextRevisionRow["brief"] }, mcp);
+    const allowed = new Set([...DISCOVERY_BROWSER_TOOLS, "browser_console_messages", "browser_network_requests", "browser_take_screenshot"]);
+    return {
+        beforeCall: async (name, args, signal) => {
+            if (!allowed.has(name)) throw new Error("This browser action needs human authorization. Explain the blocker in the Inbox before proceeding.");
+            await policy.beforeCall?.(name, args, signal);
+        },
+        afterCall: policy.afterCall,
     };
 }

@@ -24,7 +24,6 @@ export interface Crumb {
 export function PageHeader({
     title,
     breadcrumbs,
-    eyebrow,
     description,
     meta,
     actions,
@@ -35,8 +34,6 @@ export function PageHeader({
 }: {
     title: React.ReactNode;
     breadcrumbs?: Crumb[];
-    /** @deprecated Use `breadcrumbs`. Rendered as a single muted crumb. */
-    eyebrow?: React.ReactNode;
     description?: React.ReactNode;
     meta?: React.ReactNode;
     actions?: React.ReactNode;
@@ -46,7 +43,7 @@ export function PageHeader({
     bordered?: boolean;
     className?: string;
 }) {
-    const crumbs = breadcrumbs ?? (eyebrow ? [{ label: eyebrow }] : []);
+    const crumbs = breadcrumbs ?? [];
     return (
         <header className={cn("shrink-0 bg-surface px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5", bordered && "border-b border-line", className)}>
             <div className={cn("mx-auto w-full", widthClasses[width])}>

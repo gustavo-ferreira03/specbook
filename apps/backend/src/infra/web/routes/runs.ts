@@ -139,7 +139,7 @@ export function createRunsRouter(): Hono {
 
     router.post("/specs/:id/run", async (c) => {
         try {
-            const run = await executeSpec(c.req.param("id"));
+            const run = await executeSpec(c.req.param("id"), { automate: true });
             return c.json({ run });
         } catch (error) {
             throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
@@ -200,6 +200,8 @@ export function createRunsRouter(): Hono {
             steps?: { number?: number; label?: string; file?: string }[];
             video?: string | null;
             failedStep?: string | null;
+            diagnostics?: import("../../../core/runner/evidence").RunDiagnostic[];
+            errorContext?: string;
         } = {};
         if (directory && available.has("evidence.json")) {
             try {
@@ -241,6 +243,8 @@ export function createRunsRouter(): Hono {
             failedStep: typeof manifest?.failedStep === "string" ? manifest.failedStep : null,
             reportAvailable: reportUrl !== null,
             reportUrl,
+            diagnostics: manifest.diagnostics ?? [],
+            errorContext: manifest.errorContext ?? null,
         });
     });
 

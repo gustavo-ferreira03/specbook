@@ -1,27 +1,9 @@
 import crypto from "node:crypto";
-import { and, asc, eq, isNotNull } from "drizzle-orm";
-import { decryptSecret, encryptSecret } from "../../core/credentials/crypto";
+import { asc, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { projects } from "../db/schema";
-import { logger } from "../logger";
 
 export type Project = typeof projects.$inferSelect;
-
-/** Tokens written before encryption was introduced are stored verbatim. */
-function isEncryptedToken(stored: string): boolean {
-    return /^v1:[^:]+:[^:]+:[^:]+$/.test(stored);
-}
-
-/** The Git token is encrypted at rest; callers always see plaintext. */
-function withPlainToken(row: Project): Project {
-    if (!row.gitToken || !isEncryptedToken(row.gitToken)) return row;
-    try {
-        return { ...row, gitToken: decryptSecret(row.gitToken) };
-    } catch (error) {
-        logger.error("could not decrypt the project Git token; reconnect the remote", { projectId: row.id, error });
-        return { ...row, gitToken: null };
-    }
-}
 
 class ProjectsRepository {
     async createProject(name: string, baseUrl: string): Promise<Project> {
@@ -29,10 +11,7 @@ class ProjectsRepository {
             id: crypto.randomUUID(),
             name,
             baseUrl,
-            gitRemoteUrl: null,
-            gitToken: null,
-            gitPushError: null,
-            gitConflictPaths: null,
+            ciAllowedOrigins: [],
             contextSyncError: null,
             gitAccessTokenHash: null,
             gitAccessTokenPrefix: null,
@@ -43,26 +22,6 @@ class ProjectsRepository {
         };
         await db.insert(projects).values(row);
         return row;
-    }
-
-    async updateGitConnection(id: string, remoteUrl: string | null, token: string | null): Promise<void> {
-        await db
-            .update(projects)
-            .set({
-                gitRemoteUrl: remoteUrl,
-                gitToken: token ? encryptSecret(token) : null,
-                gitPushError: null,
-                gitConflictPaths: null,
-            })
-            .where(eq(projects.id, id));
-    }
-
-    async setGitPushError(id: string, error: string | null): Promise<void> {
-        await db.update(projects).set({ gitPushError: error }).where(eq(projects.id, id));
-    }
-
-    async setGitConflictPaths(id: string, paths: string[] | null): Promise<void> {
-        await db.update(projects).set({ gitConflictPaths: paths }).where(eq(projects.id, id));
     }
 
     async setContextSyncError(id: string, error: string | null): Promise<void> {
@@ -92,36 +51,18 @@ class ProjectsRepository {
         await db.update(projects).set({ gitAccessTokenLastUsedAt: usedAt }).where(eq(projects.id, id));
     }
 
-    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl">>): Promise<void> {
+    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl" | "ciAllowedOrigins">>): Promise<void> {
         await db.update(projects).set(patch).where(eq(projects.id, id));
     }
 
     async listProjects(): Promise<Project[]> {
         const rows = await db.select().from(projects).orderBy(asc(projects.createdAt), asc(projects.id));
-        return rows.map(withPlainToken);
+        return rows;
     }
 
     async getProject(id: string): Promise<Project | null> {
         const rows = await db.select().from(projects).where(eq(projects.id, id));
-        return rows[0] ? withPlainToken(rows[0]) : null;
-    }
-
-    /** Encrypts Git tokens stored in plaintext by earlier versions. Returns how many were migrated. */
-    async encryptLegacyGitTokens(): Promise<number> {
-        const rows = await db
-            .select({ id: projects.id, gitToken: projects.gitToken })
-            .from(projects)
-            .where(isNotNull(projects.gitToken));
-        let migrated = 0;
-        for (const row of rows) {
-            if (!row.gitToken || isEncryptedToken(row.gitToken)) continue;
-            await db
-                .update(projects)
-                .set({ gitToken: encryptSecret(row.gitToken) })
-                .where(and(eq(projects.id, row.id), eq(projects.gitToken, row.gitToken)));
-            migrated += 1;
-        }
-        return migrated;
+        return rows[0] ?? null;
     }
 
     async deleteProject(id: string): Promise<void> {

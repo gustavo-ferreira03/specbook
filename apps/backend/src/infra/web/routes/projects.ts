@@ -4,13 +4,11 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteProjectData, ResourceBusyError } from "../../../core/deletion";
-import { SyncConflictError } from "../../../core/repo/errors";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { YamlParseError } from "../../../core/repo/yaml";
 import { repoBare } from "../../../core/repo/bare";
 import { repoGit } from "../../../core/repo/git";
-import { createManualSpec, editContextFile, readContextRaw, RepoConflictError } from "../../../core/repo/manual";
-import { syncProject } from "../../../core/repo/sync";
+import { createManualSpec, editContextFile, readContextRaw } from "../../../core/repo/manual";
 import { featuresRepository } from "../../repositories/features";
 import { projectsRepository } from "../../repositories/projects";
 import { runsRepository } from "../../repositories/runs";
@@ -49,8 +47,8 @@ const contextFileSchema = z.object({ yaml: z.string().min(1) });
 function mapManualError(error: unknown): never {
     if (error instanceof HTTPException) throw error;
     if (
-        error instanceof RepoConflictError ||
-        error instanceof SyncConflictError ||
+
+
         error instanceof ResourceBusyError ||
         error instanceof UnsafeRepoPathError
     ) {
@@ -61,27 +59,6 @@ function mapManualError(error: unknown): never {
         throw new HTTPException(409, { message: error.message });
     }
     throw error;
-}
-
-// The tree endpoint answers from the DB; opening a page only nudges a sync
-// (fetch, reindex, push) in the background, at most once per interval.
-const BACKGROUND_SYNC_INTERVAL_MS = 30_000;
-const lastSyncStarts = new Map<string, number>();
-const syncsInFlight = new Set<string>();
-const lastSyncErrors = new Map<string, string>();
-
-function scheduleBackgroundSync(projectId: string): void {
-    const now = Date.now();
-    if (syncsInFlight.has(projectId)) return;
-    if (now - (lastSyncStarts.get(projectId) ?? 0) < BACKGROUND_SYNC_INTERVAL_MS) return;
-    lastSyncStarts.set(projectId, now);
-    syncsInFlight.add(projectId);
-    void syncProject(projectId)
-        .then(() => lastSyncErrors.delete(projectId))
-        .catch((error: unknown) => {
-            lastSyncErrors.set(projectId, error instanceof Error ? error.message : String(error));
-        })
-        .finally(() => syncsInFlight.delete(projectId));
 }
 
 export function createProjectsRouter(): Hono {
@@ -138,8 +115,7 @@ export function createProjectsRouter(): Hono {
         const projectId = c.req.param("id");
         const project = await projectsRepository.getProject(projectId);
         if (!project) throw new HTTPException(404, { message: "Project not found" });
-        if (!project.gitConflictPaths?.length) scheduleBackgroundSync(projectId);
-        const syncError = lastSyncErrors.get(projectId) ?? null;
+        const syncError = project.gitExternalSyncError;
         const [features, specs] = await Promise.all([
             featuresRepository.listFeatures(projectId),
             specsRepository.listSpecs(projectId),

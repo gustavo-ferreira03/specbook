@@ -3,11 +3,10 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
-import { SyncConflictError } from "../../../core/repo/errors";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { parseSpecYaml, YamlParseError } from "../../../core/repo/yaml";
 import type { HumanSpec } from "../../db/schema";
-import { editSpecFiles, readSpecRawFiles, RepoConflictError } from "../../../core/repo/manual";
+import { editSpecFiles, readSpecRawFiles } from "../../../core/repo/manual";
 import { updateSpecWithLock } from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
 import { runsRepository } from "../../repositories/runs";
@@ -42,8 +41,8 @@ const updateSpecSchema = z
 function mapManualError(error: unknown): never {
     if (error instanceof HTTPException) throw error;
     if (
-        error instanceof RepoConflictError ||
-        error instanceof SyncConflictError ||
+
+
         error instanceof ResourceBusyError ||
         error instanceof UnsafeRepoPathError
     ) {
@@ -61,10 +60,10 @@ async function specDetail(spec: Spec, runLimit?: number) {
     const runs = await runsRepository.listRuns(spec.id, { limit: runLimit });
     // A symlinked spec file is reported through the spec's invalid status; never serve it.
     const raw = await readSpecRawFiles(spec).catch((error) => {
-        if (error instanceof UnsafeRepoPathError) return { yaml: null, testSource: null, legacyRobotSource: null };
+        if (error instanceof UnsafeRepoPathError) return { yaml: null, testSource: null };
         throw error;
     });
-    // Parse spec.yml on its own so a legacy Spec (no spec.ts) still shows its behavior.
+    // A missing executable should not hide the behavior contract.
     let humanSpec: HumanSpec | null = null;
     if (raw.yaml !== null) {
         try {
@@ -74,13 +73,11 @@ async function specDetail(spec: Spec, runLimit?: number) {
         }
     }
     const content =
-        raw.yaml !== null || raw.testSource !== null || raw.legacyRobotSource !== null
+        raw.yaml !== null || raw.testSource !== null
             ? {
                   humanSpec,
                   testSource: raw.testSource ?? "",
                   yamlSource: raw.yaml ?? "",
-                  // Set only for a Spec that still has spec.robot and no spec.ts.
-                  legacyRobotSource: raw.legacyRobotSource,
               }
             : null;
     return { spec, feature, content, runs };

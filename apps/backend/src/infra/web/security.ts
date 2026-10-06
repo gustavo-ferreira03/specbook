@@ -7,7 +7,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const DEFAULT_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
 
 /**
- * Git Smart HTTP authenticates every request with a project token, so neither
+ * Git Smart HTTP and CI authenticate every request with a project token, so neither
  * DNS rebinding nor cross-site form posts can use it without that secret.
  */
 function isGitHttpPath(pathname: string): boolean {
@@ -70,7 +70,7 @@ export function isAllowedHost(allowlist: HostAllowlist, host: string | undefined
 export function hostGuard(allowlist: HostAllowlist): MiddlewareHandler {
     return async (c, next) => {
         const pathname = c.req.path;
-        if (pathname === "/health" || isGitHttpPath(pathname)) return next();
+        if (pathname === "/health" || isGitHttpPath(pathname) || pathname.startsWith("/ci/")) return next();
         const host = c.req.header("host");
         if (!isAllowedHost(allowlist, host)) {
             logger.warn("rejected request with unexpected Host header", { host, path: pathname });
@@ -86,7 +86,7 @@ export function hostGuard(allowlist: HostAllowlist): MiddlewareHandler {
  */
 export function csrfGuard(): MiddlewareHandler {
     return async (c, next) => {
-        if (SAFE_METHODS.has(c.req.method) || isGitHttpPath(c.req.path)) return next();
+        if (SAFE_METHODS.has(c.req.method) || isGitHttpPath(c.req.path) || c.req.path.startsWith("/ci/")) return next();
         if (c.req.header(REQUEST_HEADER) !== "1") {
             return c.json({ error: `Missing ${REQUEST_HEADER} header` }, 403);
         }

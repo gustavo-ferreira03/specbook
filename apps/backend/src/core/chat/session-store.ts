@@ -1,3 +1,4 @@
+import { jobsRepository } from "../../infra/repositories/jobs";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -220,7 +221,8 @@ export async function createChat(
 export async function listChats(
     projectId: string,
 ): Promise<{ id: string; title: string; createdAt: string }[]> {
-    const rows = await chatsRepository.listChatRows(projectId);
+    const jobChatIds = new Set((await jobsRepository.list(projectId)).map((job) => job.chatId));
+    const rows = (await chatsRepository.listChatRows(projectId)).filter((row) => !jobChatIds.has(row.id));
     return Promise.all(
         rows.map(async (row) => ({
             id: row.id,

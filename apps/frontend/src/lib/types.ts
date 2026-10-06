@@ -1,4 +1,4 @@
-export type SpecStatus = "unverified" | "passed" | "failed" | "invalid" | "conflict";
+export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface Project {
@@ -6,15 +6,6 @@ export interface Project {
     name: string;
     baseUrl: string;
     createdAt: string;
-}
-
-export interface GitStatus {
-    remoteUrl: string | null;
-    hasToken: boolean;
-    pushError: string | null;
-    conflictPaths: string[] | null;
-    contextSyncError: string | null;
-    externalSyncError: string | null;
 }
 
 export interface GitAccessTokenInfo {
@@ -30,11 +21,6 @@ export interface GitRemoteAccess {
     headSha: string | null;
     token: GitAccessTokenInfo;
     externalSyncError: string | null;
-}
-
-export interface GitSyncOutcome {
-    status: "no-remote" | "clean" | "updated" | "conflict";
-    conflictedPaths: string[];
 }
 
 export interface Feature {
@@ -72,6 +58,9 @@ export interface HumanSpec {
 
 export interface Run {
     id: string;
+    retryOf: string | null;
+    flaky: boolean;
+    automationPending: boolean;
     specId: string;
     commitSha: string;
     sourceHash: string;
@@ -101,8 +90,6 @@ export interface SpecDetail {
         humanSpec: HumanSpec | null;
         testSource: string;
         yamlSource: string;
-        /** Set only while the Spec folder still has the old spec.robot and no spec.ts. */
-        legacyRobotSource: string | null;
     } | null;
     runs: Run[];
 }
@@ -195,6 +182,8 @@ export interface RunEvidence {
     video: string | null;
     /** Title of the step() that failed, when the run failed inside one. */
     failedStep: string | null;
+    diagnostics?: { kind: "console" | "pageerror" | "requestfailed" | "response"; message: string; url?: string; method?: string; status?: number }[];
+    errorContext?: string;
     reportAvailable: boolean;
     reportUrl: string | null;
 }
@@ -286,4 +275,100 @@ export interface CredentialProfile {
 export interface CredentialFieldInput {
     key: string;
     value?: string;
+}
+
+export interface InboxItem {
+    id: string;
+    jobId: string;
+    kind: "new_spec" | "spec_fix" | "feature" | "question" | "bug_report" | "note";
+    status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
+    title: string;
+    body: string;
+    payload: { files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; checkTitles?: string[]; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
+    answer: string | null;
+    commitSha: string | null;
+    createdAt: string;
+}
+
+export interface AgentSummary {
+    projectName: string;
+    attentionCount: number;
+    activeCount: number;
+    lastCheckedAt: string | null;
+    paused: boolean;
+    globallyPaused: boolean;
+    autonomy: string;
+    systemHealth?: { message: string; detail?: string };
+}
+
+export interface PresentedInboxItem extends InboxItem {
+    presentation: {
+        type: "update" | "new_check" | "feature" | "bug" | "question" | "help" | "regenerate";
+        title: string;
+        summary: string;
+        workDone: string;
+        consequence: string;
+        screenshots: { before?: { url: string; label: string }; after?: { url: string; label: string } };
+        technicalDetails: string;
+        credentialRequest: boolean;
+        specId?: string;
+        chatId?: string;
+        activityId: string;
+    };
+}
+
+export interface ActivityStory {
+    id: string;
+    subject: { type: "spec" | "feature" | "deployment" | "project"; id?: string; name: string };
+    title: string;
+    summary: string;
+    status: "working" | "queued" | "waiting" | "needs_attention" | "paused" | "completed" | "observing" | "stopped";
+    outcome?: "passed" | "failed" | "flaky" | "reviewed" | "stopped";
+    nextStep: string;
+    updatedAt: string;
+    createdAt: string;
+    timeline: { id: string; label: string; detail: string; createdAt: string; specId?: string; runId?: string }[];
+    jobIds: string[];
+    specId?: string;
+    runId?: string;
+    inboxIds: string[];
+    technicalDetails: string;
+}
+
+export interface SpecHealth {
+    status: "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
+    label: string;
+    runId?: string;
+    lastCheckedAt: string | null;
+}
+
+export interface FailingSpec {
+    specId: string;
+    title: string;
+    triageStatus: string;
+    runId?: string;
+    updatedAt: string;
+    storyId?: string;
+    inboxIds: string[];
+}
+
+export interface RecentRun extends ActivityStory {
+    trigger: "deploy" | "ci" | "schedule" | "manual" | "spec_change";
+    occurrences: number;
+    counts: { total: number; passed: number; failed: number; flaky: number; running: number };
+}
+
+export interface OverviewResponse {
+    summary: AgentSummary & {
+        verdict: string;
+        nextCheck: string;
+        nextCheckAt: string | null;
+        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; invalid: number };
+    };
+    specHealth: Record<string, SpecHealth>;
+    needsYou: PresentedInboxItem[];
+    failing: FailingSpec[];
+    recentRuns: RecentRun[];
+    items: PresentedInboxItem[];
+    stories: ActivityStory[];
 }

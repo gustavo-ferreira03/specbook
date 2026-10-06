@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { TurnPolicy } from "../jobs/policy";
 import {
     createAgentSession,
     DefaultResourceLoader,
@@ -14,6 +15,7 @@ import { modelRegistryPromise, modelRuntimePromise } from "../llm/runtime";
 import { storageRoot } from "../paths";
 import { createProjectScrubber } from "../credentials/scrub";
 import { chatsRepository } from "../../infra/repositories/chats";
+import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
@@ -32,7 +34,9 @@ import {
 } from "./chat-registry";
 import { createContextTools } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
-import { createDiscoveryBrowserPolicy } from "./discovery-policy";
+import { createExplorationTools } from "./exploration-tools";
+import { createBackgroundTaskTool } from "../steward/tools";
+import { createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy } from "./discovery-policy";
 import { TurnMetricsRecorder, type TurnTrigger } from "./metrics";
 import { buildSystemPrompt } from "./prompts";
 import {
@@ -117,9 +121,10 @@ export async function runChatTurn(
     id: string,
     userText: string,
     existingSessionManager?: SessionManager,
+    policy?: TurnPolicy,
 ): Promise<void> {
     if (!tryReserveChatTurn(id)) return;
-    await runReservedChatTurn(id, userText, existingSessionManager, existingSessionManager ? "retry" : "message");
+    await runReservedChatTurn(id, userText, existingSessionManager, existingSessionManager ? "retry" : "message", policy);
 }
 
 interface SessionEventValue {
@@ -143,6 +148,7 @@ async function runReservedChatTurn(
     userText: string,
     existingSessionManager: SessionManager | undefined,
     trigger: TurnTrigger,
+    turnPolicy?: TurnPolicy,
 ): Promise<void> {
     publishChatUpdate(id);
     const metrics = new TurnMetricsRecorder(id, trigger);
@@ -167,7 +173,8 @@ async function runReservedChatTurn(
             return;
         }
         previousUserCount = userMessageCount(sessionManager);
-        const project = await projectsRepository.getProject(row.projectId);
+        const storedProject = await projectsRepository.getProject(row.projectId);
+        const project = storedProject && turnPolicy?.baseUrl ? { ...storedProject, baseUrl: turnPolicy.baseUrl } : storedProject;
         if (!project) {
             metrics.fail("error", "project_missing");
             ensureUserMessage(sessionManager, userText, previousUserCount);
@@ -223,18 +230,18 @@ async function runReservedChatTurn(
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision
                 ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp), sanitizeResult: scrub }
-                : { sanitizeResult: scrub };
+                : turnPolicy ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp), sanitizeResult: scrub } : { sanitizeResult: scrub };
             const policy: BrowserToolPolicy = {
                 ...basePolicy,
-                beforeCall: async (toolName, args) => {
-                    await browser.mcp.ensureBrowser();
-                    await basePolicy.beforeCall?.(toolName, args);
+                beforeCall: async (toolName, args, signal) => {
+                    await browser.mcp.ensureBrowser(signal);
+                    await basePolicy.beforeCall?.(toolName, args, signal);
                     beginChatBrowserTool(id, toolName);
                     publishChatUpdate(id);
                 },
-                afterCall: async (toolName, args, result) => {
+                afterCall: async (toolName, args, result, signal) => {
                     try {
-                        await basePolicy.afterCall?.(toolName, args, result);
+                        if (!signal?.aborted) await basePolicy.afterCall?.(toolName, args, result, signal);
                     } finally {
                         endChatBrowserTool(id, toolName);
                         publishChatUpdate(id);
@@ -243,7 +250,12 @@ async function runReservedChatTurn(
             };
             browserTools = bridgeBrowserTools(browser.mcp, browser.workDir, policy);
             metrics.setBrowserAvailable(true);
+            await turnPolicy?.browserReady?.();
         } catch (error) {
+            if (turnPolicy?.infrastructureFailure) {
+                await turnPolicy.infrastructureFailure(String(error));
+                return;
+            }
             appendWarning(
                 sessionManager,
                 `The agent browser failed to start: ${error instanceof Error ? error.message : String(error)}. Browser tools are unavailable for this turn.`,
@@ -252,7 +264,7 @@ async function runReservedChatTurn(
 
         const credentialTools = createCredentialTools({
             projectId: row.projectId,
-            baseUrl: project.baseUrl,
+            baseUrl: storedProject!.baseUrl,
             chatId: id,
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
@@ -265,24 +277,38 @@ async function runReservedChatTurn(
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
         });
+        const explorationTools = createExplorationTools({
+            baseUrl: project.baseUrl,
+            mcp: chatBrowser?.mcp ?? null,
+            scrub,
+            recordEvidence: async (json) => {
+                const job = await jobsRepository.forChat(id);
+                if (!job) return;
+                await jobsRepository.log(job.id, "page_scan", json);
+                return `/p/${row.projectId}/overview#${job.id}`;
+            },
+        });
         const customTools = discoveryRevision
             ? [
                   ...browserTools,
                   ...createContextTools(discoveryRevision.id, row.projectId),
                   ...credentialTools,
                   ...sessionTools,
+                  ...explorationTools,
               ]
             : [
                   ...browserTools,
-                  ...createDomainTools(row.projectId, { scrub, metrics }),
+                  ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl }),
+                  ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`)] : []),
                   ...credentialTools,
                   ...sessionTools,
+                  ...explorationTools,
               ];
         const confirmedContext = discoveryRevision
             ? null
             : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
         const resourceLoader = await createResourceLoader(
-            buildSystemPrompt(project, discoveryRevision, confirmedContext),
+            buildSystemPrompt(project, discoveryRevision, confirmedContext) + (turnPolicy?.prompt ?? ""),
         );
         if (consumeAbortRequest(id)) {
             metrics.fail("aborted", "aborted_before_start");
@@ -293,7 +319,7 @@ async function runReservedChatTurn(
             modelRuntime,
             cwd,
             noTools: "builtin",
-            customTools,
+            customTools: turnPolicy ? turnPolicy.tools(customTools) : customTools,
             resourceLoader,
             sessionManager,
         });
@@ -327,6 +353,7 @@ async function runReservedChatTurn(
             }
             if (value.type === "message_end" && value.message?.role === "assistant") {
                 metrics.assistantMessage(value.message);
+                turnPolicy?.tokens(value.message.usage?.totalTokens ?? 0);
                 publishChatUpdate(id, { type: "message_end" });
             }
             if (value.type === "tool_execution_start" && value.toolName) {
@@ -406,6 +433,7 @@ async function runReservedChatTurn(
             console.error(error);
         }
     } finally {
+        await turnPolicy?.flush();
         releaseChatTurn(id);
         publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
         publishChatUpdate(id);

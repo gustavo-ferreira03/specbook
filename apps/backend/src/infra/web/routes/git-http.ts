@@ -11,7 +11,6 @@ import {
 import { BareStateError, repoBare } from "../../../core/repo/bare";
 import { repoGit } from "../../../core/repo/git";
 import { reindexProjectUnlocked } from "../../../core/repo/indexer";
-import { repoRemote } from "../../../core/repo/remote";
 import { bareReposDir } from "../../../core/paths";
 import { projectsRepository, type Project } from "../../repositories/projects";
 
@@ -241,7 +240,6 @@ async function alignBareWithCheckoutUnlocked(projectId: string): Promise<void> {
     const { moved } = await repoBare.fastForwardCheckout(projectId, repoGit.getRepoDir(projectId));
     if (moved) {
         await reindexProjectUnlocked(projectId);
-        repoRemote.schedulePush(projectId);
     }
     if (!status.isClean()) await repoGit.commitAll(projectId, "specbook: import working tree changes");
     // commitAll only logs publish failures; this one must fail the request.
@@ -271,8 +269,6 @@ async function followExternalPush(projectId: string): Promise<void> {
         const { moved } = await repoBare.fastForwardCheckout(projectId, repoGit.getRepoDir(projectId));
         if (!moved) return;
         await reindexProjectUnlocked(projectId);
-        // Keep the optional GitHub mirror in step with the pushed commits.
-        repoRemote.schedulePush(projectId);
     } catch (error) {
         // The push itself succeeded and must not be rolled back; surface the
         // follow-up failure instead so the project can be repaired.

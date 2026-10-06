@@ -5,10 +5,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { WebSocket } from "ws";
+import { minimalChildEnv } from "../runner/process";
 
-const DISPLAY_START = 99;
-const DISPLAY_END = 119;
-const VNC_PORT_START = 5900;
 export const SCREEN_WIDTH = 1280;
 export const SCREEN_HEIGHT = 800;
 
@@ -19,58 +17,93 @@ export interface VncSession {
 }
 
 interface VncSessionRecord extends VncSession {
-    displayNumber: number;
     xvfbProc: ChildProcess;
     x11vncProc: ChildProcess;
     password: string;
     passwordDir: string;
 }
 
+export class BrowserUnavailableError extends Error {
+    constructor(cause: unknown) {
+        super("Specbook could not start its browser. It will retry automatically.", { cause });
+        this.name = "BrowserUnavailableError";
+    }
+}
+
 interface SpawnedProcess {
     proc: ChildProcess;
-    ready: Promise<void>;
+    ready: Promise<number>;
 }
 
 const sessions = new Map<string, VncSessionRecord>();
-const reservedDisplays = new Set<number>();
+const closing = new Map<string, Promise<void>>();
+
+// Closing the parent's pipe also runs this cleanup after an abrupt backend exit.
+// Only children created by this supervisor are signalled; X server locks are never removed.
+const PROCESS_SUPERVISOR = `
+const { spawn } = require("node:child_process");
+const fs = require("node:fs/promises");
+const [cleanupDir, command, ...args] = process.argv.slice(1);
+const child = spawn(command, args, { stdio: ["ignore", 1, 2, 3] });
+let stopping = false;
+let killTimer;
+const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    child.kill("SIGTERM");
+    killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
+    killTimer.unref();
+};
+const finish = async (code) => {
+    clearTimeout(killTimer);
+    process.stdin.destroy();
+    if (cleanupDir) await fs.rm(cleanupDir, { recursive: true, force: true }).catch(() => {});
+    process.exit(code);
+};
+child.once("error", error => { process.stderr.write(String(error)); void finish(1); });
+child.once("exit", code => void finish(code || 0));
+process.stdin.on("end", stop);
+process.stdin.on("error", stop);
+process.stdin.resume();
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+`;
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function spawnWithOutput(cmd: string, args: string[], env: NodeJS.ProcessEnv): SpawnedProcess {
-    const proc = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"], env });
-    let stderr = "";
-    const ready = new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const timer = setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            resolve();
-        }, 700);
-        proc.stderr?.on("data", (chunk: Buffer) => {
-            stderr += chunk.toString();
-        });
-        proc.once("error", (error) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            reject(error);
-        });
-        proc.once("exit", (code, signal) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            reject(new Error(stderr.trim() || `${cmd} exited early: ${code ?? signal ?? "unknown"}`));
-        });
+function spawnUntilReady(cmd: string, args: string[], env: NodeJS.ProcessEnv, output: 1 | 3, pattern: RegExp, cleanupDir = ""): SpawnedProcess {
+    const proc = spawn(process.execPath, ["-e", PROCESS_SUPERVISOR, cleanupDir, cmd, ...args], {
+        stdio: ["pipe", "pipe", "pipe", "pipe"], env,
     });
+    let stderr = "";
+    proc.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-4000); });
+    const ready = new Promise<number>((resolve, reject) => {
+        let settled = false;
+        let outputText = "";
+        const finish = (error?: Error, value?: number) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (error) reject(error);
+            else resolve(value!);
+        };
+        const timer = setTimeout(() => finish(new Error(`${cmd} did not become ready: ${stderr.trim()}`)), 10_000);
+        proc.stdio[output]?.on("data", (chunk: Buffer) => {
+            outputText = (outputText + chunk.toString()).slice(-4000);
+            const match = pattern.exec(outputText);
+            if (match) finish(undefined, Number.parseInt(match[1], 10));
+        });
+        proc.once("error", (error) => finish(error));
+        proc.once("exit", (code, signal) => finish(new Error(stderr.trim() || `${cmd} exited early: ${code ?? signal ?? "unknown"}`)));
+    });
+    if (output !== 1) proc.stdout?.resume();
     return { proc, ready };
 }
 
-function x11Env(display: string): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...process.env, DISPLAY: display, XDG_SESSION_TYPE: "x11" };
-    delete env.WAYLAND_DISPLAY;
-    return env;
+function x11Env(display?: string): NodeJS.ProcessEnv {
+    return minimalChildEnv({ DISPLAY: display, XDG_SESSION_TYPE: "x11" });
 }
 
 function hasStopped(proc: ChildProcess): boolean {
@@ -79,41 +112,17 @@ function hasStopped(proc: ChildProcess): boolean {
 
 async function stopProcess(proc: ChildProcess | null): Promise<void> {
     if (!proc || hasStopped(proc)) return;
-    proc.kill("SIGKILL");
-    for (let attempt = 0; attempt < 40 && !hasStopped(proc); attempt += 1) {
-        await sleep(25);
-    }
-}
-
-async function cleanOwnedDisplayArtifacts(display: number, proc: ChildProcess): Promise<void> {
-    const pid = proc.pid;
-    if (pid === undefined || !hasStopped(proc)) return;
-    const lockPath = `/tmp/.X${display}-lock`;
-    const socketPath = `/tmp/.X11-unix/X${display}`;
-    const readLockPid = async (): Promise<number | null> => {
-        try {
-            const value = Number.parseInt((await fs.readFile(lockPath, "utf8")).trim(), 10);
-            return Number.isInteger(value) ? value : null;
-        } catch {
-            return null;
-        }
-    };
-    if ((await readLockPid()) !== pid) return;
-    try {
-        await fs.rm(socketPath, { force: true });
-    } catch {
-        return;
-    }
-    if ((await readLockPid()) === pid) {
-        await fs.rm(lockPath, { force: true }).catch(() => undefined);
-    }
+    proc.stdin?.end();
+    proc.kill("SIGTERM");
+    for (let attempt = 0; attempt < 80 && !hasStopped(proc); attempt += 1) await sleep(25);
+    if (!hasStopped(proc)) proc.kill("SIGKILL");
+    for (let attempt = 0; attempt < 40 && !hasStopped(proc); attempt += 1) await sleep(25);
 }
 
 async function stopRecord(record: VncSessionRecord): Promise<void> {
-    await Promise.all([stopProcess(record.x11vncProc), stopProcess(record.xvfbProc)]);
-    await cleanOwnedDisplayArtifacts(record.displayNumber, record.xvfbProc);
+    await stopProcess(record.x11vncProc);
+    await stopProcess(record.xvfbProc);
     await fs.rm(record.passwordDir, { recursive: true, force: true }).catch(() => undefined);
-    reservedDisplays.delete(record.displayNumber);
 }
 
 /**
@@ -134,7 +143,7 @@ function publicSession(record: VncSessionRecord): VncSession {
 
 function monitorSession(record: VncSessionRecord): void {
     const stop = () => {
-        if (sessions.get(record.id) === record) stopVncStack(record.id);
+        if (sessions.get(record.id) === record) void stopVncStack(record.id);
     };
     record.xvfbProc.once("error", stop);
     record.xvfbProc.once("exit", stop);
@@ -147,93 +156,67 @@ export function getVncSession(id: string): VncSession | null {
     return record ? publicSession(record) : null;
 }
 
-export async function startVncStack(): Promise<VncSession> {
-    let lastError: unknown;
-    for (let display = DISPLAY_START; display <= DISPLAY_END; display += 1) {
-        if (reservedDisplays.has(display)) continue;
-        reservedDisplays.add(display);
-        const displayName = `:${display}`;
-        const port = VNC_PORT_START + (display - DISPLAY_START);
-        let xvfbProc: ChildProcess | null = null;
-        let x11vncProc: ChildProcess | null = null;
-        let record: VncSessionRecord | null = null;
-        let passwordDir: string | null = null;
-        let active = false;
+async function startDisplay(): Promise<{ proc: ChildProcess; display: string }> {
+    for (let attempt = 0; attempt < 16; attempt++) {
+        const number = crypto.randomInt(100, 10_000);
+        const occupied = await Promise.all([`/tmp/.X${number}-lock`, `/tmp/.X11-unix/X${number}`].map((file) =>
+            fs.lstat(file).then(() => true, (error: NodeJS.ErrnoException) => error.code !== "ENOENT"),
+        ));
+        if (occupied.some(Boolean)) continue;
+        // The X server atomically claims the display. Explicit high candidates also
+        // work when WSLg's socket directory is read-only and only abstract sockets work.
+        const xvfb = spawnUntilReady("Xvfb", [`:${number}`, "-displayfd", "3", "-screen", "0", `${SCREEN_WIDTH}x${SCREEN_HEIGHT}x24`, "-nolisten", "tcp"], x11Env(), 3, /^(\d+)\n/m);
         try {
-            const secret = await writePasswordFile();
-            passwordDir = secret.dir;
-            const xvfb = spawnWithOutput(
-                "Xvfb",
-                [displayName, "-screen", "0", `${SCREEN_WIDTH}x${SCREEN_HEIGHT}x24`],
-                x11Env(displayName),
-            );
-            xvfbProc = xvfb.proc;
-            await xvfb.ready;
-            await sleep(500);
-            if (hasStopped(xvfbProc)) throw new Error(`Xvfb failed to start on ${displayName}`);
-            const x11vnc = spawnWithOutput(
-                "x11vnc",
-                [
-                    "-display",
-                    displayName,
-                    "-localhost",
-                    "-rfbport",
-                    String(port),
-                    "-passwdfile",
-                    secret.file,
-                    "-quiet",
-                    "-forever",
-                    "-shared",
-                    "-noipv6",
-                    "-noshm",
-                    "-wait",
-                    "50",
-                    "-nap",
-                ],
-                x11Env(displayName),
-            );
-            x11vncProc = x11vnc.proc;
-            await x11vnc.ready;
-            await sleep(500);
-            if (hasStopped(xvfbProc) || hasStopped(x11vncProc)) {
-                throw new Error(`Xvfb/x11vnc failed to start on ${displayName}`);
-            }
-            record = {
-                id: crypto.randomUUID(),
-                display: displayName,
-                displayNumber: display,
-                port,
-                xvfbProc,
-                x11vncProc,
-                password: secret.password,
-                passwordDir: secret.dir,
-            };
-            monitorSession(record);
-            sessions.set(record.id, record);
-            if (hasStopped(xvfbProc) || hasStopped(x11vncProc)) {
-                sessions.delete(record.id);
-                throw new Error(`Xvfb/x11vnc failed to start on ${displayName}`);
-            }
-            active = true;
-            return publicSession(record);
+            return { proc: xvfb.proc, display: `:${await xvfb.ready}` };
         } catch (error) {
-            lastError = error;
-            if (record) sessions.delete(record.id);
-            await Promise.all([stopProcess(x11vncProc), stopProcess(xvfbProc)]);
-            if (xvfbProc) await cleanOwnedDisplayArtifacts(display, xvfbProc);
-            if (passwordDir) await fs.rm(passwordDir, { recursive: true, force: true }).catch(() => undefined);
-        } finally {
-            if (!active) reservedDisplays.delete(display);
+            await stopProcess(xvfb.proc);
+            if (!(error instanceof Error) || !/already active|already in use|Cannot establish any listening sockets/.test(error.message)) throw error;
         }
     }
-    throw lastError instanceof Error ? lastError : new Error("Xvfb/x11vnc failed to start");
+    throw new Error("No free browser display could be allocated");
 }
 
-export function stopVncStack(id: string): void {
+export async function startVncStack(): Promise<VncSession> {
+    let xvfbProc: ChildProcess | null = null;
+    let x11vncProc: ChildProcess | null = null;
+    let record: VncSessionRecord | null = null;
+    let passwordDir: string | null = null;
+    try {
+        const secret = await writePasswordFile();
+        passwordDir = secret.dir;
+        const xvfb = await startDisplay();
+        xvfbProc = xvfb.proc;
+        const display = xvfb.display;
+        // LibVNCServer's default auto-port loop binds each candidate, avoiding probe/bind races.
+        const x11vnc = spawnUntilReady("x11vnc", [
+            "-norc", "-display", display, "-localhost", "-passwdfile", secret.file,
+            "-quiet", "-forever", "-shared", "-noipv6", "-no6", "-noshm", "-wait", "50", "-nap",
+        ], x11Env(display), 1, /^PORT=(\d+)\r?\n/m, secret.dir);
+        x11vncProc = x11vnc.proc;
+        const port = await x11vnc.ready;
+        record = { id: crypto.randomUUID(), display, port, xvfbProc, x11vncProc, password: secret.password, passwordDir: secret.dir };
+        monitorSession(record);
+        sessions.set(record.id, record);
+        if (hasStopped(xvfbProc) || hasStopped(x11vncProc)) throw new Error("The browser display stopped during startup");
+        return publicSession(record);
+    } catch (error) {
+        if (record) sessions.delete(record.id);
+        await stopProcess(x11vncProc);
+        await stopProcess(xvfbProc);
+        if (passwordDir) await fs.rm(passwordDir, { recursive: true, force: true }).catch(() => undefined);
+        throw new BrowserUnavailableError(error);
+    }
+}
+
+export async function stopVncStack(id: string): Promise<void> {
+    const previous = closing.get(id);
+    if (previous) return previous;
     const record = sessions.get(id);
     if (!record) return;
     sessions.delete(id);
-    void stopRecord(record);
+    const task = stopRecord(record);
+    closing.set(id, task);
+    try { await task; } finally { closing.delete(id); }
 }
 
 const RFB_HANDSHAKE_TIMEOUT_MS = 10_000;

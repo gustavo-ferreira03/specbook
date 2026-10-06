@@ -7,7 +7,7 @@ export interface HumanSpec {
     postconditions: string[];
 }
 
-export type SpecStatus = "unverified" | "passed" | "failed" | "invalid" | "conflict";
+export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface LlmSettings {
@@ -52,10 +52,7 @@ export const projects = sqliteTable("projects", {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
-    gitRemoteUrl: text("git_remote_url"),
-    gitToken: text("git_token"),
-    gitPushError: text("git_push_error"),
-    gitConflictPaths: text("git_conflict_paths", { mode: "json" }).$type<string[] | null>(),
+    ciAllowedOrigins: text("ci_allowed_origins", { mode: "json" }).$type<string[]>().notNull().default([]),
     contextSyncError: text("context_sync_error"),
     gitAccessTokenHash: text("git_access_token_hash"),
     gitAccessTokenPrefix: text("git_access_token_prefix"),
@@ -141,8 +138,13 @@ export const runs = sqliteTable(
         startedAt: text("started_at").notNull(),
         durationMs: integer("duration_ms"),
         failReason: text("fail_reason"),
+        automationPending: integer("automation_pending", { mode: "boolean" }).notNull().default(false),
+        healOnFailure: integer("heal_on_failure", { mode: "boolean" }).notNull().default(true),
+        retryOf: text("retry_of"),
+        flaky: integer("flaky", { mode: "boolean" }).notNull().default(false),
+        baseUrl: text("base_url"),
     },
-    (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt)],
+    (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt), uniqueIndex("runs_retry_of_unique").on(table.retryOf)],
 );
 
 export interface CredentialField {
@@ -181,5 +183,131 @@ export const chatSessions = sqliteTable(
 export const appSettings = sqliteTable("app_settings", {
     id: integer("id").primaryKey(),
     llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),
+    agentPaused: integer("agent_paused", { mode: "boolean" }).notNull().default(false),
     updatedAt: text("updated_at").notNull(),
+});
+
+export const jobs = sqliteTable("jobs", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull().unique(),
+    trigger: text("trigger").notNull(),
+    kind: text("kind").notNull().default("review"),
+    specId: text("spec_id"),
+    runId: text("run_id").unique(),
+    classification: text("classification").$type<"test_drift" | "application_bug" | "environment">(),
+    goal: text("goal").notNull(),
+    status: text("status").$type<import("../../core/jobs/schemas").JobStatus>().notNull(),
+    limits: text("limits", { mode: "json" }).$type<import("../../core/jobs/schemas").JobLimits>().notNull(),
+    tokensUsed: integer("tokens_used").notNull().default(0),
+    actionsUsed: integer("actions_used").notNull().default(0),
+    elapsedMs: integer("elapsed_ms").notNull().default(0),
+    stopReason: text("stop_reason"),
+    safetyRetries: integer("safety_retries").notNull().default(0),
+    retryAt: text("retry_at"),
+    systemError: text("system_error"),
+    infrastructureRetries: integer("infrastructure_retries").notNull().default(0),
+    startedAt: text("started_at"),
+    heartbeatAt: text("heartbeat_at"),
+    pendingMessage: text("pending_message").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [index("jobs_project_status").on(table.projectId, table.status)]);
+
+export const inboxItems = sqliteTable("inbox_items", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<import("../../core/jobs/schemas").InboxKind>().notNull(),
+    status: text("status").$type<"pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed">().notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    answer: text("answer"),
+    commitSha: text("commit_sha"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [index("inbox_project_status").on(table.projectId, table.status)]);
+
+export const jobActions = sqliteTable("job_actions", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    detail: text("detail").notNull(),
+    createdAt: text("created_at").notNull(),
+}, (table) => [index("job_actions_job").on(table.jobId)]);
+
+export const projectAutomations = sqliteTable("project_automations", {
+    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+    cron: text("cron"),
+    specIds: text("spec_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    healFailures: integer("heal_failures", { mode: "boolean" }).notNull().default(true),
+    webhookUrl: text("webhook_url"),
+    allowPrivateWebhook: integer("allow_private_webhook", { mode: "boolean" }).notNull().default(false),
+    nextRunAt: text("next_run_at"),
+    lastBatchId: text("last_batch_id"),
+    lastBatchStatus: text("last_batch_status").$type<RunStatus>(),
+    lastError: text("last_error"),
+    updatedAt: text("updated_at").notNull(),
+});
+
+export const webhookNotifications = sqliteTable("webhook_notifications", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    batchId: text("batch_id").notNull(),
+    status: text("status").$type<RunStatus>().notNull(),
+    webhookUrl: text("webhook_url").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: text("next_attempt_at"),
+    deliveredAt: text("delivered_at"),
+    lastError: text("last_error"),
+    createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("webhook_batch_status_unique").on(table.batchId, table.status), index("webhook_retry_idx").on(table.nextAttemptAt)]);
+
+export const projectStewards = sqliteTable("project_stewards", {
+    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+    autonomy: text("autonomy").$type<"observe" | "propose" | "act">().notNull().default("propose"),
+    autoApproveFixes: integer("auto_approve_fixes", { mode: "boolean" }).notNull().default(false),
+    paused: integer("paused", { mode: "boolean" }).notNull().default(false),
+    observation: text("observation", { mode: "json" }).$type<import("../../core/steward/signals").ProjectObservation>().notNull().default({}),
+    updatedAt: text("updated_at").notNull(),
+});
+
+export const projectSignals = sqliteTable("project_signals", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    status: text("status").$type<"pending" | "handled" | "observed">().notNull().default("pending"),
+    createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("project_signal_key").on(table.projectId, table.key)]);
+
+export const stewardIntents = sqliteTable("steward_intents", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    source: text("source").$type<"user" | "event">().notNull().default("event"),
+    intent: text("intent", { mode: "json" }).$type<import("../../core/steward/schemas").StewardIntent>().notNull(),
+    priority: integer("priority").notNull(),
+    status: text("status").$type<"pending" | "running" | "completed" | "ignored" | "failed">().notNull().default("pending"),
+    reason: text("reason").notNull(),
+    jobId: text("job_id"),
+    batchId: text("batch_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [uniqueIndex("steward_intent_key").on(table.projectId, table.key)]);
+
+export const projectCiTokens = sqliteTable("project_ci_tokens", {
+    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash"),
+    tokenPrefix: text("token_prefix"),
+    createdAt: text("created_at"),
+    lastUsedAt: text("last_used_at"),
+    requestWindowStartedAt: text("request_window_started_at"),
+    requestCount: integer("request_count").notNull().default(0),
 });

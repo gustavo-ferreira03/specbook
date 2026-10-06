@@ -2,7 +2,7 @@
 // Converts the chat turn metrics JSONL (<storage>/metrics/chat-turns.jsonl) to CSV.
 //
 // Usage:
-//   node scripts/export-metrics.mjs [input.jsonl] [--runs] [--out file.csv]
+//   node scripts/export-metrics.mjs [input.jsonl] [--runs | --agent] [--out file.csv]
 //
 // Default output: one row per turn. With --runs: one row per run_spec call.
 // Input defaults to $SPECBOOK_STORAGE_DIR/metrics/chat-turns.jsonl, or
@@ -15,11 +15,17 @@ import { fileURLToPath } from "node:url";
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const runsMode = args.includes("--runs");
+const agentMode = args.includes("--agent");
 const outIndex = args.indexOf("--out");
 const outPath = outIndex >= 0 ? args[outIndex + 1] : null;
-const positional = args.filter((arg, index) => !arg.startsWith("--") && index !== outIndex + 1);
+const positional = args.filter((arg, index) => !arg.startsWith("--") && (outIndex < 0 || index !== outIndex + 1));
 const storageRoot = process.env.SPECBOOK_STORAGE_DIR ?? path.join(backendRoot, "storage");
-const inputPath = positional[0] ?? path.join(storageRoot, "metrics", "chat-turns.jsonl");
+const inputPath = positional[0] ?? path.join(storageRoot, "metrics", agentMode ? "agent-events.jsonl" : "chat-turns.jsonl");
+
+if ((runsMode && agentMode) || (outIndex >= 0 && !outPath)) {
+    console.error("Use either --runs or --agent, and supply a file after --out.");
+    process.exit(1);
+}
 
 if (!fs.existsSync(inputPath)) {
     console.error(`Metrics file not found: ${inputPath}`);
@@ -109,7 +115,8 @@ const runColumns = [
     ["specAttempt", (r) => r.run.specAttempt],
 ];
 
-const [columns, rows] = runsMode
+const agentColumns = ["schemaVersion", "eventId", "at", "event", "projectId", "jobId", "chatId", "specId", "runId", "trigger", "kind", "status", "classification", "tokensUsed", "actionsUsed", "elapsedMs", "itemId", "itemKind", "decision", "actor", "verificationStatus"].map((name) => [name, (r) => r[name]]);
+const [columns, rows] = agentMode ? [agentColumns, records] : runsMode
     ? [runColumns, records.flatMap((turn) => (turn.runSpec ?? []).map((run) => ({ turn, run })))]
     : [turnColumns, records];
 

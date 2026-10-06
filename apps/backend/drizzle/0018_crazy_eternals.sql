@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `heartbeat_at` text;

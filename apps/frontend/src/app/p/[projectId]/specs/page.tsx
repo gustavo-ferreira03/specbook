@@ -28,7 +28,6 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
     { value: "all", label: "All" },
     { value: "failed", label: "Failing" },
     { value: "invalid", label: "Invalid" },
-    { value: "conflict", label: "Conflict" },
     { value: "unverified", label: "Not run" },
     { value: "passed", label: "Passing" },
 ];
@@ -118,6 +117,30 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
         return () => controller.abort();
     }, [projectId, retryKey]);
 
+    const pendingRun = Boolean(specs?.some((spec) => spec.lastRun?.status === "running" || spec.lastRun?.automationPending));
+    useEffect(() => {
+        if (!pendingRun) return;
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout>;
+        async function refreshRuns() {
+            try {
+                const result = await getProjectTree(projectId, controller.signal);
+                setFeatures(result.features);
+                setSpecs(result.specs);
+                setLoadError("");
+            } catch (error) {
+                if (!isAbortError(error)) setLoadError(errorMessage(error));
+            } finally {
+                if (!controller.signal.aborted) timer = setTimeout(() => void refreshRuns(), 1500);
+            }
+        }
+        timer = setTimeout(() => void refreshRuns(), 1500);
+        return () => {
+            controller.abort();
+            clearTimeout(timer);
+        };
+    }, [pendingRun, projectId]);
+
     useEffect(() => onInvalidate((event) => {
         if (matchesInvalidation(event, "tree", projectId)) setRetryKey((key) => key + 1);
     }), [projectId]);
@@ -201,12 +224,12 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const visibleCount = groups.reduce((sum, group) => sum + group.specs.length, 0);
 
     function handleRun(selected: SpecSummary[], label: string) {
-        const runnable = selected.filter((spec) => spec.status !== "invalid" && spec.status !== "conflict");
+        const runnable = selected.filter((spec) => spec.status !== "invalid");
         if (runnable.length === 0) return;
         void runBatch.start(label, runnable.map((spec) => ({ id: spec.id, title: spec.title })));
     }
 
-    const runnableCount = specs.filter((spec) => spec.status !== "invalid" && spec.status !== "conflict").length;
+    const runnableCount = specs.filter((spec) => spec.status !== "invalid").length;
 
     return (
         <div className="flex min-h-full flex-col bg-surface">

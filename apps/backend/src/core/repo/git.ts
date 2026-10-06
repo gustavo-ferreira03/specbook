@@ -64,7 +64,7 @@ class RepoGit {
     }
 
     /**
-     * Content arrives from Git pushes and GitHub pulls, so symbolic links are
+     * Content arrives from Git pushes, so symbolic links are
      * checked out as plain files holding the link target instead of real links.
      */
     private async hardenCheckoutConfig(projectId: string): Promise<void> {
@@ -178,18 +178,6 @@ class RepoGit {
         }
     }
 
-    getAuthedRemoteUrl(remoteUrl: string, token: string | null): string {
-        if (!token) return remoteUrl;
-        const url = new URL(remoteUrl);
-        url.username = "x-access-token";
-        url.password = token;
-        return url.toString();
-    }
-
-    sanitizeGitError(error: unknown, token: string | null): string {
-        const message = error instanceof Error ? error.message : String(error);
-        return token ? message.split(token).join("***") : message;
-    }
 }
 
 export const repoGit = new RepoGit();

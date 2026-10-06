@@ -5,9 +5,7 @@ import type {
     CredentialFieldInput,
     CredentialProfile,
     Feature,
-    GitStatus,
     GitRemoteAccess,
-    GitSyncOutcome,
     HumanSpec,
     LlmCurrentSettings,
     LlmOAuthPoll,
@@ -241,10 +239,6 @@ export function deleteProject(projectId: string): Promise<void> {
     return api(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
 }
 
-export function getProjectGit(projectId: string): Promise<{ git: GitStatus }> {
-    return api(`/projects/${encodeURIComponent(projectId)}/git`);
-}
-
 export function getProjectGitRemote(projectId: string): Promise<{ remote: GitRemoteAccess }> {
     return api(`/projects/${encodeURIComponent(projectId)}/git/remote`);
 }
@@ -257,35 +251,6 @@ export function revokeProjectGitRemoteToken(projectId: string): Promise<{ remote
     return api(`/projects/${encodeURIComponent(projectId)}/git/remote/token`, { method: "DELETE" });
 }
 
-export function connectProjectGit(
-    projectId: string,
-    remoteUrl: string,
-    token?: string | null,
-): Promise<{ git: GitStatus }> {
-    return api(`/projects/${encodeURIComponent(projectId)}/git`, {
-        method: "PUT",
-        body: JSON.stringify({ remoteUrl, token }),
-    });
-}
-
-export function disconnectProjectGit(projectId: string): Promise<void> {
-    return api(`/projects/${encodeURIComponent(projectId)}/git`, { method: "DELETE" });
-}
-
-export function syncProjectGit(projectId: string): Promise<{ outcome: GitSyncOutcome }> {
-    return api(`/projects/${encodeURIComponent(projectId)}/git/sync`, { method: "POST" });
-}
-
-export function resolveProjectGit(
-    projectId: string,
-    choices: { path: string; keep: "local" | "remote" }[],
-): Promise<{ outcome: GitSyncOutcome }> {
-    return api(`/projects/${encodeURIComponent(projectId)}/git/resolve`, {
-        method: "POST",
-        body: JSON.stringify({ choices }),
-    });
-}
-
 export function getSpecHistory(specId: string): Promise<{
     entries: { sha: string; date: string; message: string }[];
 }> {
@@ -295,7 +260,7 @@ export function getSpecHistory(specId: string): Promise<{
 export function getSpecAtCommit(
     specId: string,
     sha: string,
-): Promise<{ yaml: string | null; testSource: string | null; legacyRobotSource: string | null }> {
+): Promise<{ yaml: string | null; testSource: string | null }> {
     return api(`/specs/${encodeURIComponent(specId)}/history/${encodeURIComponent(sha)}`);
 }
 

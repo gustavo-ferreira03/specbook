@@ -29,7 +29,7 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
     const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
     const [entriesLoading, setEntriesLoading] = useState(false);
     const [selected, setSelected] = useState<HistoryEntry | null>(null);
-    const [contents, setContents] = useState<{ yaml: string | null; testSource: string | null; legacyRobotSource: string | null } | null>(null);
+    const [contents, setContents] = useState<{ yaml: string | null; testSource: string | null } | null>(null);
     const [contentsLoading, setContentsLoading] = useState(false);
     const [error, setError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
@@ -132,11 +132,7 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
                         {selected && contents && (
                             <div className="min-w-0 p-4 sm:p-5">
                                 <FileContent label="spec.yml" language="yaml" source={contents.yaml} />
-                                {contents.testSource === null && contents.legacyRobotSource !== null ? (
-                                    <FileContent label="spec.robot (old format)" language="text" source={contents.legacyRobotSource} className="mt-6" />
-                                ) : (
-                                    <FileContent label="spec.ts" language="typescript" source={contents.testSource} className="mt-6" />
-                                )}
+                                <FileContent label="spec.ts" language="typescript" source={contents.testSource} className="mt-6" />
                             </div>
                         )}
                     </ScrollArea>

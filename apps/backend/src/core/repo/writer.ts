@@ -5,14 +5,11 @@ import { runBatch } from "../../infra/db/client";
 import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { projectContextsRepository, type ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
-import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { validateSpecSource, type SpecSourceValidation } from "../runner/validate";
 import { acquireSpecLocks, areSpecsLocked, ResourceBusyError, withSpecLock } from "../specs/lifecycle";
-import { SyncConflictError } from "./errors";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
-import { repoRemote } from "./remote";
 import { assertRepoPathSafe, readOptionalRepoFile, readRepoFile, writeRepoFile } from "./safe-fs";
 import { uniqueSlug } from "./slug";
 import {
@@ -36,13 +33,6 @@ export function specYamlFile(specPath: string): string {
 export function specTestFile(specPath: string): string {
     return `${specPath}/spec.ts`;
 }
-
-/** The Robot Framework executable of Specs written before spec.ts; no longer run. */
-export function legacyRobotFile(specPath: string): string {
-    return `${specPath}/spec.robot`;
-}
-
-export const LEGACY_ROBOT_REASON = "This Spec uses the old Robot Framework format; regenerate it in a chat";
 
 export function featureYamlFile(featurePath: string): string {
     return `${featurePath}/feature.yml`;
@@ -77,7 +67,7 @@ async function siblingNames(projectId: string, dirRelative: string): Promise<Set
     const entries = await fs.readdir(absolute(projectId, dirRelative), { withFileTypes: true }).catch(() => []);
     const names = new Set<string>(["feature", "context"]);
     for (const entry of entries) {
-        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|ts|robot)$/, ""));
+        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|ts)$/, ""));
     }
     return names;
 }
@@ -88,13 +78,6 @@ function isUnder(candidate: string, prefix: string): boolean {
 
 function movedPath(candidate: string, from: string, to: string): string {
     return `${to}${candidate.slice(from.length)}`;
-}
-
-export async function assertNoSyncConflict(projectId: string): Promise<void> {
-    const project = await projectsRepository.getProject(projectId);
-    if (project?.gitConflictPaths?.length) {
-        throw new SyncConflictError("Resolve the git sync conflict before editing this project");
-    }
 }
 
 /** The allowlist check of spec.ts plus the named-steps rule; the same validation the indexer applies. */
@@ -116,24 +99,36 @@ async function rollbackWorkingTree(projectId: string): Promise<void> {
  * working tree is restored so disk and DB never disagree. The commit happens only
  * after the DB write succeeded.
  */
+export interface RepoMutationOptions {
+    expectedHead?: string;
+    expectedSpec?: { yaml: string; testSource: string | null };
+    commitMessage?: string;
+    checkPolicy?: () => Promise<void>;
+}
+
 async function mutateRepoUnlocked<T>(
     projectId: string,
     message: string,
     work: () => Promise<T>,
+    options: RepoMutationOptions = {},
 ): Promise<{ result: T; commitSha: string }> {
-    await assertNoSyncConflict(projectId);
     await repoGit.assertRepoWritableUnlocked(projectId);
+    if (options.expectedHead && options.expectedHead !== await repoGit.getHeadSha(projectId)) {
+        throw new Error("The repository changed since this proposal. Ask the job to prepare a new proposal.");
+    }
     let result: T;
     try {
+        await options.checkPolicy?.();
         result = await work();
+        await options.checkPolicy?.();
     } catch (error) {
         await rollbackWorkingTree(projectId).catch((rollbackError: unknown) => {
             console.error(`[specbook] restoring the working tree of ${projectId} failed:`, rollbackError);
         });
+        if (options.checkPolicy) await reindexProjectUnlocked(projectId);
         throw error;
     }
-    const commitSha = await repoGit.commitAll(projectId, message);
-    repoRemote.schedulePush(projectId);
+    const commitSha = await repoGit.commitAll(projectId, options.commitMessage ?? message);
     return { result, commitSha };
 }
 
@@ -142,6 +137,7 @@ export async function createFeatureInRepo(
     parentId: string | null,
     title: string,
     description: string,
+    options: RepoMutationOptions = {},
 ): Promise<Feature> {
     return repoGit.withRepoLock(projectId, async () => {
         const { result } = await mutateRepoUnlocked(projectId, `feature: create "${title}"`, async () => {
@@ -154,7 +150,7 @@ export async function createFeatureInRepo(
             await fs.mkdir(await safePath(projectId, featurePath), { recursive: true });
             await writeFile(projectId, featureYamlFile(featurePath), serializeFeatureYaml({ title, description }));
             return featuresRepository.createFeature(projectId, parentId, title, description, featurePath, id);
-        });
+        }, options);
         return result;
     });
 }
@@ -166,7 +162,7 @@ export async function createSpecInRepo(input: {
     description: string;
     humanSpec: HumanSpec;
     testSource: string;
-}): Promise<{ spec: Spec; commitSha: string }> {
+}, options: RepoMutationOptions = {}): Promise<{ spec: Spec; commitSha: string }> {
     const validation = validateSpec(input.testSource, input.humanSpec);
     return repoGit.withRepoLock(input.projectId, async () => {
         const { result: spec, commitSha } = await mutateRepoUnlocked(
@@ -204,6 +200,7 @@ export async function createSpecInRepo(input: {
                 await specsRepository.createSpecRecordRow(row);
                 return row;
             },
+            options,
         );
         return { spec, commitSha };
     });
@@ -294,13 +291,6 @@ async function readOptionalFile(projectId: string, relative: string): Promise<st
     return readOptionalRepoFile(repoGit.getRepoDir(projectId), absolute(projectId, relative));
 }
 
-/** Deletes a leftover spec.robot (even a symlink: only the link is removed). */
-async function removeLegacyRobot(projectId: string, specPath: string): Promise<void> {
-    const target = absolute(projectId, legacyRobotFile(specPath));
-    await assertRepoPathSafe(repoGit.getRepoDir(projectId), path.dirname(target));
-    await fs.rm(target, { force: true });
-}
-
 export interface SpecPatchInput {
     title?: string;
     description?: string;
@@ -311,23 +301,25 @@ export interface SpecPatchInput {
 /**
  * Writes a Spec's files, validates the resulting spec.ts against the resulting
  * spec.yml and records the matching status. The caller must hold the Spec lock (see
- * updateSpecWithLock). Writing spec.ts removes a leftover Robot Framework spec.robot.
+ * updateSpecWithLock).
  */
 export async function updateSpecInRepo(
     spec: Spec,
     patch: SpecPatchInput,
+    options: RepoMutationOptions = {},
 ): Promise<{ spec: Spec; commitSha: string }> {
     return repoGit.withRepoLock(spec.projectId, async () => {
         const { commitSha } = await mutateRepoUnlocked(spec.projectId, `spec: update "${patch.title ?? spec.title}"`, async () => {
             const current = await specsRepository.getSpec(spec.id);
             if (!current) throw new Error("Spec not found");
-            if (current.status === "conflict") {
-                throw new SyncConflictError("Resolve the git sync conflict of this Spec before editing it");
-            }
             const currentYaml = await readFile(current.projectId, specYamlFile(current.path));
+            if (options.expectedSpec && (currentYaml !== options.expectedSpec.yaml
+                || await readOptionalFile(current.projectId, specTestFile(current.path)) !== options.expectedSpec.testSource)) {
+                throw new Error("The Spec changed since this proposal. Ask the job to prepare a new proposal.");
+            }
             const testSource = patch.testSource ?? (await readOptionalFile(current.projectId, specTestFile(current.path)));
             if (testSource === null) {
-                throw new Error(`${LEGACY_ROBOT_REASON}: provide the new spec.ts source (testSource) with this update.`);
+                throw new Error("Missing spec.ts; provide the complete testSource with this update.");
             }
 
             const title = patch.title ?? current.title;
@@ -348,10 +340,11 @@ export async function updateSpecInRepo(
                     await fs.rename(from, to);
                 }
             }
-            const markdown = serializeSpecYaml({ title, description, humanSpec });
+            const markdown = patch.title === undefined && patch.description === undefined && patch.humanSpec === undefined
+                ? currentYaml
+                : serializeSpecYaml({ title, description, humanSpec });
             await writeFile(current.projectId, specYamlFile(specPath), markdown);
             await writeFile(current.projectId, specTestFile(specPath), testSource);
-            await removeLegacyRobot(current.projectId, specPath);
             const sourceHash = sourceHashOf(testSource);
             const markdownHash = markdownHashOf(markdown);
             const validation = validateSpec(testSource, humanSpec);
@@ -374,7 +367,7 @@ export async function updateSpecInRepo(
                 status,
                 invalidReason,
             });
-        });
+        }, options);
         const updated = await specsRepository.getSpec(spec.id);
         if (!updated) throw new Error("Spec disappeared during update");
         return { spec: updated, commitSha };
@@ -395,21 +388,17 @@ export async function updateSpecWithLock(
 
 export async function deleteSpecFiles(spec: Spec): Promise<void> {
     await repoGit.withRepoLock(spec.projectId, async () => {
-        await assertNoSyncConflict(spec.projectId);
         await repoGit.assertRepoWritableUnlocked(spec.projectId);
         await fs.rm(await safePath(spec.projectId, spec.path), { recursive: true, force: true });
         await repoGit.commitAll(spec.projectId, `spec: delete "${spec.title}"`);
-        repoRemote.schedulePush(spec.projectId);
     });
 }
 
 export async function deleteFeatureDirectory(projectId: string, featurePath: string, title: string): Promise<void> {
     await repoGit.withRepoLock(projectId, async () => {
-        await assertNoSyncConflict(projectId);
         await repoGit.assertRepoWritableUnlocked(projectId);
         await fs.rm(await safePath(projectId, featurePath), { recursive: true, force: true });
         await repoGit.commitAll(projectId, `feature: delete "${title}"`);
-        repoRemote.schedulePush(projectId);
     });
 }
 
