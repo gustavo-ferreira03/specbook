@@ -45,6 +45,50 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
     catch { return false; }
 }
 
+/**
+ * A repair the agent may save on its own: it changes only spec.ts (the behavior contract in spec.yml is
+ * untouched), it passed a test run, and it cannot hide a real bug — either the Spec had no working
+ * implementation to weaken, or a healer fix kept every assertion and only moved action locators.
+ */
+export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> {
+    if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
+    if ((item.payload.verification as { status?: string } | undefined)?.status !== "passed") return false;
+    const patch = fixProposalSchema.safeParse(item.payload.params);
+    if (!patch.success || !patch.data.testSource || patch.data.humanSpec || patch.data.title !== undefined || patch.data.description !== undefined) return false;
+    const job = await jobsRepository.get(item.jobId);
+    if (job?.kind === "regenerate") return true;
+    return job?.kind === "failure_triage" && job.classification === "test_drift" && isLocatorOnlyFix(item);
+}
+
+/**
+ * Saves verified implementation-only repairs so the agent never waits on a human for them. Only the newest
+ * proposal per Spec is applied; older pending ones for the same Spec are superseded.
+ */
+export async function applyVerifiedRepairs(projectId: string): Promise<void> {
+    if (await isAgentPaused(projectId) || (await stewardRepository.get(projectId)).autonomy === "observe") return;
+    const pending = (await jobsRepository.inbox(projectId)).filter((item) => item.kind === "spec_fix" && item.status === "pending");
+    const newestBySpec = new Map<string, InboxItem>();
+    for (const item of [...pending].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+        const specId = fixProposalSchema.safeParse(item.payload.params).data?.specId;
+        if (!specId) continue;
+        if (!newestBySpec.has(specId)) { newestBySpec.set(specId, item); continue; }
+        await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, supersededBy: newestBySpec.get(specId)!.id } });
+    }
+    for (const item of newestBySpec.values()) {
+        if (!await isSelfApprovableRepair(item) || !await jobsRepository.claimItem(item.id)) continue;
+        const job = await jobsRepository.get(item.jobId);
+        try {
+            const commitSha = await applyProposal(item, async () => { if (await isAgentPaused(projectId)) throw new Error("The agent was paused"); });
+            await jobsRepository.updateItem(item.id, { status: "approved", commitSha, payload: { ...item.payload, appliedBy: "agent" } });
+            if (job) await recordAgentMetric(job, "decision", { itemId: item.id, itemKind: item.kind, decision: "approve", actor: "agent" });
+            await jobsRepository.log(item.jobId, "auto_approved", "Verified implementation-only repair; the behavior contract is unchanged.");
+        } catch {
+            // Stale base or a concurrent edit: leave it for the next pass or for a human.
+            await jobsRepository.updateItem(item.id, { status: "pending" });
+        }
+    }
+}
+
 export async function applyTrustedFixes(projectId: string): Promise<void> {
     const permitted = async () => {
         const settings = await stewardRepository.get(projectId);

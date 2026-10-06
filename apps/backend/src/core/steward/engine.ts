@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { applyTrustedFixes } from "./approval";
+import { applyTrustedFixes, applyVerifiedRepairs } from "./approval";
 import { runsRepository } from "../../infra/repositories/runs";
 import { areSpecsLocked } from "../specs/lifecycle";
 import { jobsRepository } from "../../infra/repositories/jobs";
@@ -299,6 +299,7 @@ export async function processProjectSteward(projectId: string, collect = true): 
             } else if (batch && batch.status !== "running") await stewardRepository.updateIntent(intent.id, { status: batch.status === "passed" ? "completed" : "failed" });
         }
         if (await isAgentPaused(projectId)) return;
+        await applyVerifiedRepairs(projectId);
         if (settings.autonomy === "act") await applyTrustedFixes(projectId);
         const pending = (await stewardRepository.intents(projectId)).filter((intent) => intent.status === "pending");
         for (const intent of pending) {
