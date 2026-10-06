@@ -536,8 +536,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 <Tabs value={pathTab ?? chosenTab} onValueChange={(value) => setChosenTab(value as SidebarTab)} className="min-h-0 flex-1">
                     <div className="flex items-center gap-2 px-3 pb-2">
                         <TabsList variant="segmented" className="grid flex-1 grid-cols-2" aria-label="Project content">
-                            <TabsTrigger value="specs" className="h-9 md:h-8"><FileCheck2 size={14} /> Specs</TabsTrigger>
                             <TabsTrigger value="chats" className="h-9 md:h-8"><MessageSquare size={14} /> Chats</TabsTrigger>
+                            <TabsTrigger value="specs" className="h-9 md:h-8"><FileCheck2 size={14} /> Specs</TabsTrigger>
                         </TabsList>
                     </div>
                     {renderLoadError()}
