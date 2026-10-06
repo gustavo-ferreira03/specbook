@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, Info, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, Info, PencilLine, Play, RefreshCw, RotateCcw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { RawFileEditor } from "@/components/RawFileEditor";
@@ -13,6 +13,7 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -298,6 +299,7 @@ function EvidenceGallery({ runId, evidence, onSelect }: { runId: string; evidenc
 
 function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedRunEvidence | undefined; onSelect: (selection: EvidenceSelection) => void }) {
     const evidence = loaded?.data;
+    if (run.status === "running") return <p role="status" className="text-body text-ink-muted">This run is in progress. Evidence appears when it finishes.</p>;
     if (!loaded) return <Skeleton className="h-24 w-full rounded-lg" aria-label="Loading evidence" />;
     if (loaded.error) return <Alert variant="danger" role="alert"><AlertDescription>Could not load evidence: {loaded.error}</AlertDescription></Alert>;
     if (!evidence) return null;
@@ -349,8 +351,8 @@ function RunEntry({
     // Evidence loads lazily: the latest run is requested with the Spec, older runs when expanded.
     // This also re-requests it when the evidence cache was reset while the entry stayed open.
     useEffect(() => {
-        if (open && !loaded) onExpand(run.id);
-    }, [loaded, onExpand, open, run.id]);
+        if (open && !loaded && run.status !== "running") onExpand(run.id);
+    }, [loaded, onExpand, open, run.id, run.status]);
     const reportUrl = loaded?.data?.reportUrl;
     return (
         <li id={`run-${run.id}`} className="relative scroll-mt-4 pb-6 pl-8 last:pb-0">
@@ -360,11 +362,12 @@ function RunEntry({
                 open={open}
                 onOpenChange={(next) => {
                     setOpen(next);
-                    if (next) onExpand(run.id);
+                    if (next && run.status !== "running") onExpand(run.id);
                 }}
             >
                 <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
                     <StatusPill status={run.status} kind="run" size="sm" />
+                    {run.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
                         {run.durationMs !== null && <><Dot /><span className="tabular">{formatDuration(run.durationMs)}</span></>}
@@ -384,6 +387,12 @@ function RunEntry({
                         </CollapsibleTrigger>
                     </span>
                 </div>
+                {run.retryOf && (
+                    <p className="mt-2 text-meta text-ink-muted">
+                        {run.flaky ? "Passed on the automatic retry. " : "Automatic retry. "}
+                        <a href={`#run-${run.retryOf}`} className="rounded-sm font-medium underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">View first attempt</a>
+                    </p>
+                )}
                 {run.status !== "passed" && loaded?.data?.failedStep && (
                     <p className="mt-2 text-control text-ink-muted"><span className="font-medium text-ink">Failed at step:</span> {loaded.data.failedStep}</p>
                 )}
@@ -416,6 +425,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const [selectedEvidence, setSelectedEvidence] = useState<{ runId: string; step: RunEvidence["steps"][number] } | null>(null);
     const [loadError, setLoadError] = useState("");
     const [actionError, setActionError] = useState("");
+    const [runRefreshError, setRunRefreshError] = useState("");
     const [running, setRunning] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
     const [editing, setEditing] = useState(false);
@@ -449,7 +459,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         evidenceRequestsRef.current = new Set();
         setEvidence({});
         setDetail(nextDetail);
-        if (nextDetail.runs[0]) ensureEvidence(nextDetail.runs[0].id);
+        if (nextDetail.runs[0] && nextDetail.runs[0].status !== "running") ensureEvidence(nextDetail.runs[0].id);
     }, [ensureEvidence]);
 
     useEffect(() => {
@@ -470,6 +480,30 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         void load();
         return () => controller.abort();
     }, [projectId, retryKey, showDetail, specId]);
+
+    const pendingRun = Boolean(detail?.runs.some((run) => run.status === "running" || run.automationPending));
+    useEffect(() => {
+        if (!pendingRun) return;
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout>;
+        async function refreshRun() {
+            try {
+                const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT, signal: controller.signal });
+                if (nextDetail.spec.projectId !== projectId) throw new Error("This Spec does not belong to this project.");
+                setDetail(nextDetail);
+                setRunRefreshError("");
+            } catch (error) {
+                if (!isAbortError(error)) setRunRefreshError(errorMessage(error));
+            } finally {
+                if (!controller.signal.aborted) timer = setTimeout(() => void refreshRun(), 1500);
+            }
+        }
+        timer = setTimeout(() => void refreshRun(), 1500);
+        return () => {
+            controller.abort();
+            clearTimeout(timer);
+        };
+    }, [pendingRun, projectId, specId]);
 
     /** Reloads the Spec after an action; returns null when it no longer exists. */
     async function reloadDetail(): Promise<SpecDetail | null> {
@@ -623,7 +657,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 title={spec.title}
                 breadcrumbs={crumbs}
                 width="reading"
-                titleAdornment={<StatusPill status={spec.status} />}
+                titleAdornment={<><StatusPill status={spec.status} />{latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}</>}
                 description={spec.description || undefined}
                 meta={<span>Updated <RelativeTime value={spec.updatedAt} /></span>}
                 actions={
@@ -640,6 +674,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
             />
             <PageContainer width="reading" className="min-w-0 [overflow-wrap:anywhere] lg:pb-14" innerClassName="space-y-9">
                 {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}</AlertDescription></Alert>}
+                {runRefreshError && <Alert variant="warning" role="status"><AlertDescription>Run updates are delayed: {runRefreshError} Retrying…</AlertDescription></Alert>}
 
                 <div ref={bannerRef} className="scroll-mt-4 space-y-3">
                 {savedInvalid && spec.status === "invalid" && (

@@ -138,8 +138,12 @@ export const runs = sqliteTable(
         durationMs: integer("duration_ms"),
         failReason: text("fail_reason"),
         automationPending: integer("automation_pending", { mode: "boolean" }).notNull().default(false),
+        healOnFailure: integer("heal_on_failure", { mode: "boolean" }).notNull().default(true),
+        retryOf: text("retry_of"),
+        flaky: integer("flaky", { mode: "boolean" }).notNull().default(false),
+        baseUrl: text("base_url"),
     },
-    (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt)],
+    (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt), uniqueIndex("runs_retry_of_unique").on(table.retryOf)],
 );
 
 export interface CredentialField {

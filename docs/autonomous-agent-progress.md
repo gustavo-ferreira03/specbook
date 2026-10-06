@@ -73,3 +73,9 @@ The steward reserves queued/running/blocked job budgets against 300,000 tokens a
 Activity replaces the Jobs page and exposes audit/evidence links. Automation settings reuse the existing settings rows for the optional autonomy level. Autonomous browser tools remain visible, with the discovery origin/destructive-action policy checked when invoked. Spec regeneration is implementation-only and requires isolated verification. Coverage jobs receive confirmed context and prior decisions; advanced exploratory diagnostics/axe and CI/CD remain to implement.
 
 Steward validation: all 191 tests passed before starting the next feature, including concurrent dispatch/idempotency, observe mode, reserved budgets, remembered rejection and AST safeguards. Restarted the running backend; automatic coverage/regeneration jobs entered the queue, some asked for access in Inbox, and the per-project daily planner appeared without manual creation. Activity loaded at 390px with no horizontal overflow. Old instruction-heavy job goals now render as human-facing activity titles.
+
+## Flakiness (implemented)
+
+Failures now rerun once before triage. A unique retry reference survives restart; the monitor checks the original source and YAML hashes before retrying or healing. Pass-on-retry flags both attempts as flaky and emits no healer signal. Disabling healing still allows the retry. Runs persist the actual URL so preview retries cannot accidentally run against the project's default URL.
+
+History retains both attempts, a link to the first attempt and existing warning badges for flaky Specs. Nine real-browser tests passed, including restart replay, changed contracts and URL overrides. Live verification produced one failed attempt and one passing retry, preserved the YAML bytes, showed both attempts in the UI and created no job.

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Folder, LoaderCircle, Play } from "lucide-react";
+import { Folder, LoaderCircle, Play, RotateCcw } from "lucide-react";
 import { RelativeTime } from "@/components/RelativeTime";
 import { StatusPill } from "@/components/StatusPill";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -90,13 +91,16 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                 <StatusPill status={spec.status} size="sm" />
             </span>
             <div className="min-w-0 flex-1">
-                <Link
-                    href={`/p/${projectId}/specs/${spec.id}`}
-                    className="block truncate rounded-sm text-body font-medium text-ink outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
-                >
-                    {spec.title}
-                </Link>
-                <div className="mt-1 flex items-center gap-2 text-meta text-ink-muted sm:hidden">
+                <div className="flex min-w-0 items-center gap-2">
+                    <Link
+                        href={`/p/${projectId}/specs/${spec.id}`}
+                        className="min-w-0 flex-1 truncate rounded-sm text-body font-medium text-ink outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+                    >
+                        {spec.title}
+                    </Link>
+                    {run?.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted sm:hidden">
                     <StatusPill status={spec.status} size="sm" />
                     <LastRunText run={run} />
                     {duration && <><span aria-hidden="true" className="text-ink-disabled">·</span><span className="tabular">{duration}</span></>}

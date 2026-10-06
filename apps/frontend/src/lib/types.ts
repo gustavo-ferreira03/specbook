@@ -58,6 +58,9 @@ export interface HumanSpec {
 
 export interface Run {
     id: string;
+    retryOf: string | null;
+    flaky: boolean;
+    automationPending: boolean;
     specId: string;
     commitSha: string;
     sourceHash: string;

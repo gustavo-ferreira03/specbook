@@ -117,6 +117,30 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
         return () => controller.abort();
     }, [projectId, retryKey]);
 
+    const pendingRun = Boolean(specs?.some((spec) => spec.lastRun?.status === "running" || spec.lastRun?.automationPending));
+    useEffect(() => {
+        if (!pendingRun) return;
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout>;
+        async function refreshRuns() {
+            try {
+                const result = await getProjectTree(projectId, controller.signal);
+                setFeatures(result.features);
+                setSpecs(result.specs);
+                setLoadError("");
+            } catch (error) {
+                if (!isAbortError(error)) setLoadError(errorMessage(error));
+            } finally {
+                if (!controller.signal.aborted) timer = setTimeout(() => void refreshRuns(), 1500);
+            }
+        }
+        timer = setTimeout(() => void refreshRuns(), 1500);
+        return () => {
+            controller.abort();
+            clearTimeout(timer);
+        };
+    }, [pendingRun, projectId]);
+
     useEffect(() => onInvalidate((event) => {
         if (matchesInvalidation(event, "tree", projectId)) setRetryKey((key) => key + 1);
     }), [projectId]);

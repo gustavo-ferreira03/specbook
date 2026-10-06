@@ -32,11 +32,18 @@ async function chromiumAvailable(): Promise<boolean> {
 const available = await chromiumAvailable();
 let site: http.Server;
 let baseUrl = "";
+const flakyRequests = new Map<string, number>();
 
 before(async () => {
     await runMigrations();
-    site = http.createServer((_request, response) => {
+    site = http.createServer((request, response) => {
         response.setHeader("content-type", "text/html");
+        if (request.url?.startsWith("/flaky")) {
+            const count = (flakyRequests.get(request.url) ?? 0) + 1;
+            flakyRequests.set(request.url, count);
+            response.end(`<h1>${count > 1 ? "Ready" : "Loading"}</h1>`);
+            return;
+        }
         response.end('<h1>Store</h1><label>Password <input type="password"></label>');
     });
     await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
@@ -236,7 +243,8 @@ describe("scheduled runs", () => {
             const batch = (await getRunBatch(scheduled.lastBatchId!))!;
             assert.equal(batch.specs.length, 1, "all means runnable Specs only");
             assert.equal(batch.specs[0]?.specId, spec.id);
-            assert.equal((await runsRepository.getRun(batch.specs[0]!.runId))?.automationPending, false);
+            assert.equal((await runsRepository.getRun(batch.specs[0]!.runId))?.automationPending, true);
+            assert.equal((await runsRepository.getRun(batch.specs[0]!.runId))?.healOnFailure, false);
             await schedulesRepository.update(project.id, { nextRunAt: new Date(at.getTime() - 1000).toISOString() });
             await processSchedules(new Date(at.getTime() + 1));
             assert.equal((await schedulesRepository.get(project.id))?.lastBatchId, batch.id, "active batch is retained");
@@ -292,4 +300,112 @@ describe("scheduled runs", () => {
             await new Promise<void>((resolve) => webhook.close(() => resolve()));
         }
     });
+});
+
+describe("failure retry", { skip: available ? false : "Chromium is not installed" }, () => {
+    async function failingSpec(route: string) {
+        const project = await projectsRepository.createProject("Retry", baseUrl);
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Retry", "");
+        const source = `import { test, expect } from "specbook";
+test("Store", async ({ page, step }) => {
+    await step("See the store", async () => {
+        await page.goto("${route}");
+        await expect(page.getByRole("heading")).toHaveText("Ready", { timeout: 500 });
+    });
+});`;
+        const humanSpec = { preconditions: [], steps: ["See the store"], expectedResult: "Ready", postconditions: [] };
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec, testSource: source });
+        return { project, spec, source, humanSpec };
+    }
+
+    test("pass on retry retains both attempts, marks flaky, and skips healing even after recovery", async () => {
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { db } = await import("../../src/infra/db/client");
+        const { runs } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const { project, spec } = await failingSpec("/flaky");
+        const original = await executeSpec(spec.id, { automate: true });
+        assert.equal(original.status, "failed");
+        await processRunFailures();
+        const history = await runsRepository.listRuns(spec.id);
+        assert.equal(history.length, 2);
+        const retry = history.find((run) => run.retryOf === original.id)!;
+        assert.equal(retry.status, "passed");
+        assert.ok(history.every((run) => run.flaky));
+        assert.equal((await jobsRepository.list(project.id)).length, 0);
+        assert.equal((await stewardRepository.signals(project.id)).length, 0);
+        assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
+        await db.update(runs).set({ automationPending: true }).where(eq(runs.id, original.id));
+        await processRunFailures();
+        assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
+        assert.equal((await jobsRepository.list(project.id)).length, 0);
+    });
+
+    test("healer opt-out still retries once, while a changed contract skips both retry and healing", async () => {
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { project, spec } = await failingSpec("/always-fails");
+        const original = await executeSpec(spec.id, { automate: true, healOnFailure: false });
+        await processRunFailures();
+        const history = await runsRepository.listRuns(spec.id);
+        assert.equal(history.length, 2);
+        assert.ok(history.every((run) => run.status === "failed" && !run.flaky));
+        assert.equal((await jobsRepository.list(project.id)).length, 0);
+        await processRunFailures();
+        assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
+
+        const changed = await failingSpec("/changed-contract");
+        const stale = await executeSpec(changed.spec.id, { automate: true });
+        await writer.updateSpecWithLock(changed.spec.id, { humanSpec: { ...changed.humanSpec, expectedResult: "New behavior" } });
+        await processRunFailures();
+        assert.equal((await runsRepository.listRuns(changed.spec.id)).length, 1);
+        assert.equal((await runsRepository.getRun(stale.id))?.automationPending, false);
+        assert.equal((await jobsRepository.list(changed.project.id)).length, 0);
+        assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
+    });
+
+    test("failed retry emits one steward signal, and interrupted retry is never repeated", async () => {
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { project, spec } = await failingSpec("/failure-signal");
+        const original = await executeSpec(spec.id, { automate: true });
+        await processRunFailures();
+        const retry = (await runsRepository.retryFor(original.id))!;
+        assert.equal(retry.status, "failed");
+        assert.equal((await stewardRepository.signals(project.id))[0]?.payload.runId, retry.id);
+        await processRunFailures();
+        assert.equal((await stewardRepository.signals(project.id)).length, 1);
+        assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
+
+        const recovered = await failingSpec("/interrupted-retry");
+        const failed = await executeSpec(recovered.spec.id, { automate: true });
+        const interrupted = await runsRepository.createRun({ specId: recovered.spec.id, commitSha: failed.commitSha, sourceHash: failed.sourceHash, retryOf: failed.id });
+        await runsRepository.markInterruptedRuns();
+        await processRunFailures();
+        await processRunFailures();
+        assert.equal((await runsRepository.listRuns(recovered.spec.id)).length, 2);
+        assert.equal((await stewardRepository.signals(recovered.project.id))[0]?.payload.runId, interrupted.id);
+        assert.equal((await stewardRepository.signals(recovered.project.id)).length, 1);
+    });
+
+    test("retry retains the preview URL even when the project's base URL changes", async () => {
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { project, spec } = await failingSpec("/flaky-preview");
+        const original = await executeSpec(spec.id, { automate: true, baseUrl });
+        assert.equal(original.status, "failed");
+        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1" });
+        await processRunFailures();
+        const retry = (await runsRepository.retryFor(original.id))!;
+        assert.equal(retry.status, "passed");
+        assert.equal(retry.baseUrl, baseUrl);
+        assert.equal(retry.flaky, true);
+    });
+
 });

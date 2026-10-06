@@ -53,6 +53,30 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
         return () => controller.abort();
     }, [projectId, featureId, retryKey]);
 
+    const pendingRun = Boolean(specs?.some((spec) => spec.lastRun?.status === "running" || spec.lastRun?.automationPending));
+    useEffect(() => {
+        if (!pendingRun) return;
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout>;
+        async function refreshRuns() {
+            try {
+                const result = await getProjectTree(projectId, controller.signal);
+                setFeatures(result.features);
+                setSpecs(result.specs);
+                setLoadError("");
+            } catch (error) {
+                if (!isAbortError(error)) setLoadError(errorMessage(error));
+            } finally {
+                if (!controller.signal.aborted) timer = setTimeout(() => void refreshRuns(), 1500);
+            }
+        }
+        timer = setTimeout(() => void refreshRuns(), 1500);
+        return () => {
+            controller.abort();
+            clearTimeout(timer);
+        };
+    }, [pendingRun, projectId]);
+
     useEffect(() => onInvalidate((event) => {
         if (deleting) return;
         if (matchesInvalidation(event, "tree", projectId)) setRetryKey((key) => key + 1);

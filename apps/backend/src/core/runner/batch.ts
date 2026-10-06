@@ -190,7 +190,7 @@ async function prepareSpecBatch(
     ids: string[],
     label: string,
     baseUrl: string,
-    automate: boolean,
+    healOnFailure: boolean,
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
         if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
@@ -256,7 +256,9 @@ async function prepareSpecBatch(
                 specId: definition.spec.id,
                 commitSha,
                 sourceHash: definition.sourceHash,
-                automate,
+                automate: true,
+                healOnFailure,
+                baseUrl,
             });
             createdRuns.push(run);
             await repoGit.withRepoLock(projectId, () => repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha));

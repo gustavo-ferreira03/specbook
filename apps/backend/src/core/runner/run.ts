@@ -41,9 +41,15 @@ export function analyzeForRun(title: string, testSource: string, markdown: strin
     return analysis.analysis;
 }
 
+export class StaleRunError extends Error {}
+
 interface RunOptions {
     persistFailures?: boolean;
     automate?: boolean;
+    healOnFailure?: boolean;
+    retryOf?: string;
+    expected?: { sourceHash: string; markdownHash: string };
+    baseUrl?: string;
     signal?: AbortSignal;
 }
 
@@ -71,6 +77,9 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
     if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
         throw new Error("Spec files changed without being reindexed");
     }
+    if (options.expected && (sourceHash !== options.expected.sourceHash || markdownHash !== options.expected.markdownHash)) {
+        throw new StaleRunError("Spec changed after the failed run; retry skipped");
+    }
     const analysis = analyzeForRun(spec.title, testSource, markdown);
 
     const refs = analysis.secretRefs.map((ref) => ref.envName);
@@ -80,10 +89,14 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
             `Spec "${spec.title}" references credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
         );
     }
-    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, project.baseUrl, refs);
+    const baseUrl = options.baseUrl ?? project.baseUrl;
+    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, baseUrl, refs);
     const scrub = await projectSecretScrubber(spec.projectId);
 
-    const run = await runsRepository.createRun({ specId: spec.id, commitSha, sourceHash, automate: options.automate });
+    const run = await runsRepository.createRun({
+        specId: spec.id, commitSha, sourceHash, automate: options.automate,
+        healOnFailure: options.healOnFailure, retryOf: options.retryOf, baseUrl,
+    });
     try {
         await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
     } catch (error) {
@@ -108,7 +121,7 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
             started = Date.now();
             return runPlaywrightSuite({
                 directory: outputDir,
-                baseUrl: project.baseUrl,
+                baseUrl,
                 specs: [{ key: run.id, source: testSource, analysis, outputDir }],
                 timeoutMs: RUN_TIMEOUT_MS,
                 secretEnv,
