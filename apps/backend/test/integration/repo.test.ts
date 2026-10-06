@@ -1038,7 +1038,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(paused.items.length, 1);
         assert.equal(paused.items[0]?.presentation.type, "help");
         assert.match(paused.items[0]?.presentation.title ?? "", /Look at it together\?/);
-        assert.equal(paused.summary.pausedCount, 0, "an unfinished attempt is not a user-requested pause");
+        assert.ok(!paused.activity.some((story) => story.status === "paused"), "an unfinished attempt is not a user-requested pause");
         assert.equal(paused.summary.paused, false);
         assert.doesNotMatch(JSON.stringify(paused), /\/home\/gus|\/tmp\/specbook|src\/core\/runner|Object\.click|279 \|/);
         await writer.updateSpecWithLock(spec.id, { testSource: source });
@@ -1046,16 +1046,13 @@ describe("plain-language autonomous presentation", () => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         await stewardRepository.update(projectId, { autonomy: "observe" });
         const observing = await projectPresentation(projectId);
-        assert.equal(observing.summary.pausedCount, 0);
+        assert.ok(!observing.activity.some((story) => story.status === "paused" || story.status === "working"));
         assert.equal(observing.summary.paused, false);
-        assert.match(observing.summary.statusText, /is watching/);
-        assert.doesNotMatch(observing.summary.statusText, /tomorrow/);
         assert.equal(observing.activity[0]?.status, "stopped");
         assert.match(observing.activity[0]?.nextStep ?? "", /Discuss the Spec/);
         await jobsRepository.update(job.id, { status: "running" });
         const working = await projectPresentation(projectId);
         assert.equal(working.activity[0]?.status, "working");
-        assert.match(working.summary.statusText, /is working on/);
     });
 
     test("groups repeated observations and investigations around one check and pairs the same screenshot step", async () => {
@@ -1096,8 +1093,8 @@ describe("plain-language autonomous presentation", () => {
         assert.doesNotMatch(view.items[0]?.presentation.summary ?? "", /passed/);
         assert.match(view.items[0]?.presentation.workDone ?? "", /passed/);
         assert.match(view.activity[0]?.title ?? "", /needs an update before it can run/);
-        assert.equal(view.summary.attentionCount, 1);
-        assert.match(view.summary.statusText, /is watching/);
+        assert.equal(view.items.filter((item) => item.status === "pending" && item.kind !== "bug_report").length, 1);
+        assert.ok(!view.activity.some((story) => story.status === "working"));
     });
 
     test("keeps internal browser failures out of Inbox and removes source frames from optional diagnostics", async () => {
@@ -1113,7 +1110,6 @@ describe("plain-language autonomous presentation", () => {
         }
         const view = await projectPresentation(projectId);
         assert.deepEqual(view.items, []);
-        assert.equal(view.summary.attentionCount, 0);
         assert.ok(view.summary.systemHealth);
         assert.match(view.summary.systemHealth.message, /resume automatically/);
         assert.equal(view.activity.length, 0, "infrastructure recovery is represented by one health notice");

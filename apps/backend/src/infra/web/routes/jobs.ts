@@ -13,11 +13,31 @@ import { projectOverview } from "../../../core/jobs/overview";
 import { createJobSchema, reviewSchema, selectSpecBatchSchema } from "../../../core/jobs/schemas";
 import { presentSpecBatch, selectSpecBatch } from "../../../core/jobs/spec-batches";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
-import { jobsRepository } from "../../repositories/jobs";
+import { ACTIVE_JOB_STATUSES } from "../../../core/jobs/shared";
+import { jobsRepository, type Job } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
 import { createChat, startChatTurn } from "../../../core/chat/session";
 import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors";
+
+async function projectJob(projectId: string, jobId: string) {
+    const job = await jobsRepository.get(jobId);
+    if (!job || job.projectId !== projectId) throw new HTTPException(404, { message: "Job not found" });
+    return job;
+}
+
+async function projectItem(projectId: string, itemId: string, message = "Inbox item not found") {
+    const item = await jobsRepository.item(itemId);
+    if (!item || item.projectId !== projectId) throw new HTTPException(404, { message });
+    return item;
+}
+
+async function cancelJob(job: Job, classification?: Job["classification"]): Promise<boolean> {
+    if (!ACTIVE_JOB_STATUSES.includes(job.status)) return false;
+    await jobsRepository.update(job.id, { status: "cancelled", ...(classification ? { classification } : {}) });
+    if (isChatBusy(job.chatId)) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
+    return true;
+}
 
 export function createJobsRouter(): Hono {
     const router = new Hono();
@@ -34,22 +54,17 @@ export function createJobsRouter(): Hono {
         return c.json({ job: await enqueueJob(c.req.param("id"), c.req.valid("json")) }, 202);
     });
     router.get("/projects/:id/jobs/:jobId", access("viewer"), async (c) => {
-        const job = await jobsRepository.get(c.req.param("jobId"));
-        if (!job || job.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Job not found" });
+        const job = await projectJob(c.req.param("id"), c.req.param("jobId"));
         return c.json({ job, actions: await jobsRepository.actions(job.id) });
     });
     router.post("/projects/:id/jobs/:jobId/cancel", access("editor"), async (c) => {
-        const job = await jobsRepository.get(c.req.param("jobId"));
-        if (!job || job.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Job not found" });
-        if (!["queued", "running", "blocked", "paused", "stalled"].includes(job.status)) throw new HTTPException(409, { message: "Job already stopped" });
-        await jobsRepository.update(job.id, { status: "cancelled" });
-        if (isChatBusy(job.chatId)) await Promise.all([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
+        const job = await projectJob(c.req.param("id"), c.req.param("jobId"));
+        if (!await cancelJob(job)) throw new HTTPException(409, { message: "Job already stopped" });
         await jobsRepository.log(job.id, "cancelled", "Cancelled by human");
         return c.json({ ok: true });
     });
     router.get("/projects/:id/inbox/:itemId/evidence/:file{.+}", access("viewer"), async (c) => {
-        const item = await jobsRepository.item(c.req.param("itemId"));
-        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
+        const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
         const verification = item.payload.verification as ProposalVerification | undefined;
         const file = c.req.param("file");
         if (!verification || !verification.screenshots.includes(file) || !/^evidence\/step-\d{2,3}\.png$/.test(file)) throw new HTTPException(404, { message: "Evidence not found" });
@@ -59,8 +74,7 @@ export function createJobsRouter(): Hono {
         return c.body(new Uint8Array(await fs.readFile(target)), 200, { "Content-Type": "image/png", "Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff" });
     });
     router.post("/projects/:id/inbox/:itemId/promote", access("editor"), async (c) => {
-        const item = await jobsRepository.item(c.req.param("itemId"));
-        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
+        const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
         if (item.kind !== "bug_report") throw new HTTPException(400, { message: "Only bug reports can be promoted to regression coverage" });
         const intent = await enqueueIntent(item.projectId, {
             kind: "coverage", priority: 90,
@@ -73,8 +87,7 @@ ${item.body}`.slice(0, 6000),
         return c.json({ intentId: intent.id }, 202);
     });
     router.post("/projects/:id/inbox/:itemId/select", access("editor"), zValidator("json", selectSpecBatchSchema), async (c) => {
-        const item = await jobsRepository.item(c.req.param("itemId"));
-        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Suggestion not found" });
+        const item = await projectItem(c.req.param("id"), c.req.param("itemId"), "Suggestion not found");
         try {
             const selected = await selectSpecBatch(item, c.req.valid("json").candidateIds);
             return c.json({ item: { ...selected, payload: { ...selected.payload, specBatch: await presentSpecBatch(selected) } } }, 202);
@@ -83,8 +96,7 @@ ${item.body}`.slice(0, 6000),
         }
     });
     router.post("/projects/:id/inbox/:itemId/discuss", access("editor"), async (c) => {
-        const item = await jobsRepository.item(c.req.param("itemId"));
-        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
+        const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
         const existing = typeof item.payload.discussionChatId === "string" ? await chatsRepository.getChatRow(item.payload.discussionChatId) : null;
         if (existing?.projectId === item.projectId) return c.json({ chatId: existing.id });
         const chat = await createChat(item.projectId);
@@ -93,8 +105,7 @@ ${item.body}`.slice(0, 6000),
         return c.json({ chatId: chat.id });
     });
     router.post("/projects/:id/inbox/:itemId/review", access("editor"), zValidator("json", reviewSchema), async (c) => {
-        const item = await jobsRepository.item(c.req.param("itemId"));
-        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
+        const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
         const { action, answer } = c.req.valid("json");
         const job = await jobsRepository.get(item.jobId);
         const proposal = ["spec_fix", "new_spec", "feature"].includes(item.kind);
@@ -120,16 +131,10 @@ ${item.body}`.slice(0, 6000),
                     body: "The suggested update was declined. The existing check and expected behavior are unchanged.",
                     payload: { sourceItemId: item.id, specId: params?.specId ?? job?.specId, runId: job?.runId, language: "en" } });
                 await jobsRepository.updateItem(item.id, { status: "rejected" });
-                if (job && ["running", "queued", "blocked", "paused", "stalled"].includes(job.status)) {
-                    await jobsRepository.update(job.id, { status: "cancelled", classification: "application_bug" });
-                    if (isChatBusy(job.chatId)) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
-                }
+                if (job) await cancelJob(job, "application_bug");
             } else if (action === "ignore") {
                 await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, ignoredCheck: true } });
-                if (job && ["running", "stalled", "paused", "blocked", "queued"].includes(job.status)) {
-                    await jobsRepository.update(job.id, { status: "cancelled" });
-                    if (isChatBusy(job.chatId)) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
-                }
+                if (job) await cancelJob(job);
             } else {
                 await jobsRepository.updateItem(item.id, { status: action === "reject" ? "rejected" : "dismissed" });
             }

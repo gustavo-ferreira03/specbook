@@ -8,7 +8,14 @@ import { currentActor, recordAudit } from "../../core/accounts/audit";
 
 export type Job = typeof jobs.$inferSelect;
 export type InboxItem = typeof inboxItems.$inferSelect;
+type JobPatch = Partial<Omit<Job, "id" | "projectId" | "chatId" | "status" | "updatedAt">>;
 const now = () => new Date().toISOString();
+
+function requeuePatch(job: Job, patch: JobPatch & { pendingMessage: string }, activeMs = 0): JobPatch {
+    const allowance = jobLimitsSchema.parse({});
+    return { limits: { maxActions: job.actionsUsed + allowance.maxActions, wallTimeMs: job.elapsedMs + activeMs + allowance.wallTimeMs },
+        safetyRetries: 0, stopReason: null, retryAt: null, ...patch };
+}
 
 export const jobsRepository = {
     async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "limits"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage" | "stopReason">> & { status?: "queued" | "blocked" }): Promise<Job> {
@@ -25,14 +32,22 @@ export const jobsRepository = {
     async list(projectId: string) {
         return db.select().from(jobs).where(eq(jobs.projectId, projectId)).orderBy(desc(jobs.createdAt));
     },
+    async busyProjects(jobIds: string[]) {
+        const rows = await db.selectDistinct({ projectId: jobs.projectId }).from(jobs)
+            .where(jobIds.length ? or(eq(jobs.status, "running"), inArray(jobs.id, jobIds)) : eq(jobs.status, "running"));
+        return new Set(rows.map((row) => row.projectId));
+    },
     async queued() {
         return db.select().from(jobs).where(eq(jobs.status, "queued")).orderBy(asc(jobs.createdAt));
     },
-    async transition(id: string, from: Job["status"], status: Job["status"], patch: Partial<Omit<Job, "id" | "projectId" | "chatId" | "status" | "updatedAt">> = {}) {
+    async transition(id: string, from: Job["status"], status: Job["status"], patch: JobPatch = {}) {
         const [job] = await db.update(jobs).set({ ...patch, status, updatedAt: now() })
             .where(and(eq(jobs.id, id), eq(jobs.status, from))).returning();
         if (job) await recordAgentMetric(job, "status_changed");
         return job ?? null;
+    },
+    async requeue(job: Job, from: Job["status"], patch: JobPatch & { pendingMessage: string }, options: { to?: "queued" | "paused"; activeMs?: number } = {}) {
+        return this.transition(job.id, from, options.to ?? "queued", requeuePatch(job, patch, options.activeMs));
     },
     async forRun(runId: string) {
         return (await db.select().from(jobs).where(eq(jobs.runId, runId)))[0] ?? null;
@@ -63,19 +78,22 @@ export const jobsRepository = {
     },
     async log(jobId: string, action: string, detail = "") {
         await db.insert(jobActions).values({ jobId, action, detail, createdAt: now() });
-        const owner = await this.get(jobId);
-        if (owner) await recordAudit("agent.action", { jobId, action, detail }, owner.projectId,
-            currentActor() ?? { id: jobId, name: "Specbook", kind: "agent" });
+        const job = await this.get(jobId);
+        if (!job) return;
+        await recordAudit("agent.action", { jobId, action, detail }, job.projectId, currentActor() ?? { id: jobId, name: "Specbook", kind: "agent" });
         const decision = /^inbox:(approve|reject|answer|dismiss|report_bug|ignore)$/.exec(action)?.[1];
         const verification = action === "proposal:verified" ? /^([a-f0-9-]{36}): (passed|failed|error)$/.exec(detail) : null;
-        if (action === "stopped" || decision || verification) {
-            const job = await this.get(jobId);
-            if (job) await recordAgentMetric(job, decision ? "decision" : verification ? "verified" : "stopped",
-                decision ? { decision, actor: "human", itemId: detail } : verification ? { itemId: verification[1], verificationStatus: verification[2] } : {});
-        }
+        if (action === "stopped" || decision || verification) await recordAgentMetric(job, decision ? "decision" : verification ? "verified" : "stopped",
+            decision ? { decision, actor: "human", itemId: detail } : verification ? { itemId: verification[1], verificationStatus: verification[2] } : {});
     },
     async actions(jobId: string) {
         return db.select().from(jobActions).where(eq(jobActions.jobId, jobId)).orderBy(asc(jobActions.id));
+    },
+    async actionsByJob(jobIds: string[]) {
+        const grouped = new Map<string, (typeof jobActions.$inferSelect)[]>(jobIds.map((id) => [id, []]));
+        if (!jobIds.length) return grouped;
+        for (const action of await db.select().from(jobActions).where(inArray(jobActions.jobId, jobIds)).orderBy(asc(jobActions.id))) grouped.get(action.jobId)?.push(action);
+        return grouped;
     },
     async addItem(input: Pick<InboxItem, "jobId" | "projectId" | "kind" | "title" | "body"> & { payload?: Record<string, unknown> }) {
         const [item] = await db.insert(inboxItems).values({ ...input, payload: input.payload ?? {}, id: crypto.randomUUID(), status: "pending", createdAt: now(), updatedAt: now() }).returning();
@@ -99,13 +117,11 @@ export const jobsRepository = {
     async answer(item: InboxItem, answer: string) {
         const job = await this.get(item.jobId);
         if (!job) throw new Error("The investigation no longer exists");
-        const allowance = jobLimitsSchema.parse({});
-        const limits = { maxActions: job.actionsUsed + allowance.maxActions, wallTimeMs: job.elapsedMs + allowance.wallTimeMs };
         const deterministic = item.payload.runIntentId === job.id;
         // changes() ties the Inbox update to the job transition in this transaction.
         const [resumed] = await db.batch([
-            db.update(jobs).set({ status: deterministic ? "completed" : "queued", limits, safetyRetries: 0, stopReason: null, retryAt: null,
-                updatedAt: now(), pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` })
+            db.update(jobs).set({ ...requeuePatch(job, { pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` }),
+                status: deterministic ? "completed" : "queued", updatedAt: now() })
                 .where(and(eq(jobs.id, item.jobId), eq(jobs.status, "blocked"), inArray(jobs.id,
                     db.select({ jobId: inboxItems.jobId }).from(inboxItems).where(and(eq(inboxItems.id, item.id), eq(inboxItems.status, "applying"))),
                 ))).returning({ id: jobs.id }),
