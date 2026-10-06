@@ -30,6 +30,7 @@ class RepoGit {
         return simpleGit({
             baseDir: this.getRepoDir(projectId),
             timeout: { block: 30_000 },
+            allowEnvironment: ["GIT_TERMINAL_PROMPT"],
         }).env("GIT_TERMINAL_PROMPT", "0");
     }
 

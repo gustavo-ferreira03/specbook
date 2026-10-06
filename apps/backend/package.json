@@ -30,7 +30,7 @@
         "hono": "^4.12.23",
         "openid-client": "^6.8.8",
         "playwright-core": "1.62.0",
-        "simple-git": "^3.36.0",
+        "simple-git": "^4.0.2",
         "ws": "^8.21.0",
         "yaml": "^2.9.0",
         "zod": "^4.4.3"
