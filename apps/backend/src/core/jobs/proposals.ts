@@ -76,7 +76,7 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
     });
 }
 
-export async function applyProposal(item: InboxItem): Promise<string> {
+export async function applyProposal(item: InboxItem, checkPolicy?: () => Promise<void>): Promise<string> {
     const marker = `inbox:${item.id}`;
     // Makes approval replay safe if the commit succeeded before the DB update.
     const git = repoGit.getProjectGit(item.projectId);
@@ -85,7 +85,7 @@ export async function applyProposal(item: InboxItem): Promise<string> {
     if (item.payload.requiresVerification && (item.payload.verification as { status?: string } | undefined)?.status !== "passed") {
         throw new Error("This proposal needs a passing verification before approval");
     }
-    const options = { expectedHead: String(item.payload.baseHead), commitMessage: `${marker} ${item.title}` };
+    const options = { expectedHead: String(item.payload.baseHead), commitMessage: `${marker} ${item.title}`, checkPolicy };
     if (item.kind === "spec_fix") {
         const { specId, ...patch } = fixProposalSchema.parse(item.payload.params);
         if (item.payload.requiresVerification) {

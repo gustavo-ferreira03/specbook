@@ -39,6 +39,8 @@ interface AutomationResponse {
 export function AutomationSettingsCard({ projectId }: { projectId: string }) {
     const [autonomy, setAutonomy] = useState("propose");
     const [savedAutonomy, setSavedAutonomy] = useState("propose");
+    const [autoApproveFixes, setAutoApproveFixes] = useState(false);
+    const [savedAutoApproveFixes, setSavedAutoApproveFixes] = useState(false);
     const [settings, setSettings] = useState<AutomationSettings | null>(null);
     const [notifications, setNotifications] = useState<AutomationResponse["notifications"]>([]);
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
@@ -76,11 +78,13 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setSpecsError("");
         Promise.all([
             api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, { signal: controller.signal }),
-            api<{ autonomy: string }>(apiPath`/projects/${projectId}/steward`, { signal: controller.signal }),
+            api<{ autonomy: string; autoApproveFixes: boolean }>(apiPath`/projects/${projectId}/steward`, { signal: controller.signal }),
         ])
             .then(([result, steward]) => {
                 setAutonomy(steward.autonomy);
                 setSavedAutonomy(steward.autonomy);
+                setAutoApproveFixes(steward.autoApproveFixes);
+                setSavedAutoApproveFixes(steward.autoApproveFixes);
                 applySettings(result.automation);
                 setNotifications(result.notifications);
             })
@@ -98,6 +102,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
 
     const dirty = settings !== null && (
         autonomy !== savedAutonomy
+        || autoApproveFixes !== savedAutoApproveFixes
         || cron.trim() !== (settings.cron ?? "")
         || JSON.stringify([...specIds].sort()) !== JSON.stringify([...settings.specIds].sort())
         || healFailures !== settings.healFailures
@@ -111,8 +116,9 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setSaving(true);
         setFeedback(null);
         try {
-            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ autonomy }) });
+            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ autonomy, autoApproveFixes }) });
             setSavedAutonomy(autonomy);
+            setSavedAutoApproveFixes(autoApproveFixes);
             const result = await api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, {
                 method: "PUT",
                 body: JSON.stringify({
@@ -170,10 +176,17 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                                 <SelectContent>
                                     <SelectItem value="observe">Observe changes</SelectItem>
                                     <SelectItem value="propose">Investigate and propose</SelectItem>
-                                    <SelectItem value="act">Apply trusted locator fixes</SelectItem>
+                                    <SelectItem value="act">Investigate with optional automatic fixes</SelectItem>
                                 </SelectContent>
                             </Select>
-                            <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes always need your approval. Trusted fixes must pass a test run and follow at least three approved locator fixes.</p>
+                            <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes and assertion changes always need your approval.</p>
+                        </SettingsRow>
+                        <SettingsRow label="Automatic fixes" htmlFor="automation-auto-approve" description="Off by default. Available in the optional automatic fixes mode above.">
+                            <Select value={autoApproveFixes ? "enabled" : "disabled"} onValueChange={(value) => { setAutoApproveFixes(value === "enabled"); setFeedback(null); }} disabled={saving || autonomy !== "act"}>
+                                <SelectTrigger id="automation-auto-approve" aria-describedby="automation-auto-approve-help"><SelectValue /></SelectTrigger>
+                                <SelectContent><SelectItem value="disabled">Review every fix</SelectItem><SelectItem value="enabled">Allow verified locator fixes</SelectItem></SelectContent>
+                            </Select>
+                            <p id="automation-auto-approve-help" className="mt-1.5 text-meta text-ink-subtle">Only action locators may change. Fixes must pass verification and follow three approved locator fixes with no rejected fixes.</p>
                         </SettingsRow>
                         <SettingsRow label="Schedule" htmlFor="automation-cron" description="Optional, in UTC.">
                             <Input id="automation-cron" value={cron} onChange={(event) => { setCron(event.target.value); setFeedback(null); }} placeholder="0 9 * * 1-5" disabled={saving} className="font-mono" autoComplete="off" aria-describedby="automation-cron-help" />
@@ -213,7 +226,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                         </SettingsRow>
                         {settings.lastError && <SettingsBlock><Alert variant="warning" role="status"><AlertTitle>Last automation attempt</AlertTitle><AlertDescription>{settings.lastError}</AlertDescription></Alert></SettingsBlock>}
                         <SettingsFooter feedback={feedback ? <InlineFeedback feedback={feedback} /> : dirty ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}>
-                            {dirty && <Button type="button" variant="ghost" onClick={() => { applySettings(settings); setFeedback(null); }} disabled={saving}>Cancel</Button>}
+                            {dirty && <Button type="button" variant="ghost" onClick={() => { applySettings(settings); setAutonomy(savedAutonomy); setAutoApproveFixes(savedAutoApproveFixes); setFeedback(null); }} disabled={saving}>Cancel</Button>}
                             <Button type="submit" disabled={saving || !dirty}>{saving ? "Saving…" : "Save changes"}</Button>
                         </SettingsFooter>
                     </form>

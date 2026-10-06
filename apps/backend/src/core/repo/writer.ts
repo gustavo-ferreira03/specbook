@@ -103,6 +103,7 @@ export interface RepoMutationOptions {
     expectedHead?: string;
     expectedSpec?: { yaml: string; testSource: string | null };
     commitMessage?: string;
+    checkPolicy?: () => Promise<void>;
 }
 
 async function mutateRepoUnlocked<T>(
@@ -117,11 +118,14 @@ async function mutateRepoUnlocked<T>(
     }
     let result: T;
     try {
+        await options.checkPolicy?.();
         result = await work();
+        await options.checkPolicy?.();
     } catch (error) {
         await rollbackWorkingTree(projectId).catch((rollbackError: unknown) => {
             console.error(`[specbook] restoring the working tree of ${projectId} failed:`, rollbackError);
         });
+        if (options.checkPolicy) await reindexProjectUnlocked(projectId);
         throw error;
     }
     const commitSha = await repoGit.commitAll(projectId, options.commitMessage ?? message);

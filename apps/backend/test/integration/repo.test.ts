@@ -473,23 +473,119 @@ describe("project steward", () => {
         assert.notEqual(firstTriage.fingerprint, nextTriage.fingerprint, "a new failed run cannot be hidden by the previous investigation's cooldown");
     });
 
-    test("trusted automatic fixes compare syntax, not selector-like text inside input values", async () => {
+    test("trusted automatic fixes preserve assertion targets, action kinds, aliases and input values", async () => {
         const { isLocatorOnlyFix } = await import("../../src/core/steward/approval");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const projectId = await createProject("Trusted fixes");
         const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Review", limits: jobLimitsSchema.parse({}) });
-        const source = VALID_SPEC.replace('page.getByRole("heading")', 'page.locator("body")');
-        const before = source.replace('page.locator("body")', 'page.locator("main")');
+        const source = VALID_SPEC.replace('await page.goto("/");', 'await page.goto("/");\n        await page.locator("button.new").click();');
+        const before = source.replace('button.new', 'button.old');
         const item = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_fix", title: "Fix", body: "Fix", payload: {
             requiresVerification: true, before: { testSource: before }, params: { specId: crypto.randomUUID(), testSource: source },
         } });
         assert.equal(isLocatorOnlyFix(item), true);
+        for (const method of ["locator", "getByLabel", "getByTestId", "getByPlaceholder"]) {
+            item.payload.before = { testSource: before.replace(".locator", `.${method}`) };
+            item.payload.params = { specId: crypto.randomUUID(), testSource: source.replace(".locator", `.${method}`) };
+            assert.equal(isLocatorOnlyFix(item), true, `${method} may change on a direct action`);
+            item.payload.before = { testSource: VALID_SPEC.replace('page.getByRole("heading")', `page.${method}("specific target")`) };
+            item.payload.params = { specId: crypto.randomUUID(), testSource: VALID_SPEC.replace('page.getByRole("heading")', `page.${method}("body")`) };
+            assert.equal(isLocatorOnlyFix(item), false, `${method} cannot weaken an assertion target`);
+        }
+        item.payload.before = { testSource: before };
+        item.payload.params = { specId: crypto.randomUUID(), testSource: source.replace('.click()', '.hover()') };
+        assert.equal(isLocatorOnlyFix(item), false, "changing the action requires review");
+        const alias = VALID_SPEC.replace('await page.goto("/");', 'await page.goto("/");\n        const target = page.locator("specific");').replace('page.getByRole("heading")', 'target');
+        item.payload.before = { testSource: alias };
+        item.payload.params = { specId: crypto.randomUUID(), testSource: alias.replace('"specific"', '"body"') };
+        assert.equal(isLocatorOnlyFix(item), false, "shared locator declarations cannot weaken an assertion indirectly");
+        for (const expectCall of ["expect", "expect.soft"]) {
+            item.payload.before = { testSource: `await ${expectCall}(await page.locator("specific").click()).toBeUndefined();` };
+            item.payload.params = { specId: crypto.randomUUID(), testSource: `await ${expectCall}(await page.locator("body").click()).toBeUndefined();` };
+            assert.equal(isLocatorOnlyFix(item), false, "actions nested inside assertions cannot change their selectors");
+        }
+        item.payload.before = { testSource: before };
+        item.payload.params = { specId: crypto.randomUUID(), testSource: source.replace('toBeVisible()', 'toBeAttached()') };
+        assert.equal(isLocatorOnlyFix(item), false, "assertion matchers must stay exact");
+        item.payload.params = { specId: crypto.randomUUID(), testSource: source };
         item.payload.params = { ...(item.payload.params as object), humanSpec: HUMAN_SPEC };
         assert.equal(isLocatorOnlyFix(item), false, "behavior proposals always need a human");
         item.payload.before = { testSource: `page.fill(".locator('old')")` };
         item.payload.params = { specId: crypto.randomUUID(), testSource: `page.fill(".locator('new')")` };
         assert.equal(isLocatorOnlyFix(item), false, "input data cannot masquerade as a locator change");
+    });
+
+    test("trusted automatic fixes require explicit opt-in and recheck policy through the commit", async (t) => {
+        const { applyTrustedFixes } = await import("../../src/core/steward/approval");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const { createStewardRouter } = await import("../../src/infra/web/routes/steward");
+        const projectId = await createProject("Opt-in approval");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const before = VALID_SPEC.replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByTestId("old-button").click();');
+        const after = before.replace('old-button', 'new-button');
+        const { spec } = await createSpec(projectId, feature.id, "Check store", before);
+        const yaml = await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"), "utf8");
+        const job = await jobsRepository.create({ projectId, specId: spec.id, chatId: crypto.randomUUID(), trigger: "spec_failure", kind: "failure_triage", goal: "Repair selector", limits: jobLimitsSchema.parse({}) });
+        await jobsRepository.update(job.id, { status: "completed", classification: "test_drift" });
+        const item = await proposeMutation((await jobsRepository.get(job.id))!, "update_spec", { specId: spec.id, testSource: after });
+        await jobsRepository.updateItem(item.id, { payload: { ...item.payload, verification: { status: "passed", sourceHash: writer.sourceHashOf(after), baseUrl: "https://app.example.com" } } });
+        for (let i = 0; i < 3; i++) {
+            const trusted = await jobsRepository.addItem({ projectId, jobId: job.id, kind: item.kind, title: "Previously reviewed selector", body: "Approved by the human", payload: item.payload });
+            await jobsRepository.updateItem(trusted.id, { status: "approved" });
+        }
+        const router = createStewardRouter();
+        const endpoint = `/projects/${projectId}/steward`;
+        const put = (body: unknown) => router.request(endpoint, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal((await (await router.request(endpoint)).json()).autoApproveFixes, false);
+        assert.equal((await put({ autoApproveFixes: "true" })).status, 400);
+        await put({ autonomy: "act" });
+        const head = await repoGit.getHeadSha(projectId);
+        await applyTrustedFixes(projectId);
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending", "Act mode alone cannot opt in");
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+        assert.equal((await (await put({ autoApproveFixes: true })).json()).autoApproveFixes, true);
+
+        const claim = jobsRepository.claimItem.bind(jobsRepository);
+        const revokeAtClaim = t.mock.method(jobsRepository, "claimItem", async (id: string) => {
+            const claimed = await claim(id);
+            await stewardRepository.update(projectId, { autoApproveFixes: false });
+            return claimed;
+        });
+        await applyTrustedFixes(projectId);
+        revokeAtClaim.mock.restore();
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+
+        await put({ autoApproveFixes: true });
+        const update = specsRepository.updateSpecRecord.bind(specsRepository);
+        const revokeDuringWrite = t.mock.method(specsRepository, "updateSpecRecord", async (...args: Parameters<typeof update>) => {
+            const result = await update(...args);
+            await stewardRepository.update(projectId, { autoApproveFixes: false });
+            return result;
+        });
+        await applyTrustedFixes(projectId);
+        revokeDuringWrite.mock.restore();
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
+        assert.equal(await repoGit.getHeadSha(projectId), head, "revoking opt-in during the write prevents the commit");
+        assert.equal((await specsRepository.getSpec(spec.id))?.sourceHash, writer.sourceHashOf(before));
+        assert.equal((await writer.readSpecFiles(spec)).testSource, before);
+        assert.equal((await repoGit.getProjectGit(projectId).status()).isClean(), true);
+
+        await stewardRepository.update(projectId, { autoApproveFixes: true, paused: true });
+        await applyTrustedFixes(projectId);
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
+        await stewardRepository.update(projectId, { paused: false, autonomy: "propose" });
+        await applyTrustedFixes(projectId);
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
+        await stewardRepository.update(projectId, { autonomy: "act" });
+        await applyTrustedFixes(projectId);
+        assert.equal((await jobsRepository.item(item.id))?.status, "approved");
+        assert.equal((await writer.readSpecFiles(spec)).testSource, after);
+        assert.equal(await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"), "utf8"), yaml);
     });
 
     test("replays changed Spec and deploy signals once after a crash, while retaining real reversions", async (t) => {

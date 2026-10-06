@@ -11,8 +11,8 @@ import { projectsRepository } from "../../repositories/projects";
 import { settingsRepository } from "../../repositories/settings";
 import { stewardRepository } from "../../repositories/steward";
 
-const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose", "act"]).optional(), paused: z.boolean().optional() }).strict()
-    .refine((input) => input.autonomy !== undefined || input.paused !== undefined, "Provide an autonomy setting or pause state");
+const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose", "act"]).optional(), paused: z.boolean().optional(), autoApproveFixes: z.boolean().optional() }).strict()
+    .refine((input) => Object.keys(input).length > 0, "Provide an automation setting or pause state");
 const taskSchema = z.object({ kind: z.enum(["coverage", "explore"]), goal: z.string().trim().min(1).max(6000).optional() }).strict();
 
 export function createStewardRouter(): Hono {
@@ -24,7 +24,7 @@ export function createStewardRouter(): Hono {
         const id = c.req.param("id");
         await check(id);
         const row = await stewardRepository.get(id);
-        return c.json({ autonomy: row.autonomy, paused: row.paused, globallyPaused: await settingsRepository.getAgentPaused() });
+        return c.json({ autonomy: row.autonomy, paused: row.paused, autoApproveFixes: row.autoApproveFixes, globallyPaused: await settingsRepository.getAgentPaused() });
     });
     router.put("/projects/:id/steward", zValidator("json", settingsSchema), async (c) => {
         const id = c.req.param("id");
@@ -36,7 +36,7 @@ export function createStewardRouter(): Hono {
         if (patch.paused === true) await pauseAgentJobs(id);
         else if (patch.paused === false) await resumeAgentJobs(id);
         const row = await stewardRepository.get(id);
-        return c.json({ autonomy: row.autonomy, paused: row.paused, globallyPaused: await settingsRepository.getAgentPaused() });
+        return c.json({ autonomy: row.autonomy, paused: row.paused, autoApproveFixes: row.autoApproveFixes, globallyPaused: await settingsRepository.getAgentPaused() });
     });
     router.post("/projects/:id/tasks", zValidator("json", taskSchema), async (c) => {
         const id = c.req.param("id");

@@ -148,6 +148,13 @@
       "when": 1791278070345,
       "tag": "0020_pretty_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1791278086784,
+      "tag": "0021_nappy_gambit",
+      "breakpoints": true
     }
   ]
 }
