@@ -756,6 +756,83 @@ describe("autonomous pause and decisions", () => {
         assert.equal((await jobsRepository.get(running.id))?.pendingMessage, retained, "repeated pauses must not duplicate the reminder or replace the original request");
     });
 
+    test("completion cannot replace a pause made while reading the final response", { timeout: 10_000 }, async (t) => {
+        const { startJobWorker, stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { createChat, openSession, flushSessionFile } = await import("../../src/core/chat/session-store");
+        const { tryReserveChatTurn, releaseChatTurn } = await import("../../src/core/chat/chat-registry");
+        const project = await projectWithWork();
+        const chat = await createChat(project.id);
+        const session = (await openSession(chat.id))!;
+        session.appendCustomMessageEntry("result", "The checkout investigation is ready for review.", true);
+        flushSessionFile(session);
+        const job = await jobsRepository.create({ projectId: project.id, chatId: chat.id, trigger: "manual",
+            goal: "Investigate checkout", limits: jobLimitsSchema.parse({}) });
+        const read = jobsRepository.get.bind(jobsRepository);
+        const log = jobsRepository.log.bind(jobsRepository);
+        let runningReads = 0;
+        let notifyStopped!: () => void;
+        const stopped = new Promise<void>((resolve) => { notifyStopped = resolve; });
+        t.mock.method(jobsRepository, "queued", async () => {
+            const row = await read(job.id);
+            return row?.status === "queued" ? [row] : [];
+        });
+        t.mock.method(jobsRepository, "get", async (id: string) => {
+            const snapshot = await read(id);
+            if (id === job.id && snapshot?.status === "running" && ++runningReads === 2) {
+                await stewardRepository.update(project.id, { paused: true });
+                await jobsRepository.transition(job.id, "running", "paused");
+            }
+            return snapshot;
+        });
+        t.mock.method(jobsRepository, "log", async (id: string, action: string, detail = "") => {
+            await log(id, action, detail);
+            if (id === job.id && action === "stopped") notifyStopped();
+        });
+        // The completed response is already saved; hold its chat reservation to avoid another provider call.
+        assert.equal(tryReserveChatTurn(chat.id), true);
+        try {
+            await startJobWorker();
+            await stopped;
+            assert.equal((await read(job.id))?.status, "paused");
+            assert.equal((await read(job.id))?.startedAt, null);
+            assert.equal((await jobsRepository.inbox(project.id)).length, 0, "a paused attempt must not publish a completion note");
+        } finally {
+            await stopJobWorker();
+            releaseChatTurn(chat.id);
+        }
+    });
+
+    test("environment retry cannot replace a pause made while recording the finding", async (t) => {
+        const { createTriageTools } = await import("../../src/core/jobs/triage");
+        const project = await projectWithWork();
+        const instructions = "Investigate Checkout using the failed step and screenshot. Preserve spec.yml and all assertions.";
+        const job = await jobsRepository.create({ projectId: project.id, chatId: crypto.randomUUID(), trigger: "spec_failure", kind: "failure_triage",
+            goal: "Investigate Checkout", pendingMessage: instructions, limits: jobLimitsSchema.parse({}) });
+        const running = (await jobsRepository.claim(job.id))!;
+        const addItem = jobsRepository.addItem.bind(jobsRepository);
+        let retained = "";
+        t.mock.method(jobsRepository, "addItem", async (...args: Parameters<typeof addItem>) => {
+            const item = await addItem(...args);
+            if (item.jobId === job.id) {
+                assert.equal((await put(`/projects/${project.id}/steward`, { paused: true })).status, 200);
+                retained = (await jobsRepository.get(job.id))!.pendingMessage;
+            }
+            return item;
+        });
+        let aborted = false;
+        const tool = createTriageTools(running, () => { aborted = true; }).find((tool) => tool.name === "triage_failure")!;
+        await tool.execute("environment-result", {
+            classification: "environment", reason: "The application returns HTTP 503 from checkout.",
+            reproduction: ["Open checkout"], evidence: ["The checkout response returned HTTP 503"],
+        }, undefined, undefined, {} as never);
+        const paused = (await jobsRepository.get(job.id))!;
+        assert.equal(paused.status, "paused");
+        assert.equal(paused.retryAt, null);
+        assert.equal(paused.pendingMessage, retained);
+        assert.ok(paused.pendingMessage.endsWith(instructions));
+        assert.equal(aborted, true);
+    });
+
     test("concurrent resume requests preserve one investigation and reject invalid pause inputs", async () => {
         const project = await projectWithWork();
         const job = await createWork(project.id);

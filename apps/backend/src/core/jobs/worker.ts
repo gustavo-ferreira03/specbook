@@ -60,7 +60,7 @@ async function executeJob(job: Job): Promise<void> {
             await jobsRepository.transition(job.id, "running", "paused");
             return;
         }
-        if (!await canRunAgentJob(job)) { await jobsRepository.transition(job.id, "running", "queued", { startedAt: null }); return; }
+        if (!await canRunAgentJob(job)) { await jobsRepository.transition(job.id, "running", "queued", { startedAt: null, heartbeatAt: null }); return; }
         if (remaining <= 0 || job.actionsUsed >= job.limits.maxActions) {
             if (job.systemError) await retryInfrastructure(job, job.systemError);
             else await stallJob(job, "The investigation did not reach a confirmed result.");
@@ -80,8 +80,9 @@ async function executeJob(job: Job): Promise<void> {
             if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
                 await retryInfrastructure(job, last || "The agent service could not complete its response.");
             } else {
-                await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Investigation finished", body: await scrub(last), payload: { language: "en" } });
-                await jobsRepository.update(job.id, { status: "completed", systemError: null, stopReason: null, retryAt: null });
+                const body = await scrub(last);
+                const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
+                if (completed) await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Investigation finished", body, payload: { language: "en" } });
             }
         }
     } catch (error) {
@@ -114,7 +115,7 @@ export async function drainJobs(): Promise<void> {
             if (siblings.some((job) => job.status === "running" || active.has(job.id))) continue;
             const job = await jobsRepository.claim(row.id);
             if (!job) continue;
-            if (await isAgentPaused(job.projectId)) { await jobsRepository.transition(job.id, "running", "paused", { startedAt: null }); continue; }
+            if (await isAgentPaused(job.projectId)) { await jobsRepository.transition(job.id, "running", "paused", { startedAt: null, heartbeatAt: null }); continue; }
             const execution = executeJob(job).catch((error) => logger.error("job failed", { jobId: job.id, error }))
                 .finally(() => { active.delete(job.id); void drainJobs(); });
             active.set(job.id, execution);

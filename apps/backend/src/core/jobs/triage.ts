@@ -63,7 +63,7 @@ export function createTriageTools(job: Job, abort: () => void) {
                     title: kind === "bug_report" ? "The app did not behave as expected. What should happen next?" : credentials ? "Can you restore access to the app?" : "The failure was investigated", body,
                     payload: { runId: job.runId, specId: job.specId, language: "en", classification: triage.classification, ...(credentials ? { waitingFor: "credentials" } : {}) } });
                 if (triage.classification === "environment" && !credentials) {
-                    await jobsRepository.update(job.id, { status: "queued", retryAt: new Date(Date.now() + 60_000).toISOString(), systemError: null,
+                    await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 60_000).toISOString(), systemError: null,
                         pendingMessage: "Check whether the app is available again. Retry the original investigation without changing its intended behavior. Availability failures are progress updates, not questions for the human." });
                     abort();
                 }
