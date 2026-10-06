@@ -119,7 +119,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "create_feature",
             label: "create_feature",
-            description: "Create a feature in the current project's Spec tree. Each area of the confirmed project context already has a feature with its name; check list_features and reuse it. Create a feature only for behavior outside every area.",
+            description: "Create a feature in the current project's Spec tree. Each area of the project context is a feature with the area's exact name: check list_features and reuse it, or create it with that name when missing. Create any other feature only for behavior outside every area.",
             parameters: Type.Unsafe<z.infer<typeof featureProposalSchema>>(featureProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 if (params.parentId) {
@@ -140,7 +140,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "create_spec",
             label: "create_spec",
-            description: "Create a human-readable Spec and its executable spec.ts (testSource), written in the restricted Playwright Test subset of your Playwright rules. spec.ts must contain one test() whose step() titles are exactly humanSpec.steps, in order. Use the featureId of the feature named after the project context area the behavior belongs to.",
+            description: "Create a human-readable Spec and its executable spec.ts (testSource), written in the restricted Playwright Test subset of your Playwright rules. spec.ts must contain one test() whose step() titles are exactly humanSpec.steps, in order. File it under the feature named after the project context area the behavior belongs to.",
             parameters: Type.Unsafe<z.infer<typeof newSpecProposalSchema>>(newSpecProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 const feature = await featuresRepository.getFeature(params.featureId);

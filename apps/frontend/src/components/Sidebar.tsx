@@ -222,7 +222,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const knownFeatureIds = new Set(features.map((feature) => feature.id));
     const rootFeatures = features.filter((feature) => feature.parentId === null || !knownFeatureIds.has(feature.parentId));
     const ungroupedSpecs = specs.filter((spec) => !knownFeatureIds.has(spec.featureId));
-    const recentChats = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
+    const recentChats = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .filter((chat, index) => index < 8 || pathname === `/p/${projectId}/chats/${chat.id}`);
     const overviewHref = `/p/${projectId}/overview`;
 
     useEffect(() => {

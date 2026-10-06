@@ -51,6 +51,7 @@ import {
 import { countLabel } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { useProjectOverview } from "@/lib/projectOverview";
+import { useVisiblePolling } from "@/lib/usePolling";
 import type { CoverageArea, CoverageResponse, Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
 
 function parseSafetyNotes(raw: string): string[] {
@@ -166,7 +167,7 @@ function AreaCoverage({ projectId, area }: { projectId: string; area: CoverageAr
                     ))}
                 </ul>
             )}
-            {area.uncoveredRoutes.length > 0 && area.specs.length > 0 && (
+            {area.specs.length > 0 && area.uncoveredRoutes.length > 0 && area.uncoveredRoutes.length < area.routes.length && (
                 <p className="mt-2 text-meta text-ink-subtle [overflow-wrap:anywhere]">No Spec opens <span className="font-mono">{area.uncoveredRoutes.join("  ·  ")}</span></p>
             )}
         </div>
@@ -453,13 +454,11 @@ export default function AppPage({ params }: { params: Promise<{ projectId: strin
         Promise.all([
             getProject(projectId),
             getProjectContext(projectId),
-            getCoverage(projectId),
         ])
-            .then(([projectResult, contextResult, coverageResult]) => {
+            .then(([projectResult, contextResult]) => {
                 if (!active) return;
                 setProject(projectResult.project);
                 setContextState(contextResult);
-                setCoverage(coverageResult);
             })
             .catch((error) => {
                 if (!active) return;
@@ -471,14 +470,18 @@ export default function AppPage({ params }: { params: Promise<{ projectId: strin
         };
     }, [projectId, retryKey]);
 
+    const loadCoverage = useCallback(() => {
+        getCoverage(projectId).then(setCoverage).catch(() => undefined);
+    }, [projectId]);
+    useEffect(() => loadCoverage(), [loadCoverage, retryKey]);
+    useVisiblePolling(loadCoverage, 60_000);
+
     useEffect(() => onInvalidate((event) => {
         if (matchesInvalidation(event, "projects", projectId)) {
             getProject(projectId).then((result) => setProject(result.project)).catch(() => undefined);
         }
-        if (matchesInvalidation(event, "tree", projectId)) {
-            getCoverage(projectId).then(setCoverage).catch(() => undefined);
-        }
-    }), [projectId]);
+        if (matchesInvalidation(event, "tree", projectId)) loadCoverage();
+    }), [projectId, loadCoverage]);
 
     if (notFound) {
         return (
