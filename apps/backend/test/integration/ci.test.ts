@@ -124,6 +124,37 @@ describe("CI access and quality gates", () => {
         for (const baseUrl of ["file:///etc/passwd", "https://user:pass@example.com", "not-a-url"]) assert.equal(ciRunSchema.safeParse({ baseUrl }).success, false);
     });
 
+    test("reports completed attempts while agent work is paused or still awaiting acknowledgement", async () => {
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        for (const global of [false, true]) {
+            const { project, run, spec, batch } = await fixture();
+            await stewardRepository.update(project.id, { paused: !global });
+            await settingsRepository.setAgentPaused(global);
+            try {
+                assert.equal((await ciResult(batch)).complete, false, "a requested retry must still run");
+                const retry = await runsRepository.createRun({ specId: spec.id, sourceHash: "source", commitSha: "sha", retryOf: run.id });
+                assert.equal((await ciResult(batch)).complete, false, "an active retry is still pending");
+                await runsRepository.finishRun(retry.id, "failed", 20, "Still failing");
+                const failed = await ciResult(batch);
+                assert.equal(failed.complete, true);
+                assert.equal(failed.status, "failed");
+                assert.equal(failed.qualityGate.failures, 1);
+                assert.match(junitResult(failed), /failures="1"/);
+                await runsRepository.finishRun(retry.id, "passed", 20, null);
+                const flaky = await ciResult(batch);
+                assert.equal(flaky.complete, true);
+                assert.equal(flaky.status, "passed");
+                assert.equal(flaky.qualityGate.flaky, 1, "reporting cannot wait for the healer to acknowledge the result");
+                assert.match(markdownResult(flaky), /Quality gate: passed/);
+                await runsRepository.finishRun(run.id, "passed", 100, null);
+                await runsRepository.deleteRun(retry.id);
+                assert.equal((await ciResult({ ...batch, status: "passed" })).complete, true, "passing runs need no retry acknowledgement");
+            } finally {
+                await settingsRepository.setAgentPaused(false);
+            }
+        }
+    });
+
     test("rejects busy CI triggers before preparing a batch, with atomic multi-Spec reservations", async () => {
         const { acquireSpecLocks, areSpecsLocked } = await import("../../src/core/specs/lifecycle");
         const { project, spec } = await fixture();

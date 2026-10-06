@@ -19,11 +19,11 @@ export async function ciResult(batch: RunBatch) {
     const results = await Promise.all(batch.specs.map(async (item) => {
         const run = await runsRepository.getRun(item.runId);
         const retry = await runsRepository.retryFor(item.runId);
-        const flaky = run?.flaky ?? false;
+        const flaky = run?.flaky === true || retry?.status === "passed";
         const knownBug = known.has(item.specId);
-        const pending = run?.automationPending === true || run?.status === "running" || retry?.status === "running";
         const status = run?.status ?? item.status;
         const failed = ["failed", "error"].includes(status);
+        const pending = status === "running" || retry?.status === "running" || (failed && run?.automationPending === true && !retry);
         const failsGate = !pending && ((flaky && gate.failOnFlaky) || (failed && !flaky && (!knownBug || gate.failOnKnownBugs)));
         return { ...item, status, failReason: run?.failReason ?? item.failReason, flaky, knownBug, pending, failsGate,
             retryRunId: retry?.id ?? null,

@@ -520,6 +520,37 @@ test("Store", async ({ page, step }) => {
         assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
     });
 
+    test("project and global agent pause do not prevent the retry from completing CI reporting", async () => {
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { ciResult } = await import("../../src/core/ci/results");
+        for (const global of [false, true]) {
+            const { project, spec } = await failingSpec(`/flaky-paused-${global}`);
+            const original = await executeSpec(spec.id, { automate: true });
+            await stewardRepository.update(project.id, { paused: !global });
+            await settingsRepository.setAgentPaused(global);
+            try {
+                await processRunFailures();
+                const retry = (await runsRepository.retryFor(original.id))!;
+                assert.equal(retry.status, "passed");
+                assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
+                const result = await ciResult({
+                    id: "paused-ci", projectId: project.id, label: "CI", baseUrl, status: "failed", startedAt: original.startedAt,
+                    durationMs: original.durationMs, failReason: original.failReason,
+                    specs: [{ runId: original.id, specId: spec.id, commitSha: original.commitSha, sourceHash: original.sourceHash,
+                        markdownHash: spec.markdownHash, title: spec.title, status: "failed", durationMs: original.durationMs, failReason: original.failReason }],
+                });
+                assert.equal(result.complete, true);
+                assert.equal(result.qualityGate.flaky, 1);
+                assert.equal(result.qualityGate.passed, true);
+                assert.equal((await jobsRepository.list(project.id)).length, 0);
+            } finally {
+                await settingsRepository.setAgentPaused(false);
+            }
+        }
+    });
+
     test("failed retry emits one steward signal, and interrupted retry is never repeated", async () => {
         const { processRunFailures } = await import("../../src/core/jobs/failures");
         const { runsRepository } = await import("../../src/infra/repositories/runs");
