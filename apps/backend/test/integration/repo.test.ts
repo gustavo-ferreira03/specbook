@@ -287,6 +287,29 @@ describe("first-run setup", () => {
         assert.equal(await projectContextsRepository.getActiveProjectContextDraft(project.id), null);
     });
 
+    test("the LLM installation ID is stable under concurrent creation and persists across processes", async () => {
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { db } = await import("../../src/infra/db/client");
+        const { appSettings } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const { backendRoot } = await import("../../src/core/paths");
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        await db.update(appSettings).set({ llmDeviceId: null }).where(eq(appSettings.id, 1));
+        const ids = await Promise.all(Array.from({ length: 8 }, () => settingsRepository.getLlmDeviceId()));
+        assert.equal(new Set(ids).size, 1);
+        assert.match(ids[0], /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+        const [stored] = await db.select({ deviceId: appSettings.llmDeviceId }).from(appSettings).where(eq(appSettings.id, 1));
+        assert.equal(stored.deviceId, ids[0]);
+        const script = `
+            const { settingsRepository } = await import('./src/infra/repositories/settings.ts');
+            process.stdout.write(await settingsRepository.getLlmDeviceId());
+        `;
+        const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], { cwd: backendRoot, env: process.env, timeout: 10_000 });
+        assert.equal(stdout, ids[0]);
+        assert.equal(await settingsRepository.getLlmDeviceId(), ids[0]);
+    });
+
     test("LLM settings expose provider authentication methods and support OpenAI subscription login", async (t) => {
         const setup = await setupApp();
         const { modelRuntimePromise } = await import("../../src/core/llm/runtime");
@@ -301,10 +324,14 @@ describe("first-run setup", () => {
         assert.deepEqual(new Set(openai.authMethods), new Set(["oauth", "api_key"]));
         assert.deepEqual(codex.authMethods, ["oauth"]);
 
-        const login = t.mock.method(runtime, "login", async (provider: string, type: string, interaction: Parameters<typeof runtime.login>[2]) => {
+        const login = t.mock.method(runtime, "login", async (provider: string, type: string, interaction: Parameters<typeof runtime.login>[2], options: Parameters<typeof runtime.login>[3]) => {
             assert.equal(provider, "openai");
             assert.equal(type, "oauth");
             assert.ok(interaction.signal instanceof AbortSignal);
+            assert.ok(options?.getDeviceId);
+            const deviceId = options.getDeviceId();
+            assert.match(deviceId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+            assert.equal(options.getDeviceId(), deviceId);
             interaction.notify({ type: "auth_url", url: "https://auth.example.com/sign-in" });
         });
         const started = await setup.request("/settings/llm/providers/openai/oauth/start", { method: "POST" });
@@ -322,6 +349,54 @@ describe("first-run setup", () => {
         assert.equal(unsupported.status, 400);
         assert.match((await unsupported.json()).error, /OAuth is not supported/);
         assert.equal(login.mock.callCount(), 1);
+    });
+
+    test("OpenAI's real subscription SDK opens sign-in with a persistent installation ID without token requests", { timeout: 15_000 }, async (t) => {
+        const setup = await setupApp();
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const deviceId = await settingsRepository.getLlmDeviceId();
+        const fetch = t.mock.method(globalThis, "fetch", async () => { throw new Error("The sign-in startup test must not make token requests"); });
+        type OAuthResult = { status: "pending" | "done" | "error"; url?: string; prompt?: { type: string; placeholder?: string }; error?: string };
+        async function pollUntil(sessionId: string, ready: (result: OAuthResult) => boolean): Promise<OAuthResult> {
+            const deadline = Date.now() + 3_000;
+            while (Date.now() < deadline) {
+                const response = await setup.request(`/settings/llm/providers/openai/oauth/poll?sessionId=${sessionId}`);
+                assert.equal(response.status, 200);
+                const result = await response.json() as OAuthResult;
+                if (ready(result)) return result;
+                assert.equal(result.status, "pending", result.error ?? "Sign-in ended before the expected event");
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            assert.fail("OpenAI sign-in did not produce the expected event in time");
+        }
+        try {
+            for (let attempt = 0; attempt < 2; attempt++) {
+                const started = await setup.request("/settings/llm/providers/openai/oauth/start", { method: "POST" });
+                assert.equal(started.status, 200);
+                const { sessionId } = await started.json() as { sessionId: string };
+                const pending = await pollUntil(sessionId, (result) => Boolean(result.url && result.prompt));
+                assert.equal(pending.status, "pending");
+                assert.equal(pending.prompt?.type, "manual_code");
+                assert.equal(pending.prompt?.placeholder, "http://127.0.0.1:1455/auth/callback");
+                const url = new URL(pending.url!);
+                assert.equal(url.origin, "https://auth.openai.com");
+                assert.equal(url.searchParams.get("ext_agent_host_id"), `urn:uuid:${deviceId}`);
+                assert.equal(url.searchParams.get("resource"), "https://api.openai.com/v1");
+                assert.equal(url.searchParams.get("redirect_uri"), "http://127.0.0.1:1455/auth/callback");
+                const input = await setup.request("/settings/llm/providers/openai/oauth/input", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ sessionId, input: "not-a-callback" }),
+                });
+                assert.equal(input.status, 200);
+                const failed = await pollUntil(sessionId, (result) => result.status === "error");
+                assert.equal(failed.error, "Paste the complete address from the final sign-in page, then try again.");
+                assert.equal(await settingsRepository.getLlmDeviceId(), deviceId);
+            }
+            assert.equal(fetch.mock.callCount(), 0);
+        } finally {
+            await setup.request("/settings/llm/providers/openai", { method: "DELETE" });
+        }
     });
 
     test("test connection makes a bounded request and presents provider errors without raw secrets", async (t) => {
@@ -588,7 +663,7 @@ describe("project steward", () => {
         assert.equal(jobs.length, 1);
         assert.equal(jobs[0]?.id, one.id, "dispatch recovery keeps the original identity");
         assert.equal(await canRunAgentJob(jobs[0]!), true);
-        assert.equal((await stewardRepository.intents(projectId)).find((item) => item.id === event.id)?.status, "ignored");
+        assert.equal((await stewardRepository.intents(projectId)).find((item) => item.id === event.id)?.status, "pending", "observation mode records event work without dispatching it");
         const eventJob = await jobsRepository.create({ id: event.id, projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair sign in", limits: jobLimitsSchema.parse({}) });
         assert.equal(await canRunAgentJob(eventJob), false, "worker dispatch respects observation mode too");
         const tools = createJobPolicy(jobs[0]!, () => undefined).tools([createBackgroundTaskTool(projectId, "chat:policy-check")]);
@@ -1373,7 +1448,7 @@ test("agent evaluation records outcomes and decisions without prompts or credent
 });
 
 describe("existing checks baseline", () => {
-    test("first observation seeds 80 existing checks without automatic runs or repairs", async (t) => {
+    test("first observation seeds 80 existing Specs without automatic runs, and queues repairs for broken ones", async (t) => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { processProjectSteward } = await import("../../src/core/steward/engine");
@@ -1389,10 +1464,15 @@ describe("existing checks baseline", () => {
             await processProjectSteward(projectId);
             await processProjectSteward(projectId);
             assert.equal(Object.keys((await stewardRepository.get(projectId)).observation.specs ?? {}).length, 80);
-            assert.equal((await stewardRepository.signals(projectId)).length, 0);
-            assert.equal((await stewardRepository.intents(projectId)).length, 0);
+            const signals = await stewardRepository.signals(projectId);
+            const intents = await stewardRepository.intents(projectId);
+            // Existing Specs are a baseline, never re-run; broken ones are things to repair, one repair per Spec version.
+            assert.equal(signals.length, invalid ? 80 : 0);
+            assert.ok(signals.every((signal) => signal.kind === "invalid_spec"));
+            assert.equal(intents.length, invalid ? 80 : 0);
+            assert.ok(intents.every((intent) => intent.intent.kind === "regenerate"));
             const jobs = await jobsRepository.list(projectId);
-            assert.equal(jobs.length, 0);
+            assert.ok(jobs.every((job) => job.kind === "regenerate"), "no automatic runs");
             const inbox = await jobsRepository.inbox(projectId);
             assert.equal(inbox.length, 0);
         }

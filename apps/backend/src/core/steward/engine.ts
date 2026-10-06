@@ -54,6 +54,9 @@ async function intentFingerprint(projectId: string, intent: StewardIntent, sourc
     }
     const context = await projectContextsRepository.getLatestConfirmedProjectContext(projectId);
     const targets = specs.filter((spec) => !intent.specIds?.length || intent.specIds.includes(spec.id)).map((spec) => [spec.id, spec.sourceHash, spec.markdownHash]).sort();
+    // A repair is about one Spec version, whoever asked: a human's rejection or "ignore" then also stops
+    // automatic repairs of that same version, until the Spec files change.
+    if (intent.kind === "regenerate") return fingerprint({ kind: intent.kind, targets });
     return fingerprint({ kind: intent.kind, targets, context: context?.context, baseUrl: intent.baseUrl, environment: intent.environment,
         goal: source === "user" ? intent.goal.replace(/\s+/g, " ").trim().toLowerCase() : undefined,
         regressionKey: key.startsWith("regression:") ? key : undefined });
@@ -79,6 +82,12 @@ export async function recordFailureSignal(projectId: string, runId: string, spec
 
 async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
     if (signal.kind === "spec_failure") return !!await currentFailure(signal.projectId, typeof signal.payload.runId === "string" ? signal.payload.runId : undefined);
+    if (signal.kind === "invalid_spec") {
+        const specId = Array.isArray(signal.payload.specIds) ? signal.payload.specIds[0] : null;
+        const spec = typeof specId === "string" ? await specsRepository.getSpec(specId) : null;
+        return !!spec && spec.projectId === signal.projectId && spec.status === "invalid"
+            && spec.sourceHash === signal.payload.sourceHash && spec.markdownHash === signal.payload.markdownHash;
+    }
     if (signal.kind === "spec_changed") {
         const specId = Array.isArray(signal.payload.specIds) ? signal.payload.specIds[0] : null;
         const spec = typeof specId === "string" ? await specsRepository.getSpec(specId) : null;
@@ -128,6 +137,7 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
     const runId = typeof signal.payload.runId === "string" ? signal.payload.runId : undefined;
     const kinds: Record<string, StewardIntent["kind"]> = {
         spec_failure: "triage",
+        invalid_spec: "regenerate",
         deployment_changed: "run_specs", deployment: "run_specs", spec_changed: "run_specs", schedule: "run_specs",
     };
     if (signal.kind === "credentials_changed") {
@@ -192,10 +202,6 @@ export async function recordScheduledPrerequisite(projectId: string, specIds: st
 
 async function dispatchIntent(row: Intent): Promise<void> {
     if (await isAgentPaused(row.projectId)) return;
-    if (row.intent.kind === "regenerate" && row.source !== "user") {
-        await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "Regeneration requires a human request." });
-        return;
-    }
     const relatedIntents = await stewardRepository.intents(row.projectId);
     const signals = await stewardRepository.signals(row.projectId, null);
     const runTrigger = runTriggerForIntent(row, relatedIntents, signals);

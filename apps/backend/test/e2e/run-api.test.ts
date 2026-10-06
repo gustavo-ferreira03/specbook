@@ -1323,7 +1323,7 @@ describe("autonomous pause and decisions", () => {
         assert.equal(await repoGit.getHeadSha(project.id), head);
     });
 
-    test("ignore stops requested work and regeneration needs a new human request", async () => {
+    test("ignore stops requested work and automatic repairs of the same Spec version", async () => {
         const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
         const project = await projectWithWork();
         await repoGit.ensureProjectRepo(project.id, { create: true });
@@ -1344,7 +1344,7 @@ describe("autonomous pause and decisions", () => {
         await processProjectSteward(project.id, false);
         const ignored = (await stewardRepository.intents(project.id)).find((row) => row.id === next.id)!;
         assert.equal(ignored.status, "ignored");
-        assert.match(ignored.reason, /human request/i);
+        assert.match(ignored.reason, /human rejected/i);
         assert.equal((await jobsRepository.list(project.id)).length, 1);
     });
 

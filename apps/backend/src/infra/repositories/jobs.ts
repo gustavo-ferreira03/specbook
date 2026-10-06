@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { inboxItems, jobActions, jobs } from "../db/schema";
 import { jobLimitsSchema } from "../../core/jobs/schemas";
@@ -117,12 +117,14 @@ export const jobsRepository = {
         if (updated) await recordAgentMetric(updated, "status_changed");
     },
     async recover() {
-        for (const job of await db.select().from(jobs).where(isNotNull(jobs.startedAt))) {
-            const interval = Date.parse(job.heartbeatAt ?? job.startedAt!) - Date.parse(job.startedAt!);
+        // A shutdown clears startedAt in finishExecution but leaves the status "running", so those jobs are
+        // recovered too; otherwise one orphan blocks every other job of its project forever.
+        for (const job of await db.select().from(jobs).where(or(isNotNull(jobs.startedAt), eq(jobs.status, "running")))) {
+            const interval = job.startedAt ? Date.parse(job.heartbeatAt ?? job.startedAt) - Date.parse(job.startedAt) : 0;
             const activeMs = Number.isFinite(interval) ? Math.max(0, interval) : 0;
             const [recovered] = await db.update(jobs).set({ status: job.status === "running" ? "queued" : job.status,
                 elapsedMs: sql`${jobs.elapsedMs} + ${activeMs}`, startedAt: null, heartbeatAt: null, updatedAt: now() })
-                .where(and(eq(jobs.id, job.id), eq(jobs.status, job.status), eq(jobs.startedAt, job.startedAt!))).returning();
+                .where(and(eq(jobs.id, job.id), eq(jobs.status, job.status), job.startedAt ? eq(jobs.startedAt, job.startedAt) : isNull(jobs.startedAt))).returning();
             if (recovered) {
                 await recordAgentMetric(recovered, "status_changed");
                 await this.log(job.id, "recovered", "Backend restarted. Reconcile existing Inbox proposals before continuing; do not repeat browser mutations.");
