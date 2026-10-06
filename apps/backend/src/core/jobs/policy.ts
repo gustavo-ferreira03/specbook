@@ -113,7 +113,7 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                         if (job.kind === "generate_spec" && tool.name === "create_spec") {
                             output = result(await createSelectedSpec(job, params, { signal, checkPolicy: check, baseUrl, environment }));
                         } else if (job.kind === "generate_spec" && ["create_feature", "update_spec", "propose_spec_batch", "start_background_task"].includes(tool.name)) {
-                            throw new Error("Create only the selected draft using its assigned feature. Do not change existing Specs.");
+                            throw new Error("Create only the selected Spec using its assigned feature. Do not change existing Specs.");
                         } else if (job.kind === "generate_spec" && tool.name === "run_spec") {
                             output = result(await selectedSpecResult(job));
                         } else if (job.kind === "coverage" && ["create_spec", "create_feature"].includes(tool.name)) {

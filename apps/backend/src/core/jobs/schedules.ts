@@ -157,8 +157,7 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
         }
         if (!automation.cron || !automation.nextRunAt || Date.parse(automation.nextRunAt) > at.getTime() || await isAgentPaused(projectId)) return;
         const allSpecs = await specsRepository.listSpecs(projectId);
-        const available = allSpecs.filter((spec) => spec.lifecycle === "active");
-        const selected = automation.specIds.length ? available.filter((spec) => automation.specIds.includes(spec.id)) : available;
+        const selected = automation.specIds.length ? allSpecs.filter((spec) => automation.specIds.includes(spec.id)) : allSpecs;
         const runnable = selected.filter((spec) => spec.status !== "invalid");
         const ids = runnable.map((spec) => spec.id);
         if (areSpecsLocked(ids) || await runsRepository.hasRunningRuns(ids)) return;

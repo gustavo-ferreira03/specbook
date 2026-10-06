@@ -45,9 +45,7 @@ The repository accepts the `main` branch only. Generated files and edits made in
 
 A missing or invalid `spec.ts` makes a Spec incomplete. Open its validation reason and use **Repair in chat**. The agent may propose an implementation repair; changing `spec.yml` requires a human decision.
 
-## Drafts and environments
-
-Selected batches generate drafts with their first run result. Drafts run manually; activate a Spec to include it in schedules, CI, deployment events and failure investigation. Activation is an operational setting saved in Specbook, separate from the behavior contract. New Specs imported through Git begin as drafts; existing Specs retain their state when reindexed.
+## Environments
 
 Save destinations in **Project settings → Environments**. Production is the default and uses the project URL. Other environments can override a Spec's credential profile with another profile saved in the same project. An override explicitly authorizes the selected profile at that environment's base origin; otherwise the original profile's allowed origins still apply. One-off preview URLs must be allowlisted separately for navigation and credential use. Run results retain their environment configuration for retries and investigation.
 

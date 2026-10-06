@@ -82,7 +82,7 @@ export function createCiRouter(): Hono {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
         const environment = await acceptTrigger(c, projectId, input.baseUrl, input.environment);
-        let specs = (await specsRepository.listSpecs(projectId)).filter((spec) => spec.lifecycle === "active");
+        let specs = await specsRepository.listSpecs(projectId);
         if (input.featureId) {
             const feature = await featuresRepository.getFeature(input.featureId);
             if (!feature || feature.projectId !== projectId) throw new HTTPException(400, { message: "Feature not found in this project" });
@@ -90,7 +90,7 @@ export function createCiRouter(): Hono {
             specs = specs.filter((spec) => selected.has(spec.id));
         }
         if (input.specIds) {
-            if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected Specs must be active and belong to this project" });
+            if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected Specs must belong to this project" });
             specs = specs.filter((spec) => input.specIds!.includes(spec.id));
         }
         // All/Feature runs include runnable Specs. Explicitly selected invalid Specs report their validation error.

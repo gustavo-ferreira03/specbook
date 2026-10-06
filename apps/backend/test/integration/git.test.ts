@@ -220,18 +220,18 @@ test("coverage uses confirmed context, tested routes and current runs from the s
     await environmentsRepository.create(project.id, { name: "Staging", baseUrl: "https://staging.example.com", allowedOrigins: [], credentialOverrides: {} });
     const production = await resolveRunEnvironment(project.id);
     const staging = await resolveRunEnvironment(project.id, "staging");
-    const addSpec = async (title: string, target: string, lifecycle: "draft" | "active" = "active", api = false) => {
+    const addSpec = async (title: string, target: string, api = false) => {
         const source = `import { test, expect } from "specbook";\ntest(${JSON.stringify(title)}, async ({ ${api ? "request" : "page"}, step }) => {\n    await step("Open", async () => { ${api ? `const response = await request.get(${JSON.stringify(target)}); await expect(response).toBeOK();` : `await page.goto(${JSON.stringify(target)}); await expect(page.getByRole("heading")).toBeVisible();`} });\n});\n`;
         const yaml = serializeSpecYaml({ title, description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "The Spec passes", postconditions: [] } });
-        const spec = await specsRepository.createSpecRecord({ projectId: project.id, featureId: api ? apiFeature.id : feature.id, title, description: "", path: `specs/${sourceHashOf(title).slice(0, 8)}`, sourceHash: sourceHashOf(source), markdownHash: markdownHashOf(yaml), lifecycle });
+        const spec = await specsRepository.createSpecRecord({ projectId: project.id, featureId: api ? apiFeature.id : feature.id, title, description: "", path: `specs/${sourceHashOf(title).slice(0, 8)}`, sourceHash: sourceHashOf(source), markdownHash: markdownHashOf(yaml) });
         await fs.mkdir(path.join(project.checkout, spec.path), { recursive: true });
         await fs.writeFile(path.join(project.checkout, spec.path, "spec.ts"), source);
         await fs.writeFile(path.join(project.checkout, spec.path, "spec.yml"), yaml);
         return { spec, yaml };
     };
     const checkout = await addSpec("Checkout page", "/checkout");
-    const draft = await addSpec("Draft settings", "/settings", "draft");
-    const api = await addSpec("Admin can manage accounts", "/api/users/42", "active", true);
+    const settings = await addSpec("Settings page", "/settings");
+    const api = await addSpec("Admin can manage accounts", "/api/users/42", true);
     const stale = await addSpec("Checkout confirmation", "/checkout/confirmation");
     const running = await addSpec("Checkout running", "/checkout/running");
     const invalid = await specsRepository.createSpecRecord({ projectId: project.id, featureId: feature.id, title: "Checkout broken", description: "", path: "specs/broken", sourceHash: "bad", markdownHash: "bad", status: "invalid" });
@@ -248,7 +248,7 @@ test("coverage uses confirmed context, tested routes and current runs from the s
     const retry = await addRun(stale, production, "passed", failed.id);
     await runsRepository.markFlaky(failed.id, retry.id);
     await addRun(running, production, "running");
-    await addRun(draft, production, "passed");
+    await addRun(settings, production, "passed");
     const rule = "Admin can manage accounts";
     const context = { ...EMPTY_PROJECT_CONTEXT, areas: [
         { name: "Checkout", description: "Purchase flow", routes: ["/checkout", "/checkout/shipping"] },
@@ -277,13 +277,13 @@ test("coverage uses confirmed context, tested routes and current runs from the s
     const result = await projectCoverage(project.id);
     assert.equal(result.confirmed, true);
     assert.equal(result.environment.name, "Production");
-    assert.deepEqual(result.areas.filter((area) => area.kind === "area").map((area) => area.coverage), ["partial", "partial", "covered", "uncovered"]);
+    assert.deepEqual(result.areas.filter((area) => area.kind === "area").map((area) => area.coverage), ["partial", "covered", "covered", "uncovered"]);
     assert.deepEqual(result.areas[0]?.matchedRoutes, ["/checkout"]);
     assert.deepEqual(result.areas[2]?.specIds, [api.spec.id], "literal API requests cover parameterized routes");
     assert.equal(result.areas.find((area) => area.kind === "role" && area.name === "Admin")?.coverage, "covered");
     assert.equal(result.areas.find((area) => area.kind === "role" && area.name === "Viewer")?.coverage, "uncovered");
     assert.equal(result.areas.find((area) => area.kind === "rule")?.coverage, "covered");
-    assert.deepEqual(result.features.find((row) => row.id === feature.id)?.counts, { passing: 1, failing: 0, flaky: 1, draft: 1, notRun: 0, invalid: 1, running: 1 });
+    assert.deepEqual(result.features.find((row) => row.id === feature.id)?.counts, { passing: 2, failing: 0, flaky: 1, notRun: 0, invalid: 1, running: 1 });
     assert.deepEqual(result.trend.map((row) => [row.id, row.passRate]), [[older, 100], [newer, 100]], "retry passes count as flaky passes and history is chronological");
     const staged = await projectCoverage(project.id, "staging");
     assert.equal(staged.features.find((row) => row.id === feature.id)?.counts.failing, 1);

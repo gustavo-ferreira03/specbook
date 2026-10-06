@@ -19,7 +19,7 @@ import type { CoverageCounts, CoverageResponse } from "@/lib/types";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { useVisiblePolling } from "@/lib/usePolling";
 
-const healthLabels: Record<keyof CoverageCounts, string> = { passing: "passing", failing: "failing", flaky: "flaky", draft: "draft", notRun: "not run", invalid: "need repairing", running: "running" };
+const healthLabels: Record<keyof CoverageCounts, string> = { passing: "passing", failing: "failing", flaky: "flaky", notRun: "not run", invalid: "need repairing", running: "running" };
 
 function healthSummary(counts: CoverageCounts): string {
     return Object.entries(counts).filter(([, count]) => count > 0).map(([key, count]) => `${count} ${healthLabels[key as keyof CoverageCounts]}`).join(" · ");

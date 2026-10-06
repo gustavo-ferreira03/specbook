@@ -64,7 +64,7 @@ const ITEM_TYPES: Partial<Record<InboxItem["kind"], InboxPresentation["type"]>> 
 const CONSEQUENCES: Record<InboxPresentation["type"], string> = {
     update: "Saves the updated Spec to this project; you can undo it from history.",
     new_check: "Adds the Spec to this project; future runs can verify this behavior.",
-    batch: "Creates only your selected drafts. Drafts stay out of automatic runs until you activate them.",
+    batch: "Creates only the Specs you select. Each one is validated and run once.",
     feature: "Adds a feature to organize this project’s Specs.",
     bug: "Requests a regression Spec for review. The current Spec stays unchanged.",
     help: "Discuss it in chat, or set this suggestion aside without changing the Spec.",
@@ -256,7 +256,7 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
             case "batch":
                 title = batchTitle(item, batch!);
                 summary = batch!.contextReviewRequired ? "Confirm the discovery context, then select the Specs you want to create."
-                    : item.status === "approved" ? "Each selected Spec is saved as a draft. Review its first result before activating it." : "Select the Specs you want. Each one will be created as a draft, validated and run once.";
+                    : item.status === "approved" ? "Each selected Spec is saved, validated and run once. Review its first result." : "Select the Specs you want. Each one will be created, validated and run once.";
                 break;
             case "feature":
                 title = `Add “${string(params.title) ?? name}” to this project?`;
@@ -351,7 +351,7 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
             const batch = latestItem.payload.specBatch as SpecBatch;
             const selected = batch.candidates.filter((candidate) => candidate.selected);
             timeline.push({ id: latestItem.id, label: latestItem.status === "approved" ? "Selected" : "Suggested",
-                detail: latestItem.status === "approved" ? `${selected.length} Spec${selected.length === 1 ? "" : "s"} selected to create as drafts.` : latestItem.presentation.title,
+                detail: latestItem.status === "approved" ? `${selected.length} Spec${selected.length === 1 ? "" : "s"} selected to create.` : latestItem.presentation.title,
                 createdAt: batch.selectedAt ?? latestItem.createdAt });
             for (const candidate of selected) if (candidate.runId && candidate.finishedAt) timeline.push({ id: candidate.runId, label: "First run",
                 detail: `“${candidate.title}” ${candidate.state === "passed" ? "passed" : "did not pass"}.`, createdAt: candidate.finishedAt, specId: candidate.specId, runId: candidate.runId });

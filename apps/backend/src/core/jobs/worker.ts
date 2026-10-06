@@ -88,9 +88,9 @@ async function executeJob(job: Job): Promise<void> {
                 await retryInfrastructure(job, last || "The agent service could not complete its response.");
             } else if (selected?.status === "running") {
                 await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 15_000).toISOString(),
-                    pendingMessage: "The selected draft's first run is still running. Use run_spec to inspect its saved result. Do not create another Spec or start another run." });
+                    pendingMessage: "The selected Spec's first run is still running. Use run_spec to inspect its saved result. Do not create another Spec or start another run." });
             } else if (selected) {
-                await stallJob(job, selected.specId ? "The draft was saved, but its first result is missing." : "The selected Spec has no saved runnable draft.");
+                await stallJob(job, selected.specId ? "The Spec was saved, but its first result is missing." : "The selected Spec has not been saved.");
             } else {
                 const body = await scrub(last);
                 const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });

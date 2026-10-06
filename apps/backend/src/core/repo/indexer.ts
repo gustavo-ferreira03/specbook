@@ -274,7 +274,7 @@ function specQuery(projectId: string, entry: PlannedSpec): { id: string; query: 
         const id = crypto.randomUUID();
         return {
             id,
-            query: specsRepository.insertSpecQuery({ id, projectId, lifecycle: "draft", ...values, createdAt: now, updatedAt: now }),
+            query: specsRepository.insertSpecQuery({ id, projectId, ...values, createdAt: now, updatedAt: now }),
         };
     }
     const patch: SpecPatch = {};

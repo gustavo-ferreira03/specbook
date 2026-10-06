@@ -382,7 +382,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
         return (
             <div key={spec.id} className={rowClass(selected)}>
                 <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} pr-2 pl-2 ${selected ? "font-medium" : ""}`} title={health ? `${spec.title}: ${health.label}` : spec.title}>
-                    <StatusDot status={spec.lifecycle === "draft" ? "draft" : health?.status ?? spec.status} size={14} />
+                    <StatusDot status={health?.status ?? spec.status} size={14} />
                     <span className="min-w-0 flex-1 truncate">{spec.title}</span>
                 </Link>
                 <div className={rowActionsClass}>

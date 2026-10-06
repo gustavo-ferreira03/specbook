@@ -107,7 +107,6 @@ export function createProjectsRouter(): Hono {
                 featureId: spec.featureId,
                 title: spec.title,
                 status: spec.status,
-                lifecycle: spec.lifecycle,
                 lastRun: lastRuns.get(spec.id) ?? null,
             })),
             syncError,
