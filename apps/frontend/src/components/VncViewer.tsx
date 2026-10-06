@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { WS_URL } from "@/lib/api";
+import { websocketUrl } from "@/lib/api";
 
 export type VncStatus = "connecting" | "connected" | "error";
 
@@ -43,7 +43,7 @@ export function VncViewer({ vncSessionId, onStatusChange }: { vncSessionId: stri
             try {
                 const { default: noVNC } = await import("@novnc/novnc");
                 if (cancelled || !containerRef.current) return;
-                connection = new noVNC(containerRef.current, `${WS_URL}/vnc/${encodeURIComponent(vncSessionId)}`, { shared: true });
+                connection = new noVNC(containerRef.current, websocketUrl(`/vnc/${encodeURIComponent(vncSessionId)}`), { shared: true });
                 connection.background = getComputedStyle(document.documentElement).getPropertyValue("--color-browser").trim() || "black";
                 connection.scaleViewport = true;
                 connection.viewOnly = true;

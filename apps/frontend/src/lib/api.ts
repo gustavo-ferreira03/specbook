@@ -23,8 +23,13 @@ import type {
     SpecDetail,
 } from "./types";
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
-export const WS_URL = API_URL.replace(/^http/, "ws");
+export const API_URL = "/api";
+
+export function websocketUrl(path: string): string {
+    const url = new URL(`${API_URL}${path}`, window.location.origin);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+}
 
 export class ApiError extends Error {
     readonly status: number;
@@ -61,7 +66,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
     let response: Response;
     try {
-        response = await fetch(`${API_URL}${path}`, { ...init, headers });
+        response = await fetch(`${API_URL}${path}`, { credentials: "same-origin", ...init, headers });
     } catch (error) {
         if (isAbortError(error)) throw error;
         throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0, "network_error");
@@ -71,8 +76,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         let message = text;
         let code: string | undefined;
         try {
-            const body = JSON.parse(text) as { error?: string; message?: string; code?: string };
-            message = body.error ?? body.message ?? text;
+            const body = JSON.parse(text) as { error?: string; message?: string; code?: string; nextStep?: string };
+            message = [body.error ?? body.message ?? text, body.nextStep].filter(Boolean).join(" ");
             code = typeof body.code === "string" ? body.code : undefined;
         } catch {}
         throw new ApiError(message || `Request failed with status ${response.status}`, response.status, code);

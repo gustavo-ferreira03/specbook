@@ -34,8 +34,6 @@ jobs:
 
             - name: Build
               run: pnpm build
-              env:
-                  NEXT_PUBLIC_API_URL: http://localhost:4000
 
             # Chromium for Playwright Test, so the runner's real-browser tests run
             # instead of being skipped.

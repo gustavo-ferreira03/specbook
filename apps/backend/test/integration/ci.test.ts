@@ -48,6 +48,17 @@ async function fixture() {
 }
 
 describe("CI access and quality gates", () => {
+    test("public CI links follow the runtime frontend origin", async () => {
+        const { project, batch } = await fixture();
+        const response = await app.request(`/projects/${project.id}/ci`, { headers: {
+            ...browserHeaders, "x-specbook-proxy": "1", "x-forwarded-host": "192.168.0.165:8080", "x-forwarded-proto": "http",
+        } });
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.batches[0].url, `http://192.168.0.165:8080/p/${project.id}/settings?tab=ci#ci-batch-${batch.id}`);
+        assert.ok(body.batches[0].results[0].url.startsWith(`http://192.168.0.165:8080/p/${project.id}/specs/`));
+    });
+
     test("stores only hashes, separates project and Git scopes, and rotates/revokes immediately", async () => {
         const first = await projectsRepository.createProject("First", "https://example.com");
         const second = await projectsRepository.createProject("Second", "https://example.com");

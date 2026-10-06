@@ -36,6 +36,7 @@ import {
     csrfGuard,
     hostGuard,
     isAllowedHost,
+    isAllowedWebsocketOrigin,
     jsonBodyLimit,
     REQUEST_HEADER,
     requestLogger,
@@ -73,6 +74,7 @@ app.use(
     cors({
         origin: (origin) => (allowedOrigins.has(origin) ? origin : undefined),
         allowHeaders: ["Content-Type", REQUEST_HEADER],
+        credentials: true,
     }),
 );
 // CORS only stops other sites from reading responses. These guards stop them
@@ -133,10 +135,11 @@ wss.on("connection", (websocket, request) => {
 });
 
 server.on("upgrade", (request, socket, head) => {
+    const headers = new Headers(Object.entries(request.headers).flatMap(([key, value]) => typeof value === "string" ? [[key, value]] : []));
     if (
         !request.url?.startsWith("/vnc/") ||
         !isAllowedHost(hostAllowlist, request.headers.host) ||
-        (request.headers.origin !== undefined && !allowedOrigins.has(request.headers.origin))
+        !isAllowedWebsocketOrigin(headers, hostAllowlist, allowedOrigins)
     ) {
         socket.destroy();
         return;

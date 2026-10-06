@@ -74,6 +74,21 @@ after(() => site?.close());
 const app = new Hono();
 app.route("/", createRunsRouter());
 
+test("chat events disable compression and buffering in the frontend proxy", async () => {
+    const { createChatsRouter } = await import("../../src/infra/web/routes/chats");
+    const project = await projectsRepository.createProject("Streaming", "https://example.com");
+    const chatApp = new Hono().route("/", createChatsRouter());
+    const { chat } = await (await chatApp.request(`/projects/${project.id}/chats`, { method: "POST" })).json();
+    const response = await chatApp.request(`/chats/${chat.id}/events`);
+    assert.equal(response.headers.get("cache-control"), "no-cache, no-transform");
+    assert.equal(response.headers.get("x-accel-buffering"), "no");
+    const reader = response.body!.getReader();
+    try {
+        const chunk = await reader.read();
+        assert.match(new TextDecoder().decode(chunk.value), /event: connected/);
+    } finally { await reader.cancel(); }
+});
+
 describe("executeSpec (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
     test("blocks redirected navigation outside the configured project origins", { timeout: 120_000 }, async () => {
         let privateRequests = 0;

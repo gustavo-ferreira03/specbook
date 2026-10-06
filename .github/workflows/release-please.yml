@@ -61,7 +61,5 @@ jobs:
                       org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                       org.opencontainers.image.revision=${{ github.sha }}
                       org.opencontainers.image.version=${{ steps.release.outputs.tag_name }}
-                  build-args: |
-                      NEXT_PUBLIC_API_URL=http://localhost:4000
                   cache-from: type=gha
                   cache-to: type=gha,mode=max

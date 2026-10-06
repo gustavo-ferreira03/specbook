@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { Hono } from "hono";
 
 process.env.LOG_LEVEL ??= "silent";
-const { buildHostAllowlist, csrfGuard, hostGuard, isAllowedHost, jsonBodyLimit, REQUEST_HEADER } = await import(
+const { buildHostAllowlist, csrfGuard, frontendProxyOrigin, hostGuard, isAllowedHost, isAllowedWebsocketOrigin, jsonBodyLimit, REQUEST_HEADER } = await import(
     "../../src/infra/web/security"
 );
 
@@ -26,7 +26,7 @@ function request(path: string, init: RequestInit & { host?: string } = {}): Requ
 }
 
 describe("host allowlist", () => {
-    test("localhost on the API port and configured origins are allowed", () => {
+    test("literal addresses support published ports and DNS names must be configured", () => {
         const allowlist = buildHostAllowlist(4000, {
             FRONTEND_ORIGIN: "http://specbook.lan:4001",
             SPECBOOK_ALLOWED_HOSTS: "Internal.Example , exact.example:8443",
@@ -38,13 +38,38 @@ describe("host allowlist", () => {
         assert.ok(isAllowedHost(allowlist, "internal.example:1234"), "entries without a port match any port");
         assert.ok(isAllowedHost(allowlist, "exact.example:8443"));
         assert.ok(!isAllowedHost(allowlist, "exact.example:9999"));
-        assert.ok(!isAllowedHost(allowlist, "localhost:5000"));
+        assert.ok(isAllowedHost(allowlist, "localhost:5000"));
+        assert.ok(isAllowedHost(allowlist, "192.168.0.165:8080"));
+        assert.ok(isAllowedHost(allowlist, "[2001:db8::1]:8080"));
+        assert.ok(!isAllowedHost(allowlist, "127.0.0.1.attacker.example:8080"));
+        assert.ok(!isAllowedHost(allowlist, "127.0.0.1:8080@attacker.example"));
+        assert.ok(!isAllowedHost(allowlist, "localhost:8080/path"));
         assert.ok(!isAllowedHost(allowlist, "attacker.example:4000"));
         assert.ok(!isAllowedHost(allowlist, undefined));
     });
 
     test("* disables the check", () => {
         assert.ok(isAllowedHost(buildHostAllowlist(4000, { SPECBOOK_ALLOWED_HOSTS: "*" }), "anything:1"));
+    });
+});
+
+describe("same-origin frontend proxy", () => {
+    test("VNC requires an Origin matching the validated proxy host or configured frontend", () => {
+        const allowlist = buildHostAllowlist(4000, {});
+        const origins = new Set(["http://localhost:4001"]);
+        const headers = new Headers({ "x-specbook-proxy": "1", "x-forwarded-host": "192.168.0.165:8080", "x-forwarded-proto": "http" });
+        assert.equal(frontendProxyOrigin(headers, allowlist), "http://192.168.0.165:8080");
+        assert.equal(isAllowedWebsocketOrigin(headers, allowlist, origins), false, "missing Origin is never accepted");
+        headers.set("origin", "http://192.168.0.165:8080");
+        assert.equal(isAllowedWebsocketOrigin(headers, allowlist, origins), true);
+        headers.set("origin", "https://attacker.example");
+        assert.equal(isAllowedWebsocketOrigin(headers, allowlist, origins), false);
+        headers.set("x-forwarded-host", "attacker.example");
+        headers.set("x-forwarded-proto", "https");
+        assert.equal(frontendProxyOrigin(headers, allowlist), null, "forwarding cannot add a DNS host to the allowlist");
+        headers.delete("x-specbook-proxy");
+        headers.set("origin", "http://localhost:4001");
+        assert.equal(isAllowedWebsocketOrigin(headers, allowlist, origins), true);
     });
 });
 

@@ -6,7 +6,7 @@ services:
         # Published on loopback only: Specbook has no application-level login.
         # To reach it from other machines, drop the "127.0.0.1:" prefix (or use
         # a specific interface address), add the public host names to
-        # SPECBOOK_ALLOWED_HOSTS, and put an authenticated reverse proxy or a
+        # SPECBOOK_ALLOWED_HOSTS (literal IPs work directly), and put an authenticated reverse proxy or a
         # VPN in front of it. 1455 and 53692 receive OAuth callbacks and only
         # need to be reachable from the browser completing the login.
         ports:
@@ -16,7 +16,8 @@ services:
             - "127.0.0.1:53692:53692"
         environment:
             HOST: 0.0.0.0
-            FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4001}
+            FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-}
+            SPECBOOK_BACKEND_URL: http://127.0.0.1:4000
             PI_OAUTH_CALLBACK_HOST: 0.0.0.0
             SPECBOOK_ALLOWED_HOSTS: ${SPECBOOK_ALLOWED_HOSTS:-}
             LOG_LEVEL: ${LOG_LEVEL:-info}

@@ -11,8 +11,8 @@ export async function knownBugSpecIds(projectId: string): Promise<string[]> {
     return [...new Set(ids)];
 }
 
-export async function ciResult(batch: RunBatch) {
-    const frontend = (process.env.FRONTEND_ORIGIN ?? "http://localhost:4001").replace(/\/$/, "");
+export async function ciResult(batch: RunBatch, frontendOrigin = process.env.FRONTEND_ORIGIN ?? "") {
+    const frontend = frontendOrigin.replace(/\/$/, "");
     const url = `${frontend}/p/${batch.projectId}/settings?tab=ci#ci-batch-${batch.id}`;
     const known = new Set(batch.ci?.knownBugSpecIds ?? []);
     const gate = batch.ci?.qualityGate ?? { failOnFlaky: false, failOnKnownBugs: false };

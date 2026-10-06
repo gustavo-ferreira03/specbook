@@ -80,7 +80,7 @@ export function createChatsRouter(): Hono {
     router.get("/chats/:id/events", async (c) => {
         const id = c.req.param("id");
         if (!(await chatsRepository.getChatRow(id))) throw new HTTPException(404, { message: "Chat not found" });
-        return streamSSE(c, async (stream) => {
+        c.res = streamSSE(c, async (stream) => {
             const notify = (event: ChatUpdateEvent) =>
                 void stream
                     .writeSSE({
@@ -98,6 +98,9 @@ export function createChatsRouter(): Hono {
             await stream.writeSSE({ event: "connected", data: "" });
             await new Promise<void>((resolve) => stream.onAbort(resolve));
         });
+        c.header("Cache-Control", "no-cache, no-transform");
+        c.header("X-Accel-Buffering", "no");
+        return c.res;
     });
 
     router.delete("/chats/:id", async (c) => {
