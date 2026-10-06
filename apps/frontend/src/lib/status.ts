@@ -40,6 +40,7 @@ const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
     passing: { label: "Passing", runLabel: "Passed", description: "The last run passed.", tone: "success", icon: Check },
     failing: { label: "Failing", runLabel: "Failed", description: "The last run failed.", tone: "danger", icon: X },
     flaky: { label: "Flaky", runLabel: "Passed on retry", description: "The run failed, then passed on retry.", tone: "warning", icon: AlertTriangle },
+    repairing: { label: "Repairing", runLabel: "Repairing", description: "Specbook is repairing this Spec.", tone: "running", icon: LoaderCircle },
     not_checked: { label: "Not run", runLabel: "Not run", description: "There is no completed run for the current Spec.", tone: "neutral", icon: CircleDashed },
 };
 

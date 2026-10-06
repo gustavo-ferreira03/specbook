@@ -1,5 +1,6 @@
 "use client";
 
+import { useDisplayStatus } from "@/lib/projectOverview";
 import { useAuth } from "@/components/AuthProvider";
 
 import Link from "next/link";
@@ -46,12 +47,9 @@ export function orderFeatures(features: Feature[], rootId: string | null = null)
 export interface SpecGroup {
     id: string;
     title: React.ReactNode;
-    href?: string;
     specs: SpecSummary[];
     /** Shown when the group has no Specs. */
     emptyText?: string;
-    /** Hide the group header row (e.g. the Feature's own Specs on the Feature page). */
-    hideHeader?: boolean;
 }
 
 function canRun(spec: SpecSummary) {
@@ -88,10 +86,11 @@ function LastRunText({ run }: { run: Run | null | undefined }) {
 function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; spec: SpecSummary; run: Run | null | undefined; running: boolean; onRun?: (spec: SpecSummary) => void }) {
     const { canEdit } = useAuth();
     const duration = run?.durationMs != null ? formatDuration(run.durationMs) : null;
+    const status = useDisplayStatus(spec);
     return (
         <li className="group/row relative flex items-center gap-3 border-b border-line px-4 py-2.5 transition-colors duration-150 hover:bg-surface-soft sm:gap-4">
             <span className="hidden w-24 shrink-0 sm:flex">
-                <StatusPill status={spec.status} size="sm" />
+                <StatusPill status={status} size="sm" />
             </span>
             <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
@@ -104,7 +103,7 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                     {run?.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted sm:hidden">
-                    <StatusPill status={spec.status} size="sm" />
+                    <StatusPill status={status} size="sm" />
                     <LastRunText run={run} />
                     {duration && <><span aria-hidden="true" className="text-ink-disabled">·</span><span className="tabular">{duration}</span></>}
                 </div>
@@ -146,7 +145,7 @@ function GroupHeader({ group, running, onRunGroup }: { group: SpecGroup; running
         <li className="flex min-h-11 items-center gap-2.5 border-b border-line bg-surface-soft px-4 py-1.5">
             <Folder size={14} aria-hidden="true" className="shrink-0 text-ink-subtle" />
             <h2 className="min-w-0 truncate text-control font-semibold text-ink">
-                {group.href ? <Link href={group.href} className="rounded-sm hover:underline hover:underline-offset-2">{group.title}</Link> : group.title}
+                {group.title}
             </h2>
             <span className="tabular text-meta text-ink-subtle" aria-label={countLabel(group.specs.length, "Spec")}>{formatNumber(group.specs.length)}</span>
             <span className="flex-1" />
@@ -195,9 +194,9 @@ export function SpecTable({
             </div>
             <ul aria-label={label} className="[&>li:last-child>ul>li:last-child]:border-b-0">
                 {groups.map((group) => (
-                    <li key={group.id}>
+                    <li key={group.id} id={`feature-${group.id}`} className="scroll-mt-4">
                         <ul aria-label={typeof group.title === "string" ? group.title : undefined}>
-                            {!group.hideHeader && <GroupHeader group={group} running={running} onRunGroup={onRunGroup} />}
+                            <GroupHeader group={group} running={running} onRunGroup={onRunGroup} />
                             {group.specs.length === 0 ? (
                                 <li className="border-b border-line px-4 py-3 text-control text-ink-subtle">{group.emptyText ?? "No Specs yet."}</li>
                             ) : (

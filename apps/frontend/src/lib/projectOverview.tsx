@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { getOverview } from "./api";
 import { invalidate, onInvalidate } from "./invalidation";
-import type { OverviewResponse } from "./types";
+import type { OverviewResponse, SpecStatus } from "./types";
 import { useVisiblePolling } from "./usePolling";
 
 interface ProjectOverview {
@@ -56,6 +56,12 @@ export function ProjectOverviewProvider({ projectId, children }: { projectId: st
             {children}
         </ProjectOverviewContext.Provider>
     );
+}
+
+/** Status to show for a Spec: "repairing" while the agent fixes a broken one, otherwise its own status. */
+export function useDisplayStatus(spec: { id: string; status: SpecStatus }): SpecStatus | "repairing" {
+    const overview = useContext(ProjectOverviewContext);
+    return spec.status === "invalid" && overview?.data?.specHealth[spec.id]?.status === "repairing" ? "repairing" : spec.status;
 }
 
 export function useProjectOverview(): ProjectOverview {

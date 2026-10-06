@@ -170,7 +170,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
         .map(({ feature, label }) => ({
             id: feature.id,
             title: label,
-            href: `/p/${projectId}/features/${feature.id}`,
             specs: specs.filter((spec) => spec.featureId === feature.id && visible(spec)),
             emptyText: "No Specs in this feature yet.",
             hasChildren: features.some((item) => item.parentId === feature.id),

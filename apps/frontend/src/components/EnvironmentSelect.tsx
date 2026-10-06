@@ -31,13 +31,19 @@ export function EnvironmentSelect({ projectId, value, onValueChange, disabled = 
     useEffect(() => onInvalidate((event) => {
         if (matchesInvalidation(event, "projects", projectId)) setRetryKey((key) => key + 1);
     }), [projectId]);
+    const loaded = environments.length > 0;
+    useEffect(() => {
+        if (loaded && !environments.some((environment) => environment.name === value)) onValueChange("Production");
+    }, [loaded, environments, value, onValueChange]);
+    // With only Production there is nothing to choose.
+    if (!error && environments.length <= 1) return null;
     return (
         <div className={cn("min-w-0", className)}>
             <label htmlFor={id} className="sr-only">Run environment</label>
             <Select value={value} onValueChange={onValueChange} disabled={disabled}>
                 <SelectTrigger id={id} className="h-8 w-36" aria-label="Run environment"><SelectValue>{value}</SelectValue></SelectTrigger>
                 <SelectContent>
-                    {environments.length === 0 ? <SelectItem value="Production">Production</SelectItem> : environments.map((environment) => (
+                    {environments.map((environment) => (
                         <SelectItem key={environment.id} value={environment.name}>{environment.name}</SelectItem>
                     ))}
                 </SelectContent>

@@ -12,7 +12,6 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { InlineFeedback, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { StatusDot } from "@/components/StatusDot";
 import { StoryDetails } from "@/components/StoryDetails";
-import { TechnicalDetails } from "@/components/TechnicalDetails";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -76,6 +75,7 @@ function healthStatus(health: OverviewResponse["summary"]["specHealth"]) {
     if (health.failing > 0) return "failing";
     if (health.running > 0) return "running";
     if (health.invalid > 0) return "invalid";
+    if (health.repairing > 0) return "repairing";
     if (health.flaky > 0) return "flaky";
     if (health.passing > 0) return "passing";
     return "not_checked";
@@ -97,7 +97,6 @@ function ProjectHealth({ summary }: { summary: OverviewResponse["summary"] }) {
         </div>
         {summary.systemHealth && <Alert variant="warning" role="status" className="mt-4">
             <AlertDescription>{summary.systemHealth.message}</AlertDescription>
-            {summary.systemHealth.detail && <TechnicalDetails><p className="text-meta text-ink-muted">{summary.systemHealth.detail}</p></TechnicalDetails>}
         </Alert>}
     </section>;
 }

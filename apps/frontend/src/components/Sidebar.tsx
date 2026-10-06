@@ -82,7 +82,6 @@ type DeleteTarget =
 
 function sectionFromPathname(pathname: string, projectId: string): SidebarTab | null {
     if (pathname === `/p/${projectId}/specs` || pathname.startsWith(`/p/${projectId}/specs/`)) return "specs";
-    if (pathname.startsWith(`/p/${projectId}/features/`)) return "specs";
     if (pathname === `/p/${projectId}/chats` || pathname.startsWith(`/p/${projectId}/chats/`)) return "chats";
     return null;
 }
@@ -242,8 +241,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
 
     useEffect(() => {
         const activeSpec = specs.find((spec) => pathname === `/p/${projectId}/specs/${spec.id}`);
-        const activeFeature = features.find((item) => pathname === `/p/${projectId}/features/${item.id}`);
-        const startId = activeSpec?.featureId ?? activeFeature?.id;
+        const startId = activeSpec?.featureId;
         if (!startId) return;
         const ids = new Set<string>();
         let feature = features.find((item) => item.id === startId);
@@ -400,13 +398,12 @@ export function Sidebar({ projectId }: { projectId: string }) {
     function renderFeature(feature: Feature): React.ReactNode {
         const expanded = expandedFeatures.has(feature.id);
         const count = featureSpecCount(feature.id);
-        const href = `/p/${projectId}/features/${feature.id}`;
-        const selected = pathname === href;
+        const href = `/p/${projectId}/specs#feature-${feature.id}`;
         const childSpecs = specs.filter((spec) => spec.featureId === feature.id);
         const childFeatures = features.filter((child) => child.parentId === feature.id);
         return (
             <Collapsible key={feature.id} open={expanded} onOpenChange={(open) => setFeatureExpanded(feature.id, open)} className="w-full min-w-0">
-                <div className={rowClass(selected)}>
+                <div className={rowClass(false)}>
                     <CollapsibleTrigger asChild>
                         <Button
                             type="button"
@@ -418,7 +415,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <ChevronRight size={14} className={`transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} />
                         </Button>
                     </CollapsibleTrigger>
-                    <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} pr-2 font-medium ${selected ? "text-ink" : "text-ink"}`} title={feature.title}>
+                    <Link href={href} className={`${rowLinkClass} pr-2 font-medium text-ink`} title={feature.title}>
                         <span className="min-w-0 flex-1 truncate">{feature.title}</span>
                         <span className="tabular text-meta font-normal text-ink-subtle" aria-label={countLabel(count, "Spec")}>{count}</span>
                     </Link>
