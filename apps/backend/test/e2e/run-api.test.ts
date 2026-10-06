@@ -75,6 +75,31 @@ const app = new Hono();
 app.route("/", createRunsRouter());
 
 describe("executeSpec (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
+    test("blocks redirected navigation outside the configured project origins", { timeout: 120_000 }, async () => {
+        let privateRequests = 0;
+        const privateSite = http.createServer((_request, response) => { privateRequests++; response.end("Internal service"); });
+        await new Promise<void>((resolve) => privateSite.listen(0, "127.0.0.1", resolve));
+        const destination = `http://127.0.0.1:${(privateSite.address() as AddressInfo).port}/`;
+        const preview = http.createServer((_request, response) => { response.writeHead(302, { location: destination }); response.end(); });
+        await new Promise<void>((resolve) => preview.listen(0, "127.0.0.1", resolve));
+        try {
+            const project = await projectsRepository.createProject("Redirect check", `http://127.0.0.1:${(preview.address() as AddressInfo).port}`);
+            await repoGit.ensureProjectRepo(project.id, { create: true });
+            const feature = await writer.createFeatureInRepo(project.id, null, "Redirect", "");
+            const { spec } = await writer.createSpecInRepo({
+                projectId: project.id, featureId: feature.id, title: "Open preview", description: "",
+                humanSpec: { preconditions: [], steps: ["Open preview"], expectedResult: "Preview opens", postconditions: [] },
+                testSource: 'import { test, expect } from "specbook"; test("Open preview", async ({ page, step }) => { await step("Open preview", async () => { await page.goto("/"); }); });',
+            });
+            const run = await executeSpec(spec.id);
+            assert.equal(run.status, "failed", run.failReason ?? "");
+            assert.match(run.failReason ?? "", /BLOCKED_BY_CLIENT|blockedbyclient/i);
+            assert.equal(privateRequests, 0, "the redirect target receives no browser request");
+        } finally {
+            for (const server of [preview, privateSite]) { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
+        }
+    });
+
     test("stores the run with sourceHash, evidence and report links, and scrubs secrets", { timeout: 120_000 }, async () => {
         const project = await projectsRepository.createProject("Loja", baseUrl);
         await repoGit.ensureProjectRepo(project.id, { create: true });
@@ -136,6 +161,7 @@ test("Store", async ({ page, step, secret }) => {
     test("a preview override cannot receive saved credentials until its origin is explicitly allowed", { timeout: 120_000 }, async () => {
         const { getProfileByName, updateProfile } = await import("../../src/core/credentials/profiles");
         const project = await projectsRepository.createProject("Preview credential boundary", "http://127.0.0.1:1");
+        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: [new URL(baseUrl).origin] });
         await repoGit.ensureProjectRepo(project.id, { create: true });
         await createProfile(project.id, { name: "shopper", fields: [{ key: "password", value: "preview-trust-secret" }] });
         const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
@@ -190,7 +216,7 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
         const { runsRepository } = await import("../../src/infra/repositories/runs");
         const originalRun = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(project.id), sourceHash: spec.sourceHash, baseUrl });
         await runsRepository.finishRun(originalRun.id, "failed", 1, "Preview locator drift");
-        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1" });
+        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1", ciAllowedOrigins: [new URL(baseUrl).origin] });
         const job = await jobsRepository.create({ projectId: project.id, runId: originalRun.id, chatId: "candidate-test", trigger: "manual", kind: "failure_triage", specId: spec.id, goal: "Heal", limits: jobLimitsSchema.parse({}) });
         const running = (await jobsRepository.claim(job.id))!;
         await jobsRepository.update(job.id, { classification: "test_drift" });
@@ -485,7 +511,7 @@ test("Store", async ({ page, step }) => {
         const history = await runsRepository.listRuns(spec.id);
         assert.equal(history.length, 2);
         const retry = history.find((run) => run.retryOf === original.id)!;
-        assert.equal(retry.status, "passed");
+        assert.equal(retry.status, "passed", retry.failReason ?? "");
         assert.ok(history.every((run) => run.flaky));
         assert.equal((await jobsRepository.list(project.id)).length, 0);
         assert.equal((await stewardRepository.signals(project.id)).length, 0);
@@ -533,7 +559,7 @@ test("Store", async ({ page, step }) => {
             try {
                 await processRunFailures();
                 const retry = (await runsRepository.retryFor(original.id))!;
-                assert.equal(retry.status, "passed");
+                assert.equal(retry.status, "passed", retry.failReason ?? "");
                 assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
                 const result = await ciResult({
                     id: "paused-ci", projectId: project.id, label: "CI", baseUrl, status: "failed", startedAt: original.startedAt,
@@ -612,7 +638,7 @@ test("Store", async ({ page, step }) => {
             now += 15_000;
             await processRunFailures();
             const retry = (await runsRepository.retryFor(original.id))!;
-            assert.equal(retry.status, "passed");
+            assert.equal(retry.status, "passed", retry.failReason ?? "");
             assert.equal(retry.flaky, true);
             assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
             assert.equal((await stewardRepository.signals(project.id)).length, 0);
@@ -630,10 +656,10 @@ test("Store", async ({ page, step }) => {
         const { project, spec } = await failingSpec("/flaky-preview");
         const original = await executeSpec(spec.id, { automate: true, baseUrl });
         assert.equal(original.status, "failed");
-        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1" });
+        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1", ciAllowedOrigins: [new URL(baseUrl).origin] });
         await processRunFailures();
         const retry = (await runsRepository.retryFor(original.id))!;
-        assert.equal(retry.status, "passed");
+        assert.equal(retry.status, "passed", retry.failReason ?? "");
         assert.equal(retry.baseUrl, baseUrl);
         assert.equal(retry.flaky, true);
     });
@@ -1326,6 +1352,7 @@ describe("autonomous pause and decisions", () => {
         const { getRunBatch } = await import("../../src/core/runner/batch");
         const { runsRepository } = await import("../../src/infra/repositories/runs");
         const project = await projectsRepository.createProject("Requested preview check", "http://127.0.0.1:1");
+        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: [new URL(baseUrl).origin] });
         await stewardRepository.update(project.id, { autonomy: "observe" });
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");

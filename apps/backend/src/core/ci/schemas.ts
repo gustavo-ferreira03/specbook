@@ -3,7 +3,7 @@ import { z } from "zod";
 export const httpUrlSchema = z.string().url().max(2048).refine((value) => {
     try {
         const url = new URL(value);
-        return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
+        return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.hash;
     } catch { return false; }
 }, "Use an HTTP(S) URL without credentials");
 
@@ -32,4 +32,11 @@ export const deploySchema = z.object({
     url: httpUrlSchema.optional(),
     commitSha: z.string().trim().min(1).max(128).optional(),
     ref: z.string().trim().min(1).max(500).optional(),
+}).strict();
+
+export const ciSettingsSchema = z.object({
+    allowedOrigins: z.array(httpUrlSchema.refine((value) => {
+        const url = new URL(value);
+        return url.pathname === "/" && !url.search && !url.hostname.includes("*");
+    }, "Enter an origin without a path or query").transform((value) => new URL(value).origin)).max(50),
 }).strict();

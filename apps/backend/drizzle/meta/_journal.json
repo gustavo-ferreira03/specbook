@@ -134,6 +134,13 @@
       "when": 1791277563269,
       "tag": "0018_crazy_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1791277671194,
+      "tag": "0019_easy_northstar",
+      "breakpoints": true
     }
   ]
 }

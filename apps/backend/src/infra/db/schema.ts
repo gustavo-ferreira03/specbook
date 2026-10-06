@@ -52,6 +52,7 @@ export const projects = sqliteTable("projects", {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
+    ciAllowedOrigins: text("ci_allowed_origins", { mode: "json" }).$type<string[]>().notNull().default([]),
     contextSyncError: text("context_sync_error"),
     gitAccessTokenHash: text("git_access_token_hash"),
     gitAccessTokenPrefix: text("git_access_token_prefix"),
@@ -305,4 +306,6 @@ export const projectCiTokens = sqliteTable("project_ci_tokens", {
     tokenPrefix: text("token_prefix"),
     createdAt: text("created_at"),
     lastUsedAt: text("last_used_at"),
+    requestWindowStartedAt: text("request_window_started_at"),
+    requestCount: integer("request_count").notNull().default(0),
 });

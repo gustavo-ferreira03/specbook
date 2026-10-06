@@ -19,6 +19,7 @@ export interface SecretOriginPolicy {
 }
 
 export interface SpecbookRuntime {
+    navigationOrigins?: string[];
     baseURL: string;
     secretOrigins: SecretOriginPolicy;
 }
@@ -47,6 +48,7 @@ export function parseRuntime(raw: string | undefined): SpecbookRuntime {
     const policy = value.secretOrigins;
     return {
         baseURL: value.baseURL,
+        navigationOrigins: value.navigationOrigins?.map(String),
         secretOrigins: {
             defaultOrigins: Array.isArray(policy?.defaultOrigins) ? policy.defaultOrigins.map(String) : [],
             byRef: policy?.byRef && typeof policy.byRef === "object" ? policy.byRef : {},

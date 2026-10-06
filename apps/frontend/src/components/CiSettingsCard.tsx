@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_URL, api, apiPath, errorMessage, isAbortError } from "@/lib/api";
 import { CI_PROVIDERS, ciSnippet, type CiProvider } from "@/lib/ci-snippets";
@@ -42,6 +43,8 @@ interface CiBatch {
 }
 
 interface CiSettings {
+    projectOrigin: string;
+    allowedOrigins: string[];
     token: CiAccess;
     batches: CiBatch[];
 }
@@ -52,6 +55,9 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
     onOneTimeTokenChange: (token: string | null) => void;
 }) {
     const [settings, setSettings] = useState<CiSettings | null>(null);
+    const [originsDraft, setOriginsDraft] = useState<string | null>(null);
+    const [originsSaving, setOriginsSaving] = useState(false);
+    const [originsFeedback, setOriginsFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [busy, setBusy] = useState(false);
@@ -127,6 +133,19 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
         }
     }
 
+    async function saveOrigins() {
+        setOriginsSaving(true);
+        setOriginsFeedback(null);
+        try {
+            const allowedOrigins = (originsDraft ?? "").split(/\r?\n/).map((origin) => origin.trim()).filter(Boolean);
+            const saved = await api<{ allowedOrigins: string[] }>(apiPath`/projects/${projectId}/ci`, { method: "PUT", body: JSON.stringify({ allowedOrigins }) });
+            setSettings((current) => current && { ...current, allowedOrigins: saved.allowedOrigins });
+            setOriginsDraft(null);
+            setOriginsFeedback({ type: "success", text: "Preview origins saved." });
+        } catch (caught) { setOriginsFeedback({ type: "error", text: errorMessage(caught) }); }
+        finally { setOriginsSaving(false); }
+    }
+
     function openConfirmation(action: "rotate" | "revoke", trigger: HTMLElement) {
         confirmTriggerRef.current = trigger;
         setConfirmError("");
@@ -181,6 +200,19 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                     </SettingsBlock>
                 )}
                 {(error || notice) && <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : { type: "success", text: notice }} />} />}
+            </SettingsSection>
+
+            <SettingsSection id="ci-origins-heading" title="Preview deployments" description="Choose where CI tokens may run checks or report a deployment.">
+                <form onSubmit={(event) => { event.preventDefault(); void saveOrigins(); }}>
+                    <SettingsRow label="Allowed origins" htmlFor="ci-origins" description="Optional. One exact HTTP(S) origin per line, without paths or wildcards.">
+                        <Textarea id="ci-origins" rows={3} value={originsDraft ?? settings.allowedOrigins.join("\n")} onChange={(event) => { setOriginsDraft(event.target.value); setOriginsFeedback(null); }} placeholder="https://preview.example.com" disabled={originsSaving} className="font-mono text-meta" aria-describedby="ci-origins-help" />
+                        <p id="ci-origins-help" className="mt-1.5 break-words text-meta text-ink-subtle">{settings.projectOrigin} is always allowed. Private targets require a project URL using a private IP address or localhost. Credential access is configured separately in Credentials.</p>
+                    </SettingsRow>
+                    <SettingsFooter feedback={originsFeedback ? <InlineFeedback feedback={originsFeedback} /> : originsDraft !== null ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}>
+                        {originsDraft !== null && <Button type="button" variant="ghost" disabled={originsSaving} onClick={() => { setOriginsDraft(null); setOriginsFeedback(null); }}>Cancel</Button>}
+                        <Button type="submit" disabled={originsSaving || originsDraft === null}>{originsSaving ? "Saving…" : "Save origins"}</Button>
+                    </SettingsFooter>
+                </form>
             </SettingsSection>
 
             <SettingsSection id="ci-pipeline-heading" title="Pipeline setup" description="Run this after a deployment is ready. The runner needs access to your Specbook server.">

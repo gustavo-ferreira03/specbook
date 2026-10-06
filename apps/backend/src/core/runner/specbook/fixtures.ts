@@ -38,6 +38,17 @@ function diagnosticUrl(value: string): string | undefined {
 
 export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
     page: async ({ page }, use, testInfo) => {
+        const navigation = runtime.navigationOrigins ? await page.context().newCDPSession(page) : null;
+        if (navigation) {
+            navigation.on("Fetch.requestPaused", (event) => {
+                const allowed = runtime.navigationOrigins!.includes(new URL(event.request.url).origin);
+                void navigation.send(allowed ? "Fetch.continueRequest" : "Fetch.failRequest", {
+                    requestId: event.requestId, ...(allowed ? {} : { errorReason: "BlockedByClient" }),
+                }).catch(() => undefined);
+            });
+            // Playwright routes only the first URL of an HTTP redirect chain.
+            await navigation.send("Fetch.enable", { patterns: [{ resourceType: "Document", requestStage: "Request" }] });
+        }
         const diagnostics: RunDiagnostic[] = [];
         const capture = (item: RunDiagnostic) => {
             if (diagnostics.length < 100) diagnostics.push({ ...item, message: item.message.slice(0, 2000) });
@@ -63,6 +74,7 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
         try {
             await use(guard.wrapPage(page as unknown as RawPage) as never);
         } finally {
+            await navigation?.detach().catch(() => undefined);
             page.off("console", onConsole);
             page.off("pageerror", onPageError);
             page.off("requestfailed", onRequestFailed);

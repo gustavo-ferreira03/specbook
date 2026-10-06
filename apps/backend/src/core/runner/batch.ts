@@ -154,6 +154,7 @@ async function executeBatch(
         const outcome = await withRunSlot(() => {
             started = Date.now();
             return runPlaywrightSuite({
+                projectId: batch.projectId,
                 directory: batchDir,
                 baseUrl,
                 specs: prepared.map((entry) => ({

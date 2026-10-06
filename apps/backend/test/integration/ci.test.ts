@@ -20,7 +20,7 @@ const { stewardRepository } = await import("../../src/infra/repositories/steward
 const { issueGitAccessToken } = await import("../../src/core/repo/access");
 const { issueCiToken, authenticateCiToken } = await import("../../src/core/ci/tokens");
 const { ciResult, junitResult, markdownResult } = await import("../../src/core/ci/results");
-const { ciRunSchema } = await import("../../src/core/ci/schemas");
+const { ciRunSchema, ciSettingsSchema } = await import("../../src/core/ci/schemas");
 const { getRunBatchDirectory, getRunBatch } = await import("../../src/core/runner/batch");
 const { createCiRouter, createCiSettingsRouter } = await import("../../src/infra/web/routes/ci");
 const { buildHostAllowlist, csrfGuard, hostGuard, jsonBodyLimit } = await import("../../src/infra/web/security");
@@ -33,7 +33,7 @@ app.route("/", createCiSettingsRouter());
 const browserHeaders = { Host: "localhost:4000", "X-Specbook-Request": "1" };
 
 async function fixture() {
-    const project = await projectsRepository.createProject("CI", "https://example.com");
+    const project = await projectsRepository.createProject("CI", "https://8.8.8.8");
     const feature = await featuresRepository.createFeature(project.id, null, "Checkout", "", "features/checkout");
     const spec = await specsRepository.createSpecRecord({ projectId: project.id, featureId: feature.id, title: "A <checkout> | test", description: "", path: "specs/checkout", sourceHash: "source", markdownHash: "markdown" });
     const run = await runsRepository.createRun({ specId: spec.id, sourceHash: "source", commitSha: "sha", automate: true });
@@ -69,21 +69,100 @@ describe("CI access and quality gates", () => {
     });
 
     test("accepts external CI hosts only with the correct token and records a deduplicated deploy signal", async () => {
-        const project = await projectsRepository.createProject("Deploy", "https://example.com");
+        const project = await projectsRepository.createProject("Deploy", "https://8.8.8.8");
         const { token } = await issueCiToken(project.id);
+        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: ["https://1.1.1.1"] });
         const url = `/ci/projects/${project.id}/deploy`;
-        const body = JSON.stringify({ environment: "preview", url: "https://preview.example.com", commitSha: "abc" });
+        const body = JSON.stringify({ environment: "preview", url: "https://1.1.1.1", commitSha: "abc" });
         assert.equal((await app.request(url, { method: "POST", headers: { Host: "external.test", "Content-Type": "application/json" }, body })).status, 401);
         const headers = { Host: "external.test", "Content-Type": "application/json", Authorization: `Bearer ${token}` };
         for (let i = 0; i < 2; i++) assert.equal((await app.request(url, { method: "POST", headers, body })).status, 202);
         const signals = await stewardRepository.signals(project.id);
         assert.equal(signals.length, 1);
         assert.equal(signals[0]?.kind, "deployment");
-        assert.equal(signals[0]?.payload.url, "https://preview.example.com");
+        assert.equal(signals[0]?.payload.url, "https://1.1.1.1");
         assert.equal((await app.request(`/projects/${project.id}/ci/token`, { method: "POST", headers })).status, 421);
         const client = await app.request(`/ci/projects/${project.id}/client.mjs`, { headers });
         assert.equal(client.status, 200);
         assert.match(await client.text(), /SPECBOOK_CI_TOKEN/);
+    });
+
+    test("restricts CI origins and private targets, deduplicates SHA-less deploys and persists token limits", async () => {
+        const project = await projectsRepository.createProject("Public deployment", "https://8.8.8.8");
+        const { token } = await issueCiToken(project.id);
+        const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+        const post = (body: object, endpoint = "deploy") => app.request(`/ci/projects/${project.id}/${endpoint}`, { method: "POST", headers, body: JSON.stringify(body) });
+        assert.equal((await post({ url: "https://1.1.1.1" })).status, 400);
+        const save = await app.request(`/projects/${project.id}/ci`, { method: "PUT", headers: { ...browserHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ allowedOrigins: ["https://1.1.1.1/", "http://127.0.0.1", "http://169.254.169.254", "http://[::1]"] }) });
+        assert.equal(save.status, 200);
+        assert.equal((await save.json()).allowedOrigins[0], "https://1.1.1.1");
+        for (const target of ["http://127.0.0.1", "http://169.254.169.254", "http://[::1]"]) {
+            assert.equal((await post({ url: target })).status, 400);
+            assert.equal((await post({ baseUrl: target }, "runs")).status, 400);
+        }
+        for (let index = 0; index < 2; index++) assert.equal((await post({ url: "https://1.1.1.1" })).status, 202);
+        assert.equal((await stewardRepository.signals(project.id)).length, 1);
+        assert.equal((await post({ url: "https://8.8.8.8" })).status, 202);
+        const row = (await ciRepository.token(project.id))!;
+        const remaining = 30 - row.requestCount;
+        const quota = await Promise.all(Array.from({ length: remaining + 5 }, () => ciRepository.consumeRequest(project.id, row.tokenHash!)));
+        assert.equal(quota.filter(Boolean).length, remaining, "concurrent POSTs cannot exceed the persisted limit");
+        assert.equal((await post({})).status, 429);
+        const rotated = await issueCiToken(project.id);
+        assert.equal((await app.request(`/ci/projects/${project.id}/deploy`, { method: "POST", headers: { ...headers, Authorization: `Bearer ${rotated.token}` }, body: "{}" })).status, 202);
+        const local = await projectsRepository.createProject("Local app", "http://127.0.0.1:3000");
+        await projectsRepository.updateProject(local.id, { ciAllowedOrigins: ["http://127.0.0.1:4000"] });
+        const localHeaders = { ...headers, Authorization: `Bearer ${(await issueCiToken(local.id)).token}` };
+        assert.equal((await app.request(`/ci/projects/${local.id}/deploy`, { method: "POST", headers: localHeaders, body: JSON.stringify({ url: "http://127.0.0.1:4000" }) })).status, 202);
+    });
+
+    test("blocks reserved addresses and DNS rebinding while pinning proxy connections", async () => {
+        const { resolveTarget, isPrivateAddress } = await import("../../src/core/network/targets");
+        const { createRunProxy } = await import("../../src/core/network/proxy");
+        for (const address of ["0.0.0.0", "10.1.2.3", "100.64.0.1", "127.0.0.1", "169.254.169.254", "172.16.1.1", "192.168.1.1", "224.0.0.1", "::1", "::ffff:127.0.0.1", "fc00::1", "fe80::1", "2002:7f00:1::1"]) assert.equal(isPrivateAddress(address), true, address);
+        for (const address of ["8.8.8.8", "1.1.1.1", "2001:4860:4860::8888", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) assert.equal(isPrivateAddress(address), false, address);
+        await assert.rejects(() => resolveTarget("https://mixed.test", false, async () => [{ address: "8.8.8.8", family: 4 }, { address: "127.0.0.1", family: 4 }]), /not allowed/);
+        const { projectRunPolicy } = await import("../../src/core/ci/targets");
+        const reboundProject = await projectsRepository.createProject("Rebound project", "https://rebound.test");
+        await assert.rejects(() => projectRunPolicy(reboundProject, reboundProject.baseUrl, async () => [{ address: "127.0.0.1", family: 4 }]), /not allowed/, "a public project hostname cannot turn on private access by changing its DNS");
+        let resolutions = 0;
+        const rebound = async () => [{ address: ++resolutions === 1 ? "8.8.8.8" : "127.0.0.1", family: 4 }];
+        await resolveTarget("http://rebind.test", false, rebound);
+        const blockedProxy = await createRunProxy([], rebound);
+        const request = (proxy: string, target: string) => new Promise<number>((resolve, reject) => {
+            http.get(proxy, { path: target }, (response) => { response.resume(); response.on("end", () => resolve(response.statusCode!)); }).on("error", reject);
+        });
+        try {
+            assert.equal(await request(blockedProxy.server, "http://rebind.test/"), 403);
+            assert.equal(await request(blockedProxy.server, "http://127.0.0.1/"), 403);
+        } finally { await blockedProxy.close(); }
+        let receivedHost = "";
+        const target = http.createServer((req, response) => { receivedHost = req.headers.host ?? ""; response.end("ok"); });
+        await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+        let lookups = 0;
+        const authority = `private-app.invalid:${(target.address() as AddressInfo).port}`;
+        const pinned = await createRunProxy([`http://${authority}`, `https://${authority}`], async () => { lookups++; return [{ address: "127.0.0.1", family: 4 }]; });
+        try {
+            assert.equal(await request(pinned.server, `http://${authority}/`), 200);
+            assert.equal(receivedHost, authority, "Host stays unchanged while the connection uses the checked IP");
+            assert.equal(lookups, 1, "the checked hostname is not resolved again by the transport");
+            const tunnel = await new Promise<string>((resolve, reject) => {
+                const proxyUrl = new URL(pinned.server);
+                const connect = http.request({ hostname: proxyUrl.hostname, port: proxyUrl.port, method: "CONNECT", path: authority });
+                connect.on("connect", (response, socket) => {
+                    assert.equal(response.statusCode, 200);
+                    let output = "";
+                    socket.on("data", (value) => { output += value.toString(); });
+                    socket.on("end", () => resolve(output));
+                    socket.on("error", reject);
+                    socket.write(`GET / HTTP/1.1\r\nHost: ${authority}\r\nConnection: close\r\n\r\n`);
+                });
+                connect.on("error", reject);
+                connect.end();
+            });
+            assert.match(tunnel, /200 OK/);
+            assert.equal(lookups, 2, "CONNECT also pins a single checked resolution");
+        } finally { await pinned.close(); target.closeAllConnections(); await new Promise<void>((resolve) => target.close(() => resolve())); }
     });
 
     test("waits for retry, excludes flaky/known bugs by default, and renders escaped persistent results", async () => {
@@ -122,6 +201,7 @@ describe("CI access and quality gates", () => {
         assert.equal(ciRunSchema.safeParse({}).success, true);
         assert.equal(ciRunSchema.safeParse({ featureId: crypto.randomUUID(), specIds: [crypto.randomUUID()] }).success, false);
         for (const baseUrl of ["file:///etc/passwd", "https://user:pass@example.com", "not-a-url"]) assert.equal(ciRunSchema.safeParse({ baseUrl }).success, false);
+        for (const origin of ["https://*.example.com", "https://example.com/path", "https://example.com?query"]) assert.equal(ciSettingsSchema.safeParse({ allowedOrigins: [origin] }).success, false);
     });
 
     test("reports completed attempts while agent work is paused or still awaiting acknowledgement", async () => {

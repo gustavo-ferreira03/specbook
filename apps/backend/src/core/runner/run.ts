@@ -120,6 +120,7 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
         const outcome = await withRunSlot(() => {
             started = Date.now();
             return runPlaywrightSuite({
+                projectId: spec.projectId,
                 directory: outputDir,
                 baseUrl,
                 specs: [{ key: run.id, source: testSource, analysis, outputDir }],

@@ -11,6 +11,7 @@ class ProjectsRepository {
             id: crypto.randomUUID(),
             name,
             baseUrl,
+            ciAllowedOrigins: [],
             contextSyncError: null,
             gitAccessTokenHash: null,
             gitAccessTokenPrefix: null,
@@ -50,7 +51,7 @@ class ProjectsRepository {
         await db.update(projects).set({ gitAccessTokenLastUsedAt: usedAt }).where(eq(projects.id, id));
     }
 
-    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl">>): Promise<void> {
+    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl" | "ciAllowedOrigins">>): Promise<void> {
         await db.update(projects).set(patch).where(eq(projects.id, id));
     }
 

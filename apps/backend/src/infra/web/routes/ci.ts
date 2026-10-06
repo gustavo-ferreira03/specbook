@@ -6,8 +6,10 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { authenticateCiToken, ciTokenInfo, issueCiToken } from "../../../core/ci/tokens";
-import { ciRunSchema, ciResultQuerySchema, deploySchema } from "../../../core/ci/schemas";
+import { ciRunSchema, ciResultQuerySchema, deploySchema, ciSettingsSchema } from "../../../core/ci/schemas";
 import { ciResult, junitResult, knownBugSpecIds, markdownResult } from "../../../core/ci/results";
+import { projectRunPolicy } from "../../../core/ci/targets";
+import { NetworkTargetError } from "../../../core/network/targets";
 import { backendRoot } from "../../../core/paths";
 import { ResourceBusyError } from "../../../core/specs/lifecycle";
 import { getRunBatch, listCiBatches, startSpecBatch } from "../../../core/runner/batch";
@@ -18,7 +20,9 @@ import { specsRepository } from "../../repositories/specs";
 import { stewardRepository } from "../../repositories/steward";
 
 async function requireProject(id: string) {
-    if (!await projectsRepository.getProject(id)) throw new HTTPException(404, { message: "Project not found" });
+    const project = await projectsRepository.getProject(id);
+    if (!project) throw new HTTPException(404, { message: "Project not found" });
+    return project;
 }
 
 async function authenticate(c: Context, projectId: string) {
@@ -33,13 +37,34 @@ const projectAuth: MiddlewareHandler = async (c, next) => {
     await next();
 };
 
+async function acceptTrigger(c: Context, projectId: string, target?: string) {
+    const token = c.req.header("authorization")!.slice("Bearer ".length);
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    if (!await ciRepository.consumeRequest(projectId, tokenHash)) {
+        c.header("Retry-After", String(60 - Math.floor(Date.now() / 1000) % 60));
+        throw new HTTPException(429, { message: "CI trigger limit reached. Retry after the current minute." });
+    }
+    const project = await requireProject(projectId);
+    try { await projectRunPolicy(project, target ?? project.baseUrl); }
+    catch (error) {
+        if (error instanceof NetworkTargetError) throw new HTTPException(400, { message: error.message });
+        throw error;
+    }
+}
+
 export function createCiSettingsRouter(): Hono {
     const router = new Hono();
     router.get("/projects/:id/ci", async (c) => {
         const id = c.req.param("id");
-        await requireProject(id);
+        const project = await requireProject(id);
         c.header("Cache-Control", "no-store");
-        return c.json({ token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map(ciResult)) });
+        return c.json({ allowedOrigins: project.ciAllowedOrigins, projectOrigin: new URL(project.baseUrl).origin, token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map(ciResult)) });
+    });
+    router.put("/projects/:id/ci", zValidator("json", ciSettingsSchema), async (c) => {
+        const project = await requireProject(c.req.param("id"));
+        const allowedOrigins = [...new Set(c.req.valid("json").allowedOrigins)];
+        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: allowedOrigins });
+        return c.json({ allowedOrigins });
     });
     router.post("/projects/:id/ci/token", async (c) => {
         const id = c.req.param("id");
@@ -65,6 +90,7 @@ export function createCiRouter(): Hono {
     router.post("/ci/projects/:id/runs", projectAuth, zValidator("json", ciRunSchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
+        await acceptTrigger(c, projectId, input.baseUrl);
         let specs = await specsRepository.listSpecs(projectId);
         if (input.featureId) {
             const feature = await featuresRepository.getFeature(input.featureId);
@@ -117,9 +143,17 @@ export function createCiRouter(): Hono {
     router.post("/ci/projects/:id/deploy", projectAuth, zValidator("json", deploySchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
-        const key = input.commitSha
-            ? crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex")
-            : crypto.randomUUID();
+        await acceptTrigger(c, projectId, input.url);
+        const hash = crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
+        const now = Date.now();
+        const windowMs = 5 * 60_000;
+        const key = input.commitSha ? hash : `${hash}:${Math.floor(now / windowMs)}`;
+        if (!input.commitSha) {
+            const recent = await stewardRepository.signals(projectId);
+            if (recent.some((signal) => signal.key.startsWith(`deploy:${hash}:`) && Date.parse(signal.createdAt) > now - windowMs)) {
+                return c.json({ accepted: true, duplicate: true }, 202);
+            }
+        }
         await stewardRepository.signal({ projectId, key: `deploy:${key}`, kind: "deployment",
             title: `Deployment completed${input.environment ? `: ${input.environment}` : ""}`,
             body: `A deployment completed. Run the relevant Specs, then investigate failures. ${input.url ? `Deployment URL: ${input.url}.` : ""}`,
