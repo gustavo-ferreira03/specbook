@@ -1182,14 +1182,14 @@ describe("autonomous pause and decisions", () => {
         assert.equal(await repoGit.getHeadSha(project.id), head);
     });
 
-    test("ignore stops a paused investigation and prevents an equivalent automatic continuation", async () => {
+    test("ignore stops requested work and regeneration needs a new human request", async () => {
         const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
         const project = await projectWithWork();
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Checkout", "");
         const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const input = { kind: "regenerate", specIds: [spec.id], goal: "Repair checkout implementation", reason: "Checkout implementation is invalid" };
-        const intent = await enqueueIntent(project.id, input, "first-check");
+        const intent = await enqueueIntent(project.id, input, "first-check", "user");
         await processProjectSteward(project.id, false);
         const job = (await jobsRepository.list(project.id))[0]!;
         assert.equal(job.id, intent.id);
@@ -1203,7 +1203,7 @@ describe("autonomous pause and decisions", () => {
         await processProjectSteward(project.id, false);
         const ignored = (await stewardRepository.intents(project.id)).find((row) => row.id === next.id)!;
         assert.equal(ignored.status, "ignored");
-        assert.match(ignored.reason, /human rejected/i);
+        assert.match(ignored.reason, /human request/i);
         assert.equal((await jobsRepository.list(project.id)).length, 1);
     });
 

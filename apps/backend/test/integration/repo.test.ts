@@ -448,7 +448,7 @@ describe("project steward", () => {
         assert.equal(jobs.length, 1);
         assert.equal(jobs[0]?.id, one.id, "dispatch recovery keeps the original identity");
         assert.equal(await canRunAgentJob(jobs[0]!), true);
-        assert.equal((await stewardRepository.intents(projectId)).find((item) => item.id === event.id)?.status, "pending");
+        assert.equal((await stewardRepository.intents(projectId)).find((item) => item.id === event.id)?.status, "ignored");
         const eventJob = await jobsRepository.create({ id: event.id, projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair sign in", limits: jobLimitsSchema.parse({}) });
         assert.equal(await canRunAgentJob(eventJob), false, "worker dispatch respects observation mode too");
         const tools = createJobPolicy(jobs[0]!, () => undefined).tools([createBackgroundTaskTool(projectId, "chat:policy-check")]);
@@ -612,9 +612,9 @@ describe("project steward", () => {
             assert.deepEqual(replay.specGenerations, observation.specGenerations);
             assert.equal(replay.deployment?.generation, observation.deployment?.generation);
             const signals = await stewardRepository.signals(projectId);
-            assert.equal(signals.filter((signal) => signal.kind === "spec_changed").length, index + 2);
+            assert.equal(signals.filter((signal) => signal.kind === "spec_changed").length, index + 1);
             assert.equal(signals.filter((signal) => signal.kind === "deployment_changed").length, index + 1);
-            assert.equal(observation.specGenerations?.[spec.id], index + 2);
+            assert.equal(observation.specGenerations?.[spec.id], index + 1);
             await stewardRepository.update(projectId, { observation });
         }
     });
@@ -1012,4 +1012,153 @@ test("agent evaluation records outcomes and decisions without prompts or credent
     assert.match(csv, /classification,tokensUsed,actionsUsed,elapsedMs/);
     assert.match(csv, new RegExp(`${item.id},,reject,human`));
     assert.doesNotMatch(csv, new RegExp(secret));
+});
+
+describe("regeneration review", () => {
+    async function olderChecks(count = 2) {
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const projectId = await createProject("Regeneration review");
+        await stewardRepository.update(projectId, { paused: true });
+        const feature = await writer.createFeatureInRepo(projectId, null, "Checkout", "");
+        const specs = [];
+        for (let i = 0; i < count; i++) {
+            const { spec } = await createSpec(projectId, feature.id, `Checkout ${i + 1}`);
+            await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
+            specs.push((await specsRepository.getSpec(spec.id))!);
+        }
+        return { projectId, feature, specs };
+    }
+
+    test("first observation seeds 80 existing checks without automatic runs or repairs", async (t) => {
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { processProjectSteward } = await import("../../src/core/steward/engine");
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        await stopJobWorker();
+        t.mock.method(globalThis, "fetch", async () => new Response('<script src="/stable-build.js"></script>'));
+        for (const invalid of [false, true]) {
+            const projectId = await createProject(`Imported checks ${invalid}`);
+            const feature = await writer.createFeatureInRepo(projectId, null, "Imported", "");
+            for (let i = 0; i < 80; i++) await specsRepository.createSpecRecord({ projectId, featureId: feature.id, title: `Imported check ${i + 1}`, description: "",
+                path: `specs/imported/check-${i + 1}`, sourceHash: invalid ? "" : `source-${i}`, markdownHash: `behavior-${i}`,
+                status: invalid ? "invalid" : "unverified", invalidReason: invalid ? "Missing spec.ts file in the spec directory" : null });
+            await processProjectSteward(projectId);
+            await processProjectSteward(projectId);
+            assert.equal(Object.keys((await stewardRepository.get(projectId)).observation.specs ?? {}).length, 80);
+            assert.equal((await stewardRepository.signals(projectId)).length, 0);
+            assert.equal((await stewardRepository.intents(projectId)).length, 0);
+            const jobs = await jobsRepository.list(projectId);
+            assert.equal(jobs.length, invalid ? 1 : 0);
+            assert.ok(jobs.every((job) => job.kind === "review" && job.status === "blocked"));
+            const inbox = await jobsRepository.inbox(projectId);
+            assert.equal(inbox.length, invalid ? 1 : 0);
+            if (invalid) assert.match(inbox[0]!.title, /80 checks were created by an older version/);
+        }
+    });
+
+    test("regeneration requires its explicit decision and concurrent approvals queue each selected check once", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
+        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
+        const { projectId, specs } = await olderChecks();
+        await syncRegenerationDecision(projectId);
+        const item = (await jobsRepository.inbox(projectId))[0]!;
+        const head = await repoGit.getHeadSha(projectId);
+        const router = createJobsRouter();
+        const review = (action: string) => router.request(`/projects/${projectId}/inbox/${item.id}/review`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, answer: "Yes" }),
+        });
+        assert.equal((await review("answer")).status, 409, "a generic answer must never turn the deterministic question into an LLM job");
+        assert.equal((await jobsRepository.get(item.jobId))?.status, "blocked");
+        const approvals = await Promise.all([review("regenerate"), review("regenerate")]);
+        assert.deepEqual(approvals.map((response) => response.status).sort(), [200, 409]);
+        const intents = await stewardRepository.intents(projectId);
+        assert.equal(intents.length, specs.length);
+        assert.ok(intents.every((intent) => intent.source === "user" && intent.status === "pending"));
+        assert.deepEqual(intents.flatMap((intent) => intent.intent.specIds ?? []).sort(), specs.map((spec) => spec.id).sort());
+        assert.equal((await jobsRepository.get(item.jobId))?.status, "completed");
+        assert.equal((await jobsRepository.item(item.id))?.status, "answered");
+        assert.equal(await repoGit.getHeadSha(projectId), head, "accepting regeneration queues proposals and does not change files");
+        await syncRegenerationDecision(projectId);
+        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
+        assert.equal((await jobsRepository.list(projectId)).length, 1);
+    });
+
+    test("regeneration resumes a partially recorded approval without duplicate intentions or another question", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
+        const { enqueueIntent } = await import("../../src/core/steward/engine");
+        const { projectId, specs } = await olderChecks();
+        await syncRegenerationDecision(projectId);
+        const item = (await jobsRepository.inbox(projectId))[0]!;
+        await jobsRepository.claimItem(item.id);
+        await jobsRepository.updateItem(item.id, { payload: { ...item.payload, regenerationAccepted: true } });
+        await enqueueIntent(projectId, { kind: "regenerate", specIds: [specs[0]!.id], goal: "Regenerate checkout", reason: "Human requested regeneration" }, `regeneration:${item.id}:${specs[0]!.id}`, "user");
+        await jobsRepository.recover();
+        await syncRegenerationDecision(projectId);
+        await syncRegenerationDecision(projectId);
+        assert.equal((await stewardRepository.intents(projectId)).length, specs.length);
+        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
+        assert.equal((await jobsRepository.item(item.id))?.status, "answered");
+        assert.equal((await jobsRepository.get(item.jobId))?.status, "completed");
+    });
+
+    test("declining regeneration finishes the decision and new invalid checks do not replay declined subjects", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
+        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
+        const { projectId, feature } = await olderChecks();
+        await syncRegenerationDecision(projectId);
+        const item = (await jobsRepository.inbox(projectId))[0]!;
+        const response = await createJobsRouter().request(`/projects/${projectId}/inbox/${item.id}/review`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "dismiss" }),
+        });
+        assert.equal(response.status, 200);
+        assert.equal((await jobsRepository.get(item.jobId))?.status, "completed");
+        await syncRegenerationDecision(projectId);
+        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
+        const { spec } = await createSpec(projectId, feature.id, "Another checkout");
+        await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
+        await syncRegenerationDecision(projectId);
+        const pending = (await jobsRepository.inbox(projectId)).filter((item) => item.status === "pending");
+        assert.equal(pending.length, 1);
+        assert.deepEqual((pending[0]!.payload.regenerationSpecs as { id: string }[]).map((target) => target.id), [spec.id]);
+    });
+
+    test("a retired unreviewed regeneration question can return when its check becomes invalid again", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
+        const { projectId, specs } = await olderChecks(1);
+        await syncRegenerationDecision(projectId);
+        const old = (await jobsRepository.inbox(projectId))[0]!;
+        await specsRepository.updateSpecStatus(specs[0]!.id, "unverified");
+        await syncRegenerationDecision(projectId);
+        assert.equal((await jobsRepository.item(old.id))?.payload.retiredByScope, true);
+        await specsRepository.updateSpecStatus(specs[0]!.id, "invalid", "Missing spec.ts file in the spec directory");
+        await syncRegenerationDecision(projectId);
+        const pending = (await jobsRepository.inbox(projectId)).filter((item) => item.status === "pending");
+        assert.equal(pending.length, 1);
+        assert.notEqual(pending[0]?.id, old.id);
+    });
+
+    test("a current verified repair proposal suppresses a second regeneration question", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
+        const { projectId, specs } = await olderChecks(1);
+        const spec = specs[0]!;
+        const job = await jobsRepository.create({ projectId, specId: spec.id, chatId: crypto.randomUUID(), trigger: "manual", kind: "regenerate", goal: "Repair checkout", limits: jobLimitsSchema.parse({}) });
+        const proposal = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/checkout")') });
+        await jobsRepository.updateItem(proposal.id, { payload: { ...proposal.payload, verification: { status: "passed" } } });
+        await jobsRepository.update(job.id, { status: "completed" });
+        await syncRegenerationDecision(projectId);
+        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
+        await writer.updateSpecWithLock(spec.id, { humanSpec: { ...HUMAN_SPEC, expectedResult: "A different confirmation appears" } });
+        await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
+        await syncRegenerationDecision(projectId);
+        assert.equal((await jobsRepository.inbox(projectId)).filter((item) => item.kind === "question" && item.status === "pending").length, 1, "a stale proposal must not hide the decision for the current behavior");
+    });
 });

@@ -16,6 +16,7 @@ import { retryStalledJob } from "../jobs/retry";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { collectProjectSignals, fingerprint, runSignalForIntent, runTriggerForIntent } from "./signals";
 import { stewardIntentSchema, type StewardIntent } from "./schemas";
+import { syncRegenerationDecision } from "./regeneration";
 
 const locks = new Map<string, Promise<unknown>>();
 let stopped = false;
@@ -60,7 +61,7 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
     const specIds = Array.isArray(signal.payload.specIds) ? signal.payload.specIds as string[] : undefined;
     const runId = typeof signal.payload.runId === "string" ? signal.payload.runId : undefined;
     const kinds: Record<string, StewardIntent["kind"]> = {
-        spec_failure: "triage", invalid_spec: "regenerate",
+        spec_failure: "triage",
         deployment_changed: "run_specs", deployment: "run_specs", spec_changed: "run_specs", schedule: "run_specs",
     };
     if (signal.kind === "credentials_changed") {
@@ -125,6 +126,10 @@ export async function recordScheduledPrerequisite(projectId: string, specIds: st
 
 async function dispatchIntent(row: Intent): Promise<void> {
     if (await isAgentPaused(row.projectId)) return;
+    if (row.intent.kind === "regenerate" && row.source !== "user") {
+        await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "Regeneration requires a human request." });
+        return;
+    }
     const relatedIntents = await stewardRepository.intents(row.projectId);
     const signals = await stewardRepository.signals(row.projectId, null);
     const runTrigger = runTriggerForIntent(row, relatedIntents, signals);
@@ -182,6 +187,7 @@ export async function processProjectSteward(projectId: string, collect = true): 
         const project = await projectsRepository.getProject(projectId);
         if (!project) return;
         const settings = await stewardRepository.get(projectId);
+        await syncRegenerationDecision(projectId);
         if (await isAgentPaused(projectId)) return;
         const projectJobs = await jobsRepository.list(projectId);
         for (const blocked of projectJobs.filter((job) => job.status === "blocked" && job.safetyRetries > 0)) if (await canRunAgentJob(blocked)) await retryStalledJob(blocked);

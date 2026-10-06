@@ -17,7 +17,7 @@ import { api, apiPath, API_URL } from "@/lib/api";
 import type { ActivityStory, PresentedInboxItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type ReviewAction = "approve" | "reject" | "answer" | "dismiss" | "report_bug" | "ignore";
+type ReviewAction = "approve" | "reject" | "answer" | "dismiss" | "report_bug" | "ignore" | "regenerate";
 type InboxAction = ReviewAction | "promote" | "discuss";
 
 function Screenshots({ item }: { item: PresentedInboxItem }) {
@@ -109,6 +109,7 @@ export function DecisionDetails({ projectId, item, story, onChange }: { projectI
         const active = busy?.id === item.id;
         const label = (action: InboxAction, ready: string, working: string) => active && busy.action === action ? working : ready;
         return <>
+            {type === "regenerate" && <><Button size="sm" disabled={busy !== null} onClick={() => void act(item, "regenerate")}>{label("regenerate", "Regenerate these checks", "Requesting regeneration…")}</Button><Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void act(item, "dismiss")}>{label("dismiss", "Not now", "Saving your decision…")}</Button></>}
             {type === "update" && <><Button size="sm" disabled={busy !== null} onClick={() => void act(item, "approve")}>{label("approve", "Update the check", "Saving…")}</Button><Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void act(item, "report_bug")}>{label("report_bug", "No, this is a bug in the app", "Recording the bug…")}</Button></>}
             {(type === "new_check" || type === "feature") && <><Button size="sm" disabled={busy !== null} onClick={() => void act(item, "approve")}>{label("approve", type === "feature" ? "Add this feature" : "Add this check", "Saving…")}</Button><Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void act(item, "reject")}>{label("reject", "Not now", "Saving your decision…")}</Button></>}
             {type === "question" && (credentialRequest ? <><Button asChild size="sm"><Link href={`/p/${projectId}/settings?tab=credentials`}>Open credentials</Link></Button><Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void act(item, "answer")}>{label("answer", "Check access again", "Continuing…")}</Button></> : <Button size="sm" disabled={busy !== null || !answers[item.id]?.trim()} onClick={() => void act(item, "answer")}>{label("answer", "Send answer and continue", "Sending…")}</Button>)}
@@ -121,6 +122,7 @@ export function DecisionDetails({ projectId, item, story, onChange }: { projectI
     return <div className="space-y-5">
         {!pending && <Badge variant={item.status === "applying" ? "running" : item.status === "approved" || item.status === "answered" ? "success" : "neutral"}>{item.status === "applying" ? <LoaderCircle size={12} className="animate-spin motion-reduce:animate-none" /> : item.status === "rejected" ? <X size={12} /> : <Check size={12} />}{stateLabel}</Badge>}
         <div className="space-y-2"><p className="text-body text-ink">{view.summary}</p>{view.workDone && <p className="text-body text-ink-muted">{view.workDone}</p>}</div>
+        {view.type === "regenerate" && Array.isArray(item.payload.checkTitles) && <ul className="list-disc space-y-1 pl-5 text-body text-ink-muted">{item.payload.checkTitles.map((title, index) => <li key={index}>{String(title)}</li>)}</ul>}
         <Screenshots item={item} />
         <SuggestedBehavior item={item} />
         {item.answer && <p className="whitespace-pre-wrap break-words text-body text-ink-muted"><span className="font-medium">Your answer: </span>{item.answer}</p>}

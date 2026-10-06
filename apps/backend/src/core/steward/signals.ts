@@ -64,12 +64,10 @@ export async function collectProjectSignals(project: Project, previous: ProjectO
     for (const spec of specs) {
         const hash = fingerprint([spec.sourceHash, spec.markdownHash, spec.invalidReason]);
         hashes[spec.id] = hash;
-        const changed = previous.specs?.[spec.id] !== hash;
+        const changed = previous.specs !== undefined && previous.specs[spec.id] !== hash;
         const generation = (previous.specGenerations?.[spec.id] ?? 0) + (changed ? 1 : 0);
         generations[spec.id] = generation;
-        if (spec.status === "invalid") {
-            await signal("invalid_spec", `invalid:${spec.id}:${generation}:${hash}`, `“${spec.title}” cannot run`, spec.invalidReason ?? "Its implementation needs repair.", { specIds: [spec.id] });
-        } else if (changed) {
+        if (spec.status !== "invalid" && changed) {
             await signal("spec_changed", `changed:${spec.id}:${generation}:${fingerprint([previous.specs?.[spec.id] ?? null, hash])}`, `“${spec.title}” changed`, "Verify the changed implementation against the app.", { specIds: [spec.id] });
         }
     }

@@ -284,7 +284,7 @@ export interface InboxItem {
     status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
     title: string;
     body: string;
-    payload: { files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
+    payload: { files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; checkTitles?: string[]; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
     answer: string | null;
     commitSha: string | null;
     createdAt: string;
@@ -303,7 +303,7 @@ export interface AgentSummary {
 
 export interface PresentedInboxItem extends InboxItem {
     presentation: {
-        type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
+        type: "update" | "new_check" | "feature" | "bug" | "question" | "help" | "regenerate";
         title: string;
         summary: string;
         workDone: string;
