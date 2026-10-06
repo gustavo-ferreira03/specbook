@@ -55,6 +55,10 @@ function fakePage(options: { url?: string; frameOfElement?: "main" | "child"; ac
             press: async (...args: unknown[]) => calls.push({ target: "keyboard", method: "press", args }),
             type: async (...args: unknown[]) => calls.push({ target: "keyboard", method: "type", args }),
         },
+        mouse: Object.fromEntries(["move", "down", "up", "click", "dblclick", "wheel"].map((method) => [
+            method,
+            async (...args: unknown[]) => calls.push({ target: "mouse", method, args }),
+        ])) as RawPage["mouse"],
         evaluate: async () => options.activeIframe ?? false,
         goto: async (...args: unknown[]) => {
             calls.push({ target: "page", method: "goto", args });
@@ -163,6 +167,44 @@ describe("specbook page proxy", () => {
         await assert.rejects(plain.wrapped.keyboard.type({ toString: () => "x" }), /string literal or secret/);
         assert.equal(Object.getPrototypeOf(plain.wrapped.keyboard), null);
         assert.equal(plain.wrapped.keyboard.down, undefined);
+    });
+
+    test("mouse takes literal numbers and plain options, and dragTo takes a wrapped locator", async () => {
+        const { wrapped, calls } = guarded();
+        const mouse = wrapped.mouse;
+        assert.equal(Object.getPrototypeOf(mouse), null);
+        assert.ok(Object.isFrozen(mouse));
+        assert.equal(unwrap(mouse), undefined);
+        await mouse.move(400, 300);
+        await mouse.down();
+        await mouse.move(600, 450, { steps: 10 });
+        await mouse.up({ button: "left" });
+        await mouse.click(1, 2, { clickCount: 2 });
+        await mouse.dblclick(1, 2);
+        assert.equal(await mouse.wheel(0, 120), undefined);
+        assert.deepEqual(calls.filter((call) => call.target === "mouse"), [
+            { target: "mouse", method: "move", args: [400, 300, undefined] },
+            { target: "mouse", method: "down", args: [undefined] },
+            { target: "mouse", method: "move", args: [600, 450, { steps: 10 }] },
+            { target: "mouse", method: "up", args: [{ button: "left" }] },
+            { target: "mouse", method: "click", args: [1, 2, { clickCount: 2 }] },
+            { target: "mouse", method: "dblclick", args: [1, 2, undefined] },
+            { target: "mouse", method: "wheel", args: [0, 120] },
+        ]);
+        await assert.rejects(mouse.move("1", 2), /literal numbers/);
+        await assert.rejects(mouse.click(1, Number.NaN), /literal numbers/);
+        await assert.rejects(mouse.wheel(0), /literal numbers/);
+        await assert.rejects(mouse.down({ button: () => 1 }), /Only literal values/);
+        assert.equal(mouse.drag, undefined);
+
+        const target = wrapped.getByLabel("Done");
+        await wrapped.locator("#card").dragTo(target, { steps: 5 });
+        const drag = calls.at(-1)!;
+        assert.equal(drag.method, "dragTo");
+        assert.equal(drag.args[0], unwrap(target));
+        assert.deepEqual(drag.args[1], { steps: 5 });
+        await assert.rejects(wrapped.locator("#card").dragTo("#done"), /takes a locator/);
+        await assert.rejects(wrapped.locator("#card").dragTo(wrapped), /takes a locator/);
     });
 
     test("secret handles carry no value", () => {

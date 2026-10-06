@@ -73,8 +73,12 @@ export const LOCATOR_ACTIONS = [
     "clear",
     "scrollIntoViewIfNeeded",
     "waitFor",
+    "dragTo",
 ];
 const KEYBOARD_ACTIONS = ["press", "type"];
+/** page.mouse methods and how many leading coordinate numbers each takes. */
+const MOUSE_COORDINATES: Record<string, number> = { move: 2, click: 2, dblclick: 2, down: 0, up: 0, wheel: 2 };
+const MOUSE_ACTIONS = Object.keys(MOUSE_COORDINATES);
 const PAGE_MATCHERS = ["toHaveURL", "toHaveTitle", "toMatchAriaSnapshot"];
 export const LOCATOR_MATCHERS = [
     "toBeVisible",
@@ -99,7 +103,7 @@ const TEXT_METHODS = new Set(["fill", "pressSequentially", "type"]);
 const REQUEST_METHODS = ["get", "post", "put", "patch", "delete"];
 const API_MATCHERS = ["toBe", "toEqual", "toMatchObject", "toContain", "toHaveProperty"];
 
-type ChainKind = "page" | "locator" | "keyboard";
+type ChainKind = "page" | "locator" | "keyboard" | "mouse";
 
 class SpecSourceError extends Error {}
 
@@ -370,7 +374,7 @@ class Validator {
         fail(node, "API bodies and assertion arguments must be literal JSON values; secret() is allowed only in headers and body fields.");
     }
 
-    /** Type of a page/locator/keyboard expression that is not an action. */
+    /** Type of a page/locator/keyboard/mouse expression that is not an action. */
     private chain(node: t.Node): ChainKind {
         if (node.type === "Identifier") {
             if (node.name === "page") {
@@ -384,6 +388,7 @@ class Validator {
             if (node.computed || node.property.type !== "Identifier") fail(node, "Computed property access (x[...]) is not allowed.");
             const kind = this.chain(node.object);
             if (kind === "page" && node.property.name === "keyboard") return "keyboard";
+            if (kind === "page" && node.property.name === "mouse") return "mouse";
             fail(node.property, `Property "${node.property.name}" is not allowed; call an allowed method instead.`);
         }
         if (node.type === "CallExpression") {
@@ -440,9 +445,10 @@ class Validator {
 
     private unknownMethod(kind: ChainKind, method: string): string {
         if (kind === "page") {
-            return `page.${method}() is not allowed. Page methods: ${list([...PAGE_ACTIONS, ...LOCATOR_FACTORIES])}, keyboard.press(), keyboard.type().`;
+            return `page.${method}() is not allowed. Page methods: ${list([...PAGE_ACTIONS, ...LOCATOR_FACTORIES])}, keyboard.press(), keyboard.type(), mouse.${MOUSE_ACTIONS.join("(), mouse.")}().`;
         }
         if (kind === "keyboard") return `page.keyboard.${method}() is not allowed; use keyboard.press() or keyboard.type().`;
+        if (kind === "mouse") return `page.mouse.${method}() is not allowed. Mouse methods: ${list(MOUSE_ACTIONS)}.`;
         return `Locator method ${method}() is not allowed. Locator methods: ${list([...LOCATOR_FACTORIES, ...LOCATOR_REFINERS, ...LOCATOR_ACTIONS])}.`;
     }
 
@@ -483,9 +489,9 @@ class Validator {
             return;
         }
         const kind = this.chain(callee.object);
-        const allowed = kind === "page" ? PAGE_ACTIONS : kind === "keyboard" ? KEYBOARD_ACTIONS : LOCATOR_ACTIONS;
+        const allowed = kind === "page" ? PAGE_ACTIONS : kind === "keyboard" ? KEYBOARD_ACTIONS : kind === "mouse" ? MOUSE_ACTIONS : LOCATOR_ACTIONS;
         if (!allowed.includes(method)) {
-            if (kind !== "keyboard" && (LOCATOR_FACTORIES.includes(method) || LOCATOR_REFINERS.includes(method))) {
+            if ((kind === "page" || kind === "locator") && (LOCATOR_FACTORIES.includes(method) || LOCATOR_REFINERS.includes(method))) {
                 fail(callee.property, "A locator on its own does nothing; await an action (click, fill, ...) or an expect(...) assertion.");
             }
             fail(callee.property, this.unknownMethod(kind, method));
@@ -512,7 +518,7 @@ class Validator {
         if (arg.type === "Identifier" && this.isResponseConstant(arg.name)) return "apiResponse";
         if (this.apiAssertionValue(arg)) return "apiValue";
         const kind = this.chain(target.arguments[0]);
-        if (kind === "keyboard") fail(target.arguments[0], "expect() takes the page or a locator.");
+        if (kind === "keyboard" || kind === "mouse") fail(target.arguments[0], "expect() takes the page or a locator.");
         return kind;
     }
 
@@ -575,6 +581,23 @@ class Validator {
 
     private actionArgs(kind: ChainKind, method: string, call: t.CallExpression): void {
         const args = call.arguments;
+        if (kind === "mouse") {
+            const coordinates = MOUSE_COORDINATES[method];
+            const max = method === "wheel" ? 2 : coordinates + 1;
+            if (args.length < coordinates || args.length > max) fail(call, `page.mouse.${method}() takes ${coordinates ? `${coordinates} literal numbers` : "no coordinates"}${method === "wheel" ? "" : " and an optional options object"}.`);
+            for (const arg of args.slice(0, coordinates)) {
+                if (!this.isNumber(arg)) fail(arg, `page.mouse.${method}() coordinates must be literal numbers.`);
+            }
+            const options = args[coordinates];
+            if (options && options.type !== "ObjectExpression") fail(options, `page.mouse.${method}() options must be a literal object, like { steps: 10 } or { button: "left" }.`);
+            this.plainArgs(call, coordinates, max);
+            return;
+        }
+        if (method === "dragTo") {
+            if (!args[0] || !["CallExpression", "Identifier", "MemberExpression"].includes(args[0].type) || !this.chainIsLocator(args[0])) fail(args[0] ?? call, "dragTo() takes the target locator, like dragTo(page.getByText(\"Done\")).");
+            this.plainArgs(call, 1, 2);
+            return;
+        }
         if (kind === "page" && method === "goto") {
             const target = staticString(args[0]);
             if (target === null || !isSafeRelativePath(target)) {

@@ -115,6 +115,7 @@ export interface RawPage {
     url(): string;
     mainFrame(): unknown;
     keyboard: { press: AnyFn; type: AnyFn };
+    mouse: { move: AnyFn; down: AnyFn; up: AnyFn; click: AnyFn; dblclick: AnyFn; wheel: AnyFn };
     evaluate: AnyFn;
     [method: string]: any;
 }
@@ -130,7 +131,7 @@ export interface RawRequest {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-type WrapperKind = "page" | "locator" | "keyboard" | "apiResponse" | "request";
+type WrapperKind = "page" | "locator" | "keyboard" | "mouse" | "apiResponse" | "request";
 const originals = new WeakMap<object, { kind: WrapperKind; original: object }>();
 
 /** The real Playwright object behind a wrapper, for expect() and fixture internals. */
@@ -296,6 +297,11 @@ export function createGuard(options: GuardOptions) {
                 await locator[name](...sanitizeAll(args));
             };
         }
+        methods.dragTo = async (target: unknown, dragOptions?: unknown) => {
+            const real = unwrap(target, ["locator"]);
+            if (!real) throw new Error("dragTo() takes a locator");
+            await locator.dragTo(real, sanitize(dragOptions));
+        };
         methods.fill = async (value: unknown, fillOptions?: unknown) => {
             const text = await textArgument(page, value, locator);
             await locator.fill(text, sanitize(fillOptions));
@@ -352,6 +358,37 @@ export function createGuard(options: GuardOptions) {
             page.keyboard,
         );
         methods.keyboard = keyboard;
+        const coordinates = (method: string, ...values: unknown[]) => {
+            if (!values.every((value) => typeof value === "number" && Number.isFinite(value))) throw new Error(`mouse.${method}() takes literal numbers`);
+        };
+        methods.mouse = frozen(
+            "mouse",
+            {
+                move: async (x: unknown, y: unknown, moveOptions?: unknown) => {
+                    coordinates("move", x, y);
+                    await page.mouse.move(x, y, sanitize(moveOptions));
+                },
+                click: async (x: unknown, y: unknown, clickOptions?: unknown) => {
+                    coordinates("click", x, y);
+                    await page.mouse.click(x, y, sanitize(clickOptions));
+                },
+                dblclick: async (x: unknown, y: unknown, clickOptions?: unknown) => {
+                    coordinates("dblclick", x, y);
+                    await page.mouse.dblclick(x, y, sanitize(clickOptions));
+                },
+                down: async (buttonOptions?: unknown) => {
+                    await page.mouse.down(sanitize(buttonOptions));
+                },
+                up: async (buttonOptions?: unknown) => {
+                    await page.mouse.up(sanitize(buttonOptions));
+                },
+                wheel: async (deltaX: unknown, deltaY: unknown) => {
+                    coordinates("wheel", deltaX, deltaY);
+                    await page.mouse.wheel(deltaX, deltaY);
+                },
+            },
+            page.mouse,
+        );
         return frozen("page", methods, page);
     }
 
