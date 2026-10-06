@@ -7,9 +7,12 @@ import { proposalDirectory, type ProposalVerification } from "../../../core/jobs
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { streamSSE } from "hono/streaming";
+import { watchSession } from "../../../core/accounts/sessions";
 import { abortChatTurn, isChatBusy } from "../../../core/chat/chat-registry";
 import { applyProposal } from "../../../core/jobs/proposals";
 import { projectOverview } from "../../../core/jobs/overview";
+import { watchProjectOverview } from "../../../core/jobs/overview-watch";
 import { createJobSchema, reviewSchema, selectSpecBatchSchema } from "../../../core/jobs/schemas";
 import { presentSpecBatch, selectSpecBatch } from "../../../core/jobs/spec-batches";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
@@ -19,6 +22,8 @@ import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
 import { createChat, startChatTurn } from "../../../core/chat/session";
 import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors";
+
+const SSE_HEARTBEAT_MS = 20_000;
 
 async function projectJob(projectId: string, jobId: string) {
     const job = await jobsRepository.get(jobId);
@@ -54,6 +59,27 @@ export function createJobsRouter(): Hono {
     router.get("/projects/:id/overview", access("viewer"), async (c) => {
         if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
         return c.json(await projectOverview(c.req.param("id")));
+    });
+    router.get("/projects/:id/overview/events", access("viewer"), async (c) => {
+        const id = c.req.param("id");
+        if (!await projectsRepository.getProject(id)) throw new HTTPException(404, { message: "Project not found" });
+        c.res = streamSSE(c, async (stream) => {
+            let releaseSession = () => {};
+            let unwatch = () => {};
+            const heartbeat = setInterval(() => void stream.write(":ping\n\n").catch(() => undefined), SSE_HEARTBEAT_MS);
+            stream.onAbort(() => {
+                clearInterval(heartbeat);
+                unwatch();
+                releaseSession();
+            });
+            if (c.get("user")) releaseSession = await watchSession(c.req.raw.headers, () => stream.abort());
+            if (stream.aborted) { releaseSession(); return; }
+            unwatch = watchProjectOverview(id, (overview) => void stream.writeSSE({ event: "overview", data: overview }).catch(() => undefined));
+            await new Promise<void>((resolve) => stream.aborted ? resolve() : stream.onAbort(resolve));
+        });
+        c.header("Cache-Control", "no-cache, no-transform");
+        c.header("X-Accel-Buffering", "no");
+        return c.res;
     });
     router.use("/projects/:id/jobs/*", async (c, next) => {
         if (!await projectsRepository.getProject(c.req.param("id")!)) throw new HTTPException(404, { message: "Project not found" });

@@ -90,6 +90,26 @@ test("chat events disable compression and buffering in the frontend proxy", asyn
     } finally { await reader.cancel(); }
 });
 
+test("overview events send the overview and then each change", { timeout: 10_000 }, async () => {
+    const project = await projectsRepository.createProject("Overview stream", "https://example.com");
+    const response = await new Hono().route("/", createJobsRouter()).request(`/projects/${project.id}/overview/events`);
+    assert.equal(response.headers.get("cache-control"), "no-cache, no-transform");
+    const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+    const nextOverview = async () => {
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) throw new Error("overview stream ended");
+            const data = value.match(/event: overview\ndata: (.*)\n/)?.[1];
+            if (data) return JSON.parse(data) as unknown;
+        }
+    };
+    try {
+        const first = await nextOverview();
+        await jobsRepository.create({ projectId: project.id, chatId: crypto.randomUUID(), trigger: "manual", goal: "Check checkout", limits: jobLimitsSchema.parse({}) });
+        assert.notDeepEqual(await nextOverview(), first);
+    } finally { await reader.cancel(); }
+});
+
 describe("executeSpec (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
     test("blocks redirected navigation outside the configured project origins", { timeout: 120_000 }, async () => {
         let privateRequests = 0;
