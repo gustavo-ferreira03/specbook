@@ -62,7 +62,7 @@ The repository accepts the `main` branch only. Generated files and edits made in
 
 ## Autonomous QA
 
-Specbook acts on events: deployments and changed Specs start checks; failures that persist after retry start an investigation; missing prerequisites become questions. Invalid Specs can trigger a repair, and new credentials resume blocked work. Schedules and CI requests run the selected checks. Without an event or a user request, the agent stays idle; there is no LLM planning loop. Work persists across backend restarts and uses the same agent and browser tools as chat.
+Specbook acts on events: deployments and changed Specs start checks; failures that persist after retry start an investigation; missing prerequisites become questions. Invalid Specs appear as one regeneration decision; only your request starts their repair. The first observation records existing Specs without running them. New credentials resume blocked work. Schedules and CI requests run the selected checks. Without an event or a user request, the agent stays idle; there is no LLM planning loop. Work persists across backend restarts and uses the same agent and browser tools as chat.
 
 **Overview** shows **Needs you**, **Failing** and **Recent runs**. The header and Specs tree share the same health counts. Failing checks show their triage status; recent runs are grouped by trigger. Rows open a side panel with evidence and the next step.
 
@@ -70,12 +70,12 @@ Specbook acts on events: deployments and changed Specs start checks; failures th
 
 **Settings → Automation** provides optional controls:
 
-- **Propose** is the default: investigate and submit changes for review. **Observe** records signals without starting automatic investigations; explicit requests from Actions or chat remain available. **Act** may apply a verified selector-only fix after three approved examples, provided none were rejected.
-- A five-field UTC cron schedule runs all Specs or a selected set. An optional webhook receives scheduled batch status changes; failure investigation can be disabled for scheduled runs.
+- **Propose** is the default: investigate and submit changes for review. **Observe** records signals without starting automatic investigations; explicit requests from Overview or chat remain available. Switching from Observe considers current changes and failures, not the historical backlog. **Act** also requires the **Automatic fixes** setting, off by default, before applying a verified fix to an action’s locator. This requires three approved examples and no rejected examples; assertions and action kinds must stay unchanged.
+- A five-field UTC cron schedule runs all Specs or a selected set. An optional webhook receives scheduled batch status changes; failure investigation can be disabled for scheduled runs. Webhooks allow public destinations by default. Internal or loopback destinations require explicit permission under **Webhook network access**. Delivery checks DNS again, connects to the validated address and never follows redirects.
 
-A failed Spec runs once more before the healer investigates. Passing on retry marks it as flaky and keeps both attempts in its history. Persistent failures lead to a verified implementation patch, a bug report with evidence, or a question about the environment. Choose **Actions → Find uncovered areas** or **Explore app**, or ask in chat, to request coverage analysis or exploration. Neither starts automatically. Exploration can collect console and network failures, check safe links, and inspect accessibility with axe. Bug reports can be promoted to regression Spec proposals.
+A failed Spec runs once more before the healer investigates. Passing on retry marks it as flaky and keeps both attempts in its history. Persistent failures lead to a verified implementation patch, a bug report with evidence, or a question about the environment. Choose **Find uncovered areas** or **Explore app**, or ask in chat, to request coverage analysis or exploration. Neither starts automatically. Exploration can collect console and network failures, check safe links, and inspect accessibility with axe. Bug reports can be promoted to regression Spec proposals.
 
-Pause or resume Specbook for a project from **Overview**, or for all projects from **Settings → Automation**. Pause is separate from Observe, Propose and Act. It stops new automatic work, lets agent turns stop cleanly and preserves their progress. There is no daily quota or token reservation. Internal safeguards stop investigations that fail to reach a result; retries use a different approach with backoff. Equivalent work and rejected suggestions are deduplicated. Schedules, webhooks, and steering fields are optional.
+Pause or resume Specbook for a project from **Overview**, or for all projects from **Settings → Automation**. Pause is separate from Observe, Propose and Act. It stops new automatic work, lets agent turns stop cleanly and preserves their progress. There is no daily quota or token reservation. Internal safeguards stop investigations that fail to reach a result; retries use a different approach with backoff. Repeated automatic investigations for the same check version, failed step, failure kind and execution URL are suppressed while active and for six hours afterward; rejecting a suggestion suppresses that same subject until its content changes. CI results still complete while the agent is paused. Schedules, webhooks, and steering fields are optional.
 
 ## CI/CD
 
@@ -104,6 +104,8 @@ The client uses Node.js built-ins and installs no packages. Settings provides th
 | `SPECBOOK_FAIL_ON_KNOWN_BUGS` | `true` to fail the gate for Specs with an open bug report at batch creation; default `false` |
 | `SPECBOOK_JUNIT_PATH`, `SPECBOOK_SUMMARY_PATH` | Output file paths; parent directories are created |
 | `SPECBOOK_TIMEOUT_SECONDS` | Maximum client wait; default `3600` |
+
+Preview and deployment URLs must use the project’s origin or an exact origin listed under **Settings → CI/CD**. Private, loopback and link-local targets are rejected unless the saved project URL explicitly uses a private IP or localhost. Internal DNS names alone do not enable that exception. Run navigation follows the same origin policy, including redirects; HTTP(S) run connections use validated, pinned DNS addresses. CI tokens accept at most 30 run/deploy requests per minute.
 
 Preview URLs do not authorize access to stored credentials. To use a saved credential profile on a preview, add the preview's origin to that profile's allowed origins in **Settings → Credentials**.
 
@@ -334,7 +336,7 @@ curl -fsS -X POST \
   -d '{"environment":"preview","url":"https://preview.example.com","commitSha":"abc123","ref":"feature/login"}'
 ```
 
-All payload fields are optional. A repeated event with the same commit and payload is deduplicated. Your pipeline or deploy webhook can send this generic payload without granting Specbook access to the application's source repository.
+All payload fields are optional. A repeated event with the same commit and payload is deduplicated; events without a commit are deduplicated for five minutes. Your pipeline or deploy webhook can send this generic payload without granting Specbook access to the application's source repository.
 
 ## Your first Spec
 

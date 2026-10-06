@@ -36,13 +36,13 @@ Settings → Automation supports optional five-field numeric UTC cron, all or se
 
 ### Project steward
 
-Persistent observations, signals and intentions cover failed, invalid or changed Specs, deployments, credentials and explicit user requests. Empty projects, context changes, stale checks and availability probes do not launch agent work. Lightweight deployment checks compare build asset URLs, ETag/Last-Modified or a bounded response hash every five minutes, with availability backoff. Deterministic observation generations deduplicate crash replay while retaining actual A→B→A changes.
+Persistent observations, signals and intentions cover failed or changed Specs, deployments, credentials and explicit user requests. Existing Specs seed a silent baseline on first observation; invalid Specs create one regeneration decision and require a human request before repair. Empty projects, context changes, stale checks and availability probes do not launch agent work. Lightweight deployment checks compare build asset URLs, ETag/Last-Modified or a bounded response hash every five minutes, with availability backoff. Deterministic observation generations deduplicate crash replay while retaining actual A→B→A changes.
 
-The LLM planner, planner tools and recursive background requests from agent sessions are removed. Chat retains `start_background_task` because it expresses a human request. Intention source distinguishes user requests from events; equivalent active work is deduplicated. Automatic work also has a six-hour cooldown and remembers rejections. Exact rejected proposals cannot be silently recreated.
+The LLM planner, planner tools and recursive background requests from agent sessions are removed. Chat retains `start_background_task` because it expresses a human request. Intention source distinguishes user requests from events; equivalent active work is deduplicated. Automatic investigation cooldown and rejection memory are scoped to the check, current source/contract, failed step, failure kind and execution URL. They do not promise deduplication across changed contracts or distinct failure kinds. Unique event identifiers provide replay protection, not semantic deduplication.
 
 The steward serializes investigations within a project. There is no daily quota, token reservation or per-day batch cap. A run that cannot start creates a deterministic prerequisite question, without an LLM turn. An answer retries the original selection and URL once; if the prerequisite persists, a new question is required. New credentials resume explicitly tagged credential questions.
 
-Observe records signals without dispatching automatic work; explicit requests remain available. Propose submits changes for review. Act may apply a verified selector-only fix after three approved examples and no rejected examples; AST comparison excludes assertions, input data and contract changes.
+Observe records signals without dispatching automatic work; explicit requests remain available. Propose submits changes for review. Act requires a separate auto-approval opt-in, off by default, plus three approved examples and no rejected examples. AST comparison permits direct action-locator changes only; assertions, aliases, input data, action kind and contracts remain unchanged. Policy is checked again under the repository lock and before commit.
 
 ### Coverage and exploration
 
@@ -113,7 +113,7 @@ Validation: a real test started two concurrent stacks and a third in another bac
 
 Addendum 3 checkpoint: Inbox questions now include consequences, available before/after screenshots and collapsed file diffs. Activity groups work by subject. Internal browser/provider failures retry without creating human questions; historical internal-failure questions are removed from the decision view. Failed required test runs remain internal while investigation continues and become a request for help only after it stops.
 
-Daily-limit diagnosis found partially funded investigations stopping before useful work, small planner allocations and blocked work reserving its full unused allowance. Dispatch now waits for a complete allocation, counts today's consumption separately from cumulative audit totals, and reserves only queued/running work's remaining allowance. Continue now grants one additional round for today; automatic continuation can resume the following day. Recovery preserves elapsed usage.
+The daily allocation mechanism from this checkpoint was removed by addendum 5. It is not part of the current implementation; only the internal per-investigation loop safeguard remains. Recovery now uses persisted active-time heartbeats rather than counting backend downtime.
 
 Validation at this checkpoint: both app typechecks passed; 225 tests passed with SPECBOOK_TEST_VNC=1, including browser process cleanup, presentation filtering, usage/recovery, continuation concurrency and decision actions. Inbox and Activity were inspected at desktop and phone widths in the running app. Browser fix is committed separately as 1cbf1c3; the execution and review changes are in 371d554. The remaining layout and timeline issues are addressed by addendum 4 below.
 
@@ -159,10 +159,53 @@ Run prerequisites now become questions directly, without an agent turn. Answerin
 
 `storage/metrics/agent-events.jsonl` records classification, verification and decision events with stable identifiers and cumulative usage. Human and automatic approvals are distinct. `node apps/backend/scripts/export-metrics.mjs --agent --out agent-events.csv` exports them alongside the existing turn/run exports. Metrics exclude prompts, URLs, errors and credentials; external fault labels and manual timing still belong to the evaluation protocol.
 
-The final Overview has three sections with shared health counts and per-check triage. Run counts use mutually exclusive outcomes during retry; resumed deployments retain their trigger, and an older classification cannot label a different failure. Pause does not overwrite run health. Coverage/exploration actions use the existing dropdown, and evidence/review stays in the existing side sheet.
+The final Overview has three sections with shared health counts and per-check triage. Run counts use mutually exclusive outcomes during retry; resumed deployments retain their trigger, and an older classification cannot label a different failure. Pause does not overwrite run health. Coverage/exploration actions use explicit buttons in the existing toolbar, and evidence/review stays in the existing side sheet.
 
 Live checks covered Agora Leads, Swag Labs and a temporary empty project at 1440px and 390px, with no horizontal overflow and no text below 12px. Evidence screenshots loaded, diffs stayed collapsed by default, and keyboard closure restored focus. A temporary verified locator proposal displayed one removed/added line, then approval created a repository commit with byte-identical YAML. Project pause/resume persisted. An empty project stayed at zero jobs/intentions until an explicit coverage action; that request remained pending while paused. The temporary projects were deleted through the API.
 
 Final validation: `pnpm typecheck` passed for both apps; `SPECBOOK_TEST_VNC=1 pnpm test` passed all 239 tests with no failures or skips; the backend build passed. The added cases cover idle projects, explicit requests under Observe, migration/restart preservation, deterministic credential questions, scheduled recovery with the original selection and healer policy, exclusive retry counts, current-failure triage and metric export without sensitive text. Final live reload had zero browser console errors; font-preload warnings came from Next development mode. No frontend production build was run.
 
-Commit split: `f952f21 refactor: drive autonomous QA through deterministic events` contains the event rules, explicit tasks, migration and evaluation records. The following Overview commit contains the three-section layout and its health/run model. Operational event reads include the full stored history: an additional Chromium regression inserted 301 later events and confirmed a blocked schedule still resumes with its saved options. The final Agora reload showed the regenerated-check bug only in Failing, with no duplicate decision.
+Commit split: `f952f21 refactor: drive autonomous QA through deterministic events` contains the event rules, explicit tasks, migration and evaluation records. The following Overview commit contains the three-section layout and its health/run model. Operational event reads include the full stored history: an additional Chromium regression inserted 301 later events and confirmed a blocked schedule still resumes with its saved options. That checkpoint still placed invalid checks under Failing. Phase 0 corrects this: invalid checks have their own health state, and reviewable findings without a current failed run appear in Needs you.
+
+
+## Phase 0: release review corrections
+
+Gus requested separate correction commits before merge. The branch remains unmerged and unpushed.
+
+- First observation records a baseline without creating run intentions. Invalid or older checks are grouped into one regeneration question; acceptance is persisted before dispatch, and replacement files still require reviewed diffs.
+- Observe → Propose drops stale events and considers only current content and run evidence. Triage validates the latest run and both implementation/contract hashes. Automatic cooldown and rejection matching use the check and failure kind rather than a unique run identifier.
+- Pausing retains investigation instructions and cannot be overwritten by completion. CI retries and final reporting complete independently of agent pause. Failure handling uses the original failure identifier and retries temporary startup errors with backoff before considering triage.
+- A five-second heartbeat records active execution time. Recovery excludes downtime; a crash may omit at most the unpersisted active interval. Finishing an execution accounts for it once.
+- Automatic fixes require explicit opt-in. Assertion targets and matchers, aliases and action kinds cannot be normalized away. Revoking permission before commit rolls back the candidate and reindexes the repository.
+- CI origins are explicit, private-network exceptions require a saved private IP/localhost base URL, and HTTP(S) run connections pin validated DNS addresses. Per-token trigger limits and short deployment deduplication prevent unbounded repeated batches. Webhooks require explicit private-network permission and never follow redirects.
+- Overview separates invalid checks from failures. Counts, last-check time and failure rows use the same current-content evidence. Human decisions appear in Needs you; repeated runs collapse into one row with individual runs in the timeline. Empty projects have one introduction and coverage/exploration have named buttons.
+- CHANGELOG now preserves the 0.1.0 release and places Robot execution and GitHub mirror removal under Unreleased.
+
+Validation:
+
+- `pnpm typecheck` passed for backend and frontend. `SPECBOOK_TEST_VNC=1 pnpm test` passed all 263 tests, with no failures or skips. The suite covers the current-failure guards, pause races, active-time recovery, regeneration approval/recovery, assertion preservation, CI origins, DNS rebinding, redirected navigation, webhook delivery and Overview health.
+- Both application builds passed. The frontend production build used `NEXT_DIST_DIR=.next-phase0-build`; the live `.next` was preserved, and generated changes to TypeScript configuration were restored.
+- The backend was explicitly restarted and migrations 0018–0021 applied at boot; `/health` returned OK.
+- A temporary copy of Agora's six existing checks produced zero signals, intentions or agent actions and one grouped regeneration decision on first observation. The original repository HEAD was unchanged. Additional integration cases use 80 existing valid and 80 invalid checks. Temporary project copies were deleted through the API.
+
+Live verification:
+
+- Agora Leads (`d91f9891…`), Swag Labs (`0fa0cdc2…`) and the existing empty project (`1201eeac…`) were captured at 1440px and 390px. Agora now shows six invalid checks, zero failures, no misleading last-check time and one regeneration question. Its three historical runs have different repository revisions, so they stay separate with timestamps including seconds.
+- Overview decisions wrap on mobile. The six captures have no horizontal overflow or page errors; the decision panel fits at 390px, and Escape closes it and returns focus. The empty project has one introduction. Existing Settings controls handled opt-in, cancellation, save/reload and CI origin editing in 19 successful browser checks, with no overflow or errors during that flow.
+- Evidence is saved under `/tmp/specbook-phase0-qa/`: `agora-*`, `swag-*`, `empty-*`, `automation-*` and `ci-*` screenshots, plus browser verification logs. The copied-project report is `/tmp/specbook-phase0-import-results.json`. Temporary projects were removed through the API; existing project files and repository HEADs were preserved.
+
+Correction commits:
+
+- `dad4590`: preserve paused investigation instructions (finding 5).
+- `e27324f`: finish CI reporting independently of pause (finding 3).
+- `5727d54`: recover active time without charging downtime (finding 6).
+- `8736233`: guard completion and environment retries against a concurrent pause (finding 7).
+- `e1f1095`: retry transient startup failures and deduplicate triage by the original failure (finding 8).
+- `e5445af`: restrict CI destinations, rate-limit tokens and deduplicate deploys (finding 9).
+- `0bbe4eb`: require explicit permission for private webhooks (finding 10).
+- `24c351b`: preserve assertions and require automatic-fix opt-in (finding 4).
+- `5daa622`: seed existing checks silently and request regeneration once (finding 1).
+- `de13ba0`: discard stale signals and deduplicate current failure subjects (finding 2).
+- `9f4556b`: correct Overview health, decisions and repeated-run presentation.
+
+The separate documentation commit preserves 0.1.0 and documents these breaking changes under Unreleased. Phase 0 has no remaining implementation work. Merge and push remain outside this request. Pre-existing changes in `.gitignore` and `apps/frontend/next-env.d.ts` were not included.
