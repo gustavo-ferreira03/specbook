@@ -35,7 +35,7 @@ function standardSystemPrompt(
         return [
             base,
             "",
-            `The user confirmed the following project context (revision ${confirmedContext.id}, confirmed at ${confirmedContext.confirmedAt}). Treat it as reviewed background knowledge about the application.`,
+            `The following project context is confirmed (revision ${confirmedContext.id}, confirmed at ${confirmedContext.confirmedAt}). Treat it as background knowledge about the application.`,
             "<confirmed-project-context>",
             JSON.stringify(confirmedContext.context, null, 2),
             "</confirmed-project-context>",

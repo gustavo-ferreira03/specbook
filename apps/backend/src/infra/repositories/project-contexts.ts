@@ -68,6 +68,15 @@ class ProjectContextsRepository {
         return rows[0] ?? null;
     }
 
+    async hasRevisions(projectId: string): Promise<boolean> {
+        const rows = await db
+            .select({ id: projectContextRevisions.id })
+            .from(projectContextRevisions)
+            .where(eq(projectContextRevisions.projectId, projectId))
+            .limit(1);
+        return rows.length > 0;
+    }
+
     async getLatestConfirmedProjectContext(projectId: string): Promise<ProjectContextRevisionRow | null> {
         const rows = await db
             .select()

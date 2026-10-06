@@ -51,7 +51,7 @@ export function createSpecBatchTool(projectId: string, chatId: string, contextRe
         async execute(_id, input) {
             const item = await proposeSpecBatch(projectId, chatId, input, { contextRevisionId });
             return text(JSON.stringify({ inboxId: item.id, reviewPath: `/p/${projectId}/chats/${chatId}#chat-result-${item.id}`,
-                message: contextRevisionId ? "Specs suggested in this conversation. The human can review and confirm the discovery context here, then select which Specs to add." : "Specs suggested in this conversation. Ask the human to select which Specs to add using the selection below. No files changed." }));
+                message: contextRevisionId ? "Specs suggested in this conversation. The human can select which Specs to add using the selection below." : "Specs suggested in this conversation. Ask the human to select which Specs to add using the selection below. No files changed." }));
         },
     });
 }
@@ -129,7 +129,7 @@ export function createContextTools(revisionId: string, projectId: string, chatId
             name: "propose_project_context",
             label: "propose_project_context",
             description:
-                "Save the complete structured project context as the draft for this discovery. Provide every field; the whole draft content is replaced. The user reviews and confirms it later; this tool never confirms.",
+                "Save the complete structured project context as the draft for this discovery. Provide every field; the whole draft content is replaced. Specbook confirms the latest draft automatically when this turn ends.",
             parameters: Type.Unsafe<z.infer<typeof proposeProjectContextSchema>>(proposeProjectContextSchema.toJSONSchema()),
             async execute(_id, params) {
                 const parsed = proposeProjectContextSchema.safeParse(params);
@@ -150,7 +150,7 @@ export function createContextTools(revisionId: string, projectId: string, chatId
                         revisionId: updated?.id ?? revisionId,
                         status: updated?.status ?? "draft",
                         reviewPath: `/p/${projectId}/chats/${chatId}#chat-context-review`,
-                        message: "Draft saved in this conversation. Ask the user to review and confirm it using the context review here.",
+                        message: "Draft saved. It becomes the confirmed project context when this turn ends; the user can still edit it later.",
                     }),
                 );
             },

@@ -4,16 +4,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { projectContextSchema } from "../../../core/chat/context-tools";
-import { createChat } from "../../../core/chat/session";
+import { contextProposalProblem, DEFAULT_DISCOVERY_GOAL, startContextDiscovery } from "../../../core/chat/discovery";
 import { configuredModel } from "../../../core/llm/runtime";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { writeContextToRepo } from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
-
-export const DEFAULT_DISCOVERY_GOAL =
-    "Autonomously explore the application and map its areas, terminology, roles, business rules, and UI patterns. Record anything inaccessible or unclear as unknowns and ask the user for help only when blocked.";
 
 const discoveryBriefSchema = z.object({
     goal: z.string().trim().min(1).max(500).optional(),
@@ -79,31 +76,19 @@ export function createProjectContextsRouter(): Hono {
             if (!(await configuredModel()).ready) {
                 throw new HTTPException(409, { message: "Connect a model in global Settings before exploring this application." });
             }
-            return projectContextsRepository.withProjectContextDraftLock(project.id, async () => {
-                const activeDraft = await projectContextsRepository.getActiveProjectContextDraft(project.id);
-                if (activeDraft) {
-                    return c.json(
-                        {
-                            error: "This project already has an active context draft",
-                            draft: activeDraft,
-                            chatId: activeDraft.sourceChatId,
-                        },
-                        409,
-                    );
-                }
-                const brief = resolveDiscoveryBrief(project.baseUrl, c.req.valid("json"));
-                const revision = await projectContextsRepository.createProjectContextDraft(project.id, brief);
-                let chat: { id: string };
-                try {
-                    chat = await createChat(project.id, { contextRevisionId: revision.id });
-                } catch (error) {
-                    await projectContextsRepository.deleteProjectContextDraft(revision.id).catch(console.error);
-                    throw error;
-                }
-                await projectContextsRepository.attachContextChat(revision.id, chat.id);
-                const attached = await projectContextsRepository.getProjectContextRevision(revision.id);
-                return c.json({ revision: attached ?? revision, chat }, 201);
-            });
+            const brief = resolveDiscoveryBrief(project.baseUrl, c.req.valid("json"));
+            const result = await startContextDiscovery(project.id, brief);
+            if ("activeDraft" in result) {
+                return c.json(
+                    {
+                        error: "This project already has an active context draft",
+                        draft: result.activeDraft,
+                        chatId: result.activeDraft.sourceChatId,
+                    },
+                    409,
+                );
+            }
+            return c.json(result, 201);
         },
     );
 
@@ -150,12 +135,8 @@ export function createProjectContextsRouter(): Hono {
             if (revision.status !== "draft") {
                 throw new HTTPException(409, { message: "Only draft context revisions can be confirmed" });
             }
-            if (!revision.context.summary.trim()) {
-                throw new HTTPException(400, { message: "Confirmation requires a non-empty summary" });
-            }
-            if (revision.context.areas.length === 0 && revision.context.unknowns.length === 0) {
-                throw new HTTPException(400, { message: "Confirmation requires at least one area or unknown" });
-            }
+            const problem = contextProposalProblem(revision.context);
+            if (problem) throw new HTTPException(400, { message: problem });
             const confirmed = await writeContextToRepo(revision.projectId, revision.context, {
                 confirmRevisionId: revision.id,
             }).catch(mapRepoError);

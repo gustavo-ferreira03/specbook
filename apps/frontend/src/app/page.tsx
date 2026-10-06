@@ -3,29 +3,18 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, ArrowRight, BookOpenCheck, ChevronRight, Compass, Globe, KeyRound, LoaderCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, BookOpenCheck, Compass, Globe, KeyRound, LoaderCircle, RefreshCw } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { InstanceHeader } from "@/components/InstanceHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { LogoMark } from "@/components/LogoMark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import { api, createContextDiscovery, getLlmRuntimeStatus } from "@/lib/api";
+import { api, getLlmRuntimeStatus } from "@/lib/api";
 import type { Project } from "@/lib/types";
-
-function parseSafetyNotes(raw: string): string[] {
-    return raw
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(0, 20)
-        .map((line) => line.slice(0, 200));
-}
 
 function HomeContent() {
     const { canEdit, isAdmin } = useAuth();
@@ -38,13 +27,8 @@ function HomeContent() {
     const [loadError, setLoadError] = useState("");
     const [createError, setCreateError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
-    const [submitting, setSubmitting] = useState<"discovery" | "plain" | false>(false);
+    const [submitting, setSubmitting] = useState(false);
     const [lastProjectId, setLastProjectId] = useState<string | null>(null);
-    const [goal, setGoal] = useState("");
-    const [startUrl, setStartUrl] = useState("");
-    const [startUrlEdited, setStartUrlEdited] = useState(false);
-    const [safetyNotes, setSafetyNotes] = useState("");
-    const [advancedOpen, setAdvancedOpen] = useState(false);
     const [llmReady, setLlmReady] = useState(false);
 
     useEffect(() => {
@@ -85,55 +69,17 @@ function HomeContent() {
         };
     }, [forceNew, retryKey, router, canEdit]);
 
-    async function createProjectRecord(): Promise<Project> {
-        const result = await api<{ project: Project }>("/projects", {
-            method: "POST",
-            body: JSON.stringify({ name: name.trim(), baseUrl: baseUrl.trim() }),
-        });
-        localStorage.setItem("specbook:last-project", result.project.id);
-        return result.project;
-    }
-
-    async function createWithDiscovery(event: React.FormEvent<HTMLFormElement>) {
+    async function createProject(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         setCreateError("");
-        if (!llmReady) {
-            setCreateError("Connect a model in instance settings before starting discovery.");
-            return;
-        }
-        setSubmitting("discovery");
-        let project: Project;
+        setSubmitting(true);
         try {
-            project = await createProjectRecord();
-        } catch (error) {
-            setCreateError(error instanceof Error ? error.message : String(error));
-            setSubmitting(false);
-            return;
-        }
-        try {
-            const trimmedStart = startUrl.trim();
-            const trimmedGoal = goal.trim();
-            const discovery = await createContextDiscovery(project.id, {
-                ...(trimmedGoal ? { goal: trimmedGoal } : {}),
-                ...(startUrlEdited && trimmedStart ? { startUrl: trimmedStart } : {}),
-                safetyNotes: parseSafetyNotes(safetyNotes),
+            const result = await api<{ project: Project; discoveryChatId: string | null }>("/projects", {
+                method: "POST",
+                body: JSON.stringify({ name: name.trim(), baseUrl: baseUrl.trim() }),
             });
-            router.push(`/p/${project.id}/chats/${discovery.chat.id}`);
-        } catch {
-            router.push(`/p/${project.id}?discovery=failed`);
-        }
-    }
-
-    async function createWithoutDiscovery() {
-        if (!name.trim() || !baseUrl.trim()) {
-            setCreateError("Project name and base URL are required.");
-            return;
-        }
-        setCreateError("");
-        setSubmitting("plain");
-        try {
-            const project = await createProjectRecord();
-            router.push(`/p/${project.id}`);
+            localStorage.setItem("specbook:last-project", result.project.id);
+            router.push(result.discoveryChatId ? `/p/${result.project.id}/chats/${result.discoveryChatId}` : `/p/${result.project.id}`);
         } catch (error) {
             setCreateError(error instanceof Error ? error.message : String(error));
             setSubmitting(false);
@@ -178,10 +124,9 @@ function HomeContent() {
 
     if (!canEdit) return <main className="min-h-dvh bg-surface"><InstanceHeader /><EmptyState title="No projects available" description="An administrator or editor can create the first project. You will be able to read its Specs and results here." /></main>;
     const returnProject = projects.find((project) => project.id === lastProjectId) ?? projects[0];
-    const busy = submitting !== false;
     const steps = [
         { icon: Globe, title: "Point it at your app", text: "Any URL the self-hosted runtime can reach, such as a staging site." },
-        { icon: Compass, title: "Let the agent explore", text: "A bounded browser maps areas, terms, and roles into a context you review." },
+        { icon: Compass, title: "Let the agent explore", text: "A bounded browser maps areas, terms, and roles into the project context." },
         { icon: BookOpenCheck, title: "Write executable Specs", text: "Describe behavior in a chat. Specs stay readable and run on demand." },
     ];
 
@@ -223,7 +168,7 @@ function HomeContent() {
                     </ol>
                 </div>
 
-                <form onSubmit={createWithDiscovery} className="overflow-hidden rounded-xl border border-line bg-surface shadow-xs" aria-labelledby="new-project-heading">
+                <form onSubmit={createProject} className="overflow-hidden rounded-xl border border-line bg-surface shadow-xs" aria-labelledby="new-project-heading">
                     <div className="border-b border-line px-5 py-4">
                         <h2 id="new-project-heading" className="text-section text-ink">Project details</h2>
                         <p className="mt-0.5 text-control text-ink-muted">You can change these later in settings.</p>
@@ -231,74 +176,31 @@ function HomeContent() {
                     <div className="space-y-5 px-5 py-5">
                         <div>
                             <Label className="mb-1.5" htmlFor="project-name">Project name</Label>
-                            <Input id="project-name" value={name} onChange={(event) => setName(event.target.value)} required autoFocus autoComplete="off" placeholder="Customer portal" disabled={busy} />
+                            <Input id="project-name" value={name} onChange={(event) => setName(event.target.value)} required autoFocus autoComplete="off" placeholder="Customer portal" disabled={submitting} />
                         </div>
                         <div>
                             <Label className="mb-1.5" htmlFor="base-url">Base URL</Label>
                             <Input
                                 id="base-url"
                                 value={baseUrl}
-                                onChange={(event) => {
-                                    setBaseUrl(event.target.value);
-                                    if (!startUrlEdited) setStartUrl(event.target.value);
-                                }}
+                                onChange={(event) => setBaseUrl(event.target.value)}
                                 required
                                 type="url"
                                 inputMode="url"
                                 placeholder="https://staging.example.com"
                                 className="font-mono text-meta"
                                 aria-describedby="base-url-help"
-                                disabled={busy}
+                                disabled={submitting}
                             />
                             <p id="base-url-help" className="mt-1.5 text-meta text-ink-subtle">Use a URL the self-hosted runtime can reach. Chats and runs start here.</p>
                         </div>
-                        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-                            <CollapsibleTrigger asChild>
-                                <Button type="button" variant="ghost" size="sm" className="-ml-2 text-ink-muted">
-                                    <ChevronRight size={14} aria-hidden className={`transition-transform duration-150 motion-reduce:transition-none ${advancedOpen ? "rotate-90" : ""}`} />
-                                    Discovery settings
-                                    <span className="font-normal text-ink-subtle">Optional</span>
-                                </Button>
-                            </CollapsibleTrigger>
-                            <CollapsibleContent>
-                                <div className="mt-2 space-y-4 rounded-lg border border-line bg-surface-soft p-4">
-                                    <div>
-                                        <Label className="mb-1.5" htmlFor="discovery-goal">Focus</Label>
-                                        <Input id="discovery-goal" value={goal} onChange={(event) => setGoal(event.target.value)} autoComplete="off" placeholder="e.g. Focus on the checkout flow" disabled={busy} />
-                                        <p className="mt-1.5 text-meta text-ink-subtle">Leave empty to let the agent explore everything it can reach.</p>
-                                    </div>
-                                    <div>
-                                        <Label className="mb-1.5" htmlFor="start-url">Start URL</Label>
-                                        <Input
-                                            id="start-url"
-                                            value={startUrl}
-                                            onChange={(event) => {
-                                                setStartUrl(event.target.value);
-                                                setStartUrlEdited(true);
-                                            }}
-                                            type="url"
-                                            inputMode="url"
-                                            placeholder={baseUrl || "Same as base URL"}
-                                            className="font-mono text-meta"
-                                            disabled={busy}
-                                        />
-                                        <p className="mt-1.5 text-meta text-ink-subtle">Must stay on the base URL origin.</p>
-                                    </div>
-                                    <div>
-                                        <Label className="mb-1.5" htmlFor="safety-notes">Safety notes</Label>
-                                        <Textarea id="safety-notes" value={safetyNotes} onChange={(event) => setSafetyNotes(event.target.value)} rows={3} placeholder={"Do not submit contact forms\nStay out of the checkout"} disabled={busy} />
-                                        <p className="mt-1.5 text-meta text-ink-subtle">One rule per line. The agent follows them during discovery.</p>
-                                    </div>
-                                </div>
-                            </CollapsibleContent>
-                        </Collapsible>
                         {!llmReady && (
                             <Alert variant="warning" role="status" className="flex items-start gap-2.5">
                                 <KeyRound size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
                                 <div className="min-w-0">
                                     <AlertTitle>No agent model is configured</AlertTitle>
                                     <AlertDescription>
-                                        You can create the project now. Discovery needs a model before it can run
+                                        You can create the project now. The agent explores it as soon as a model is connected
                                         {isAdmin ? <>: <Link href="/settings?tab=model">connect one in instance settings</Link>.</> : ". Ask an administrator to connect a model."}
                                     </AlertDescription>
                                 </div>
@@ -307,11 +209,8 @@ function HomeContent() {
                         {createError && <Alert variant="danger" role="alert"><AlertDescription>{createError}</AlertDescription></Alert>}
                     </div>
                     <div className="flex flex-col gap-2 border-t border-line bg-surface-soft px-5 py-4">
-                        <Button type="submit" size="lg" disabled={busy || !llmReady} className="w-full">
-                            {submitting === "discovery" ? <><LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" /> Creating project…</> : <>Create project and explore <ArrowRight size={15} /></>}
-                        </Button>
-                        <Button type="button" variant="outline" onClick={createWithoutDiscovery} disabled={busy} className="w-full">
-                            {submitting === "plain" ? "Creating project…" : "Create without discovery"}
+                        <Button type="submit" size="lg" disabled={submitting} className="w-full">
+                            {submitting ? <><LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" /> Creating project…</> : <>{llmReady ? "Create project and explore" : "Create project"} <ArrowRight size={15} /></>}
                         </Button>
                     </div>
                 </form>

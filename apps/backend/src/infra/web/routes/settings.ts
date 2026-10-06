@@ -5,6 +5,7 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { discoverPendingProjectContexts } from "../../../core/chat/discovery";
 import { configuredModel, llmCredentials, modelRegistryPromise, modelRuntimePromise } from "../../../core/llm/runtime";
 import { providerFailure, oauthFailureMessage } from "../../../core/jobs/presentation-errors";
 import { settingsRepository } from "../../repositories/settings";
@@ -118,6 +119,7 @@ async function saveOAuthCredentials(id: string): Promise<void> {
     const session = oauthSessions.get(id);
     if (!session) return;
     finishOAuthSession(id, "done");
+    discoverPendingProjectContexts();
 }
 
 function failOAuthSession(id: string, error: unknown): void {
@@ -273,7 +275,9 @@ export function createSettingsRouter(): Hono {
         if (!modelRegistry.find(updated.provider, updated.model)) {
             throw new HTTPException(400, { message: "Unknown model for this provider" });
         }
-        return c.json(await settingsRepository.updateLlmSettings(updated));
+        const saved = await settingsRepository.updateLlmSettings(updated);
+        discoverPendingProjectContexts();
+        return c.json(saved);
     });
 
     router.put("/settings/llm/providers/:provider", access("admin"), async (c) => {
@@ -285,6 +289,7 @@ export function createSettingsRouter(): Hono {
         removeProviderOAuthSessions(provider);
         await llmCredentials.modify(provider, async () => ({ type: "api_key", key: body.data.apiKey }));
         await modelRuntime.refresh({ allowNetwork: false, providers: [provider] });
+        discoverPendingProjectContexts();
         return c.json({ ok: true });
     });
 

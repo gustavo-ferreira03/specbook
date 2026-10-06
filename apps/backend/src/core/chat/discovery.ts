@@ -1,0 +1,90 @@
+import type { DiscoveryBrief, ProjectContext } from "../../infra/db/schema";
+import { logger } from "../../infra/logger";
+import { projectContextsRepository, type ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
+import { projectsRepository } from "../../infra/repositories/projects";
+import { isAgentPaused } from "../jobs/pause";
+import { configuredModel } from "../llm/runtime";
+import { writeContextToRepo } from "../repo/writer";
+import { createChat } from "./session-store";
+import { startChatTurn } from "./turn-runner";
+
+export const DEFAULT_DISCOVERY_GOAL =
+    "Autonomously explore the application and map its areas, terminology, roles, business rules, and UI patterns. Record anything inaccessible or unclear as unknowns and ask the user for help only when blocked.";
+
+const BEGIN_DISCOVERY =
+    "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes, then propose the project context.";
+
+/** Callers hold the project's draft lock and have checked that no draft is active. */
+async function startDiscoveryLocked(
+    projectId: string,
+    brief: DiscoveryBrief,
+): Promise<{ revision: ProjectContextRevisionRow; chat: { id: string } }> {
+    const revision = await projectContextsRepository.createProjectContextDraft(projectId, brief);
+    let chat: { id: string };
+    try {
+        chat = await createChat(projectId, { contextRevisionId: revision.id }, "Project discovery");
+    } catch (error) {
+        await projectContextsRepository.deleteProjectContextDraft(revision.id).catch(console.error);
+        throw error;
+    }
+    await projectContextsRepository.attachContextChat(revision.id, chat.id);
+    startChatTurn(chat.id, BEGIN_DISCOVERY);
+    return { revision: (await projectContextsRepository.getProjectContextRevision(revision.id)) ?? revision, chat };
+}
+
+/** Starts a discovery chat, unless the project already has one in progress. */
+export function startContextDiscovery(
+    projectId: string,
+    brief: DiscoveryBrief,
+): Promise<{ revision: ProjectContextRevisionRow; chat: { id: string } } | { activeDraft: ProjectContextRevisionRow }> {
+    return projectContextsRepository.withProjectContextDraftLock(projectId, async () => {
+        const activeDraft = await projectContextsRepository.getActiveProjectContextDraft(projectId);
+        return activeDraft ? { activeDraft } : startDiscoveryLocked(projectId, brief);
+    });
+}
+
+/**
+ * Explores a project that has no context yet once a model is ready. Returns the discovery chat id;
+ * a failure is logged and never fails the caller.
+ */
+export async function discoverProjectContext(projectId: string): Promise<string | null> {
+    try {
+        if (!(await configuredModel()).ready || (await isAgentPaused(projectId))) return null;
+        return await projectContextsRepository.withProjectContextDraftLock(projectId, async () => {
+            const project = await projectsRepository.getProject(projectId);
+            if (!project || (await projectContextsRepository.hasRevisions(projectId))) return null;
+            const brief = { goal: DEFAULT_DISCOVERY_GOAL, startUrl: project.baseUrl, safetyNotes: [] };
+            return (await startDiscoveryLocked(project.id, brief)).chat.id;
+        });
+    } catch (error) {
+        logger.error("automatic discovery failed", { projectId, error });
+        return null;
+    }
+}
+
+/** Starts discovery in the background for every project still without context, for example when a model becomes ready. */
+export function discoverPendingProjectContexts(): void {
+    void (async () => {
+        if (!(await configuredModel()).ready) return;
+        for (const project of await projectsRepository.listProjects()) await discoverProjectContext(project.id);
+    })().catch((error) => logger.error("automatic discovery failed", { error }));
+}
+
+export function contextProposalProblem(context: ProjectContext): string | null {
+    if (!context.summary.trim()) return "Confirmation requires a non-empty summary";
+    if (context.areas.length === 0 && context.unknowns.length === 0) {
+        return "Confirmation requires at least one area or unknown";
+    }
+    return null;
+}
+
+/** Confirms a discovery draft once it holds a complete proposal; an incomplete draft stays as is. */
+export async function confirmDiscoveredContext(revisionId: string): Promise<void> {
+    const initial = await projectContextsRepository.getProjectContextRevision(revisionId);
+    if (!initial) return;
+    await projectContextsRepository.withProjectContextDraftLock(initial.projectId, async () => {
+        const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
+        if (revision?.status !== "draft" || contextProposalProblem(revision.context)) return;
+        await writeContextToRepo(revision.projectId, revision.context, { confirmRevisionId: revision.id });
+    });
+}

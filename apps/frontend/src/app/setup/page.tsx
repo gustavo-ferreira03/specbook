@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, ArrowRight, Check, LoaderCircle, RefreshCw } from "lucide-react";
@@ -13,7 +12,7 @@ import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSec
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, createContextDiscovery, errorMessage } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import type { Project, SetupStatus } from "@/lib/types";
 
 type SetupStep = "admin" | "model" | "project";
@@ -32,7 +31,6 @@ export default function SetupPage() {
     const [projectName, setProjectName] = useState("");
     const [baseUrl, setBaseUrl] = useState("");
     const [demo, setDemo] = useState(false);
-    const [createdProject, setCreatedProject] = useState<Project | null>(null);
 
     const load = useCallback(async () => {
         setLoadError("");
@@ -77,29 +75,18 @@ export default function SetupPage() {
         setError("");
     }
 
-    async function createProject(explore: boolean) {
-        if (!demo && (!projectName.trim() || !baseUrl.trim())) {
-            setError("Enter a project name and the address of your app.");
-            return;
-        }
+    async function createProject(event: React.FormEvent) {
+        event.preventDefault();
         setBusy(true);
         setError("");
-        let project = createdProject;
         try {
-            if (!project) {
-                const result = demo
-                    ? await api<{ project: Project }>("/setup/demo", { method: "POST" })
-                    : await api<{ project: Project }>("/projects", { method: "POST", body: JSON.stringify({ name: projectName.trim(), baseUrl: baseUrl.trim() }) });
-                project = result.project;
-                setCreatedProject(project);
-            }
-            try { localStorage.setItem("specbook:last-project", project.id); } catch {}
-            if (explore) {
-                const discovery = await createContextDiscovery(project.id, {});
-                router.push(`/p/${project.id}/chats/${discovery.chat.id}`);
-            } else router.push(`/p/${project.id}`);
+            const result = demo
+                ? await api<{ project: Project; discoveryChatId: string | null }>("/setup/demo", { method: "POST" })
+                : await api<{ project: Project; discoveryChatId: string | null }>("/projects", { method: "POST", body: JSON.stringify({ name: projectName.trim(), baseUrl: baseUrl.trim() }) });
+            try { localStorage.setItem("specbook:last-project", result.project.id); } catch {}
+            router.push(result.discoveryChatId ? `/p/${result.project.id}/chats/${result.discoveryChatId}` : `/p/${result.project.id}`);
         } catch (reason) {
-            setError(project ? `Your project was saved, but exploration could not start. ${errorMessage(reason)}` : errorMessage(reason));
+            setError(errorMessage(reason));
             setBusy(false);
         }
     }
@@ -131,19 +118,18 @@ export default function SetupPage() {
                 {step === "model" && <ModelSettings onConnectionTested={connectionTested} />}
                 {step === "project" && <>
                     <SettingsSection id="setup-project-heading" title="Your first project" description="Use an app your Specbook server can reach. You can change these details later."
-                        actions={!createdProject && <Button variant="outline" onClick={demo ? () => { setDemo(false); setProjectName(""); setBaseUrl(""); } : tryDemo} disabled={busy}>{demo ? "Use my own app" : "Try with a demo app"}</Button>}>
-                        <form onSubmit={(event) => { event.preventDefault(); void createProject(true); }}>
-                            <SettingsRow label="Project name" htmlFor="setup-project-name"><Input id="setup-project-name" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer portal" required disabled={busy || demo || Boolean(createdProject)} /></SettingsRow>
-                            <SettingsRow label="App URL" htmlFor="setup-base-url"><Input id="setup-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} type="url" inputMode="url" placeholder="https://staging.example.com" required disabled={busy || demo || Boolean(createdProject)} /></SettingsRow>
+                        actions={<Button variant="outline" onClick={demo ? () => { setDemo(false); setProjectName(""); setBaseUrl(""); } : tryDemo} disabled={busy}>{demo ? "Use my own app" : "Try with a demo app"}</Button>}>
+                        <form onSubmit={createProject}>
+                            <SettingsRow label="Project name" htmlFor="setup-project-name"><Input id="setup-project-name" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer portal" required disabled={busy || demo} /></SettingsRow>
+                            <SettingsRow label="App URL" htmlFor="setup-base-url"><Input id="setup-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} type="url" inputMode="url" placeholder="https://staging.example.com" required disabled={busy || demo} /></SettingsRow>
                             {demo && <SettingsBlock><p className="text-body text-ink">Sauce Demo is a public practice store. Specbook will save its public login for the agent to use.</p><p className="mt-2 text-body text-ink-muted">Username: <code className="text-meta">standard_user</code><br />Password: <code className="text-meta">secret_sauce</code></p></SettingsBlock>}
                             <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}>
-                                <Button type="submit" disabled={busy}>{busy && <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />}{busy ? "Preparing your project…" : createdProject ? "Retry exploration" : "Create project and explore"}<ArrowRight size={14} /></Button>
+                                <Button type="submit" disabled={busy}>{busy && <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />}{busy ? "Preparing your project…" : "Create project and explore"}<ArrowRight size={14} /></Button>
                             </SettingsFooter>
                         </form>
                     </SettingsSection>
                     <div className="flex flex-wrap justify-between gap-3">
                         <Button variant="ghost" onClick={() => { setError(""); setStep("model"); }} disabled={busy}><ArrowLeft size={14} /> Model settings</Button>
-                        {createdProject ? <Button asChild variant="outline"><Link href={`/p/${createdProject.id}`}>Open saved project</Link></Button> : <Button variant="ghost" onClick={() => void createProject(false)} disabled={busy}>Create without discovery</Button>}
                     </div>
                 </>}
             </>}
