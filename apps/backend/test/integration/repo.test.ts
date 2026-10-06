@@ -865,6 +865,9 @@ describe("project steward", () => {
         const { enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
         await stopJobWorker();
         const projectId = await createProject("Missing run access");
+        const { environmentsRepository } = await import("../../src/infra/repositories/environments");
+        const production = (await environmentsRepository.list(projectId))[0]!;
+        await environmentsRepository.update(production, { ...production, allowedOrigins: ["https://preview.example.com"] });
         await stewardRepository.update(projectId, { autonomy: "observe" });
         const feature = await writer.createFeatureInRepo(projectId, null, "Sign in", "");
         const source = VALID_SPEC.replace("{ page, step }", "{ page, step, secret }")

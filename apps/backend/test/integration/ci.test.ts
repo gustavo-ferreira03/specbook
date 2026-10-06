@@ -12,6 +12,7 @@ import { useTempStorage } from "../helpers/storage";
 const storage = useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
 const { projectsRepository } = await import("../../src/infra/repositories/projects");
+const { environmentsRepository } = await import("../../src/infra/repositories/environments");
 const { featuresRepository } = await import("../../src/infra/repositories/features");
 const { specsRepository } = await import("../../src/infra/repositories/specs");
 const { runsRepository } = await import("../../src/infra/repositories/runs");
@@ -20,9 +21,11 @@ const { stewardRepository } = await import("../../src/infra/repositories/steward
 const { issueGitAccessToken } = await import("../../src/core/repo/access");
 const { issueCiToken, authenticateCiToken } = await import("../../src/core/ci/tokens");
 const { ciResult, junitResult, markdownResult } = await import("../../src/core/ci/results");
-const { ciRunSchema, ciSettingsSchema } = await import("../../src/core/ci/schemas");
+const { ciRunSchema } = await import("../../src/core/ci/schemas");
+const { environmentSchema } = await import("../../src/core/environments");
 const { getRunBatchDirectory, getRunBatch } = await import("../../src/core/runner/batch");
 const { createCiRouter, createCiSettingsRouter } = await import("../../src/infra/web/routes/ci");
+const { createEnvironmentsRouter } = await import("../../src/infra/web/routes/environments");
 const { buildHostAllowlist, csrfGuard, hostGuard, jsonBodyLimit } = await import("../../src/infra/web/security");
 
 before(runMigrations);
@@ -30,6 +33,7 @@ const app = new Hono();
 app.use("*", hostGuard(buildHostAllowlist(4000, {})), csrfGuard(), jsonBodyLimit());
 app.route("/", createCiRouter());
 app.route("/", createCiSettingsRouter());
+app.route("/", createEnvironmentsRouter());
 const browserHeaders = { Host: "localhost:4000", "X-Specbook-Request": "1" };
 
 async function fixture() {
@@ -82,7 +86,7 @@ describe("CI access and quality gates", () => {
     test("accepts external CI hosts only with the correct token and records a deduplicated deploy signal", async () => {
         const project = await projectsRepository.createProject("Deploy", "https://8.8.8.8");
         const { token } = await issueCiToken(project.id);
-        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: ["https://1.1.1.1"] });
+        await environmentsRepository.create(project.id, { name: "preview", baseUrl: project.baseUrl, allowedOrigins: ["https://1.1.1.1"], credentialOverrides: {} });
         const url = `/ci/projects/${project.id}/deploy`;
         const body = JSON.stringify({ environment: "preview", url: "https://1.1.1.1", commitSha: "abc" });
         assert.equal((await app.request(url, { method: "POST", headers: { Host: "external.test", "Content-Type": "application/json" }, body })).status, 401);
@@ -104,9 +108,10 @@ describe("CI access and quality gates", () => {
         const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
         const post = (body: object, endpoint = "deploy") => app.request(`/ci/projects/${project.id}/${endpoint}`, { method: "POST", headers, body: JSON.stringify(body) });
         assert.equal((await post({ url: "https://1.1.1.1" })).status, 400);
-        const save = await app.request(`/projects/${project.id}/ci`, { method: "PUT", headers: { ...browserHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ allowedOrigins: ["https://1.1.1.1/", "http://127.0.0.1", "http://169.254.169.254", "http://[::1]"] }) });
+        const production = (await environmentsRepository.list(project.id))[0]!;
+        const save = await app.request(`/projects/${project.id}/environments/${production.id}`, { method: "PUT", headers: { ...browserHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ name: "Production", baseUrl: project.baseUrl, allowedOrigins: ["https://1.1.1.1/", "http://127.0.0.1", "http://169.254.169.254", "http://[::1]"], credentialOverrides: {} }) });
         assert.equal(save.status, 200);
-        assert.equal((await save.json()).allowedOrigins[0], "https://1.1.1.1");
+        assert.equal((await save.json()).environment.allowedOrigins[0], "https://1.1.1.1");
         for (const target of ["http://127.0.0.1", "http://169.254.169.254", "http://[::1]"]) {
             assert.equal((await post({ url: target })).status, 400);
             assert.equal((await post({ baseUrl: target }, "runs")).status, 400);
@@ -122,7 +127,8 @@ describe("CI access and quality gates", () => {
         const rotated = await issueCiToken(project.id);
         assert.equal((await app.request(`/ci/projects/${project.id}/deploy`, { method: "POST", headers: { ...headers, Authorization: `Bearer ${rotated.token}` }, body: "{}" })).status, 202);
         const local = await projectsRepository.createProject("Local app", "http://127.0.0.1:3000");
-        await projectsRepository.updateProject(local.id, { ciAllowedOrigins: ["http://127.0.0.1:4000"] });
+        const localEnvironment = (await environmentsRepository.list(local.id))[0]!;
+        await environmentsRepository.update(localEnvironment, { ...localEnvironment, allowedOrigins: ["http://127.0.0.1:4000"] });
         const localHeaders = { ...headers, Authorization: `Bearer ${(await issueCiToken(local.id)).token}` };
         assert.equal((await app.request(`/ci/projects/${local.id}/deploy`, { method: "POST", headers: localHeaders, body: JSON.stringify({ url: "http://127.0.0.1:4000" }) })).status, 202);
     });
@@ -212,7 +218,7 @@ describe("CI access and quality gates", () => {
         assert.equal(ciRunSchema.safeParse({}).success, true);
         assert.equal(ciRunSchema.safeParse({ featureId: crypto.randomUUID(), specIds: [crypto.randomUUID()] }).success, false);
         for (const baseUrl of ["file:///etc/passwd", "https://user:pass@example.com", "not-a-url"]) assert.equal(ciRunSchema.safeParse({ baseUrl }).success, false);
-        for (const origin of ["https://*.example.com", "https://example.com/path", "https://example.com?query"]) assert.equal(ciSettingsSchema.safeParse({ allowedOrigins: [origin] }).success, false);
+        for (const origin of ["https://*.example.com", "https://example.com/path", "https://example.com?query"]) assert.equal(environmentSchema.safeParse({ name: "Production", baseUrl: "https://example.com", allowedOrigins: [origin] }).success, false);
     });
 
     test("reports completed attempts while agent work is paused or still awaiting acknowledgement", async () => {
@@ -314,6 +320,136 @@ describe("CI access and quality gates", () => {
             assert.equal(rejected.code, 1);
             assert.equal(posts, 2, "the failed POST is attempted exactly once");
             assert.equal(polls, 3, "a failed trigger never enters the result loop");
+        } finally {
+            server.closeAllConnections();
+            await new Promise<void>((resolve) => server.close(() => resolve()));
+        }
+    });
+
+    test("the CI job creates one summary per project, updates it across runs and keeps provider tokens separate", async () => {
+        const { backendRoot } = await import("../../src/core/paths");
+        const directory = path.join(storage, "client-comments");
+        await fs.mkdir(directory, { recursive: true });
+        let passing = true;
+        let failComment = false;
+        let triggerCount = 0;
+        let commentPosts = 0;
+        let commentUpdates = 0;
+        let commentDeletes = 0;
+        let environment: unknown;
+        const comments: { id: number; body: string; user: { login: string } }[] = [];
+        const notes: { id: number; body: string; author: { id: number }; system: boolean }[] = [];
+        const server = http.createServer(async (request, response) => {
+            const target = new URL(request.url!, "http://localhost");
+            let body = "";
+            for await (const chunk of request) body += chunk;
+            response.setHeader("Content-Type", "application/json");
+            if (target.pathname.startsWith("/specbook/")) {
+                assert.equal(request.headers.authorization, "Bearer test-ci-token");
+                assert.equal(request.headers["private-token"], undefined);
+                assert.ok(!body.includes("github-test-token") && !body.includes("gitlab-test-token"));
+                if (request.method === "POST") {
+                    triggerCount++;
+                    environment = JSON.parse(body).environment;
+                    response.statusCode = 202;
+                    response.end(JSON.stringify({ batch: { id: "batch-id" }, url: "https://example.com/results", complete: true, status: passing ? "passed" : "failed", qualityGate: { passed: passing, failures: passing ? 0 : 1, flaky: 0, knownBugs: 0 } }));
+                } else response.end(target.searchParams.get("format") === "junit" ? '<testsuite tests="1"/>' : `## Specbook: ${passing ? "passed" : "failed"}\nhttps://example.com/results\ntest-ci-token github-test-token gitlab-test-token`);
+                return;
+            }
+            const github = target.pathname.startsWith("/github/");
+            assert.equal(github ? request.headers.authorization : request.headers["private-token"], github ? "Bearer github-test-token" : "gitlab-test-token");
+            assert.ok(!body.includes("test-ci-token") && !body.includes("github-test-token") && !body.includes("gitlab-test-token"));
+            if (!github && target.pathname.endsWith("/user")) { response.end(JSON.stringify({ id: 77 })); return; }
+            const list = github ? comments : notes;
+            if (request.method === "GET") {
+                const start = (Number(target.searchParams.get("page")) - 1) * 100;
+                response.end(JSON.stringify(list.slice(start, start + 100)));
+            } else if (request.method === "POST") {
+                commentPosts++;
+                if (failComment) { response.statusCode = 503; response.end("github-test-token gitlab-test-token"); return; }
+                const comment = { id: 1000 + commentPosts, body: JSON.parse(body).body, user: { login: "github-actions[bot]" }, author: { id: 77 }, system: false };
+                list.push(comment);
+                response.statusCode = 201;
+                response.end(JSON.stringify(comment));
+            } else {
+                const id = Number(target.pathname.split("/").at(-1));
+                const index = list.findIndex((comment) => comment.id === id);
+                assert.ok(index >= 0);
+                if (request.method === "DELETE") {
+                    commentDeletes++;
+                    list.splice(index, 1);
+                    response.statusCode = 204;
+                    response.end();
+                } else {
+                    commentUpdates++;
+                    list[index]!.body = JSON.parse(body).body;
+                    response.end(JSON.stringify(list[index]));
+                }
+            }
+        });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const api = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const marker = `<!-- specbook:${crypto.createHash("sha256").update(`${api}/specbook/project-id`).digest("hex")} -->`;
+        comments.push({ id: 1, body: `${marker}\nHuman comment`, user: { login: "human" } });
+        for (let index = 0; index < 100; index++) comments.push({ id: index + 2, body: "Other comment", user: { login: "human" } });
+        notes.push({ id: 1, body: `${marker}\nSomeone else's note`, author: { id: 12 }, system: false });
+        await fs.writeFile(path.join(directory, "event.json"), JSON.stringify({ pull_request: { number: 42 } }));
+        const runClient = (env: Record<string, string> = {}, args: string[] = []) => new Promise<{ code: number | null; output: string }>((resolve, reject) => {
+            const child = spawn(process.execPath, [path.join(backendRoot, "scripts", "specbook-ci.mjs"), ...args], {
+                env: { ...process.env, SPECBOOK_API_URL: `${api}/specbook`, SPECBOOK_PROJECT_ID: "project-id", SPECBOOK_CI_TOKEN: "test-ci-token", SPECBOOK_ENVIRONMENT: "production", SPECBOOK_COMMENT_PROVIDER: "none", SPECBOOK_TIMEOUT_SECONDS: "20",
+                    SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), GITHUB_EVENT_PATH: path.join(directory, "event.json"), GITHUB_REPOSITORY: "example/application", GITHUB_API_URL: `${api}/github`, GITHUB_TOKEN: "github-test-token",
+                    CI_API_V4_URL: `${api}/gitlab`, CI_PROJECT_ID: "123", CI_MERGE_REQUEST_IID: "42", SPECBOOK_GITLAB_TOKEN: "gitlab-test-token", ...env },
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            let output = "";
+            child.stdout.on("data", (value) => { output += value.toString(); });
+            child.stderr.on("data", (value) => { output += value.toString(); });
+            child.on("error", reject);
+            child.on("close", (code) => resolve({ code, output }));
+        });
+        try {
+            const created = await runClient({}, ["--environment", "staging", "--comment=github"]);
+            assert.equal(created.code, 0, created.output);
+            assert.equal(environment, "staging", "the command line overrides the default environment");
+            assert.equal(commentPosts, 1);
+            assert.equal(comments.length, 102, "a human's matching marker is never overwritten");
+            assert.match(comments.at(-1)!.body, /Specbook: passed/);
+            assert.ok(comments.at(-1)!.body.includes("[REDACTED]"));
+            comments.push({ ...comments.at(-1)!, id: 2000 });
+            passing = false;
+            const updated = await runClient({ SPECBOOK_COMMENT_PROVIDER: "github" });
+            assert.equal(updated.code, 1, "comment publishing preserves a failing quality gate");
+            assert.equal(environment, "production");
+            assert.equal(commentPosts, 1, "later jobs update the existing comment, including on the second page");
+            assert.equal(commentUpdates, 1);
+            assert.equal(commentDeletes, 1, "only duplicate bot comments with this project marker are removed");
+            assert.match(comments.at(-1)!.body, /Specbook: failed/);
+            passing = true;
+            const gitlab = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab" });
+            assert.equal(gitlab.code, 0, gitlab.output);
+            assert.equal(notes.length, 2);
+            const gitlabUpdated = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab" });
+            assert.equal(gitlabUpdated.code, 0, gitlabUpdated.output);
+            assert.equal(notes.length, 2);
+            assert.equal(commentUpdates, 2, "GitLab uses PUT on the note authored by its CI project token");
+            const beforeRejected = triggerCount;
+            const rejected = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab", SPECBOOK_GITLAB_TOKEN: "", CI_JOB_TOKEN: "job-token" });
+            assert.equal(rejected.code, 1);
+            assert.match(rejected.output, /CI_JOB_TOKEN cannot create or update/);
+            assert.equal(triggerCount, beforeRejected, "unsupported GitLab authentication fails before starting a batch");
+            const noContext = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab", SPECBOOK_GITLAB_TOKEN: "", CI_MERGE_REQUEST_IID: "" });
+            assert.equal(noContext.code, 0, noContext.output);
+            assert.match(noContext.output, /no merge request/);
+            const beforeFailure = commentPosts;
+            failComment = true;
+            const failed = await runClient({ SPECBOOK_COMMENT_PROVIDER: "github", SPECBOOK_PROJECT_ID: "other-project" });
+            assert.equal(failed.code, 1, "publishing failure never silently passes the CI job");
+            assert.match(failed.output, /comment API returned HTTP 503; reports are saved locally/);
+            assert.equal(commentPosts, beforeFailure + 1, "an ambiguous failed POST is never retried");
+            for (const token of ["test-ci-token", "github-test-token", "gitlab-test-token", "job-token"]) assert.ok(!failed.output.includes(token));
+            const summary = await fs.readFile(path.join(directory, "summary.md"), "utf8");
+            assert.match(summary, /Specbook: passed/);
+            assert.ok(!summary.includes("test-ci-token") && !summary.includes("github-test-token") && !summary.includes("gitlab-test-token"));
         } finally {
             server.closeAllConnections();
             await new Promise<void>((resolve) => server.close(() => resolve()));

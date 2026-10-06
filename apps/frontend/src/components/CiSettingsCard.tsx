@@ -11,7 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import Link from "next/link";
+import { EnvironmentSelect } from "@/components/EnvironmentSelect";
+import type { ProjectEnvironment } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_URL, api, apiPath, errorMessage, isAbortError } from "@/lib/api";
 import { CI_PROVIDERS, ciSnippet, type CiProvider } from "@/lib/ci-snippets";
@@ -33,6 +35,7 @@ interface CiBatch {
         startedAt: string;
         durationMs: number | null;
         baseUrl: string;
+        environment?: ProjectEnvironment;
         ci: { commitSha?: string; ref?: string; buildUrl?: string };
     };
     status: "running" | "passed" | "failed" | "error";
@@ -43,8 +46,7 @@ interface CiBatch {
 }
 
 interface CiSettings {
-    projectOrigin: string;
-    allowedOrigins: string[];
+    environments: ProjectEnvironment[];
     token: CiAccess;
     batches: CiBatch[];
 }
@@ -55,9 +57,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
     onOneTimeTokenChange: (token: string | null) => void;
 }) {
     const [settings, setSettings] = useState<CiSettings | null>(null);
-    const [originsDraft, setOriginsDraft] = useState<string | null>(null);
-    const [originsSaving, setOriginsSaving] = useState(false);
-    const [originsFeedback, setOriginsFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [environment, setEnvironment] = useState("Production");
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [busy, setBusy] = useState(false);
@@ -74,7 +74,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
     const confirmTriggerRef = useRef<HTMLElement | null>(null);
     const [publicApiUrl, setPublicApiUrl] = useState(API_URL);
     useEffect(() => { setPublicApiUrl(`${window.location.origin}${API_URL}`); }, []);
-    const snippet = ciSnippet(provider, publicApiUrl, projectId, failOnFlaky, failOnKnownBugs);
+    const snippet = ciSnippet(provider, publicApiUrl, projectId, failOnFlaky, failOnKnownBugs, environment);
     const selectedProvider = CI_PROVIDERS.find(([value]) => value === provider)!;
 
     useEffect(() => {
@@ -135,19 +135,6 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
         }
     }
 
-    async function saveOrigins() {
-        setOriginsSaving(true);
-        setOriginsFeedback(null);
-        try {
-            const allowedOrigins = (originsDraft ?? "").split(/\r?\n/).map((origin) => origin.trim()).filter(Boolean);
-            const saved = await api<{ allowedOrigins: string[] }>(apiPath`/projects/${projectId}/ci`, { method: "PUT", body: JSON.stringify({ allowedOrigins }) });
-            setSettings((current) => current && { ...current, allowedOrigins: saved.allowedOrigins });
-            setOriginsDraft(null);
-            setOriginsFeedback({ type: "success", text: "Preview origins saved." });
-        } catch (caught) { setOriginsFeedback({ type: "error", text: errorMessage(caught) }); }
-        finally { setOriginsSaving(false); }
-    }
-
     function openConfirmation(action: "rotate" | "revoke", trigger: HTMLElement) {
         confirmTriggerRef.current = trigger;
         setConfirmError("");
@@ -204,23 +191,11 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                 {(error || notice) && <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : { type: "success", text: notice }} />} />}
             </SettingsSection>
 
-            <SettingsSection id="ci-origins-heading" title="Preview deployments" description="Choose where CI tokens may run checks or report a deployment.">
-                <form onSubmit={(event) => { event.preventDefault(); void saveOrigins(); }}>
-                    <SettingsRow label="Allowed origins" htmlFor="ci-origins" description="Optional. One exact HTTP(S) origin per line, without paths or wildcards.">
-                        <Textarea id="ci-origins" rows={3} value={originsDraft ?? settings.allowedOrigins.join("\n")} onChange={(event) => { setOriginsDraft(event.target.value); setOriginsFeedback(null); }} placeholder="https://preview.example.com" disabled={originsSaving} className="font-mono text-meta" aria-describedby="ci-origins-help" />
-                        <p id="ci-origins-help" className="mt-1.5 break-words text-meta text-ink-subtle">{settings.projectOrigin} is always allowed. Private targets require a project URL using a private IP address or localhost. Credential access is configured separately in Credentials.</p>
-                    </SettingsRow>
-                    <SettingsFooter feedback={originsFeedback ? <InlineFeedback feedback={originsFeedback} /> : originsDraft !== null ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}>
-                        {originsDraft !== null && <Button type="button" variant="ghost" disabled={originsSaving} onClick={() => { setOriginsDraft(null); setOriginsFeedback(null); }}>Cancel</Button>}
-                        <Button type="submit" disabled={originsSaving || originsDraft === null}>{originsSaving ? "Saving…" : "Save origins"}</Button>
-                    </SettingsFooter>
-                </form>
-            </SettingsSection>
-
             <SettingsSection id="ci-pipeline-heading" title="Pipeline setup" description="Run this after a deployment is ready. The runner needs access to your Specbook server.">
                 <SettingsRow label="CI provider" htmlFor="ci-provider">
                     <Select value={provider} onValueChange={(value) => { setProvider(value as CiProvider); setCopied(null); setCopyError(null); }}><SelectTrigger id="ci-provider"><SelectValue /></SelectTrigger><SelectContent>{CI_PROVIDERS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
                 </SettingsRow>
+                <SettingsRow label="Environment"><EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} /><p className="mt-1.5 text-meta text-ink-muted">Preview URLs must be allowed in <Link href={`/p/${projectId}/settings?tab=environments`} className="underline underline-offset-2">this environment</Link>.</p></SettingsRow>
                 <SettingsRow label="Quality gate" description="These options are included in the snippet below.">
                     <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-1.5"><Label htmlFor="ci-flaky">Passes on retry</Label><Select value={String(failOnFlaky)} onValueChange={(value) => setFailOnFlaky(value === "true")}><SelectTrigger id="ci-flaky"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="false">Allow flaky Specs</SelectItem><SelectItem value="true">Fail the pipeline</SelectItem></SelectContent></Select></div>
@@ -234,7 +209,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                     </div>
                     <pre ref={snippetRef} tabIndex={0} aria-label={`${selectedProvider[1]} pipeline snippet`} className="max-h-96 overflow-auto rounded-md border border-line bg-surface-soft p-3 font-mono text-meta leading-5 text-ink focus-visible:outline-2 focus-visible:outline-ring"><code>{snippet}</code></pre>
                     {copyError === "snippet" && <p className="mt-2 text-meta text-danger" role="alert">Clipboard unavailable. The snippet is selected; press Ctrl+C or Cmd+C to copy it.</p>}
-                    <p className="mt-3 text-body text-ink-muted">{provider === "jenkins" ? "Save the token as a secret text credential named specbook-ci-token." : `Save SPECBOOK_CI_TOKEN as a ${provider === "github" ? "repository secret" : provider === "gitlab" ? "masked CI/CD variable" : provider === "bitbucket" ? "secured repository variable" : "project environment variable"}.`} For preview deployments, set <code className="font-mono text-meta">SPECBOOK_BASE_URL</code> in the pipeline.</p>
+                    <p className="mt-3 text-body text-ink-muted">{provider === "jenkins" ? "Save the token as a secret text credential named specbook-ci-token." : `Save SPECBOOK_CI_TOKEN as a ${provider === "github" ? "repository secret" : provider === "gitlab" ? "masked CI/CD variable" : provider === "bitbucket" ? "secured repository variable" : "project environment variable"}.`} GitHub pull requests receive an updated comment using the job token. GitLab merge request comments require SPECBOOK_GITLAB_TOKEN with API access, saved only in CI. For preview deployments, set <code className="font-mono text-meta">SPECBOOK_BASE_URL</code> in the pipeline.</p>
                 </SettingsBlock>
             </SettingsSection>
 
@@ -246,6 +221,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                             <div className="flex flex-wrap items-center gap-2"><StatusPill status={result.batch.status} kind="run" size="sm" />{result.complete && <Badge variant={result.qualityGate.passed ? "success" : "danger"} size="sm">{result.qualityGate.passed ? <Check size={12} /> : <X size={12} />}Gate {result.qualityGate.passed ? "passed" : "failed"}</Badge>}</div>
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ink-subtle">
+                            {result.batch.environment && <Badge size="sm">{result.batch.environment.name}</Badge>}
                             <RelativeTime value={result.batch.startedAt} />
                             {result.batch.durationMs !== null && <span>{formatDuration(result.batch.durationMs)}</span>}
                             {result.batch.ci.ref && <span className="break-all">{result.batch.ci.ref}</span>}
