@@ -1,38 +1,25 @@
 import path from "node:path";
 import { parse } from "@babel/parser";
 import type * as t from "@babel/types";
-import type { RunEnvironment } from "../infra/db/schema";
 import { featuresRepository, type Feature } from "../infra/repositories/features";
 import { projectContextsRepository } from "../infra/repositories/project-contexts";
-import { runsRepository, type Run } from "../infra/repositories/runs";
 import { specsRepository, type Spec } from "../infra/repositories/specs";
-import { ciResult } from "./ci/results";
-import { resolveRunEnvironment } from "./environments";
-import { matchesCurrentSpec } from "./jobs/current-run";
 import { repoGit } from "./repo/git";
 import { readRepoFile } from "./repo/safe-fs";
 import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "./repo/writer";
 import { parseSpecYaml } from "./repo/yaml";
-import { listRunBatches } from "./runner/batch";
 import { validateSpecSource } from "./runner/validate";
 
 type CoverageStatus = "covered" | "partial" | "uncovered";
-type SpecHealth = "passing" | "failing" | "flaky" | "notRun" | "invalid" | "running";
 export interface CoverageArea {
-    kind: "area" | "role" | "rule";
     name: string;
     routes: string[];
     coverage: CoverageStatus;
-    featureIds: string[];
-    specIds: string[];
-    specs: { id: string; title: string }[];
-    matchedRoutes: string[];
     reason: string;
+    featureId: string | null;
+    specs: { id: string; title: string }[];
+    uncoveredRoutes: string[];
 }
-
-const normalize = (value: string) => value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-const contains = (text: string, phrase: string) => Boolean(normalize(phrase)) && ` ${normalize(text)} `.includes(` ${normalize(phrase)} `);
-const emptyCounts = (): Record<SpecHealth, number> => ({ passing: 0, failing: 0, flaky: 0, notRun: 0, invalid: 0, running: 0 });
 
 function routePath(value: string): string | null {
     try {
@@ -90,85 +77,33 @@ async function implementation(spec: Spec): Promise<Implementation> {
     } catch { return { valid: false, routes: [] }; }
 }
 
-function inEnvironment(run: { environment?: RunEnvironment | null }, environment: RunEnvironment): boolean {
-    return run.environment ? run.environment.id === environment.id : environment.name === "Production";
-}
-
-async function latestRun(specId: string, environment: RunEnvironment): Promise<Run | undefined> {
-    let before: string | undefined;
-    for (;;) {
-        const rows = await runsRepository.listRuns(specId, { limit: 200, before });
-        const latest = rows.find((run) => inEnvironment(run, environment));
-        if (latest || rows.length < 200) return latest;
-        before = rows.at(-1)!.id;
+function subtree(rootId: string, features: Feature[]): Set<string> {
+    const ids = new Set([rootId]);
+    for (let size = 0; size !== ids.size;) {
+        size = ids.size;
+        for (const feature of features) if (feature.parentId && ids.has(feature.parentId)) ids.add(feature.id);
     }
+    return ids;
 }
 
-function featureText(feature: Feature, features: Map<string, Feature>): string {
-    const parents = new Set<string>();
-    const parts: string[] = [];
-    let current: Feature | undefined = feature;
-    while (current && !parents.has(current.id)) {
-        parents.add(current.id);
-        parts.push(current.title, current.description);
-        current = current.parentId ? features.get(current.parentId) : undefined;
-    }
-    return parts.join(" ");
-}
-
-export async function projectCoverage(projectId: string, environmentName?: string) {
-    const [revision, features, specs, environment, batches] = await Promise.all([
+export async function projectCoverage(projectId: string) {
+    const [revision, features, specs] = await Promise.all([
         projectContextsRepository.getLatestConfirmedProjectContext(projectId), featuresRepository.listFeatures(projectId), specsRepository.listSpecs(projectId),
-        resolveRunEnvironment(projectId, environmentName), listRunBatches(projectId),
     ]);
-    const featureMap = new Map(features.map((feature) => [feature.id, feature]));
     const details = new Map(await Promise.all(specs.map(async (spec) => [spec.id, await implementation(spec)] as const)));
-    const latest = new Map(await Promise.all(specs.map(async (spec) => [spec.id, await latestRun(spec.id, environment)] as const)));
-    const health = new Map(await Promise.all(specs.map(async (spec) => {
-        const run = latest.get(spec.id);
-        const current = run && await matchesCurrentSpec(run, spec);
-        const state: SpecHealth = !details.get(spec.id)?.valid ? "invalid" : !current ? "notRun"
-            : run.status === "running" ? "running" : run.flaky ? "flaky" : run.status === "passed" ? "passing" : "failing";
-        return [spec.id, state] as const;
-    })));
-    const areas: CoverageArea[] = [];
-    const addArea = (kind: CoverageArea["kind"], name: string, routes: string[]) => {
-        const matched = specs.filter((spec) => contains(`${spec.title} ${spec.description} ${featureMap.has(spec.featureId) ? featureText(featureMap.get(spec.featureId)!, featureMap) : ""}`, name)
-            || routes.some((route) => details.get(spec.id)?.routes.some((tested) => matchesRoute(route, tested))));
+    const testsRoute = (spec: Spec, route: string) => Boolean(details.get(spec.id)?.routes.some((tested) => matchesRoute(route, tested)));
+    const areas = (revision?.context.areas ?? []).map(({ name, routes }): CoverageArea => {
+        const feature = features.find((item) => item.title.trim().toLowerCase() === name.trim().toLowerCase());
+        const featureIds = feature ? subtree(feature.id, features) : new Set<string>();
+        const matched = specs.filter((spec) => featureIds.has(spec.featureId) || routes.some((route) => testsRoute(spec, route)));
         const valid = matched.filter((spec) => details.get(spec.id)?.valid);
-        const matchedRoutes = routes.filter((route) => valid.some((spec) => details.get(spec.id)?.routes.some((tested) => matchesRoute(route, tested))));
-        const coverage: CoverageStatus = !matched.length ? "uncovered" : valid.length && matchedRoutes.length === routes.length ? "covered" : "partial";
-        const reason = coverage === "uncovered" ? "No matching Specs found"
-            : !valid.length ? "Matching Specs need repairing"
-            : coverage === "partial" ? `${routes.length - matchedRoutes.length} known route${routes.length - matchedRoutes.length === 1 ? " has" : "s have"} no matching Spec`
-            : routes.length ? "Specs reference every known route" : "Matching Specs exist";
-        const featureIds = [...new Set([...features.filter((feature) => contains(featureText(feature, featureMap), name)).map((feature) => feature.id), ...matched.map((spec) => spec.featureId)])];
-        const areaSpecs = matched.map((spec) => ({ id: spec.id, title: spec.title }));
-        areas.push({ kind, name, routes, coverage, featureIds, specIds: areaSpecs.map((spec) => spec.id), specs: areaSpecs, matchedRoutes, reason });
-    };
-    if (revision) {
-        for (const area of revision.context.areas) addArea("area", area.name, area.routes);
-        for (const role of revision.context.roles) addArea("role", role.name, []);
-        for (const rule of revision.context.businessRules) addArea("rule", rule, []);
-    }
-    const totals = emptyCounts();
-    const featureRows = features.map((feature) => {
-        const own = specs.filter((spec) => spec.featureId === feature.id);
-        const counts = emptyCounts();
-        for (const spec of own) { counts[health.get(spec.id)!]++; totals[health.get(spec.id)!]++; }
-        const lastRunAt = own.map((spec) => latest.get(spec.id)?.startedAt).filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
-        return { id: feature.id, title: feature.title, counts, lastRunAt };
+        const uncoveredRoutes = routes.filter((route) => !valid.some((spec) => testsRoute(spec, route)));
+        const coverage: CoverageStatus = !matched.length ? "uncovered" : valid.length && !uncoveredRoutes.length ? "covered" : "partial";
+        const reason = coverage === "uncovered" ? "No Specs yet"
+            : !valid.length ? "Specs need repairing"
+            : coverage === "partial" ? `${uncoveredRoutes.length} known route${uncoveredRoutes.length === 1 ? "" : "s"} without a Spec`
+            : routes.length ? "Specs reach every known route" : "Specs exist";
+        return { name, routes, coverage, reason, featureId: feature?.id ?? null, specs: matched.map((spec) => ({ id: spec.id, title: spec.title })), uncoveredRoutes };
     });
-    const trend = [];
-    for (const batch of batches.filter((batch) => batch.status !== "running" && batch.specs.length && inEnvironment(batch, environment))) {
-        const result = await ciResult(batch);
-        if (!result.complete) continue;
-        const passed = result.results.filter((item) => item.status === "passed" || item.flaky).length;
-        const total = result.results.length;
-        trend.push({ id: batch.id, label: batch.label, startedAt: batch.startedAt, passed, total, passRate: Math.round(passed / total * 100) });
-        if (trend.length === 20) break;
-    }
-    trend.reverse();
-    return { confirmed: Boolean(revision), environment: { id: environment.id, name: environment.name },
-        basis: "Matches use feature and Spec text and literal tested routes. They show where Specs exist, not complete behavioral coverage.", areas, features: featureRows, totals, trend };
+    return { confirmed: Boolean(revision), basis: "An area's Specs are the Specs in its feature and any Spec that opens one of its routes. They show where Specs exist, not complete behavioral coverage.", areas };
 }

@@ -448,8 +448,8 @@ export function overviewEventsUrl(projectId: string): string {
     return `${API_URL}${apiPath`/projects/${projectId}/overview/events`}`;
 }
 
-export function getCoverage(projectId: string, environment: string, signal?: AbortSignal): Promise<CoverageResponse> {
-    return api(`${apiPath`/projects/${projectId}/coverage`}?environment=${encodeURIComponent(environment)}`, { signal });
+export function getCoverage(projectId: string, signal?: AbortSignal): Promise<CoverageResponse> {
+    return api(apiPath`/projects/${projectId}/coverage`, { signal });
 }
 
 export function requestTask(projectId: string, kind: "coverage" | "explore"): Promise<{ intentId: string; status: "queued" | "running" | "paused" }> {

@@ -14,6 +14,7 @@ import {
     LoaderCircle,
     PencilLine,
     RefreshCw,
+    Search,
     SearchX,
     Trash2,
     X,
@@ -26,7 +27,9 @@ import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { RelativeTime } from "@/components/RelativeTime";
 import { SectionHeader } from "@/components/SectionHeader";
+import { StatusDot } from "@/components/StatusDot";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -36,16 +39,20 @@ import { Textarea } from "@/components/ui/textarea";
 import {
     ApiError,
     errorMessage,
+    getCoverage,
     getProject,
     createContextDiscovery,
     discardProjectContext,
     getProjectContext,
     getLlmRuntimeStatus,
     patchProjectContext,
+    requestTask,
 } from "@/lib/api";
 import { countLabel } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
-import type { Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
+import { useProjectOverview } from "@/lib/projectOverview";
+import { useVisiblePolling } from "@/lib/usePolling";
+import type { CoverageArea, CoverageResponse, Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
 
 function parseSafetyNotes(raw: string): string[] {
     return raw
@@ -140,11 +147,42 @@ function DiscoveryStartForm({
     );
 }
 
+const coverageLabels: Record<CoverageArea["coverage"], string> = { covered: "Covered", partial: "Partially covered", uncovered: "Uncovered" };
+
+function AreaCoverage({ projectId, area }: { projectId: string; area: CoverageArea }) {
+    const { data: overview } = useProjectOverview();
+    return (
+        <div className="mt-3 border-t border-line pt-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={area.coverage === "covered" ? "success" : area.coverage === "partial" ? "warning" : "secondary"} size="sm">{coverageLabels[area.coverage]}</Badge>
+                <span className="text-meta text-ink-muted">{area.reason}</span>
+            </div>
+            {area.specs.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                    {area.specs.map((spec) => (
+                        <li key={spec.id} className="flex min-w-0 items-center gap-1.5">
+                            <StatusDot status={overview?.specHealth[spec.id]?.status ?? "unverified"} size={13} />
+                            <Link href={`/p/${projectId}/specs/${spec.id}`} className="min-w-0 truncate text-ink-muted hover:text-ink hover:underline">{spec.title}</Link>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {area.specs.length > 0 && area.uncoveredRoutes.length > 0 && area.uncoveredRoutes.length < area.routes.length && (
+                <p className="mt-2 text-meta text-ink-subtle [overflow-wrap:anywhere]">No Spec opens <span className="font-mono">{area.uncoveredRoutes.join("  ·  ")}</span></p>
+            )}
+        </div>
+    );
+}
+
 /** This page exists to show the context, so it is always shown in full. */
-function ConfirmedContextSummary({ context }: { context: ProjectContext }) {
+function ConfirmedContextSummary({ projectId, context, coverage }: { projectId: string; context: ProjectContext; coverage?: CoverageResponse | null }) {
+    const areas = new Map(coverage?.areas.map((area) => [area.name, area]));
     return (
         <div className="px-4 py-4 sm:px-5">
-            <ContextReadout context={context} />
+            <ContextReadout context={context} renderArea={coverage ? (name) => {
+                const area = areas.get(name);
+                return area && <AreaCoverage projectId={projectId} area={area} />;
+            } : undefined} />
         </div>
     );
 }
@@ -153,6 +191,7 @@ function ContextPanel({
     projectId,
     project,
     contextState,
+    coverage,
     discoveryFailed,
     onReload,
     onDraftSaved,
@@ -160,6 +199,7 @@ function ContextPanel({
     projectId: string;
     project: Project;
     contextState: ProjectContextState;
+    coverage: CoverageResponse | null;
     discoveryFailed: boolean;
     onReload: () => void;
     onDraftSaved: (draft: ProjectContextRevision) => void;
@@ -170,6 +210,8 @@ function ContextPanel({
     const [discardDiscoveryError, setDiscardDiscoveryError] = useState("");
     const [updateMode, setUpdateMode] = useState(false);
     const [yamlMode, setYamlMode] = useState(false);
+    const [findState, setFindState] = useState<"idle" | "requesting" | "requested">("idle");
+    const [findError, setFindError] = useState("");
     const discardDiscoveryTriggerRef = useRef<HTMLButtonElement>(null);
 
     async function discardUnfinishedDiscovery(revisionId: string) {
@@ -183,6 +225,18 @@ function ContextPanel({
             setDiscardDiscoveryError(error instanceof Error ? error.message : String(error));
         } finally {
             setDiscardingDiscovery(false);
+        }
+    }
+
+    async function findUncoveredAreas() {
+        setFindError("");
+        setFindState("requesting");
+        try {
+            await requestTask(projectId, "coverage");
+            setFindState("requested");
+        } catch (error) {
+            setFindError(errorMessage(error));
+            setFindState("idle");
         }
     }
 
@@ -203,7 +257,7 @@ function ContextPanel({
     const draftHasProposal = draft ? draft.context.summary.trim().length > 0 : false;
     const draftChatHref = draft?.sourceChatId ? `/p/${projectId}/chats/${draft.sourceChatId}` : null;
 
-    if (!canEdit && !draft && !confirmed) return <section><SectionHeader title="Project context" /><p className="mt-3 text-body text-ink-muted">No context has been confirmed yet. An editor can start discovery and review the findings here.</p></section>;
+    if (!canEdit && !draft && !confirmed) return <section><SectionHeader title="What this app does" /><p className="mt-3 text-body text-ink-muted">No context has been confirmed yet. An editor can start discovery and review the findings here.</p></section>;
 
     if (!draft && !confirmed) {
         return (
@@ -315,7 +369,7 @@ function ContextPanel({
                                 onReload();
                             }}
                             onDiscarded={() => onReload()}
-                        /> : <ConfirmedContextSummary context={draft.context} />}
+                        /> : <ConfirmedContextSummary projectId={projectId} context={draft.context} />}
                     </div>
                 </section>
             )}
@@ -329,6 +383,9 @@ function ContextPanel({
                             ? "Stays active until the draft above replaces it."
                             : <>{confirmed.confirmedAt ? <RelativeTime value={confirmed.confirmedAt} prefix="Confirmed" /> : "Confirmed"} · supplied to every new chat</>}
                         actions={canEdit && !draft && <>
+                            <Button type="button" variant="ghost" size="sm" disabled={findState === "requesting"} onClick={() => void findUncoveredAreas()}>
+                                <Search size={14} /> {findState === "requesting" ? "Requesting…" : "Find uncovered areas"}
+                            </Button>
                             <Button type="button" variant="ghost" size="sm" onClick={() => setYamlMode((value) => !value)} aria-expanded={yamlMode}>
                                 {yamlMode ? <><X size={14} /> Close YAML</> : <><FileCode2 size={14} /> Edit YAML</>}
                             </Button>
@@ -338,6 +395,8 @@ function ContextPanel({
                         </>}
                         className="mb-3"
                     />
+                    {findState === "requested" && <p className="mb-3 text-body text-ink-muted">Requested. Review suggested Specs in <Link href={`/p/${projectId}/overview`} className="underline underline-offset-2">Overview</Link>.</p>}
+                    {findError && <Alert variant="danger" role="alert" className="mb-3"><AlertDescription>{findError}</AlertDescription></Alert>}
                     <div className="overflow-hidden rounded-xl border border-line">
                         {updateMode && !draft && (
                             <div className="border-b border-line bg-surface-soft p-4 sm:p-5">
@@ -347,8 +406,9 @@ function ContextPanel({
                                 <DiscoveryStartForm projectId={projectId} baseUrl={project.baseUrl} seedContext={confirmed.context} />
                             </div>
                         )}
-                        <ConfirmedContextSummary context={confirmed.context} />
+                        <ConfirmedContextSummary projectId={projectId} context={confirmed.context} coverage={coverage} />
                     </div>
+                    {coverage && <p className="mt-2 text-meta text-ink-subtle">{coverage.basis}</p>}
                     {yamlMode && !draft && <div className="mt-6"><ContextFileCard projectId={projectId} /></div>}
                 </section>
             )}
@@ -359,7 +419,7 @@ function ContextPanel({
 function ContextSkeleton() {
     return (
         <div className="flex min-h-full flex-col bg-surface" aria-busy="true" role="status">
-            <span className="sr-only">Loading project context</span>
+            <span className="sr-only">Loading app</span>
             <div className="border-b border-line px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5">
                 <div className="mx-auto flex max-w-reading items-start justify-between gap-6">
                     <div className="space-y-2.5 pt-1"><Skeleton className="h-6 w-48" /><Skeleton className="h-3.5 w-56" /></div>
@@ -373,13 +433,14 @@ function ContextSkeleton() {
     );
 }
 
-export default function ProjectContextPage({ params }: { params: Promise<{ projectId: string }> }) {
+export default function AppPage({ params }: { params: Promise<{ projectId: string }> }) {
     const { canEdit } = useAuth();
     const { projectId } = use(params);
     const searchParams = useSearchParams();
     const discoveryFailed = searchParams.get("discovery") === "failed";
     const [project, setProject] = useState<Project | null>(null);
     const [contextState, setContextState] = useState<ProjectContextState | null>(null);
+    const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
     const [loadError, setLoadError] = useState("");
     const [notFound, setNotFound] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
@@ -409,11 +470,18 @@ export default function ProjectContextPage({ params }: { params: Promise<{ proje
         };
     }, [projectId, retryKey]);
 
+    const loadCoverage = useCallback(() => {
+        getCoverage(projectId).then(setCoverage).catch(() => undefined);
+    }, [projectId]);
+    useEffect(() => loadCoverage(), [loadCoverage, retryKey]);
+    useVisiblePolling(loadCoverage, 60_000);
+
     useEffect(() => onInvalidate((event) => {
         if (matchesInvalidation(event, "projects", projectId)) {
             getProject(projectId).then((result) => setProject(result.project)).catch(() => undefined);
         }
-    }), [projectId]);
+        if (matchesInvalidation(event, "tree", projectId)) loadCoverage();
+    }), [projectId, loadCoverage]);
 
     if (notFound) {
         return (
@@ -452,7 +520,7 @@ export default function ProjectContextPage({ params }: { params: Promise<{ proje
     return (
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader
-                title="Project context"
+                title="App"
                 width="reading"
                 meta={
                     <a href={project.baseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-full items-center gap-1 rounded-sm font-mono text-meta text-ink-muted transition-colors hover:text-ink">
@@ -467,6 +535,7 @@ export default function ProjectContextPage({ params }: { params: Promise<{ proje
                     projectId={projectId}
                     project={project}
                     contextState={contextState}
+                    coverage={coverage}
                     discoveryFailed={discoveryFailed}
                     onReload={reload}
                     onDraftSaved={(updated) => setContextState((current) => (current ? { ...current, draft: updated } : current))}

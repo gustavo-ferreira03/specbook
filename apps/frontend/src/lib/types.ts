@@ -410,16 +410,20 @@ export interface OverviewResponse {
     stories: ActivityStory[];
 }
 
-export type CoverageCounts = Record<"passing" | "failing" | "flaky" | "notRun" | "invalid" | "running", number>;
+export interface CoverageArea {
+    name: string;
+    routes: string[];
+    coverage: "covered" | "partial" | "uncovered";
+    reason: string;
+    featureId: string | null;
+    specs: { id: string; title: string }[];
+    uncoveredRoutes: string[];
+}
 
 export interface CoverageResponse {
     confirmed: boolean;
     basis: string;
-    environment: { id: string; name: string };
-    totals: CoverageCounts;
-    areas: { kind: "area" | "role" | "rule"; name: string; routes: string[]; coverage: "covered" | "partial" | "uncovered"; reason: string; featureIds: string[]; specIds: string[]; specs: { id: string; title: string }[] }[];
-    features: { id: string; title: string; counts: CoverageCounts; lastRunAt: string | null }[];
-    trend: { id: string; label: string; startedAt: string; passed: number; total: number; passRate: number }[];
+    areas: CoverageArea[];
 }
 
 export interface SetupStatus {

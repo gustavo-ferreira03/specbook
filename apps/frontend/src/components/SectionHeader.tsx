@@ -27,7 +27,7 @@ export function SectionHeader({
                 </Heading>
                 {description && <p className="mt-0.5 text-control text-ink-muted">{description}</p>}
             </div>
-            {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+            {actions && <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>}
         </div>
     );
 }
