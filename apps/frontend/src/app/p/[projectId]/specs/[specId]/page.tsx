@@ -27,6 +27,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
+import { useDisplayStatus } from "@/lib/projectOverview";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { formatDateTime, formatDuration, environmentLabel } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
@@ -145,6 +146,7 @@ function VerificationBanner({
     environment: string;
 }) {
     const { canEdit } = useAuth();
+    const displayStatus = useDisplayStatus(spec);
     let status: string;
     let headline: string;
     let detail: React.ReactNode = null;
@@ -154,6 +156,10 @@ function VerificationBanner({
         status = "running";
         headline = "Verifying now";
         detail = `Running this Spec against ${environment}. Results appear here when it finishes.`;
+    } else if (displayStatus === "repairing") {
+        status = "repairing";
+        headline = "Specbook is repairing this Spec";
+        detail = "Its executable source is being rewritten to match the steps above. The repair is saved once it passes a run.";
     } else if (spec.status === "invalid") {
         status = "invalid";
         headline = "This Spec can't run";
@@ -211,8 +217,7 @@ function VerificationBanner({
     );
 }
 
-function BulletList({ items, empty }: { items: string[]; empty: string }) {
-    if (items.length === 0) return <p className="mt-2 text-body text-ink-subtle">{empty}</p>;
+function BulletList({ items }: { items: string[] }) {
     return (
         <ul className="mt-2 space-y-1.5">
             {items.map((item, index) => (
@@ -240,9 +245,9 @@ function SpecSection({ title, count, children }: { title: string; count?: number
 function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
     return (
         <div className="space-y-7">
-            <SpecSection title="Preconditions" count={humanSpec.preconditions.length}>
-                <BulletList items={humanSpec.preconditions} empty="No preconditions recorded." />
-            </SpecSection>
+            {humanSpec.preconditions.length > 0 && <SpecSection title="Preconditions" count={humanSpec.preconditions.length}>
+                <BulletList items={humanSpec.preconditions} />
+            </SpecSection>}
 
             <SpecSection title="Steps" count={humanSpec.steps.length}>
                 {humanSpec.steps.length === 0 ? (
@@ -260,17 +265,17 @@ function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
                 )}
             </SpecSection>
 
-            <section aria-labelledby="expected-result-heading" className="relative overflow-hidden rounded-xl border border-line bg-surface-soft py-3.5 pr-4 pl-5">
+            {humanSpec.expectedResult && <section aria-labelledby="expected-result-heading" className="relative overflow-hidden rounded-xl border border-line bg-surface-soft py-3.5 pr-4 pl-5">
                 <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1 bg-primary" />
                 <h3 id="expected-result-heading" className="flex items-center gap-1.5 text-control font-semibold text-ink">
                     <Target size={14} aria-hidden="true" className="text-ink-muted" /> Expected result
                 </h3>
-                <p className={cn("mt-1.5 text-body", humanSpec.expectedResult ? "font-medium text-ink" : "text-ink-subtle")}>{humanSpec.expectedResult || "No expected result recorded."}</p>
-            </section>
+                <p className="mt-1.5 text-body font-medium text-ink">{humanSpec.expectedResult}</p>
+            </section>}
 
-            <SpecSection title="Postconditions" count={humanSpec.postconditions.length}>
-                <BulletList items={humanSpec.postconditions} empty="No postconditions recorded." />
-            </SpecSection>
+            {humanSpec.postconditions.length > 0 && <SpecSection title="Postconditions" count={humanSpec.postconditions.length}>
+                <BulletList items={humanSpec.postconditions} />
+            </SpecSection>}
         </div>
     );
 }
@@ -651,7 +656,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
 
     const { spec, feature, content, runs } = detail;
     const latestRun = runs[0];
-    const crumbs: Crumb[] = [specsCrumb, ...(feature ? [{ label: feature.title, href: `/p/${projectId}/features/${feature.id}` }] : [])];
+    const crumbs: Crumb[] = [specsCrumb, ...(feature ? [{ label: feature.title, href: `/p/${projectId}/specs#feature-${feature.id}` }] : [])];
     const sourceEdited = Boolean(content && testSourceDraft !== content.testSource);
     const stepsChanged = Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(stepsDraft)) !== JSON.stringify(content.humanSpec.steps));
 

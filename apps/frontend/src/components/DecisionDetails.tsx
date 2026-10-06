@@ -6,7 +6,6 @@ import { useState } from "react";
 import { Check, LoaderCircle, MessageSquareText, X } from "lucide-react";
 import { FileDiff } from "@/components/FileDiff";
 import { StoryTimeline } from "@/components/StoryDetails";
-import { TechnicalDetails } from "@/components/TechnicalDetails";
 import { SpecBatchDecision } from "@/components/SpecBatchDecision";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -66,15 +65,9 @@ function SuggestedBehavior({ item }: { item: PresentedInboxItem }) {
     </div>;
 }
 
-function ItemTechnicalDetails({ item }: { item: PresentedInboxItem }) {
-    const verification = item.payload.verification;
-    if (!item.payload.files?.length && !item.presentation.technicalDetails && !verification && !item.commitSha) return null;
-    return <TechnicalDetails>
-        {verification && <p className="text-meta text-ink-muted">Latest test run: {verification.status === "passed" ? "passed" : verification.status === "failed" ? "failed" : "could not finish"}.</p>}
-        {item.payload.files?.map((file) => <FileDiff key={file.path} file={file} />)}
-        {item.presentation.technicalDetails && <pre tabIndex={0} aria-label="Technical details of this suggestion" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-canvas p-3 font-mono text-meta text-ink-muted">{item.presentation.technicalDetails}</pre>}
-        {item.commitSha && <p className="text-meta text-ink-subtle">Saved revision: <code>{item.commitSha.slice(0, 8)}</code></p>}
-    </TechnicalDetails>;
+function ProposedChanges({ item }: { item: PresentedInboxItem }) {
+    if (!item.payload.files?.length) return null;
+    return <section className="space-y-3"><h3 className="text-body font-medium text-ink">Proposed changes</h3>{item.payload.files.map((file) => <FileDiff key={file.path} file={file} />)}</section>;
 }
 
 export function DecisionDetails({ projectId, item, story, onChange }: { projectId: string; item: PresentedInboxItem; story?: ActivityStory; onChange: () => Promise<void> }) {
@@ -136,6 +129,6 @@ export function DecisionDetails({ projectId, item, story, onChange }: { projectI
             <p className="text-meta text-ink-subtle">{view.consequence}</p>
         </div>}
         {story?.timeline.some((event) => ![view.title, view.summary, view.workDone].includes(event.detail)) && <section className="space-y-3 border-t border-line pt-4"><h3 className="text-body font-medium text-ink">What happened</h3><StoryTimeline story={story} projectId={projectId} omit={[view.title, view.summary, view.workDone]} /></section>}
-        <ItemTechnicalDetails item={item} />
+        <ProposedChanges item={item} />
     </div>;
 }

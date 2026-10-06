@@ -1229,7 +1229,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.failing.some((item) => item.specId === invalid!.id), false, "an invalid implementation is not a failing application check");
         assert.equal(view.needsYou.some((item) => item.id === invalidFinding.id), true, "a finding without a current failing check remains a reviewable decision");
         assert.equal(view.summary.paused, true);
-        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, invalid: 1 });
+        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, repairing: 0, invalid: 1 });
         assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
         assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
         assert.equal(view.specHealth[invalid!.id]?.status, "invalid");

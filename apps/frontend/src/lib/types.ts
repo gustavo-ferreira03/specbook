@@ -336,7 +336,7 @@ export interface AgentSummary {
     lastCheckedAt: string | null;
     paused: boolean;
     globallyPaused: boolean;
-    systemHealth?: { message: string; detail?: string };
+    systemHealth?: { message: string };
 }
 
 export interface PresentedInboxItem extends InboxItem {
@@ -347,7 +347,6 @@ export interface PresentedInboxItem extends InboxItem {
         workDone: string;
         consequence: string;
         screenshots: { before?: { url: string; label: string }; after?: { url: string; label: string } };
-        technicalDetails: string;
         credentialRequest: boolean;
         specId?: string;
         chatId?: string;
@@ -370,11 +369,10 @@ export interface ActivityStory {
     specId?: string;
     runId?: string;
     inboxIds: string[];
-    technicalDetails: string;
 }
 
 export interface SpecHealth {
-    status: "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
+    status: "passing" | "failing" | "flaky" | "not_checked" | "running" | "repairing" | "invalid";
     label: string;
     runId?: string;
     lastCheckedAt: string | null;
@@ -402,7 +400,7 @@ export interface OverviewResponse {
         verdict: string;
         nextCheck: string;
         nextCheckAt: string | null;
-        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; invalid: number };
+        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; repairing: number; invalid: number };
     };
     specHealth: Record<string, SpecHealth>;
     needsYou: PresentedInboxItem[];

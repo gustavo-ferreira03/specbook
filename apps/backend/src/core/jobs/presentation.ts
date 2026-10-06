@@ -27,7 +27,6 @@ export interface InboxPresentation {
     workDone: string;
     consequence: string;
     screenshots: { before?: Screenshot; after?: Screenshot };
-    technicalDetails: string;
     specId?: string;
     chatId?: string;
     activityId: string;
@@ -48,7 +47,6 @@ export interface ActivityStory {
     inboxIds: string[];
     specId?: string;
     runId?: string;
-    technicalDetails: string;
 }
 export interface ProjectState {
     jobs: Job[];
@@ -283,9 +281,8 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
         const workDone = type === "batch" ? "" : verification ? verification.status === "passed" ? "Tried the suggested update in a test run; it passed." : "Tried an update, but the test run did not pass."
             : type === "question" ? "Paused here so your answer can guide the next step." : browserWork ? "Inspected the application and recorded the available evidence." : "Prepared this suggestion for your review.";
         const files = await proposalFiles(item).catch(() => []);
-        const technicalDetails = clean(`${item.body}${verification?.failReason ? `\n\nTest run: ${verification.failReason}` : ""}`);
         const presentation: InboxPresentation = { type, title, summary, workDone, consequence: CONSEQUENCES[type], credentialRequest,
-            screenshots: await screenshotsFor(projectId, item, job, specsById).catch(() => ({})), technicalDetails, activityId: subjectKey(subject),
+            screenshots: await screenshotsFor(projectId, item, job, specsById).catch(() => ({})), activityId: subjectKey(subject),
             specId: subject.type === "spec" ? subject.id : undefined, chatId: job?.chatId };
         items.push({ ...item, title, body: summary, payload: { ...item.payload, files, ...(batch ? { specBatch: batch } : {}),
             ...(verification ? { verification: { ...verification, failReason: verification.failReason ? clean(verification.failReason) : null } } : {}) }, presentation });
@@ -368,13 +365,12 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
         else if (paused && latestJob) timeline.push({ id: `${latestJob.id}:pause`, label: "Paused by you", detail: globallyPaused ? "Specbook is paused across all projects." : "Specbook is paused for this project.", createdAt: settings.updatedAt });
         timeline.sort(oldestFirst);
         const times = [...value.signals.map((signal) => signal.createdAt), ...value.jobs.flatMap((job) => [job.createdAt, job.updatedAt]), ...value.intents.flatMap((intent) => [intent.createdAt, intent.updatedAt]), ...value.items.map((item) => item.updatedAt)].sort();
-        const technicalDetails = clean(value.jobs.map((job) => (actions.get(job.id) ?? []).map((action) => `${action.action}${action.detail ? `: ${action.detail}` : ""}`).join("\n")).filter(Boolean).join("\n\n"));
         activity.push({ id, subject, title, status, nextStep, createdAt: times[0] ?? project.createdAt, updatedAt: times.at(-1) ?? project.createdAt,
             summary,
             timeline, jobIds: orderedJobs.map((job) => job.id), inboxIds: value.items.map((item) => item.id), specId: subject.type === "spec" ? subject.id : undefined,
-            runId: latestJob?.runId ?? undefined, technicalDetails });
+            runId: latestJob?.runId ?? undefined });
     }
     activity.sort(newestFirst);
-    const systemHealth = jobs.some((job) => infrastructureJobs.has(job.id)) ? { message: "Specbook is recovering from a service problem. Runs will resume automatically.", detail: "Your application and its Specs have not been changed. You do not need to approve a fix for this." } : undefined;
+    const systemHealth = jobs.some((job) => infrastructureJobs.has(job.id)) ? { message: "Specbook is recovering from a service problem. Your app and its Specs are unchanged, and runs resume automatically." } : undefined;
     return { items, activity, summary: { projectName: project.name, paused: settings.paused, globallyPaused, systemHealth } };
 }
