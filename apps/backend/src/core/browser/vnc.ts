@@ -22,6 +22,7 @@ interface VncSessionRecord extends VncSession {
     x11vncProc: ChildProcess;
     password: string;
     passwordDir: string;
+    viewers: Set<WebSocket>;
 }
 
 export class BrowserUnavailableError extends Error {
@@ -157,6 +158,10 @@ export function getVncSession(id: string): VncSession | null {
     return record ? publicSession(record) : null;
 }
 
+export function hasVncViewers(id: string): boolean {
+    return (sessions.get(id)?.viewers.size ?? 0) > 0;
+}
+
 async function startDisplay(): Promise<{ proc: ChildProcess; display: string }> {
     for (let attempt = 0; attempt < 16; attempt++) {
         const number = crypto.randomInt(100, 10_000);
@@ -195,7 +200,7 @@ export async function startVncStack(): Promise<VncSession> {
         ], x11Env(display), 1, /^PORT=(\d+)\r?\n/m, secret.dir);
         x11vncProc = x11vnc.proc;
         const port = await x11vnc.ready;
-        record = { id: crypto.randomUUID(), display, port, xvfbProc, x11vncProc, password: secret.password, passwordDir: secret.dir };
+        record = { id: crypto.randomUUID(), display, port, xvfbProc, x11vncProc, password: secret.password, passwordDir: secret.dir, viewers: new Set() };
         monitorSession(record);
         sessions.set(record.id, record);
         if (hasStopped(xvfbProc) || hasStopped(x11vncProc)) throw new Error("The browser display stopped during startup");
@@ -365,11 +370,14 @@ function toBuffer(data: Buffer | ArrayBuffer | Buffer[]): Buffer {
  * password handshake on the browser's behalf before piping raw RFB traffic.
  */
 export async function proxyVncSession(id: string, websocket: WebSocket): Promise<void> {
+    if (websocket.readyState !== websocket.OPEN) return;
     const record = sessions.get(id);
     if (!record) {
         websocket.close(1008, "Unknown VNC session");
         return;
     }
+    record.viewers.add(websocket);
+    websocket.once("close", () => record.viewers.delete(websocket));
     const upstream = net.createConnection(record.port, "127.0.0.1");
     const upstreamQueue = new ByteQueue();
     const downstreamQueue = new ByteQueue();

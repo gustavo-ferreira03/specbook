@@ -6,11 +6,12 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { sessionsDir } from "../paths";
 import { chatsRepository, type ChatMetadata } from "../../infra/repositories/chats";
 import { isChatDeleting, publishChatUpdate } from "./chat-registry";
-import type { ChatMessageRecord } from "./types";
+import type { ChatMessageRecord, ChatToolStepRecord } from "./types";
 
 export const cwd = process.cwd();
 export const ERROR_TYPE = "specbook-error";
 export const WARNING_TYPE = "specbook-warning";
+export const TOOL_STEP_TYPE = "specbook-tool-step";
 const DEFAULT_TITLE = "New chat";
 
 export interface AgentMessage {
@@ -184,6 +185,7 @@ export async function branchSessionForTurn(
     if (!text.trim()) throw new Error("Message has no text to send");
     if (branchFromId) sessionManager.branch(branchFromId);
     else sessionManager.resetLeaf();
+    sessionManager.appendCustomEntry("specbook-retry", { messageId });
     flushSessionFile(sessionManager);
     publishChatUpdate(id);
     return { text: text.trim(), sessionManager };
@@ -232,7 +234,7 @@ export async function listChats(
     );
 }
 
-function messagesOf(id: string, sessionManager: SessionManager): ChatMessageRecord[] {
+export function messagesOf(id: string, sessionManager: SessionManager): ChatMessageRecord[] {
     const messages: ChatMessageRecord[] = [];
     for (const entry of sessionManager.getBranch()) {
         if (entry.type === "custom_message" && entry.display) {
@@ -266,6 +268,56 @@ function messagesOf(id: string, sessionManager: SessionManager): ChatMessageReco
     return messages;
 }
 
+/** Tool calls follow the active session branch, including messages with no visible text. */
+export function toolStepsOf(sessionManager: SessionManager): ChatToolStepRecord[] {
+    const branch = sessionManager.getBranch();
+    const results = new Map<string, number>();
+    const timings = new Map<string, ChatToolStepRecord>();
+    const calls = new Map<string, string>();
+    for (const entry of branch) {
+        if (entry.type === "message" && entry.message.role === "assistant") {
+            for (const part of entry.message.content) {
+                if (part.type === "toolCall") calls.set(part.id, `${entry.id}:${part.id}`);
+            }
+        }
+        if (entry.type === "message" && entry.message.role === "toolResult") {
+            const id = calls.get(entry.message.toolCallId);
+            if (id) results.set(id, entry.message.timestamp);
+        }
+        if (entry.type === "custom" && entry.customType === TOOL_STEP_TYPE) {
+            const step = entry.data as ChatToolStepRecord;
+            timings.set(step.id, step);
+        }
+    }
+    const steps: ChatToolStepRecord[] = [];
+    let afterMessageId: string | null = null;
+    for (const entry of branch) {
+        if (entry.type === "custom_message" && entry.display && extractText({ content: entry.content }).trim()) {
+            afterMessageId = entry.id;
+        }
+        if (entry.type !== "message") continue;
+        const message = entry.message;
+        if ((message.role === "user" || message.role === "assistant") && extractText(message).trim()) {
+            afterMessageId = entry.id;
+        }
+        if (message.role !== "assistant") continue;
+        for (const part of message.content) {
+            if (part.type !== "toolCall") continue;
+            const id = `${entry.id}:${part.id}`;
+            const timing = timings.get(id);
+            if (!timing && !results.has(id)) continue;
+            steps.push({
+                id,
+                toolName: part.name,
+                afterMessageId,
+                startedAt: timing?.startedAt ?? message.timestamp,
+                endedAt: timing?.endedAt ?? results.get(id) ?? null,
+            });
+        }
+    }
+    return steps;
+}
+
 export async function getChatMessages(id: string): Promise<ChatMessageRecord[] | null> {
     const sessionManager = await openSession(id);
     return sessionManager ? messagesOf(id, sessionManager) : null;
@@ -274,8 +326,8 @@ export async function getChatMessages(id: string): Promise<ChatMessageRecord[] |
 /** Title and visible messages of a chat, reading its session file once. */
 export async function getChatView(
     id: string,
-): Promise<{ title: string; messages: ChatMessageRecord[] } | null> {
+): Promise<{ title: string; messages: ChatMessageRecord[]; toolSteps: ChatToolStepRecord[] } | null> {
     const sessionManager = await openSession(id);
     if (!sessionManager) return null;
-    return { title: sessionTitle(sessionManager), messages: messagesOf(id, sessionManager) };
+    return { title: sessionTitle(sessionManager), messages: messagesOf(id, sessionManager), toolSteps: toolStepsOf(sessionManager) };
 }

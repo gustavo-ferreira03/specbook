@@ -27,14 +27,9 @@ import {
 } from "lucide-react";
 import { countLabel, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { ChatToolStep } from "@/lib/types";
 
-/** One tool call of the current turn, as seen through the chat's SSE stream. */
-export interface ToolStep {
-    id: number;
-    toolName: string;
-    startedAt: number;
-    endedAt: number | null;
-}
+export type ToolStep = ChatToolStep;
 
 interface ToolCopy {
     done: string;
@@ -92,12 +87,8 @@ export function activeToolLabel(toolName: string): string {
 
 const VISIBLE_STEPS = 4;
 
-/**
- * Tool calls of the current turn as calm rows on a hairline rail. The data only exists while the
- * turn streams (persisted messages hold text only), so the list clears when the turn ends. It sits
- * outside the conversation log: the status line below it is what assistive technology announces.
- */
-export function TurnActivity({ steps }: { steps: ToolStep[] }) {
+/** Consecutive tool calls appear between the messages that preceded and followed them. */
+export function TurnActivity({ steps, busy }: { steps: ToolStep[]; busy: boolean }) {
     const [expanded, setExpanded] = useState(false);
     if (steps.length === 0) return null;
     const hidden = expanded ? 0 : Math.max(0, steps.length - VISIBLE_STEPS);
@@ -117,7 +108,7 @@ export function TurnActivity({ steps }: { steps: ToolStep[] }) {
             <ol className="space-y-px border-l border-line pl-3" aria-label="Agent steps in this turn">
                 {visible.map((step) => {
                     const copy = toolCopy(step.toolName);
-                    const running = step.endedAt === null;
+                    const running = busy && step.endedAt === null;
                     const Icon = copy.icon;
                     return (
                         <li key={step.id} className="flex min-h-7 items-center gap-2 text-control">
@@ -135,11 +126,11 @@ export function TurnActivity({ steps }: { steps: ToolStep[] }) {
                             </span>
                             {running ? (
                                 <span className="sr-only">in progress</span>
-                            ) : (
+                            ) : step.endedAt !== null ? (
                                 <span className="shrink-0 text-meta text-ink-subtle tabular">
                                     {formatDuration(Math.max(0, (step.endedAt ?? step.startedAt) - step.startedAt))}
                                 </span>
-                            )}
+                            ) : <span className="shrink-0 text-meta text-ink-subtle">Stopped</span>}
                         </li>
                     );
                 })}

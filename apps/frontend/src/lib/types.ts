@@ -133,6 +133,14 @@ export interface ChatMessage {
     canRetry?: boolean;
 }
 
+export interface ChatToolStep {
+    id: string;
+    toolName: string;
+    afterMessageId: string | null;
+    startedAt: number;
+    endedAt: number | null;
+}
+
 export type ChatMode = "standard" | "discovery";
 export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
 
@@ -193,6 +201,7 @@ export interface ChatCredentialRequest {
 export interface ChatState {
     title: string;
     messages: ChatMessage[];
+    toolSteps: ChatToolStep[];
     busy: boolean;
     queue: { steering: number; followUp: number };
     vncSessionId: string | null;

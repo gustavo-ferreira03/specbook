@@ -50,7 +50,9 @@ import {
     branchSessionForTurn,
     cwd,
     ensureUserMessage,
+    messagesOf,
     openSession,
+    TOOL_STEP_TYPE,
     userMessageCount,
     type AgentMessage,
 } from "./session-store";
@@ -58,6 +60,7 @@ import { createSessionTools } from "./session-tools";
 import { createDomainTools } from "./tools";
 import { ChatTurnTimeoutError, withTurnTimeout } from "./deadline";
 import { browserFailureMessage, providerFailure, providerFailureMessage } from "../jobs/presentation-errors";
+import type { ChatToolStepRecord } from "./types";
 
 const agentDir = path.join(storageRoot, "pi-agent");
 
@@ -140,6 +143,7 @@ interface SessionEventValue {
     messages?: AgentMessage[];
     assistantMessageEvent?: { type?: string; delta?: string };
     toolName?: string;
+    toolCallId?: string;
     isError?: boolean;
     steering?: readonly string[];
     followUp?: readonly string[];
@@ -343,12 +347,15 @@ async function runReservedChatTurn(
             settingsManager: await agentSettings(),
         });
         const active: ActiveChatSession = { session, sessionManager, aborted: false };
+        const manager = active.sessionManager;
         activeSession = active;
         setActiveChatSession(id, active);
         const queuedFollowUps = takePendingFollowUps(id);
         let modelError = "";
         let promptFailed = false;
         let timedOut = false;
+        let messageAnchor: string | null = null;
+        const runningSteps = new Map<string, ChatToolStepRecord>();
         const unsubscribe = session.subscribe((event) => {
             const value = event as unknown as SessionEventValue;
             const messages =
@@ -363,7 +370,8 @@ async function runReservedChatTurn(
                 }
             }
             if (value.type === "message_start" && value.message?.role === "assistant") {
-                publishChatUpdate(id, { type: "message_start" });
+                messageAnchor = messagesOf(id, manager).at(-1)?.id ?? null;
+                publishChatUpdate(id, { type: "message_start", afterMessageId: messageAnchor });
             }
             if (value.type === "message_start" && value.message?.role === "user") {
                 metrics.userMessage();
@@ -375,15 +383,46 @@ async function runReservedChatTurn(
             if (value.type === "message_end" && value.message?.role === "assistant") {
                 metrics.assistantMessage(value.message);
                 turnPolicy?.tokens(value.message.usage?.totalTokens ?? 0);
-                publishChatUpdate(id, { type: "message_end" });
             }
-            if (value.type === "tool_execution_start" && value.toolName) {
-                metrics.toolStart(value.toolName);
-                publishChatUpdate(id, { type: "tool_start", toolName: value.toolName });
+            if (value.type === "message_end") {
+                const message = value.message;
+                const afterMessageId = messageAnchor;
+                // PI appends the message after notifying listeners; publish its stable entry id afterwards.
+                queueMicrotask(() => {
+                    const entry = manager.getBranch().find((entry) => entry.type === "message" && entry.message === message);
+                    const record = entry ? messagesOf(id, manager).find((record) => record.id === entry.id) : undefined;
+                    publishChatUpdate(id, { type: "message_end", message: record, afterMessageId });
+                });
             }
-            if (value.type === "tool_execution_end" && value.toolName) {
+            if (value.type === "tool_execution_start" && value.toolName && value.toolCallId) {
+                const { toolName, toolCallId } = value;
+                metrics.toolStart(toolName);
+                const entry = manager.getBranch().reverse().find((entry) =>
+                    entry.type === "message" && entry.message.role === "assistant" &&
+                    entry.message.content.some((part) => part.type === "toolCall" && part.id === toolCallId),
+                );
+                if (entry) {
+                    const step: ChatToolStepRecord = {
+                        id: `${entry.id}:${toolCallId}`,
+                        toolName,
+                        afterMessageId: messagesOf(id, manager).at(-1)?.id ?? null,
+                        startedAt: Date.now(),
+                        endedAt: null,
+                    };
+                    runningSteps.set(toolCallId, step);
+                    manager.appendCustomEntry(TOOL_STEP_TYPE, step);
+                    publishChatUpdate(id, { type: "tool_start", toolName, step });
+                }
+            }
+            if (value.type === "tool_execution_end" && value.toolName && value.toolCallId) {
                 metrics.toolEnd(value.toolName, value.isError === true);
-                publishChatUpdate(id, { type: "tool_end", toolName: value.toolName });
+                const step = runningSteps.get(value.toolCallId);
+                if (step) {
+                    const endedAt = Date.now();
+                    manager.appendCustomEntry(TOOL_STEP_TYPE, { ...step, endedAt });
+                    publishChatUpdate(id, { type: "tool_end", toolName: value.toolName, stepId: step.id, endedAt });
+                    runningSteps.delete(value.toolCallId);
+                }
             }
             if (value.type === "agent_start") {
                 publishChatUpdate(id, { type: "agent_status", status: "working" });

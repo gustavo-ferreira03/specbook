@@ -1,4 +1,5 @@
 import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ChatMessageRecord, ChatToolStepRecord } from "./types";
 
 // In-memory state of chats handled by this process: which chats have a turn running,
 // which are being deleted, the live agent session of each running turn, queued
@@ -6,11 +7,11 @@ import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-age
 
 export type ChatUpdateEvent =
     | { type: "updated" }
-    | { type: "message_start" }
+    | { type: "message_start"; afterMessageId: string | null }
     | { type: "assistant_delta"; delta: string }
-    | { type: "message_end" }
-    | { type: "tool_start"; toolName: string }
-    | { type: "tool_end"; toolName: string }
+    | { type: "message_end"; message?: ChatMessageRecord; afterMessageId: string | null }
+    | { type: "tool_start"; toolName: string; step: ChatToolStepRecord }
+    | { type: "tool_end"; toolName: string; stepId: string; endedAt: number }
     | { type: "agent_status"; status: "working" | "retrying" | "idle"; message?: string }
     | { type: "queue_update"; steering: number; followUp: number };
 

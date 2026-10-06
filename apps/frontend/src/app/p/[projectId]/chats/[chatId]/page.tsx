@@ -168,6 +168,7 @@ function sameChatState(left: ChatState, right: ChatState): boolean {
     }
     if (JSON.stringify(left.contextRevision) !== JSON.stringify(right.contextRevision)) return false;
     if (JSON.stringify(left.credentialRequest) !== JSON.stringify(right.credentialRequest)) return false;
+    if (JSON.stringify(left.toolSteps) !== JSON.stringify(right.toolSteps)) return false;
     return left.messages.every((message, index) => {
         const next = right.messages[index];
         return (
@@ -377,6 +378,8 @@ const MessageItem = memo(function MessageItem({
 
 const MessageList = memo(function MessageList({
     messages,
+    steps,
+    busy,
     editingMessageId,
     editingText,
     actionMessageId,
@@ -385,6 +388,8 @@ const MessageList = memo(function MessageList({
     handlers,
 }: {
     messages: ChatMessage[];
+    steps: ToolStep[];
+    busy: boolean;
     editingMessageId: string;
     editingText: string;
     actionMessageId: string;
@@ -392,25 +397,41 @@ const MessageList = memo(function MessageList({
     actionsDisabled: boolean;
     handlers: MessageHandlers;
 }) {
+    const groups = new Map<string | null, ToolStep[]>();
+    const messageIds = new Set(messages.map((message) => message.id));
+    const pending: ToolStep[] = [];
+    for (const step of steps) {
+        if (step.afterMessageId !== null && !messageIds.has(step.afterMessageId)) {
+            pending.push(step);
+            continue;
+        }
+        const group = groups.get(step.afterMessageId) ?? [];
+        group.push(step);
+        groups.set(step.afterMessageId, group);
+    }
     return (
         <div className="flex flex-col" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">
+            <TurnActivity steps={groups.get(null) ?? []} busy={busy} />
             {messages.map((message, index) => {
                 const editing = editingMessageId === message.id;
                 return (
-                    <MessageItem
-                        key={message.id}
-                        message={message}
-                        first={index === 0}
-                        continuing={index > 0 && messages[index - 1].role === message.role}
-                        editing={editing}
-                        editingText={editing ? editingText : ""}
-                        actionBusy={actionMessageId === message.id}
-                        copied={copiedMessageId === message.id}
-                        actionsDisabled={actionsDisabled}
-                        handlers={handlers}
-                    />
+                    <div key={message.id}>
+                        <MessageItem
+                            message={message}
+                            first={index === 0}
+                            continuing={index > 0 && messages[index - 1].role === message.role}
+                            editing={editing}
+                            editingText={editing ? editingText : ""}
+                            actionBusy={actionMessageId === message.id}
+                            copied={copiedMessageId === message.id}
+                            actionsDisabled={actionsDisabled}
+                            handlers={handlers}
+                        />
+                        <TurnActivity steps={groups.get(message.id) ?? []} busy={busy} />
+                    </div>
                 );
             })}
+            <TurnActivity steps={pending} busy={busy} />
         </div>
     );
 });
@@ -443,11 +464,10 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const [modelReady, setModelReady] = useState<boolean | null>(null);
     const [projectOrigin, setProjectOrigin] = useState("");
     const wide = useWideLayout();
-    const stepIdRef = useRef(0);
+    const streamAnchorRef = useRef<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const stickToBottomRef = useRef(true);
-    const messageCountRef = useRef(0);
 
     useEffect(() => {
         setText(
@@ -475,7 +495,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         setEditingMessageId("");
         setEventsPaused(false);
         streamStore.reset();
-        messageCountRef.current = 0;
+        streamAnchorRef.current = null;
         setActiveTool("");
         setAgentStatus("");
         setSteps([]);
@@ -488,9 +508,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 const result = await getChat(chatId, controller.signal);
                 if (!active || controller.signal.aborted) return;
                 loaded = true;
-                // Persisted messages replace the streamed text, so it must not linger in the bubble.
-                if (result.messages.length > messageCountRef.current || !result.busy) streamStore.reset();
-                messageCountRef.current = result.messages.length;
+                if (!result.busy) streamStore.reset();
                 setState((current) => (current && sameChatState(current, result) ? current : result));
                 if (!result.busy) {
                     setActiveTool("");
@@ -513,9 +531,13 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                     delta?: string;
                     toolName?: string;
                     status?: "working" | "retrying" | "idle";
-                    message?: string;
+                    message?: string | ChatMessage;
                     steering?: number;
                     followUp?: number;
+                    afterMessageId?: string | null;
+                    step?: ToolStep;
+                    stepId?: string;
+                    endedAt?: number;
                 };
             } catch {
                 return null;
@@ -526,38 +548,46 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             setEventsPaused(false);
             // Events published while disconnected are gone; resync from the persisted state.
             streamStore.reset();
+            setSteps([]);
             void refresh();
         };
         const onDelta = (event: Event) => {
             const data = readEvent(event);
             if (data?.delta) streamStore.append(data.delta);
         };
-        const onMessageStart = () => streamStore.reset();
-        const onToolStart = (event: Event) => {
+        const onMessageStart = (event: Event) => {
+            streamAnchorRef.current = readEvent(event)?.afterMessageId ?? null;
             streamStore.reset();
+        };
+        const onMessageEnd = (event: Event) => {
+            const data = readEvent(event);
+            const message = typeof data?.message === "object" ? data.message : undefined;
+            refreshController?.abort();
+            if (message) {
+                if (message.role === "agent" && streamAnchorRef.current === data?.afterMessageId) streamStore.reset();
+                setState((current) => {
+                    if (!current || current.messages.some((item) => item.id === message.id)) return current;
+                    return { ...current, messages: [...current.messages, message] };
+                });
+            }
+            void refresh();
+        };
+        const onToolStart = (event: Event) => {
             const data = readEvent(event);
             const toolName = data?.toolName;
-            if (!toolName) return;
+            const step = data?.step;
+            if (!toolName || !step) return;
             setActiveTool(toolName);
-            stepIdRef.current += 1;
-            const step: ToolStep = { id: stepIdRef.current, toolName, startedAt: Date.now(), endedAt: null };
-            setSteps((current) => [...current, step]);
+            setSteps((current) => current.some((item) => item.id === step.id) ? current : [...current, step]);
         };
         const onToolEnd = (event: Event) => {
             setActiveTool("");
-            const toolName = readEvent(event)?.toolName;
-            const endedAt = Date.now();
+            const data = readEvent(event);
+            const stepId = data?.stepId;
+            const endedAt = data?.endedAt;
+            if (!stepId || endedAt === undefined) return;
             setSteps((current) => {
-                // Close the latest open step of this tool (or the latest open step at all).
-                let index = -1;
-                for (let position = current.length - 1; position >= 0; position -= 1) {
-                    if (current[position].endedAt !== null) continue;
-                    if (!toolName || current[position].toolName === toolName) {
-                        index = position;
-                        break;
-                    }
-                    if (index === -1) index = position;
-                }
+                const index = current.findIndex((step) => step.id === stepId);
                 if (index === -1) return current;
                 const next = current.slice();
                 next[index] = { ...next[index], endedAt };
@@ -566,7 +596,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         };
         const onAgentStatus = (event: Event) => {
             const data = readEvent(event);
-            if (data?.status === "retrying") setAgentStatus(data.message || "Retrying the response");
+            if (data?.status === "retrying") setAgentStatus(typeof data.message === "string" ? data.message : "Retrying the response");
             else if (data?.status === "working") setAgentStatus("Thinking through the request");
             else setAgentStatus("");
         };
@@ -584,7 +614,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             source.addEventListener("updated", () => void refresh());
             source.addEventListener("assistant_delta", onDelta);
             source.addEventListener("message_start", onMessageStart);
-            source.addEventListener("message_end", () => void refresh());
+            source.addEventListener("message_end", onMessageEnd);
             source.addEventListener("tool_start", onToolStart);
             source.addEventListener("tool_end", onToolEnd);
             source.addEventListener("agent_status", onAgentStatus);
@@ -784,7 +814,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         onSubmitEdit: handleSubmitEdit,
         onRetry: handleRetry,
     }), [handleCopy, handleRetry, handleStartEdit, handleSubmitEdit]);
-
+    const visibleSteps = useMemo(() => {
+        const merged = new Map((state?.toolSteps ?? []).map((step) => [step.id, step]));
+        for (const step of steps) merged.set(step.id, step);
+        return [...merged.values()];
+    }, [state?.toolSteps, steps]);
 
     const modelMissing = modelReady === false;
     const composerDisabled = discoveryTerminal || modelMissing;
@@ -965,6 +999,8 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
 
                                 <MessageList
                                     messages={state.messages}
+                                    steps={visibleSteps}
+                                    busy={state.busy}
                                     editingMessageId={editingMessageId}
                                     editingText={editingText}
                                     actionMessageId={actionMessageId}
@@ -974,8 +1010,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                 />
 
                                 <StreamingBubble store={streamStore} busy={state.busy} continuing={lastMessage?.role === "agent"} onGrow={scrollToBottomIfPinned} />
-
-                                {state.busy && <TurnActivity steps={steps} />}
 
                                 {state.busy && (
                                     <div

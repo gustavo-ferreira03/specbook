@@ -148,6 +148,65 @@ describe("createSecretScrubber", () => {
 });
 
 describe("chat registry", () => {
+    test("chat actions keep their place between messages after reload and follow only the active branch", async () => {
+        const { projectsRepository } = await import("../../src/infra/repositories/projects");
+        const { createChat, openSession, getChatView, branchSessionForTurn, flushSessionFile, TOOL_STEP_TYPE } = await import("../../src/core/chat/session-store");
+        const { runMigrations } = await import("../../src/infra/db/migrate");
+        await runMigrations();
+        const project = await projectsRepository.createProject("Chat chronology", "https://example.com");
+        const chat = await createChat(project.id);
+        const manager = (await openSession(chat.id))!;
+        manager.appendMessage({ role: "user", content: "Inspect the sign-in page.", timestamp: 2000 });
+        const introduction = manager.appendMessage({ role: "assistant", content: [
+            { type: "text", text: "I will open the sign-in page." },
+            { type: "toolCall", id: "navigate", name: "browser_navigate", arguments: { url: "https://example.com" } },
+            { type: "toolCall", id: "click", name: "browser_click", arguments: { ref: "secret-ref" } },
+        ], timestamp: 1000 } as never);
+        for (const [callId, toolName, startedAt] of [["navigate", "browser_navigate", 3000], ["click", "browser_click", 4000]] as const) {
+            const step = { id: `${introduction}:${callId}`, toolName, afterMessageId: introduction, startedAt, endedAt: startedAt + 200 };
+            manager.appendCustomEntry(TOOL_STEP_TYPE, { ...step, endedAt: null });
+            manager.appendMessage({ role: "toolResult", toolCallId: callId, toolName, content: [{ type: "text", text: "Private tool output" }], isError: callId === "click", timestamp: startedAt + 300 });
+            manager.appendCustomEntry(TOOL_STEP_TYPE, step);
+        }
+        const explanation = manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "The button could not be clicked. I will inspect the page." }], timestamp: 500 } as never);
+        const snapshot = manager.appendMessage({ role: "assistant", content: [{ type: "toolCall", id: "snapshot", name: "browser_snapshot", arguments: {} }], timestamp: 600 } as never);
+        manager.appendMessage({ role: "toolResult", toolCallId: "snapshot", toolName: "browser_snapshot", content: [{ type: "text", text: "Private snapshot" }], isError: false, timestamp: 900 });
+        manager.appendCustomMessageEntry("specbook-warning", "The page did not respond.", true);
+        manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "The sign-in page needs attention." }], timestamp: 100 } as never);
+        flushSessionFile(manager);
+
+        const view = (await getChatView(chat.id))!;
+        assert.deepEqual(view.messages.map((message) => message.content), [
+            "Inspect the sign-in page.", "I will open the sign-in page.",
+            "The button could not be clicked. I will inspect the page.",
+            "The page did not respond.", "The sign-in page needs attention.",
+        ]);
+        assert.deepEqual(view.toolSteps, [
+            { id: `${introduction}:navigate`, toolName: "browser_navigate", afterMessageId: introduction, startedAt: 3000, endedAt: 3200 },
+            { id: `${introduction}:click`, toolName: "browser_click", afterMessageId: introduction, startedAt: 4000, endedAt: 4200 },
+            { id: `${snapshot}:snapshot`, toolName: "browser_snapshot", afterMessageId: explanation, startedAt: 600, endedAt: 900 },
+        ]);
+        assert.doesNotMatch(JSON.stringify(view), /Private tool output|Private snapshot|secret-ref/);
+        assert.deepEqual((await getChatView(chat.id))?.toolSteps, view.toolSteps);
+
+        manager.appendMessage({ role: "user", content: "Now inspect the profile.", timestamp: 10_000 });
+        const profile = manager.appendMessage({ role: "assistant", content: [
+            { type: "text", text: "I will open the profile." },
+            { type: "toolCall", id: "snapshot", name: "browser_navigate", arguments: {} },
+        ], timestamp: 11_000 } as never);
+        manager.appendCustomEntry(TOOL_STEP_TYPE, { id: `${profile}:snapshot`, toolName: "browser_navigate", afterMessageId: profile, startedAt: 12_000, endedAt: 12_200 });
+        manager.appendMessage({ role: "toolResult", toolCallId: "snapshot", toolName: "browser_navigate", content: [{ type: "text", text: "Profile page" }], isError: false, timestamp: 12_200 });
+        const final = manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "The profile is ready." }], timestamp: 13_000 } as never);
+        flushSessionFile(manager);
+        const secondTurn = (await getChatView(chat.id))!;
+        assert.equal(secondTurn.toolSteps.length, 4);
+        assert.deepEqual(secondTurn.toolSteps.slice(0, 3), view.toolSteps, "a repeated provider tool call id must not change the earlier action");
+        await branchSessionForTurn(chat.id, final);
+        const retried = (await getChatView(chat.id))!;
+        assert.deepEqual(retried.messages, view.messages, "retry preserves the earlier turn and removes the latest user message and response");
+        assert.deepEqual(retried.toolSteps, view.toolSteps, "abandoned tool results and timing entries must not leak into the retried branch");
+    });
+
     test("tryReserveChatTurn is exclusive until releaseChatTurn", () => {
         assert.equal(registry.tryReserveChatTurn("chat-1"), true);
         assert.equal(registry.isChatBusy("chat-1"), true);

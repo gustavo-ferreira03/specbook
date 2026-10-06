@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { getChatBrowser, getChatBrowserActivity } from "../../../core/browser/sessions";
+import { getChatBrowser } from "../../../core/browser/sessions";
 import { getPendingCredentialRequest } from "../../../core/chat/credential-requests";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import {
@@ -51,8 +51,7 @@ export function createChatsRouter(): Hono {
         const [row, view] = await Promise.all([chatsRepository.getChatRow(id), getChatView(id)]);
         if (!row || !view) throw new HTTPException(404, { message: "Chat not found" });
         // Runs the browser health check (it never closes a browser while a turn is active).
-        await getChatBrowser(id);
-        const browserActivity = getChatBrowserActivity(id);
+        const browser = await getChatBrowser(id);
         const revision = row.contextRevisionId
             ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
@@ -60,9 +59,10 @@ export function createChatsRouter(): Hono {
         return c.json({
             title: view.title,
             messages: view.messages,
+            toolSteps: view.toolSteps,
             busy: isChatBusy(id),
             queue: getChatQueueState(id),
-            vncSessionId: browserActivity?.sessionId ?? null,
+            vncSessionId: browser?.vnc.id ?? null,
             projectId: row.projectId,
             mode: chatsRepository.chatMode(row),
             contextRevision: revision

@@ -6,3 +6,11 @@ export interface ChatMessageRecord {
     createdAt: string;
     canRetry?: boolean;
 }
+
+export interface ChatToolStepRecord {
+    id: string;
+    toolName: string;
+    afterMessageId: string | null;
+    startedAt: number;
+    endedAt: number | null;
+}

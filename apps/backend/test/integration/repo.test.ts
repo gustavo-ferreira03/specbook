@@ -243,6 +243,51 @@ describe("project, feature and spec through the writer", () => {
     });
 });
 
+describe("chat browser lifetime", { skip: process.env.SPECBOOK_TEST_VNC !== "1" }, () => {
+    test("keeps the same live browser after tools finish and between chat turns", { timeout: 90_000 }, async () => {
+        const { createChatsRouter } = await import("../../src/infra/web/routes/chats");
+        const { createChat } = await import("../../src/core/chat/session-store");
+        const { tryReserveChatTurn, releaseChatTurn } = await import("../../src/core/chat/chat-registry");
+        const { getOrCreateChatBrowser, beginChatBrowserTool, endChatBrowserTool, closeChatBrowser } = await import("../../src/core/browser/sessions");
+        const { readBrowserSnapshot } = await import("../../src/core/browser/mcp");
+        const { getVncSession } = await import("../../src/core/browser/vnc");
+        const projectId = await createProject("Persistent chat browser");
+        const chat = await createChat(projectId);
+        const chatApp = new Hono().route("/", createChatsRouter());
+        const view = async () => {
+            const response = await chatApp.request(`/chats/${chat.id}`);
+            assert.equal(response.status, 200);
+            return response.json();
+        };
+        try {
+            assert.equal((await view()).vncSessionId, null);
+            assert.equal(tryReserveChatTurn(chat.id), true);
+            const browser = await getOrCreateChatBrowser(chat.id, ["https://app.example.com"]);
+            await browser.mcp.ensureBrowser();
+            beginChatBrowserTool(chat.id, "browser_snapshot");
+            assert.equal((await view()).vncSessionId, browser.vnc.id);
+            await readBrowserSnapshot(browser.mcp);
+            endChatBrowserTool(chat.id, "browser_snapshot");
+            assert.equal((await view()).vncSessionId, browser.vnc.id, "ending a tool does not remove the live browser");
+            releaseChatTurn(chat.id);
+            assert.equal((await view()).busy, false);
+            assert.equal((await view()).vncSessionId, browser.vnc.id, "the browser remains visible after the reply");
+            assert.equal(tryReserveChatTurn(chat.id), true);
+            const nextBrowser = await getOrCreateChatBrowser(chat.id, ["https://app.example.com"]);
+            assert.equal(nextBrowser.vnc.id, browser.vnc.id, "the next turn reuses the browser");
+            await readBrowserSnapshot(nextBrowser.mcp);
+            releaseChatTurn(chat.id);
+            await closeChatBrowser(chat.id);
+            assert.equal(getVncSession(browser.vnc.id), null);
+            assert.equal((await view()).vncSessionId, null, "explicit cleanup releases the session");
+        } finally {
+            releaseChatTurn(chat.id);
+            await closeChatBrowser(chat.id);
+            await api("DELETE", `/projects/${projectId}`);
+        }
+    });
+});
+
 describe("first-run setup", () => {
     async function setupApp() {
         const { createSetupRouter } = await import("../../src/infra/web/routes/setup");

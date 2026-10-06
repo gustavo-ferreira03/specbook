@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { storageRoot } from "../paths";
-import { isChatBusy, releaseChatTurn, tryReserveChatTurn } from "../chat/chat-registry";
+import { isChatBusy, publishChatUpdate, releaseChatTurn, tryReserveChatTurn } from "../chat/chat-registry";
 import { launchBrowserMcp, type BrowserMcp } from "./mcp";
-import { BrowserUnavailableError, getVncSession, startVncStack, stopVncStack, type VncSession } from "./vnc";
+import { BrowserUnavailableError, getVncSession, hasVncViewers, startVncStack, stopVncStack, type VncSession } from "./vnc";
 
 const BROWSER_IDLE_MS = 10 * 60 * 1000;
 
@@ -36,7 +36,7 @@ function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
     browser.idleTimer = setTimeout(() => {
         // A turn may think or run Specs for a long time without browser tool calls.
         // Keep the browser while it is active and re-check after another idle period.
-        if (isChatBusy(chatId) || browser.activeTools.size > 0) touchChatBrowser(chatId, browser);
+        if (isChatBusy(chatId) || browser.activeTools.size > 0 || hasVncViewers(browser.vnc.id)) touchChatBrowser(chatId, browser);
         else void closeChatBrowser(chatId);
     }, BROWSER_IDLE_MS);
     browser.idleTimer.unref();
@@ -141,7 +141,10 @@ export async function closeChatBrowser(chatId: string): Promise<void> {
         }
     })();
     closing.set(chatId, task);
-    try { await task; } finally { closing.delete(chatId); }
+    try { await task; } finally {
+        closing.delete(chatId);
+        publishChatUpdate(chatId);
+    }
 }
 
 export function beginChatBrowserTool(chatId: string, toolName: string): void {
@@ -158,13 +161,6 @@ export function endChatBrowserTool(chatId: string, toolName: string): void {
     if (count <= 1) browser.activeTools.delete(toolName);
     else browser.activeTools.set(toolName, count - 1);
     touchChatBrowser(chatId, browser);
-}
-
-export function getChatBrowserActivity(chatId: string): { sessionId: string; toolName: string } | null {
-    const browser = browsers.get(chatId);
-    if (!browser) return null;
-    const toolName = browser.activeTools.keys().next().value;
-    return typeof toolName === "string" ? { sessionId: browser.vnc.id, toolName } : null;
 }
 
 export async function blockChatBrowser(chatId: string): Promise<void> {
