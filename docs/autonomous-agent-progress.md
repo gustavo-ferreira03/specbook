@@ -1,13 +1,13 @@
 # Autonomous agent progress
 
-Branch: `feat/autonomous-agent`. Product owner: Gus. No pushes; `main` is untouched.
+Original branch: `feat/autonomous-agent`, merged locally into `main` for the approved release plan. Product owner: Gus. No pushes.
 
 ## Product decisions
 
 - Jobs are internal. Deterministic event rules persist intentions and dispatch work; there is no LLM planner. Overview contains Needs you, Failing and Recent runs, with no job creation form. Coverage and exploration require an explicit request.
 - Steering, schedules and integrations are optional. Propose is the default autonomy level. Missing access leads to a question; credentials belong in Settings → Credentials.
 - `spec.yml` is the behavior contract. Autonomous repository tools create proposals; human approval is required for behavior changes. Source-only patches preserve the existing YAML bytes.
-- Gus cancelled Robot migration and requested removal of obsolete compatibility. Only `spec.yml` + `spec.ts` are supported. The GitHub repository mirror is removed; built-in Smart HTTP Git and GitHub Copilot OAuth remain.
+- Only `spec.yml` + `spec.ts` are supported. The GitHub repository mirror is removed; built-in Smart HTTP Git and GitHub Copilot OAuth remain.
 - Existing Specbook layout, components, typography and status tokens are reused. Proposed changes are unified file diffs, as requested in the latest correction.
 
 The six addenda have been read; the current scope follows addendum 6, with implementation and validation checkpoints below. The original source files were read from `/tmp/claude-1000/-home-gus-projetos-specbook/ebbefea2-f0e2-47c9-923c-2abbc941647f/scratchpad/codex-brief-addendum.md` and `codex-brief-addendum-2.md`.
@@ -36,7 +36,7 @@ Settings → Automation supports optional five-field numeric UTC cron, all or se
 
 ### Project steward
 
-Persistent observations, signals and intentions cover failed or changed Specs, deployments, credentials and explicit user requests. Existing Specs seed a silent baseline on first observation; invalid Specs create one regeneration decision and require a human request before repair. Empty projects, context changes, stale checks and availability probes do not launch agent work. Lightweight deployment checks compare build asset URLs, ETag/Last-Modified or a bounded response hash every five minutes, with availability backoff. Deterministic observation generations deduplicate crash replay while retaining actual A→B→A changes.
+Persistent observations, signals and intentions cover failed or changed Specs, deployments, credentials and explicit user requests. Existing Specs seed a silent baseline on first observation; invalid or incomplete Specs show a reason and offer repair in chat. Empty projects, context changes, stale checks and availability probes do not launch agent work. Lightweight deployment checks compare build asset URLs, ETag/Last-Modified or a bounded response hash every five minutes, with availability backoff. Deterministic observation generations deduplicate crash replay while retaining actual A→B→A changes.
 
 The LLM planner, planner tools and recursive background requests from agent sessions are removed. Chat retains `start_background_task` because it expresses a human request. Intention source distinguishes user requests from events; equivalent active work is deduplicated. Automatic investigation cooldown and rejection memory are scoped to the check, current source/contract, failed step, failure kind and execution URL. They do not promise deduplication across changed contracts or distinct failure kinds. Unique event identifiers provide replay protection, not semantic deduplication.
 
@@ -172,25 +172,25 @@ Commit split: `f952f21 refactor: drive autonomous QA through deterministic event
 
 Gus requested separate correction commits before merge. The branch remains unmerged and unpushed.
 
-- First observation records a baseline without creating run intentions. Invalid or older checks are grouped into one regeneration question; acceptance is persisted before dispatch, and replacement files still require reviewed diffs.
+- First observation records a baseline without creating run intentions. Invalid checks require a human repair request; replacement files require reviewed diffs.
 - Observe → Propose drops stale events and considers only current content and run evidence. Triage validates the latest run and both implementation/contract hashes. Automatic cooldown and rejection matching use the check and failure kind rather than a unique run identifier.
 - Pausing retains investigation instructions and cannot be overwritten by completion. CI retries and final reporting complete independently of agent pause. Failure handling uses the original failure identifier and retries temporary startup errors with backoff before considering triage.
 - A five-second heartbeat records active execution time. Recovery excludes downtime; a crash may omit at most the unpersisted active interval. Finishing an execution accounts for it once.
 - Automatic fixes require explicit opt-in. Assertion targets and matchers, aliases and action kinds cannot be normalized away. Revoking permission before commit rolls back the candidate and reindexes the repository.
 - CI origins are explicit, private-network exceptions require a saved private IP/localhost base URL, and HTTP(S) run connections pin validated DNS addresses. Per-token trigger limits and short deployment deduplication prevent unbounded repeated batches. Webhooks require explicit private-network permission and never follow redirects.
 - Overview separates invalid checks from failures. Counts, last-check time and failure rows use the same current-content evidence. Human decisions appear in Needs you; repeated runs collapse into one row with individual runs in the timeline. Empty projects have one introduction and coverage/exploration have named buttons.
-- CHANGELOG now preserves the 0.1.0 release and places Robot execution and GitHub mirror removal under Unreleased.
+- CHANGELOG now preserves the 0.1.0 release and places execution-format and GitHub mirror changes under Unreleased.
 
 Validation:
 
-- `pnpm typecheck` passed for backend and frontend. `SPECBOOK_TEST_VNC=1 pnpm test` passed all 263 tests, with no failures or skips. The suite covers the current-failure guards, pause races, active-time recovery, regeneration approval/recovery, assertion preservation, CI origins, DNS rebinding, redirected navigation, webhook delivery and Overview health.
+- `pnpm typecheck` passed for backend and frontend. `SPECBOOK_TEST_VNC=1 pnpm test` passed all 263 tests, with no failures or skips. The suite covers the current-failure guards, pause races, active-time recovery, assertion preservation, CI origins, DNS rebinding, redirected navigation, webhook delivery and Overview health.
 - Both application builds passed. The frontend production build used `NEXT_DIST_DIR=.next-phase0-build`; the live `.next` was preserved, and generated changes to TypeScript configuration were restored.
 - The backend was explicitly restarted and migrations 0018–0021 applied at boot; `/health` returned OK.
-- A temporary copy of Agora's six existing checks produced zero signals, intentions or agent actions and one grouped regeneration decision on first observation. The original repository HEAD was unchanged. Additional integration cases use 80 existing valid and 80 invalid checks. Temporary project copies were deleted through the API.
+- A temporary copy of Agora's six existing checks produced zero signals, intentions or agent actions on first observation. The original repository HEAD was unchanged. Additional integration cases use 80 existing valid and 80 invalid checks. Temporary project copies were deleted through the API.
 
 Live verification:
 
-- Agora Leads (`d91f9891…`), Swag Labs (`0fa0cdc2…`) and the existing empty project (`1201eeac…`) were captured at 1440px and 390px. Agora now shows six invalid checks, zero failures, no misleading last-check time and one regeneration question. Its three historical runs have different repository revisions, so they stay separate with timestamps including seconds.
+- Agora Leads (`d91f9891…`), Swag Labs (`0fa0cdc2…`) and the existing empty project (`1201eeac…`) were captured at 1440px and 390px. Agora now shows six invalid checks, zero failures, no misleading last-check time and a repair-in-chat action. Its three historical runs have different repository revisions, so they stay separate with timestamps including seconds.
 - Overview decisions wrap on mobile. The six captures have no horizontal overflow or page errors; the decision panel fits at 390px, and Escape closes it and returns focus. The empty project has one introduction. Existing Settings controls handled opt-in, cancellation, save/reload and CI origin editing in 19 successful browser checks, with no overflow or errors during that flow.
 - Evidence is saved under `/tmp/specbook-phase0-qa/`: `agora-*`, `swag-*`, `empty-*`, `automation-*` and `ci-*` screenshots, plus browser verification logs. The copied-project report is `/tmp/specbook-phase0-import-results.json`. Temporary projects were removed through the API; existing project files and repository HEADs were preserved.
 
@@ -204,7 +204,7 @@ Correction commits:
 - `e5445af`: restrict CI destinations, rate-limit tokens and deduplicate deploys (finding 9).
 - `0bbe4eb`: require explicit permission for private webhooks (finding 10).
 - `24c351b`: preserve assertions and require automatic-fix opt-in (finding 4).
-- `5daa622`: seed existing checks silently and request regeneration once (finding 1).
+- `5daa622`: seed existing checks silently (finding 1; the grouped decision was subsequently removed).
 - `de13ba0`: discard stale signals and deduplicate current failure subjects (finding 2).
 - `9f4556b`: correct Overview health, decisions and repeated-run presentation.
 

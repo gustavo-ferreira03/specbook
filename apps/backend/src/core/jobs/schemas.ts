@@ -35,7 +35,7 @@ export const reportSchema = z.object({
     body: z.string().trim().min(1).max(30000),
 });
 export const reviewSchema = z.object({
-    action: z.enum(["approve", "reject", "answer", "dismiss", "report_bug", "ignore", "regenerate"]),
+    action: z.enum(["approve", "reject", "answer", "dismiss", "report_bug", "ignore"]),
     answer: z.string().trim().min(1).max(12000).optional(),
 });
 export type JobLimits = z.infer<typeof jobLimitsSchema>;

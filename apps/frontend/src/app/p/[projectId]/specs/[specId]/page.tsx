@@ -151,13 +151,13 @@ function VerificationBanner({
     } else if (spec.status === "invalid") {
         status = "invalid";
         headline = "This Spec can't run";
-        detail = "Its files could not be validated. Fix them with Edit or Edit with AI, then run it again.";
+        detail = "Its saved steps or executable check need attention. Ask the agent to repair it, then verify the result.";
         body = (
             <>
                 <InvalidReason reason={spec.invalidReason ?? "The spec.yml or spec.ts file could not be validated."} testSource={specDetail.content?.testSource ?? null} />
                 <div className="mt-3 flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="outline">
-                        <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={13} /> Edit with AI</Link>
+                        <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}&intent=repair`}><PencilLine size={13} /> Repair in chat</Link>
                     </Button>
                 </div>
             </>

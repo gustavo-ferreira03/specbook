@@ -222,7 +222,7 @@ function planSpecs(found: FoundSpec[], featuresByPath: Map<string, Feature>, exi
             entry.invalidReason = `Invalid spec.yml: ${parseError}`;
         } else if (item.testSource === null) {
             entry.status = "invalid";
-            entry.invalidReason = "Missing spec.ts file in the spec directory";
+            entry.invalidReason = "This check is incomplete: spec.ts is missing. Repair it in chat.";
         } else if (
             existing &&
             existing.sourceHash === entry.sourceHash &&

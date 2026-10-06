@@ -49,7 +49,7 @@ export async function projectOverview(projectId: string) {
         const status: SpecHealthStatus = spec.status === "invalid" ? "invalid"
             : current?.status === "running" ? "running" : !current ? "not_checked"
             : current.flaky ? "flaky" : current.status === "passed" ? "passing" : "failing";
-        const label = status === "invalid" ? /spec\.ts.*missing|missing.*spec\.ts/i.test(spec.invalidReason ?? "") ? "Created by an older version, needs regenerating" : "Check needs repairing"
+        const label = status === "invalid" ? "Check needs repairing"
             : status === "running" ? "Check running"
             : status === "not_checked" ? "Current version not checked yet" : status === "flaky" ? "Passed on retry"
             : status === "passing" ? "Passing" : "Latest check failed";
@@ -158,14 +158,13 @@ export async function projectOverview(projectId: string) {
     const lastCheckedAt = Object.values(specHealth).flatMap((health) => health.lastCheckedAt ? [health.lastCheckedAt] : []).sort().at(-1) ?? null;
     const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length} checks passing` : "No checks yet",
         healthCounts.failing ? `${healthCounts.failing} failing` : "", healthCounts.flaky ? `${healthCounts.flaky} flaky` : "",
-        healthCounts.invalid ? `${healthCounts.invalid} need regenerating` : "",
+        healthCounts.invalid ? `${healthCounts.invalid} need repairing` : "",
         healthCounts.not_checked ? `${healthCounts.not_checked} not run yet` : "", healthCounts.running ? `${healthCounts.running} running` : ""].filter(Boolean).join(" · ");
     const activeCount = recentRuns.filter((run) => run.status === "working").length + jobs.filter((job) => job.status === "running").length;
     const nextCheckAt = agentPaused ? null : schedule?.nextRunAt ?? null;
     const nextCheck = agentPaused ? "Resume Specbook to continue."
         : activeCount ? `${countLabel(activeCount, "check")} in progress.`
-        : needsYou.some((item) => item.presentation.type === "regenerate") ? "Review the regeneration request in Needs you."
-        : healthCounts.invalid === specs.length && specs.length > 0 ? "These checks need regenerating before they can run."
+        : healthCounts.invalid === specs.length && specs.length > 0 ? "Repair the incomplete checks in chat before running them."
         : settings.autonomy === "observe" ? "Observation mode records changes. Request a coverage review or explore the app when needed."
         : nextCheckAt ? "Next scheduled check"
         : "Waiting for a deployment, check change or your request.";

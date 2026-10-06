@@ -19,7 +19,7 @@ interface Subject { type: "spec" | "feature" | "deployment" | "project"; id?: st
 interface Screenshot { url: string; label: string }
 export type PresentedItem = Omit<InboxItem, "payload"> & { payload: Record<string, unknown>; presentation: InboxPresentation };
 export interface InboxPresentation {
-    type: "update" | "new_check" | "feature" | "bug" | "question" | "help" | "regenerate";
+    type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
     title: string;
     summary: string;
     workDone: string;
@@ -159,12 +159,12 @@ export async function projectPresentation(projectId: string) {
         const unfinished = item.payload.requiresVerification === true && !verified;
         if (unfinished && awaiting(item) && job && (active(job.status) || (job.status === "stalled" && job.retryAt))) continue;
         if (unfinished && awaiting(item) && inbox.some((other) => other.id !== item.id && other.createdAt > item.createdAt && awaiting(other) && subjectKey(forItem(other)) === subjectKey(subject))) continue;
-        const type: InboxPresentation["type"] = Array.isArray(item.payload.regenerationSpecs) ? "regenerate" : unfinished && awaiting(item) ? "help" : item.kind === "spec_fix" ? "update" : item.kind === "new_spec" ? "new_check" : item.kind === "feature" ? "feature" : item.kind === "bug_report" ? "bug" : "question";
+        const type: InboxPresentation["type"] = unfinished && awaiting(item) ? "help" : item.kind === "spec_fix" ? "update" : item.kind === "new_spec" ? "new_check" : item.kind === "feature" ? "feature" : item.kind === "bug_report" ? "bug" : "question";
         const credentialRequest = item.payload.waitingFor === "credentials";
         const name = subject.type === "project" ? string(params.title) ?? "this check" : subject.name;
         const behaviorChange = item.kind === "spec_fix" && (params.humanSpec !== undefined || params.title !== undefined || params.description !== undefined);
         const safeTitle = englishExcerpt(item.title)?.replace(/^(?:Bug report|Possible bug):\s*/i, "");
-        const title = type === "regenerate" ? item.title : type === "help" ? `I couldn’t update “${name}” by myself. Look at it together?`
+        const title = type === "help" ? `I couldn’t update “${name}” by myself. Look at it together?`
             : type === "update" ? behaviorChange ? `Change what “${name}” checks?` : `Update the check for “${name}”?`
             : type === "new_check" ? `Add a check for “${string(params.title) ?? name}”?`
             : type === "feature" ? `Add “${string(params.title) ?? name}” to this project?`
@@ -175,7 +175,7 @@ export async function projectPresentation(projectId: string) {
         const originalReason = originalRun && specs.some((spec) => spec.id === originalRun.specId) ? originalRun.failReason
             : specs.find((spec) => spec.id === patchSpecId)?.invalidReason;
         const updateReason = originalReason ? plainReason(await clean(originalReason)).replace(/[.!?]+$/, "") + "." : "This suggestion updates how the check runs.";
-        const summary = type === "regenerate" ? item.body : type === "help" ? plainReason(verification?.failReason ?? job?.stopReason ?? item.body)
+        const summary = type === "help" ? plainReason(verification?.failReason ?? job?.stopReason ?? item.body)
             : type === "update" ? behaviorChange ? "This suggestion changes the behavior described by the check. Review the expected result before saving it." : verified ? `${updateReason} The expected behavior stays the same.` : "Review this suggested update to the check before saving it to the project."
             : type === "new_check" ? "This would add a check for a behavior that is not yet covered. Review the steps and expected result before saving it."
             : type === "feature" ? "This would organize related checks under a new area of the project."
@@ -183,9 +183,9 @@ export async function projectPresentation(projectId: string) {
             : credentialRequest ? "Add the requested sign-in details in Settings, then let Specbook know. Do not put passwords in your reply."
             : englishExcerpt(item.body) ?? "Specbook needs your explanation of the expected behavior before it can continue. Discuss the check in chat to clarify it.";
         const browserWork = actions.get(item.jobId)?.some((action) => /(?:browser_|scan_page).*:completed$/.test(action.action));
-        const workDone = type === "regenerate" ? "No regeneration has started. Your saved behavior is unchanged." : verification ? verification.status === "passed" ? "Tried the suggested update in a test run; it passed." : "Tried an update, but the test run did not pass."
+        const workDone = verification ? verification.status === "passed" ? "Tried the suggested update in a test run; it passed." : "Tried an update, but the test run did not pass."
             : type === "question" ? "Paused here so your answer can guide the next step." : browserWork ? "Inspected the application and recorded the available evidence." : "Prepared this suggestion for your review.";
-        const consequence = type === "regenerate" ? "Requests replacement implementations for these checks. You will review the verified file diffs before they are saved." : type === "update" ? "Saves the updated check to this project; you can undo it from history."
+        const consequence = type === "update" ? "Saves the updated check to this project; you can undo it from history."
             : type === "new_check" ? "Adds the check to this project; future runs can verify this behavior."
             : type === "feature" ? "Adds an area to organize this project’s checks."
             : type === "bug" ? "Requests a regression check for review. The current check stays unchanged."

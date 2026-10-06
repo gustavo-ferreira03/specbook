@@ -1,6 +1,5 @@
 import { closeChatBrowser } from "../../../core/browser/sessions";
-import { enqueueIntent, processProjectSteward, withProjectLock } from "../../../core/steward/engine";
-import { acceptRegeneration } from "../../../core/steward/regeneration";
+import { enqueueIntent } from "../../../core/steward/engine";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { proposalDirectory, type ProposalVerification } from "../../../core/jobs/verification";
@@ -85,19 +84,6 @@ ${item.body}`.slice(0, 6000),
         const item = await jobsRepository.item(c.req.param("itemId"));
         if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
         const { action, answer } = c.req.valid("json");
-        if (action === "regenerate") {
-            await withProjectLock(item.projectId, async () => {
-                if (item.kind !== "question" || !Array.isArray(item.payload.regenerationSpecs)) throw new HTTPException(400, { message: "This decision does not request regeneration" });
-                if (!await jobsRepository.claimItem(item.id)) throw new HTTPException(409, { message: "This decision was already applied" });
-                try { await acceptRegeneration(item); await jobsRepository.log(item.jobId, "inbox:regenerate", item.id); }
-                catch (error) { await jobsRepository.updateItem(item.id, { status: "pending" }); throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) }); }
-            });
-            void processProjectSteward(item.projectId, false);
-            return c.json({ item: await jobsRepository.item(item.id) });
-        }
-        if (action === "answer" && Array.isArray(item.payload.regenerationSpecs)) {
-            throw new HTTPException(409, { message: "Use Regenerate checks to approve this request." });
-        }
         const job = await jobsRepository.get(item.jobId);
         const proposal = ["spec_fix", "new_spec", "feature"].includes(item.kind);
         if ((action === "approve" || action === "reject") && !proposal) throw new HTTPException(400, { message: "This item is not a proposal" });
@@ -134,7 +120,6 @@ ${item.body}`.slice(0, 6000),
                 }
             } else {
                 await jobsRepository.updateItem(item.id, { status: action === "reject" ? "rejected" : "dismissed" });
-                if (Array.isArray(item.payload.regenerationSpecs)) await jobsRepository.transition(item.jobId, "blocked", "completed");
             }
             await jobsRepository.log(item.jobId, `inbox:${action}`, item.id);
             return c.json({ item: await jobsRepository.item(item.id) });

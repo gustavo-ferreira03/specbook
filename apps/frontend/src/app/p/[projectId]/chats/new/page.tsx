@@ -32,7 +32,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
         requestRef.current.promise
             .then((result) => {
                 if (!active) return;
-                const query = specId ? `?specId=${encodeURIComponent(specId)}${intent === "regenerate" ? "&intent=regenerate" : ""}` : "";
+                const query = specId ? `?specId=${encodeURIComponent(specId)}${intent === "repair" ? "&intent=repair" : ""}` : "";
                 router.replace(`/p/${projectId}/chats/${result.chat.id}${query}`);
             })
             .catch((createError) => {

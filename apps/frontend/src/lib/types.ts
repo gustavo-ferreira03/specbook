@@ -303,7 +303,7 @@ export interface AgentSummary {
 
 export interface PresentedInboxItem extends InboxItem {
     presentation: {
-        type: "update" | "new_check" | "feature" | "bug" | "question" | "help" | "regenerate";
+        type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
         title: string;
         summary: string;
         workDone: string;
