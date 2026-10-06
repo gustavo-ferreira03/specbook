@@ -1,15 +1,14 @@
 import "dotenv/config";
-import { createCiRouter, createCiSettingsRouter } from "./infra/web/routes/ci";
+import { acquireStorageLock } from "./core/operations/lock";
+import { migrateSecrets } from "./core/credentials/migration";
+import { startRetentionMonitor, stopRetentionMonitor } from "./core/operations/retention";
+import { createApp, buildAllowedOrigins } from "./infra/web/app";
+import { authEvents, sessionFromHeaders } from "./core/accounts/sessions";
 import { startSteward, stopSteward } from "./core/steward/engine";
-import { createStewardRouter } from "./infra/web/routes/steward";
 import { startFailureMonitor, stopFailureMonitor } from "./core/jobs/failures";
 import { startScheduleMonitor, stopScheduleMonitor } from "./core/jobs/schedules";
 import { startJobWorker, stopJobWorker } from "./core/jobs/worker";
-import { createJobsRouter } from "./infra/web/routes/jobs";
-import { createSchedulesRouter } from "./infra/web/routes/schedules";
 import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { WebSocketServer } from "ws";
 import { closeAllChatBrowsers } from "./core/browser/sessions";
 import { getVncSession, proxyVncSession } from "./core/browser/vnc";
@@ -20,28 +19,10 @@ import { stopActiveRunProcesses } from "./core/runner/run";
 import { runMigrations } from "./infra/db/migrate";
 import { logger } from "./infra/logger";
 import { runsRepository } from "./infra/repositories/runs";
-import { createChatsRouter } from "./infra/web/routes/chats";
-import { createCredentialsRouter } from "./infra/web/routes/credentials";
-import { createFeaturesRouter } from "./infra/web/routes/features";
-import { createGitRouter } from "./infra/web/routes/git";
-import { createGitHttpRouter } from "./infra/web/routes/git-http";
-import { createProjectContextsRouter } from "./infra/web/routes/project-contexts";
-import { createProjectsRouter } from "./infra/web/routes/projects";
-import { createRunsRouter } from "./infra/web/routes/runs";
-import { createSettingsRouter } from "./infra/web/routes/settings";
-import { createSpecsRouter } from "./infra/web/routes/specs";
-import { createSetupRouter } from "./infra/web/routes/setup";
-import { createRepositoryRecoveryRoutes } from "./infra/web/routes/repository-recovery";
-import { handleRequestError } from "./infra/web/errors";
 import {
     buildHostAllowlist,
-    csrfGuard,
-    hostGuard,
     isAllowedHost,
     isAllowedWebsocketOrigin,
-    jsonBodyLimit,
-    REQUEST_HEADER,
-    requestLogger,
 } from "./infra/web/security";
 
 // Log before anything else can fail. An uncaught exception leaves the process
@@ -54,62 +35,18 @@ process.on("uncaughtException", (error) => {
     process.exit(1);
 });
 
-function buildAllowedOrigins(frontendOrigin: string): Set<string> {
-    const allowed = new Set([frontendOrigin]);
-    try {
-        const url = new URL(frontendOrigin);
-        if (url.hostname === "localhost") allowed.add(`${url.protocol}//127.0.0.1:${url.port}`);
-        if (url.hostname === "127.0.0.1") allowed.add(`${url.protocol}//localhost:${url.port}`);
-    } catch {}
-    return allowed;
-}
-
 const port = Number(process.env.PORT ?? 4000);
 const hostname = process.env.HOST ?? "127.0.0.1";
-const app = new Hono();
-const frontendOrigin = process.env.FRONTEND_ORIGIN ?? "http://localhost:4001";
-const allowedOrigins = buildAllowedOrigins(frontendOrigin);
+const app = createApp();
+const allowedOrigins = buildAllowedOrigins();
 const hostAllowlist = buildHostAllowlist(port);
-app.use("*", requestLogger());
-app.use(
-    "*",
-    cors({
-        origin: (origin) => (allowedOrigins.has(origin) ? origin : undefined),
-        allowHeaders: ["Content-Type", REQUEST_HEADER],
-        credentials: true,
-    }),
-);
-// CORS only stops other sites from reading responses. These guards stop them
-// from reaching the API at all: DNS rebinding through the Host check, and
-// cross-site form posts through the custom header that forces a preflight.
-app.use("*", hostGuard(hostAllowlist));
-app.use("*", csrfGuard());
-app.use("*", jsonBodyLimit());
-app.onError(handleRequestError);
-
-app.get("/health", (c) => c.json({ ok: true }));
-app.route("/", createSetupRouter());
-app.route("/", createRepositoryRecoveryRoutes());
-app.route("/", createProjectsRouter());
-app.route("/", createJobsRouter());
-app.route("/", createStewardRouter());
-app.route("/", createCiRouter());
-app.route("/", createCiSettingsRouter());
-app.route("/", createSchedulesRouter());
-app.route("/", createSpecsRouter());
-app.route("/", createRunsRouter());
-app.route("/", createChatsRouter());
-app.route("/", createProjectContextsRouter());
-app.route("/", createFeaturesRouter());
-app.route("/", createGitRouter());
-app.route("/", createGitHttpRouter());
-app.route("/", createSettingsRouter());
-app.route("/", createCredentialsRouter());
 
 // ---- Boot sequence --------------------------------------------------------
 // Order matters: schema first, then repository repair, then state that reads
 // the repositories. Wire new boot steps here, before the server starts.
+const releaseStorage = await acquireStorageLock();
 await runMigrations();
+await migrateSecrets();
 await repoGit.recoverAllInterruptedState();
 // reindexAllProjects also applies the bare repository policy to every project.
 await runsRepository.markInterruptedRuns();
@@ -119,6 +56,7 @@ await startJobWorker();
 startFailureMonitor();
 startScheduleMonitor();
 startSteward();
+startRetentionMonitor();
 // ---------------------------------------------------------------------------
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     logger.info("backend listening", { hostname, port });
@@ -148,9 +86,23 @@ server.on("upgrade", (request, socket, head) => {
         socket.destroy();
         return;
     }
-    wss.handleUpgrade(request, socket, head, (websocket) => {
-        wss.emit("connection", websocket, request);
-    });
+    void sessionFromHeaders(headers).then((authenticated) => {
+        if (!authenticated || authenticated.user.role === "viewer") { socket.destroy(); return; }
+        wss.handleUpgrade(request, socket, head, (websocket) => {
+            const closeUser = (id: string) => { if (id === authenticated.user.id) websocket.close(1008, "Account permissions changed"); };
+            const closeSession = (hash: string) => { if (hash === authenticated.session.tokenHash) websocket.close(1008, "Signed out"); };
+            authEvents.on("user", closeUser);
+            authEvents.on("session", closeSession);
+            const expiry = setTimeout(() => websocket.close(1008, "Session expired"), Math.max(0, Date.parse(authenticated.session.expiresAt) - Date.now()));
+            expiry.unref();
+            websocket.once("close", () => { clearTimeout(expiry); authEvents.off("user", closeUser); authEvents.off("session", closeSession); });
+            // Recheck after subscribing so a permission change during the upgrade cannot be missed.
+            void sessionFromHeaders(headers).then((current) => {
+                if (!current || current.user.role === "viewer") websocket.close(1008, "Sign in with permission to use the browser");
+                else wss.emit("connection", websocket, request);
+            }).catch(() => websocket.close(1011, "Could not verify session"));
+        });
+    }).catch((error) => { logger.warn("VNC authentication failed", { error }); socket.destroy(); });
 });
 
 let shuttingDown = false;
@@ -171,12 +123,14 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     stopFailureMonitor();
     stopScheduleMonitor();
     stopSteward();
+    await stopRetentionMonitor();
     await stopJobWorker();
     stopActiveRunProcesses();
     await closeAllChatBrowsers().catch((error: unknown) => logger.error("closing browsers failed", { error }));
     // Open SSE streams would otherwise hold server.close() until the timeout.
     if ("closeAllConnections" in server) server.closeAllConnections();
     await closed;
+    await releaseStorage();
     clearTimeout(timer);
     process.exit(0);
 }

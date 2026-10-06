@@ -4,6 +4,7 @@ import { simpleGit, type SimpleGit } from "simple-git";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { reposDir } from "../paths";
 import { repoBare } from "./bare";
+import { currentActor, recordAudit } from "../accounts/audit";
 
 // Lock files git leaves behind when the process is killed mid-operation.
 const STALE_CHECKOUT_LOCKS = [
@@ -97,11 +98,15 @@ class RepoGit {
         const git = this.getProjectGit(projectId);
         await git.add(["-A"]);
         const status = await git.status();
-        if (!status.isClean()) await git.commit(message);
+        if (!status.isClean()) {
+            const actor = currentActor();
+            await git.commit(message, actor?.kind === "user" && actor.email ? { "--author": `${actor.name} <${actor.email}>` } : undefined);
+        }
         const head = await this.getHeadSha(projectId);
         await this.publishToBareUnlocked(projectId).catch((error: unknown) => {
             console.error(`[specbook] publishing ${projectId} to its canonical repository failed:`, error);
         });
+        if (!status.isClean()) await recordAudit("repository.commit", { commitSha: head, message }, projectId);
         return head;
     }
 

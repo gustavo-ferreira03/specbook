@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
 import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
 import { ChevronDown, FileCheck2, MessageSquarePlus, RefreshCw, Search, X } from "lucide-react";
@@ -81,6 +83,7 @@ function ContextLine({ projectId, project, contextState }: { projectId: string; 
 }
 
 export default function SpecsDashboard({ params }: { params: Promise<{ projectId: string }> }) {
+    const { canEdit } = useAuth();
     const { projectId } = use(params);
     const [features, setFeatures] = useState<Feature[] | null>(null);
     const [specs, setSpecs] = useState<SpecSummary[] | null>(null);
@@ -192,7 +195,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     icon={FileCheck2}
                     title="No Specs yet"
                     description="Describe a behavior in a chat and the agent saves it here as a Spec you can verify."
-                    action={
+                    action={canEdit &&
                         <Button asChild>
                             <Link href={`/p/${projectId}/chats/new`}><MessageSquarePlus size={14} /> Start a chat</Link>
                         </Button>
@@ -238,7 +241,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 breadcrumbs={crumbs}
                 width="data"
                 meta={<ContextLine projectId={projectId} project={project} contextState={contextState} />}
-                actions={
+                actions={canEdit &&
                     <>
                         {createActions}
                         <div className="flex items-center">

@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { buildHostAllowlist, frontendProxyOrigin } from "../security";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -286,7 +287,7 @@ async function followExternalPush(projectId: string): Promise<void> {
 export function createGitHttpRouter(): Hono {
     const router = new Hono();
 
-    router.all("/git/*", async (c) => {
+    router.all("/git/*", access("git-token"), async (c) => {
         const url = new URL(c.req.url);
         const match = GIT_PATH.exec(url.pathname);
         if (!match) return c.text("Not found\n", 404);

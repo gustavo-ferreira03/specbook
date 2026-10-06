@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
 import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -164,6 +166,7 @@ function ListSkeleton({ rows }: { rows: number }) {
 }
 
 function SpecsOverview({ projectId, tree, error }: { projectId: string; tree: ProjectTree | null; error: string }) {
+    const { canEdit } = useAuth();
     const specsHref = `/p/${projectId}/specs`;
     if (!tree) {
         return (
@@ -214,7 +217,7 @@ function SpecsOverview({ projectId, tree, error }: { projectId: string; tree: Pr
                         icon={BookOpenCheck}
                         title="No Specs yet"
                         description="Describe a behavior in a chat and the agent drafts an executable Spec for it."
-                        action={<Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Start chat</Link></Button>}
+                        action={canEdit && <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Start chat</Link></Button>}
                         className="py-8"
                     />
                 </div>
@@ -353,6 +356,7 @@ function ContextPanel({
     onReload: () => void;
     onDraftSaved: (draft: ProjectContextRevision) => void;
 }) {
+    const { canEdit, isAdmin } = useAuth();
     const [discardingDiscovery, setDiscardingDiscovery] = useState(false);
     const [discardDiscoveryOpen, setDiscardDiscoveryOpen] = useState(false);
     const [discardDiscoveryError, setDiscardDiscoveryError] = useState("");
@@ -390,6 +394,8 @@ function ContextPanel({
     const draftHasProposal = draft ? draft.context.summary.trim().length > 0 : false;
     const draftChatHref = draft?.sourceChatId ? `/p/${projectId}/chats/${draft.sourceChatId}` : null;
 
+    if (!canEdit && !draft && !confirmed) return <section><SectionHeader title="Project context" /><p className="mt-3 text-body text-ink-muted">No context has been confirmed yet. An editor can start discovery and review the findings here.</p></section>;
+
     if (!draft && !confirmed) {
         return (
             <section aria-labelledby="overview-context-heading" className="rounded-xl border border-line bg-surface-soft">
@@ -413,7 +419,7 @@ function ContextPanel({
                         {!llmReady && (
                             <Alert variant="warning" role="status" className="mt-4">
                                 <AlertTitle>No agent model is configured</AlertTitle>
-                                <AlertDescription>Discovery needs one. <Link href="/settings?tab=model">Set up a model in Settings</Link>.</AlertDescription>
+                                <AlertDescription>Discovery needs one. {isAdmin ? <Link href="/settings?tab=model">Set up a model in Settings</Link> : "Ask an administrator to connect a provider"}.</AlertDescription>
                             </Alert>
                         )}
                         <div className="mt-5">
@@ -452,7 +458,7 @@ function ContextPanel({
                                 </ul>
                             </div>
                         )}
-                        <div className="mt-4 flex flex-wrap gap-2">
+                        {canEdit && <div className="mt-4 flex flex-wrap gap-2">
                             {draftChatHref && (
                                 <Button asChild size="sm">
                                     <Link href={draftChatHref}><Compass size={14} /> Continue discovery</Link>
@@ -483,7 +489,7 @@ function ContextPanel({
                                 }}
                                 onConfirm={() => void discardUnfinishedDiscovery(draft.id)}
                             />
-                        </div>
+                        </div>}
                     </div>
                 </section>
             )}
@@ -492,7 +498,7 @@ function ContextPanel({
                 <section aria-labelledby="overview-context-heading">
                     <SectionHeader id="overview-context-heading" title="Review project context" description="Drafted from discovery. Edit anything before confirming." className="mb-3" />
                     <div className="rounded-xl border border-line p-4 sm:p-5">
-                        <DraftReview
+                        {canEdit ? <DraftReview
                             revision={draft}
                             chatHref={draftChatHref}
                             onSaved={onDraftSaved}
@@ -501,7 +507,7 @@ function ContextPanel({
                                 onReload();
                             }}
                             onDiscarded={() => onReload()}
-                        />
+                        /> : <ConfirmedContextSummary context={draft.context} />}
                     </div>
                 </section>
             )}
@@ -514,7 +520,7 @@ function ContextPanel({
                         description={draft
                             ? "Stays active until the draft above replaces it."
                             : <>{confirmed.confirmedAt ? <RelativeTime value={confirmed.confirmedAt} prefix="Confirmed" /> : "Confirmed"} · supplied to every new chat</>}
-                        actions={!draft && (
+                        actions={canEdit && !draft && (
                             <Button type="button" variant="outline" size="sm" onClick={() => setUpdateMode((value) => !value)} aria-expanded={updateMode}>
                                 {updateMode ? <><X size={14} /> Cancel update</> : <><PencilLine size={14} /> Update context</>}
                             </Button>
@@ -562,6 +568,7 @@ function OverviewSkeleton() {
 }
 
 export default function ProjectHome({ params }: { params: Promise<{ projectId: string }> }) {
+    const { canEdit } = useAuth();
     const { projectId } = use(params);
     const searchParams = useSearchParams();
     const discoveryFailed = searchParams.get("discovery") === "failed";
@@ -642,7 +649,7 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                         icon={SearchX}
                         title="Project not found"
                         description="This project may have been deleted."
-                        action={<Button asChild><Link href="/?new=1">Create a project</Link></Button>}
+                        action={canEdit && <Button asChild><Link href="/?new=1">Create a project</Link></Button>}
                     />
                 </div>
             </div>
@@ -682,7 +689,7 @@ export default function ProjectHome({ params }: { params: Promise<{ projectId: s
                         <span className="sr-only">(opens in a new tab)</span>
                     </a>
                 }
-                actions={
+                actions={canEdit &&
                     <>
                         <Button asChild variant={hasContext ? "default" : "outline"}>
                             <Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Start chat</Link>

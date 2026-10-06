@@ -16,7 +16,7 @@ Done. The 12 corrections passed typecheck, 263 tests and both builds; live Overv
 
 ## Phase 1: first hour
 
-Implemented on `feat/first-run`; final live evidence and local merge in progress.
+Completed on `feat/first-run` and merged locally into `main` (`66be65d`).
 
 - Runtime API address for REST, evidence, SSE and VNC.
 - First-run wizard, model connection test, global Settings, demo credentials and discovery prerequisites. The administrator step is a phase-2 integration hook until accounts are implemented.
@@ -37,7 +37,19 @@ Limits: Docker Desktop is unavailable, so the published container itself has not
 
 ## Phase 2: company accounts and operations
 
-Pending on `feat/accounts-sso`: accounts, sessions, default-deny roles and route coverage guard; OIDC and invites; attribution/audit; encrypted LLM secrets and key rotation; browser safety and screenshot policy; retention; verified backup/restore and upgrade/rollback documentation.
+Completed on `feat/accounts-sso`; verified and ready for the local merge. Accounts, sessions, declared route roles, OIDC, invites, attribution/audit, encrypted secrets, retention and operational commands are implemented. The interface uses the existing Settings layout and role-aware controls.
+
+Browser safety now reads the actual MCP snapshot reference before a discovery/autonomous click, including interactive ancestors. Interactive chat shares the project/credential origin policy. A Chromium document-request guard blocks external destinations before navigation, including redirects. The real MCP test passed with no request reaching the forbidden server. Administrators control automatic selector approval (off by default) and whether screenshots reach the model; the image policy also applies to restored conversation images and active sessions.
+
+Verification: typecheck, backend/operations bundles and the isolated frontend production build passed. `SPECBOOK_TEST_VNC=1 pnpm test` passed all 279 tests without skips. The only new test file is the authorized default-deny route coverage guard; existing test files cover the remaining regressions.
+
+A real Dex v2.45.1 login verified authorization code, PKCE, nonce, signed ID tokens, explicit administrator linking, password-free sign-in and just-in-time Viewer creation. Integration checks reject invalid signatures, nonce mismatches, replay, unverified email, unexpected domains and implicit linking. The last usable administrator remains protected. Session revocation closes SSE and VNC. LAN WebSocket checks denied anonymous/missing-Origin upgrades and accepted the authenticated path.
+
+Live UI checks on a fresh instance at `192.168.0.165:4301` cover administrator setup, invitations, Viewer denial, Editor controls, sign-out, safe login return paths, SSO settings, screenshot policy, retention and audit. Captures at 1440 and 390 pixels show no horizontal overflow. A real SauceDemo check passed, with history and evidence; the temporary project was deleted through the API. Evidence: `/tmp/specbook-phase2-qa` and `/tmp/specbook-phase2-oidc`.
+
+Backup/restore was verified through the compiled CLI and a fresh backend boot. Tests cover external-key migration, rotation recovery, wrong-key rejection, occupied destinations, malicious archive paths and preserving the operations lock. Retention keeps pending evidence and batch outcomes coherent; expired videos remove their metadata/report links. A volume built from the v0.1.0 migrations upgraded successfully: project IDs, repository HEAD and YAML/TypeScript bytes stayed identical, model credentials became encrypted, and first visit requests an administrator. Evidence: `/tmp/specbook-v010-before.json` and `/tmp/specbook-v010-upgrade-real`.
+
+Docker Desktop is still unavailable. Dex ran as the official local binary, and storage/upgrade checks used the production Node bundle. Container execution is not claimed.
 
 ## Phase 3: landing and release preparation
 

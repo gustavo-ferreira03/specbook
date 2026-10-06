@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -53,23 +54,23 @@ function mapManualError(error: unknown): never {
 export function createProjectsRouter(): Hono {
     const router = new Hono();
 
-    router.post("/projects", zValidator("json", createProjectSchema), async (c) => {
+    router.post("/projects", access("editor"), zValidator("json", createProjectSchema), async (c) => {
         const { name, baseUrl } = c.req.valid("json");
         const project = await createProject(name, baseUrl);
         return c.json({ project: publicProject(project) });
     });
 
-    router.get("/projects", async (c) => {
+    router.get("/projects", access("viewer"), async (c) => {
         return c.json({ projects: (await projectsRepository.listProjects()).map(publicProject) });
     });
 
-    router.get("/projects/:id", async (c) => {
+    router.get("/projects/:id", access("viewer"), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ project: publicProject(project) });
     });
 
-    router.patch("/projects/:id", zValidator("json", updateProjectSchema), async (c) => {
+    router.patch("/projects/:id", access("editor"), zValidator("json", updateProjectSchema), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         await projectsRepository.updateProject(project.id, c.req.valid("json"));
@@ -78,7 +79,7 @@ export function createProjectsRouter(): Hono {
         return c.json({ project: publicProject(updated) });
     });
 
-    router.delete("/projects/:id", async (c) => {
+    router.delete("/projects/:id", access("editor"), async (c) => {
         try {
             if (!(await deleteProjectData(c.req.param("id")))) {
                 throw new HTTPException(404, { message: "Project not found" });
@@ -89,7 +90,7 @@ export function createProjectsRouter(): Hono {
         }
     });
 
-    router.get("/projects/:id/tree", async (c) => {
+    router.get("/projects/:id/tree", access("viewer"), async (c) => {
         const projectId = c.req.param("id");
         const project = await projectsRepository.getProject(projectId);
         if (!project) throw new HTTPException(404, { message: "Project not found" });
@@ -112,7 +113,7 @@ export function createProjectsRouter(): Hono {
         });
     });
 
-    router.post("/projects/:id/specs", zValidator("json", createSpecSchema), async (c) => {
+    router.post("/projects/:id/specs", access("editor"), zValidator("json", createSpecSchema), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         const { featureId, title } = c.req.valid("json");
@@ -124,13 +125,13 @@ export function createProjectsRouter(): Hono {
         return c.json({ spec });
     });
 
-    router.get("/projects/:id/context-file", async (c) => {
+    router.get("/projects/:id/context-file", access("viewer"), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ yaml: await readContextRaw(project.id), contextSyncError: project.contextSyncError });
     });
 
-    router.put("/projects/:id/context-file", zValidator("json", contextFileSchema), async (c) => {
+    router.put("/projects/:id/context-file", access("editor"), zValidator("json", contextFileSchema), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         await editContextFile(project.id, c.req.valid("json").yaml).catch(mapManualError);

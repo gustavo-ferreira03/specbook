@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
 import Link from "next/link";
 import { Folder, LoaderCircle, Play, RotateCcw } from "lucide-react";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -84,6 +86,7 @@ function LastRunText({ run }: { run: Run | null | undefined }) {
 }
 
 function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; spec: SpecSummary; run: Run | null | undefined; running: boolean; onRun?: (spec: SpecSummary) => void }) {
+    const { canEdit } = useAuth();
     const duration = run?.durationMs != null ? formatDuration(run.durationMs) : null;
     return (
         <li className="group/row relative flex items-center gap-3 border-b border-line px-4 py-2.5 transition-colors duration-150 hover:bg-surface-soft sm:gap-4">
@@ -113,7 +116,7 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                 {duration ?? (run === undefined ? "" : "—")}
             </span>
             <span className="relative z-10 flex w-7 shrink-0 justify-end">
-                {onRun && canRun(spec) && (
+                {canEdit && onRun && canRun(spec) && (
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
@@ -137,6 +140,7 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
 }
 
 function GroupHeader({ group, running, onRunGroup }: { group: SpecGroup; running: boolean; onRunGroup?: (group: SpecGroup) => void }) {
+    const { canEdit } = useAuth();
     const runnable = group.specs.filter(canRun);
     return (
         <li className="flex min-h-11 items-center gap-2.5 border-b border-line bg-surface-soft px-4 py-1.5">
@@ -147,7 +151,7 @@ function GroupHeader({ group, running, onRunGroup }: { group: SpecGroup; running
             <span className="tabular text-meta text-ink-subtle" aria-label={`${group.specs.length} ${group.specs.length === 1 ? "Spec" : "Specs"}`}>{formatNumber(group.specs.length)}</span>
             <span className="flex-1" />
             <GroupSummary specs={group.specs} />
-            {onRunGroup && runnable.length > 0 && (
+            {canEdit && onRunGroup && runnable.length > 0 && (
                 <Button type="button" variant="ghost" size="sm" className="-mr-2 h-7 px-2" disabled={running} onClick={() => onRunGroup(group)} aria-label={`Run ${runnable.length} ${runnable.length === 1 ? "Spec" : "Specs"} in ${typeof group.title === "string" ? group.title : "this feature"}`}>
                     <Play size={12} /> Run
                 </Button>

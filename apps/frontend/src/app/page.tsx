@@ -4,6 +4,8 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpenCheck, ChevronRight, Compass, Globe, KeyRound, LoaderCircle, RefreshCw } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
+import { InstanceHeader } from "@/components/InstanceHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { LogoMark } from "@/components/LogoMark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -26,6 +28,7 @@ function parseSafetyNotes(raw: string): string[] {
 }
 
 function HomeContent() {
+    const { canEdit, isAdmin } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
     const forceNew = searchParams.get("new") === "1";
@@ -64,7 +67,7 @@ function HomeContent() {
             .then((result) => {
                 if (!active) return;
                 setLastProjectId(localStorage.getItem("specbook:last-project"));
-                if (result.projects.length > 0 && !forceNew) {
+                if (result.projects.length > 0 && (!forceNew || !canEdit)) {
                     const lastProject = localStorage.getItem("specbook:last-project");
                     const destination = result.projects.find((project) => project.id === lastProject) ?? result.projects[0];
                     router.replace(`/p/${destination.id}`);
@@ -80,7 +83,7 @@ function HomeContent() {
         return () => {
             active = false;
         };
-    }, [forceNew, retryKey, router]);
+    }, [forceNew, retryKey, router, canEdit]);
 
     async function createProjectRecord(): Promise<Project> {
         const result = await api<{ project: Project }>("/projects", {
@@ -173,6 +176,7 @@ function HomeContent() {
         );
     }
 
+    if (!canEdit) return <main className="min-h-dvh bg-surface"><InstanceHeader /><EmptyState title="No projects available" description="An administrator or editor can create the first project. You will be able to read its checks and results here." /></main>;
     const returnProject = projects.find((project) => project.id === lastProjectId) ?? projects[0];
     const busy = submitting !== false;
     const steps = [
@@ -295,7 +299,7 @@ function HomeContent() {
                                     <AlertTitle>No agent model is configured</AlertTitle>
                                     <AlertDescription>
                                         You can create the project now. Discovery needs a model before it can run
-                                        <>: <Link href="/settings?tab=model">connect one in instance settings</Link>.</>
+                                        {isAdmin ? <>: <Link href="/settings?tab=model">connect one in instance settings</Link>.</> : ". Ask an administrator to connect a model."}
                                     </AlertDescription>
                                 </div>
                             </Alert>

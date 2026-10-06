@@ -375,13 +375,21 @@ export interface OverviewResponse {
 
 export interface SetupStatus {
     needsAdmin: boolean;
-    modelReady: boolean;
-    needsProject: boolean;
-    completed: boolean;
+    authenticated?: boolean;
+    modelReady?: boolean;
+    needsProject?: boolean;
+    completed?: boolean;
 }
 
 export interface SystemReadiness {
     ok: boolean;
     checkedAt: string;
     checks: { id: string; label: string; ok: boolean; message: string; nextStep?: string }[];
+}
+
+export interface AuthUser {
+    id: string;
+    name: string;
+    email: string;
+    role: "admin" | "editor" | "viewer";
 }

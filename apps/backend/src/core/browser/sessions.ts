@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { storageRoot } from "../paths";
-import { isChatBusy } from "../chat/chat-registry";
+import { isChatBusy, releaseChatTurn, tryReserveChatTurn } from "../chat/chat-registry";
 import { launchBrowserMcp, type BrowserMcp } from "./mcp";
 import { BrowserUnavailableError, getVncSession, startVncStack, stopVncStack, type VncSession } from "./vnc";
 
@@ -14,12 +14,22 @@ interface ChatBrowser {
     idleTimer: NodeJS.Timeout;
     lastHealthCheck: number;
     activeTools: Map<string, number>;
+    navigationPolicy: string;
 }
 
 const browsers = new Map<string, ChatBrowser>();
 const pending = new Map<string, Promise<ChatBrowser>>();
 const closing = new Map<string, Promise<void>>();
 const deletingChats = new Set<string>();
+
+export async function removeInactiveBrowserData(chatId: string, before: number): Promise<boolean> {
+    const directory = path.join(storageRoot, "chat", "browser", chatId);
+    const stat = await fs.lstat(directory).catch(() => null);
+    if (!stat?.isDirectory() || stat.mtimeMs >= before || browsers.has(chatId) || pending.has(chatId) || closing.has(chatId) || deletingChats.has(chatId)) return false;
+    if (!tryReserveChatTurn(chatId)) return false;
+    try { await fs.rm(directory, { recursive: true, force: true }); return true; }
+    finally { releaseChatTurn(chatId); }
+}
 
 function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
     clearTimeout(browser.idleTimer);
@@ -56,12 +66,13 @@ export async function getChatBrowser(chatId: string): Promise<ChatBrowser | null
     return browser;
 }
 
-export async function getOrCreateChatBrowser(chatId: string): Promise<ChatBrowser> {
+export async function getOrCreateChatBrowser(chatId: string, navigationOrigins: string[]): Promise<ChatBrowser> {
     await closing.get(chatId);
     if (deletingChats.has(chatId)) throw new Error("Chat is being deleted");
+    const navigationPolicy = [...new Set(navigationOrigins)].sort().join(";");
     const existing = browsers.get(chatId);
     if (existing) {
-        if (!getVncSession(existing.vnc.id)) {
+        if (!getVncSession(existing.vnc.id) || existing.navigationPolicy !== navigationPolicy) {
             await closeChatBrowser(chatId);
         } else {
             try {
@@ -80,7 +91,7 @@ export async function getOrCreateChatBrowser(chatId: string): Promise<ChatBrowse
         const workDir = path.join(storageRoot, "chat", "browser", chatId);
         try {
             await fs.rm(path.join(workDir, "profile"), { recursive: true, force: true });
-            const mcp = await launchBrowserMcp({ workDir, display: vnc.display });
+            const mcp = await launchBrowserMcp({ workDir, display: vnc.display, navigationOrigins });
             if (deletingChats.has(chatId)) {
                 await mcp.close();
                 await stopVncStack(vnc.id);
@@ -95,6 +106,7 @@ export async function getOrCreateChatBrowser(chatId: string): Promise<ChatBrowse
                 idleTimer,
                 lastHealthCheck: Date.now(),
                 activeTools: new Map(),
+                navigationPolicy,
             };
             browsers.set(chatId, record);
             touchChatBrowser(chatId, record);

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Check, ChevronRight, CircleHelp, Eye, LoaderCircle, ScanSearch, Search, MessageSquareText, Pause, Play, RefreshCw } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
 import { DecisionDetails } from "@/components/DecisionDetails";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
@@ -54,6 +55,7 @@ function runCounts(run: RecentRun) {
 }
 
 export default function OverviewPage({ params }: { params: Promise<{ projectId: string }> }) {
+    const { canEdit } = useAuth();
     const { projectId } = use(params);
     const [data, setData] = useState<OverviewResponse | null>(null);
     const [loadError, setLoadError] = useState("");
@@ -156,7 +158,7 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
     return <div className="flex min-h-full flex-col bg-surface">
         <PageHeader title={data ? `Overview — ${data.summary.projectName}` : "Overview"} width="data"
             description={data?.summary.globallyPaused ? "Specbook is paused across all projects." : data?.summary.paused ? "Specbook is paused for this project." : undefined}
-            actions={data && <>
+            actions={data && canEdit && <>
                 <Button variant="outline" size="sm" disabled={requestingTask !== null} onClick={() => void requestTask("coverage")}>{requestingTask === "coverage" ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Search size={14} />} Find uncovered areas</Button>
                 <Button variant="outline" size="sm" disabled={requestingTask !== null} onClick={() => void requestTask("explore")}>{requestingTask === "explore" ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <ScanSearch size={14} />} Explore app</Button>
                 {data.summary.globallyPaused ? <Button asChild variant="ghost" size="sm"><Link href={`/p/${projectId}/settings?tab=automation#agent-pause-heading`}><Play size={14} /> Resume in settings</Link></Button> : <Button variant="ghost" size="sm" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : data.summary.paused ? <Play size={14} /> : <Pause size={14} />}{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</Button>}
@@ -172,7 +174,7 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
                 {data.needsYou.length > 0 && <OverviewSection id="needs-you" title="Needs you" count={data.needsYou.length}><ul className="divide-y divide-line border-y border-line">{data.needsYou.slice(0, decisionLimit).map((item) => <OverviewRow key={item.id} icon={<CircleHelp size={16} className="text-warning-icon" />} title={item.presentation.title} time={item.createdAt} action="Review" onClick={() => open({ type: "item", id: item.id })} />)}</ul>{data.needsYou.length > decisionLimit && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setDecisionLimit((count) => count + 5)}>Show more decisions</Button>}</OverviewSection>}
                 {data.failing.length > 0 && <OverviewSection id="failing" title="Failing" count={data.failing.length}><ul className="divide-y divide-line border-y border-line">{data.failing.slice(0, failingLimit).map((failure) => <OverviewRow key={failure.specId} icon={<AlertCircle size={16} className="text-danger" />} title={failure.title} annotation={failure.triageStatus} time={failure.updatedAt} onClick={() => open({ type: "failure", id: failure.specId })} />)}</ul>{data.failing.length > failingLimit && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setFailingLimit((count) => count + 5)}>Show more failing checks</Button>}</OverviewSection>}
                 {data.recentRuns.length > 0 && <OverviewSection id="recent-runs" title="Recent runs">{[...runGroups].map(([trigger, runs]) => <div key={trigger} className="mt-4 first:mt-0"><h3 className="mb-1 text-meta font-medium text-ink-subtle">{RUN_TRIGGERS[trigger]}</h3><ul className="divide-y divide-line border-y border-line">{runs.map((run) => <OverviewRow key={run.id} icon={<RunOutcome run={run} />} title={run.subject.name} annotation={runCounts(run)} detail={`${run.occurrences > 1 ? `${run.occurrences} runs · Last ` : ""}${formatDateTime(run.updatedAt, { seconds: true })}`} onClick={() => open({ type: "story", id: run.id })} />)}</ul></div>)}{data.recentRuns.length > runsLimit && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setRunsLimit((count) => count + 10)}>Show more runs</Button>}</OverviewSection>}
-                {emptyProject && <EmptyState icon={Eye} title="Your project starts here" description="Create a check in chat. Its results and any questions that need your decision will appear here." action={<Button asChild variant="outline"><Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Tell Specbook about your app</Link></Button>} />}
+                {emptyProject && <EmptyState icon={Eye} title="Your project starts here" description="Create a check in chat. Its results and any questions that need your decision will appear here." action={canEdit && <Button asChild variant="outline"><Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Tell Specbook about your app</Link></Button>} />}
             </>}
         </PageContainer>
         <Sheet open={Boolean(selected)} onOpenChange={(value) => { if (!value) close(); }}>

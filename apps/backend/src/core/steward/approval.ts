@@ -1,3 +1,4 @@
+import { getSecuritySettings } from "../chat/safety-settings";
 import { parse } from "@babel/parser";
 import { jobsRepository, type InboxItem } from "../../infra/repositories/jobs";
 import { stewardRepository } from "../../infra/repositories/steward";
@@ -47,7 +48,7 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
 export async function applyTrustedFixes(projectId: string): Promise<void> {
     const permitted = async () => {
         const settings = await stewardRepository.get(projectId);
-        return settings.autonomy === "act" && settings.autoApproveFixes && !await isAgentPaused(projectId);
+        return (await getSecuritySettings()).allowAutoApproveFixes && settings.autonomy === "act" && settings.autoApproveFixes && !await isAgentPaused(projectId);
     };
     if (!await permitted()) return;
     const items = await jobsRepository.inbox(projectId);

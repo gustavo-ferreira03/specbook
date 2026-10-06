@@ -250,6 +250,10 @@ describe("first-run setup", () => {
         const { createProjectContextsRouter } = await import("../../src/infra/web/routes/project-contexts");
         const { handleRequestError } = await import("../../src/infra/web/errors");
         const setup = new Hono();
+        setup.use("*", async (c, next) => {
+            c.set("user", { id: "setup-admin", email: "admin@example.com", name: "Admin", role: "admin", passwordHash: null, disabledAt: null, createdAt: "", updatedAt: "" });
+            await next();
+        });
         setup.onError(handleRequestError);
         setup.route("/", createSetupRouter());
         setup.route("/", createSettingsRouter());
@@ -265,7 +269,7 @@ describe("first-run setup", () => {
         const { chatsRepository } = await import("../../src/infra/repositories/chats");
         await settingsRepository.updateLlmSettings({ provider: "", model: "" });
         const status = await (await setup.request("/setup/status")).json();
-        assert.equal(status.needsAdmin, false);
+        assert.equal(status.needsAdmin, true);
         assert.equal(status.modelReady, false);
         assert.equal(status.completed, false);
         const response = await setup.request("/setup/demo", { method: "POST" });
@@ -745,7 +749,18 @@ describe("project steward", () => {
             const trusted = await jobsRepository.addItem({ projectId, jobId: job.id, kind: item.kind, title: "Previously reviewed selector", body: "Approved by the human", payload: item.payload });
             await jobsRepository.updateItem(trusted.id, { status: "approved" });
         }
-        const router = createStewardRouter();
+        const { agentSettings, updateSecuritySettings } = await import("../../src/core/chat/safety-settings");
+        const manager = await agentSettings();
+        assert.equal(manager.getBlockImages(), false);
+        await updateSecuritySettings({ sendScreenshotsToModel: false });
+        assert.equal(manager.getBlockImages(), true, "existing sessions recheck image policy on every request");
+        t.after(() => updateSecuritySettings({}));
+        const router = new Hono();
+        router.use("*", async (c, next) => {
+            c.set("user", { id: "admin", role: "admin", name: "Admin", email: "admin@example.com", passwordHash: null, disabledAt: null, createdAt: "", updatedAt: "" });
+            await next();
+        });
+        router.route("/", createStewardRouter());
         const endpoint = `/projects/${projectId}/steward`;
         const put = (body: unknown) => router.request(endpoint, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         assert.equal((await (await router.request(endpoint)).json()).autoApproveFixes, false);
@@ -756,6 +771,11 @@ describe("project steward", () => {
         assert.equal((await jobsRepository.item(item.id))?.status, "pending", "Act mode alone cannot opt in");
         assert.equal(await repoGit.getHeadSha(projectId), head);
         assert.equal((await (await put({ autoApproveFixes: true })).json()).autoApproveFixes, true);
+
+        await applyTrustedFixes(projectId);
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending", "project opt-in cannot override the administrator's default denial");
+        await updateSecuritySettings({ allowAutoApproveFixes: true, sendScreenshotsToModel: true });
+        assert.equal(manager.getBlockImages(), false);
 
         const claim = jobsRepository.claimItem.bind(jobsRepository);
         const revokeAtClaim = t.mock.method(jobsRepository, "claimItem", async (id: string) => {
@@ -1390,5 +1410,307 @@ describe("repository recovery", () => {
         await fs.writeFile(path.join(root, ".git", "index.lock"), "active operation");
         await assert.rejects(() => repoGit.withRepoLock(projectId, () => prepareRunRepositoryUnlocked(projectId)), /files are being updated/);
         assert.equal(await fs.readFile(path.join(root, ".git", "index.lock"), "utf8"), "active operation");
+    });
+});
+
+describe("encrypted credentials and operations", () => {
+    test("migrates old credentials, rotates every stored secret and restores an independent backup", { timeout: 60_000 }, async () => {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const exec = promisify(execFile);
+        const root = tempDir("specbook-operations-");
+        const original = path.join(root, "original");
+        const restored = path.join(root, "restored");
+        const archive = path.join(root, "backup.tar.gz");
+        const keyFile = path.join(root, "external.key");
+        const env = { ...process.env, SPECBOOK_STORAGE_DIR: original, SPECBOOK_ENCRYPTION_KEY: "", SPECBOOK_ENCRYPTION_KEY_FILE: "" };
+        const script = `
+            import assert from 'node:assert/strict'; import fs from 'node:fs/promises'; import crypto from 'node:crypto';
+            const {runMigrations}=await import('./src/infra/db/migrate.ts'); await runMigrations();
+            const {createProject}=await import('./src/core/projects.ts'); const p=await createProject('Backup check','https://example.com');
+            const old=crypto.randomBytes(32); await fs.writeFile(process.env.SPECBOOK_STORAGE_DIR+'/credentials.key',old);
+            const {createProfile}=await import('./src/core/credentials/profiles.ts');
+            const profile=await createProfile(p.id,{name:'account',fields:[{key:'password',value:'credential-to-preserve'}]});
+            const {db}=await import('./src/infra/db/client.ts'); const schema=await import('./src/infra/db/schema.ts');
+            const {encryptSecret,decryptSecret}=await import('./src/core/credentials/crypto.ts');
+            await db.insert(schema.chatSessions).values({id:'saved',projectId:p.id,profileId:profile.id,state:encryptSecret('saved-browser-state'),savedAt:new Date().toISOString()});
+            await db.insert(schema.projectAutomations).values({projectId:p.id,webhookUrl:encryptSecret('https://hooks.example/secret'),updatedAt:new Date().toISOString()});
+            await db.insert(schema.appSettings).values({id:1,llm:{provider:'',model:''},sso:{clientSecret:encryptSecret('oidc-secret')},updatedAt:new Date().toISOString()});
+            await db.insert(schema.oidcStates).values({stateHash:'state',browserHash:'browser',pkceVerifier:encryptSecret('pkce-verifier'),nonce:'nonce',redirectUri:'https://specbook.example/callback',issuer:'https://issuer.example',clientId:'client',expiresAt:new Date().toISOString()});
+            const auth=process.env.SPECBOOK_STORAGE_DIR+'/pi-auth.json'; await fs.writeFile(auth,JSON.stringify({example:{type:'api_key',key:'model-to-preserve'}}));
+            const {migrateSecrets,rotateEncryptionKey}=await import('./src/core/credentials/migration.ts');
+            process.env.SPECBOOK_ENCRYPTION_KEY=crypto.randomBytes(32).toString('base64'); await migrateSecrets();
+            assert.ok(!(await fs.readFile(auth,'utf8')).includes('model-to-preserve'));
+            assert.equal((await fs.stat(auth)).mode & 0o777,0o600);
+            await assert.rejects(fs.access(process.env.SPECBOOK_STORAGE_DIR+'/credentials.key'));
+            const next=crypto.randomBytes(32); const result=await rotateEncryptionKey(next); assert.equal(result.requiresConfiguration,true);
+            await assert.rejects(migrateSecrets(),/Configure the new/);
+            process.env.SPECBOOK_ENCRYPTION_KEY=next.toString('base64'); await migrateSecrets();
+            const {FileCredentialStore}=await import('./src/core/llm/credentials.ts'); assert.equal((await new FileCredentialStore(auth).read('example')).key,'model-to-preserve');
+            assert.equal(decryptSecret((await db.select().from(schema.credentialProfiles))[0].fields[0].value),'credential-to-preserve');
+            assert.equal(decryptSecret((await db.select().from(schema.chatSessions))[0].state),'saved-browser-state');
+            assert.equal(decryptSecret((await db.select().from(schema.projectAutomations))[0].webhookUrl),'https://hooks.example/secret');
+            assert.equal(decryptSecret((await db.select().from(schema.appSettings))[0].sso.clientSecret),'oidc-secret');
+            assert.equal(decryptSecret((await db.select().from(schema.oidcStates))[0].pkceVerifier),'pkce-verifier');
+            await fs.writeFile(process.env.OPS_TEST_KEY,next,{mode:0o600});
+        `;
+        await exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { env: { ...env, OPS_TEST_KEY: keyFile } });
+        const keyedEnv = { ...env, SPECBOOK_ENCRYPTION_KEY_FILE: keyFile };
+        const cli = ["--import", "tsx", "src/operations-cli.ts"];
+        await exec(process.execPath, [...cli, "backup", archive], { env: keyedEnv });
+        assert.equal((await fs.stat(archive)).mode & 0o777, 0o600);
+        await exec(process.execPath, [...cli, "restore", archive, "--storage", restored], { env: keyedEnv });
+        assert.ok(existsSync(path.join(restored, "specbook.db")));
+        assert.equal(await fs.readFile(path.join(restored, "pi-auth.json"), "utf8"), await fs.readFile(path.join(original, "pi-auth.json"), "utf8"));
+        assert.deepEqual(await fs.readdir(path.join(restored, "repos")), await fs.readdir(path.join(original, "repos")));
+        await assert.rejects(exec(process.execPath, [...cli, "restore", archive, "--storage", restored], { env: keyedEnv }), /empty storage directory/);
+        const wrong = path.join(root, "wrong-key");
+        await fs.writeFile(wrong, crypto.randomBytes(32));
+        const rejected = path.join(root, "rejected");
+        await assert.rejects(exec(process.execPath, [...cli, "restore", archive, "--storage", rejected], { env: { ...env, SPECBOOK_ENCRYPTION_KEY_FILE: wrong } }), /matching encryption key/);
+        assert.deepEqual((await fs.readdir(rejected)).filter((name) => name !== ".operations.lock"), []);
+    });
+
+    test("retention keeps current runs and pending evidence while pruning expired data", async () => {
+        const { db } = await import("../../src/infra/db/client");
+        const { runs } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { cleanupRetention } = await import("../../src/core/operations/retention");
+        const { storageRoot, runsDir } = await import("../../src/core/paths");
+        const projectId = await createProject("Retention");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Retention", "");
+        const { spec } = await createSpec(projectId, feature.id, "Retained evidence");
+        const old = new Date(Date.now() - 200 * 86_400_000);
+        const ids: string[] = [];
+        for (let index = 0; index < 4; index++) {
+            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash!, commitSha: "sha" });
+            await runsRepository.finishRun(run.id, "passed", 1, null);
+            await db.update(runs).set({ startedAt: new Date(old.getTime() + index * 1000).toISOString() }).where(eq(runs.id, run.id));
+            await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+            await fs.writeFile(path.join(runsDir, run.id, "evidence.txt"), "retained only when needed");
+            ids.push(run.id);
+        }
+        const batchId = crypto.randomUUID();
+        const batchDirectory = path.join(runsDir, "batches", batchId);
+        await fs.mkdir(batchDirectory, { recursive: true });
+        await fs.writeFile(path.join(batchDirectory, "batch.json"), JSON.stringify({ id: batchId, projectId, label: "Retained batch", status: "passed", startedAt: old.toISOString(), durationMs: 2, failReason: null,
+            specs: ids.slice(2).map((runId) => ({ runId, specId: spec.id, status: "passed", title: spec.title, sourceHash: spec.sourceHash, markdownHash: spec.markdownHash, commitSha: "sha", durationMs: 1, failReason: null })) }));
+        await db.update(runs).set({ automationPending: true }).where(eq(runs.id, ids[0]));
+        const metrics = path.join(storageRoot, "metrics", "chat-turns.jsonl");
+        await fs.mkdir(path.dirname(metrics), { recursive: true });
+        await fs.writeFile(metrics, `${JSON.stringify({ startedAt: old.toISOString() })}\n${JSON.stringify({ startedAt: new Date().toISOString() })}\n`);
+        await settingsRepository.updateRetention({ runsPerSpec: 1, runDays: 30, videoDays: 7, batchDays: 30, metricDays: 90, browserProfileDays: 30 });
+        const result = await cleanupRetention();
+        assert.ok(result.removedRuns >= 1);
+        assert.ok(await runsRepository.getRun(ids[0]), "pending failure evidence survives");
+        assert.equal(await runsRepository.getRun(ids[1]), null);
+        assert.ok(await runsRepository.getRun(ids[2]), "a retained batch keeps all attempts needed to report its CI status");
+        assert.ok(await runsRepository.getRun(ids[3]), "last run survives regardless of age");
+        assert.equal((await fs.readFile(metrics, "utf8")).trim().split("\n").length, 1);
+        assert.ok(result.removedMetrics >= 1);
+        await settingsRepository.updateRetention({ runsPerSpec: 20, runDays: 30, videoDays: 7, batchDays: 30, metricDays: 90, browserProfileDays: 30 });
+    });
+});
+
+describe("accounts, roles and session security", () => {
+    let secured: Hono;
+    let adminCookie = "";
+    let admin: { id: string; name: string; email: string; role: string };
+    const password = "Specbook-test-password-42";
+    const cookieOf = (response: Response, name = "specbook_session") => response.headers.getSetCookie().find((cookie) => cookie.startsWith(`${name}=`))?.split(";")[0] ?? "";
+    const call = (method: string, url: string, body?: unknown, cookie = adminCookie, extra: Record<string, string> = {}) => secured.request(`http://localhost:4000${url}`, {
+        method, headers: { host: "localhost:4000", "X-Specbook-Request": "1", "content-type": "application/json", ...(cookie ? { cookie } : {}), ...extra },
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    before(async () => { secured = (await import("../../src/infra/web/app")).createApp(); });
+
+    test("bootstrap is exclusive, credentials are hashed and sessions carry secure cookie attributes", async () => {
+        const { accountsRepository } = await import("../../src/infra/repositories/accounts");
+        assert.deepEqual(await (await call("GET", "/setup/status", undefined, "")).json(), { needsAdmin: true, authenticated: false });
+        const responses = await Promise.all(["first", "second"].map((name) => call("POST", "/setup/admin", { name, email: `${name}@example.com`, password }, "")));
+        assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409]);
+        const response = responses.find((result) => result.status === 201)!;
+        admin = (await response.json()).user;
+        adminCookie = cookieOf(response);
+        assert.ok(adminCookie);
+        assert.match(response.headers.get("set-cookie")!, /HttpOnly/);
+        assert.match(response.headers.get("set-cookie")!, /SameSite=Lax/i);
+        assert.equal((await accountsRepository.listUsers()).length, 1);
+        const stored = (await accountsRepository.getUser(admin.id))!;
+        assert.match(stored.passwordHash!, /^scrypt-v1:/);
+        assert.notEqual(stored.passwordHash, password);
+        assert.equal((await call("GET", "/auth/me")).status, 200);
+        assert.equal((await call("POST", "/setup/admin", { name: "Third", email: "third@example.com", password }, "")).status, 409);
+        assert.equal((await call("POST", "/auth/login", { email: admin.email, password: "wrong" }, "")).status, 401);
+        const status = await (await call("GET", "/setup/status", undefined, "")).json();
+        assert.deepEqual(status, { needsAdmin: false, authenticated: false });
+    });
+
+    test("invitations are one-use, viewers cannot mutate, editors cannot administer, and bearer clients keep working", async () => {
+        const invite = async (role: string) => {
+            const response = await call("POST", "/settings/invitations", { email: `${role}@example.com`, role });
+            assert.equal(response.status, 201, await response.clone().text());
+            const result = await response.json();
+            assert.ok(new URL(result.inviteUrl).hash.startsWith("#token="));
+            const token = new URLSearchParams(new URL(result.inviteUrl).hash.slice(1)).get("token")!;
+            const accepted = await call("POST", "/auth/invitations/accept", { token, name: role, password }, "");
+            assert.equal(accepted.status, 201, await accepted.clone().text());
+            assert.equal((await call("POST", "/auth/invitations/inspect", { token }, "")).status, 410);
+            assert.equal((await call("POST", "/auth/invitations/accept", { token, name: role, password }, "")).status, 410);
+            return { user: (await accepted.json()).user, cookie: cookieOf(accepted) };
+        };
+        const viewer = await invite("viewer");
+        const editor = await invite("editor");
+        assert.equal((await call("GET", "/projects", undefined, viewer.cookie)).status, 200);
+        assert.equal((await call("POST", "/projects", { name: "Forbidden", baseUrl: "https://example.com" }, viewer.cookie)).status, 403);
+        assert.equal((await call("GET", "/settings/members", undefined, viewer.cookie)).status, 403);
+        assert.equal((await call("GET", "/settings/llm", undefined, editor.cookie)).status, 403);
+        assert.equal((await call("GET", "/settings/llm/status", undefined, editor.cookie)).status, 200);
+        const created = await call("POST", "/projects", { name: "Attributed edits", baseUrl: "https://example.com" }, editor.cookie);
+        assert.equal(created.status, 200, await created.clone().text());
+        const project = (await created.json()).project;
+        assert.equal((await call("PUT", `/projects/${project.id}/steward`, { autoApproveFixes: true }, editor.cookie)).status, 403);
+        const featureResponse = await call("POST", `/projects/${project.id}/features`, { title: "Authored feature", description: "" }, editor.cookie);
+        assert.equal(featureResponse.status, 200, await featureResponse.clone().text());
+        const author = await repoGit.getProjectGit(project.id).raw(["log", "-1", "--format=%an <%ae>"]);
+        assert.equal(author.trim(), "editor <editor@example.com>");
+        const gitToken = (await (await call("POST", `/projects/${project.id}/git/remote/token`)).json()).token;
+        const git = await call("GET", `/git/${project.id}.git/info/refs?service=git-upload-pack`, undefined, "", { authorization: `Basic ${Buffer.from(`git:${gitToken}`).toString("base64")}` });
+        assert.equal(git.status, 200, await git.clone().text());
+        const ciToken = (await (await call("POST", `/projects/${project.id}/ci/token`)).json()).token;
+        assert.equal((await call("GET", `/ci/projects/${project.id}/client.mjs`, undefined, "", { authorization: `Bearer ${ciToken}` })).status, 200);
+        assert.equal((await call("GET", `/ci/projects/${project.id}/client.mjs`, undefined, "")).status, 401);
+        const audit = await (await call("GET", "/settings/audit?limit=100")).json();
+        assert.ok(audit.events.some((event: { actorId: string; action: string }) => event.actorId === editor.user.id && event.action === "repository.commit"));
+        assert.doesNotMatch(JSON.stringify(audit), new RegExp(password));
+        assert.doesNotMatch(JSON.stringify(audit), new RegExp(ciToken));
+        assert.equal((await call("PATCH", `/settings/members/${viewer.user.id}`, { disabled: true })).status, 200);
+        assert.equal((await call("GET", "/projects", undefined, viewer.cookie)).status, 401);
+    });
+
+    test("last usable administrator is protected and session revocation closes active streams", async () => {
+        const { accountsRepository } = await import("../../src/infra/repositories/accounts");
+        const { watchSession } = await import("../../src/core/accounts/sessions");
+        await accountsRepository.createSsoUser("unlinked-admin@example.com", "No active SSO", "admin", "https://inactive.example", "subject");
+        assert.equal((await call("PATCH", `/settings/members/${admin.id}`, { role: "viewer" })).status, 409);
+        assert.equal((await call("PATCH", `/settings/members/${admin.id}`, { disabled: true })).status, 409);
+        const signedIn = await call("POST", "/auth/login", { email: admin.email, password }, "");
+        assert.equal(signedIn.status, 200);
+        const cookie = cookieOf(signedIn);
+        const projectId = await createProject("Authenticated stream");
+        const chat = (await (await call("POST", `/projects/${projectId}/chats`, undefined, cookie)).json()).chat;
+        const stream = await call("GET", `/chats/${chat.id}/events`, undefined, cookie);
+        const reader = stream.body!.getReader();
+        assert.match(new TextDecoder().decode((await reader.read()).value), /event: connected/);
+        let closed = false;
+        const stop = await watchSession(new Headers({ cookie }), () => { closed = true; });
+        try {
+            assert.equal(closed, false);
+            assert.equal((await call("POST", "/auth/logout", undefined, cookie)).status, 200);
+            assert.equal(closed, true);
+            assert.equal((await reader.read()).done, true, "logout closes the live SSE response");
+            assert.equal((await call("GET", "/auth/me", undefined, cookie)).status, 401);
+        } finally { stop(); await reader.cancel(); }
+    });
+
+    test("OIDC validates signatures, PKCE, nonce, browser binding and explicit account linking", async (t) => {
+        const { accountsRepository } = await import("../../src/infra/repositories/accounts");
+        const { verifiedEmail } = await import("../../src/core/accounts/oidc");
+        const issuer = "https://identity.example.com";
+        const config = { enabled: true, issuer, clientId: "specbook", clientSecret: "test-oidc-secret", defaultRole: "viewer", allowedEmailDomains: ["example.com"], passwordLoginEnabled: true };
+        const keys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+        const wrongKeys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+        const jwt = (claims: object, invalid = false) => {
+            const encoded = [JSON.stringify({ alg: "RS256", kid: "test-key" }), JSON.stringify(claims)].map((value) => Buffer.from(value).toString("base64url")).join(".");
+            return `${encoded}.${crypto.sign("RSA-SHA256", Buffer.from(encoded), invalid ? wrongKeys.privateKey : keys.privateKey).toString("base64url")}`;
+        };
+        let authorization: URL;
+        let overrides: Record<string, unknown> = {};
+        let invalidSignature = false;
+        let exchanges = 0;
+        const originalFetch = globalThis.fetch;
+        t.mock.method(globalThis, "fetch", async (input: string | URL | Request, options?: RequestInit) => {
+            const url = new URL(input instanceof Request ? input.url : input.toString());
+            if (url.origin !== issuer) return originalFetch(input, options);
+            if (url.pathname === "/.well-known/openid-configuration") return Response.json({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, jwks_uri: `${issuer}/jwks`, response_types_supported: ["code"], subject_types_supported: ["public"], id_token_signing_alg_values_supported: ["RS256"], code_challenge_methods_supported: ["S256"] });
+            if (url.pathname === "/jwks") return Response.json({ keys: [{ ...keys.publicKey.export({ format: "jwk" }), alg: "RS256", kid: "test-key", use: "sig" }] });
+            if (url.pathname === "/token") {
+                exchanges++;
+                const body = new URLSearchParams(options?.body?.toString());
+                assert.equal(body.get("client_secret"), config.clientSecret);
+                assert.equal(crypto.createHash("sha256").update(body.get("code_verifier")!).digest("base64url"), authorization.searchParams.get("code_challenge"));
+                const now = Math.floor(Date.now() / 1000);
+                return Response.json({ token_type: "Bearer", access_token: "fake-access-token", expires_in: 300, id_token: jwt({ iss: issuer, sub: "local-admin", aud: "specbook", iat: now, exp: now + 300, nonce: authorization.searchParams.get("nonce"), email: admin.email, email_verified: true, ...overrides }, invalidSignature) });
+            }
+            throw new Error(`Unexpected identity request: ${url}`);
+        });
+        const begin = async (link = false, cookie = adminCookie) => {
+            const response = await call("POST", "/auth/oidc/start", { link }, cookie);
+            assert.equal(response.status, 200, await response.clone().text());
+            authorization = new URL((await response.json()).url);
+            assert.equal(authorization.searchParams.get("code_challenge_method"), "S256");
+            return { path: `/auth/oidc/callback?code=authorization-code&state=${authorization.searchParams.get("state")}`, cookie: [cookie, cookieOf(response, "specbook_oidc")].filter(Boolean).join("; ") };
+        };
+        const callback = (pending: { path: string; cookie: string }) => call("GET", pending.path, undefined, pending.cookie);
+        const failed = async (pending: { path: string; cookie: string }) => {
+            const response = await callback(pending);
+            assert.match(response.headers.get("location")!, /\/login\?error=sso_failed$/);
+            assert.equal(cookieOf(response), "");
+        };
+        assert.equal((await call("PUT", "/settings/sso", config)).status, 200);
+        try {
+            const bound = await begin();
+            await failed({ ...bound, cookie: adminCookie });
+            assert.equal(exchanges, 0, "a different browser cannot exchange the code");
+            await failed(bound);
+            assert.equal(await accountsRepository.identity(issuer, "local-admin"), null, "matching emails never link accounts automatically");
+            await failed(bound);
+            assert.equal(exchanges, 1, "state is consumed once");
+            overrides = { nonce: "wrong-nonce" };
+            await failed(await begin(true));
+            overrides = {};
+            invalidSignature = true;
+            await failed(await begin(true));
+            invalidSignature = false;
+            overrides = { email_verified: false };
+            await failed(await begin(true));
+            overrides = { email: "outside@other.example" };
+            await failed(await begin(true));
+            overrides = {};
+            const linked = await callback(await begin(true));
+            assert.equal(linked.headers.get("location"), "http://localhost:4000/settings");
+            adminCookie = cookieOf(linked);
+            assert.ok(adminCookie);
+            assert.equal((await (await call("GET", "/settings/sso")).json()).linked, true);
+            const hidden = await (await call("GET", "/settings/sso")).text();
+            assert.doesNotMatch(hidden, /test-oidc-secret|verifiedUsers/);
+            const invitation = await (await call("POST", "/settings/invitations", { email: "pending@example.com", role: "viewer" })).json();
+            const token = new URLSearchParams(new URL(invitation.inviteUrl).hash.slice(1)).get("token")!;
+            const { clientSecret: _secret, ...unchanged } = config;
+            assert.equal((await call("PUT", "/settings/sso", { ...unchanged, passwordLoginEnabled: false })).status, 200);
+            assert.equal((await call("POST", "/auth/login", { email: admin.email, password }, "")).status, 403);
+            assert.equal((await call("POST", "/auth/invitations/accept", { token, name: "Pending", password }, "")).status, 403);
+            assert.equal((await call("PUT", "/settings/sso", { ...config, clientSecret: "changed", passwordLoginEnabled: false })).status, 409, "changed provider credentials need a new successful link before disabling local login");
+            overrides = { sub: "new-member", email: "sso-member@example.com", name: "New member" };
+            const created = await callback(await begin(false, ""));
+            assert.equal(created.headers.get("location"), "http://localhost:4000/");
+            assert.equal((await (await call("GET", "/auth/me", undefined, cookieOf(created))).json()).user.role, "viewer");
+            assert.equal((await call("PATCH", `/settings/members/${admin.id}`, { disabled: true })).status, 409);
+            const { db } = await import("../../src/infra/db/client");
+            const { users } = await import("../../src/infra/db/schema");
+            const { eq } = await import("drizzle-orm");
+            const localHash = (await accountsRepository.getUser(admin.id))!.passwordHash;
+            await db.update(users).set({ passwordHash: null }).where(eq(users.id, admin.id));
+            try {
+                assert.equal((await call("PUT", "/settings/sso", { ...config, clientId: "another-client", passwordLoginEnabled: true })).status, 409, "enabling passwords cannot protect a provider change when no administrator has a local password");
+            } finally { await db.update(users).set({ passwordHash: localHash }).where(eq(users.id, admin.id)); }
+            assert.equal(verifiedEmail("https://login.microsoftonline.com/12345678-1234-1234-1234-123456789abc/v2.0", { email: "verified@example.com", xms_edov: true }), "verified@example.com");
+            assert.equal(verifiedEmail("https://login.microsoftonline.com/common/v2.0", { email: "verified@example.com", xms_edov: true }), null);
+            assert.equal(verifiedEmail(issuer, { email: "verified@example.com", xms_edov: true }), null);
+        } finally {
+            const { clientSecret: _secret, ...unchanged } = config;
+            assert.equal((await call("PUT", "/settings/sso", { ...unchanged, enabled: false, passwordLoginEnabled: true })).status, 200);
+        }
     });
 });

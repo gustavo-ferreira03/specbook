@@ -4,6 +4,7 @@ import { db } from "../db/client";
 import { inboxItems, jobActions, jobs } from "../db/schema";
 import { jobLimitsSchema } from "../../core/jobs/schemas";
 import { recordAgentMetric } from "../../core/jobs/metrics";
+import { currentActor, recordAudit } from "../../core/accounts/audit";
 
 export type Job = typeof jobs.$inferSelect;
 export type InboxItem = typeof inboxItems.$inferSelect;
@@ -62,6 +63,9 @@ export const jobsRepository = {
     },
     async log(jobId: string, action: string, detail = "") {
         await db.insert(jobActions).values({ jobId, action, detail, createdAt: now() });
+        const owner = await this.get(jobId);
+        if (owner) await recordAudit("agent.action", { jobId, action, detail }, owner.projectId,
+            currentActor() ?? { id: jobId, name: "Specbook", kind: "agent" });
         const decision = /^inbox:(approve|reject|answer|dismiss|report_bug|ignore)$/.exec(action)?.[1];
         const verification = action === "proposal:verified" ? /^([a-f0-9-]{36}): (passed|failed|error)$/.exec(detail) : null;
         if (action === "stopped" || decision || verification) {

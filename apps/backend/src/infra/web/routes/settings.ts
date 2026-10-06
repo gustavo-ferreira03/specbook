@@ -1,3 +1,4 @@
+import { access } from "../access";
 import crypto from "node:crypto";
 import type { AuthEvent, AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -214,7 +215,7 @@ function listProviders(modelRegistry: Awaited<typeof modelRegistryPromise>): Pro
 export function createSettingsRouter(): Hono {
     const router = new Hono();
 
-    router.post("/settings/llm/test", async (c) => {
+    router.post("/settings/llm/test", access("admin"), async (c) => {
         const selected = await configuredModel();
         if (!selected.ready || !selected.model) {
             return c.json({ error: "Connect a provider and choose a model first.", code: "model_not_configured", nextStep: "Save your model settings, then test the connection." }, 400);
@@ -234,8 +235,8 @@ export function createSettingsRouter(): Hono {
         }
     });
 
-    router.get("/settings/agent", async (c) => c.json({ paused: await settingsRepository.getAgentPaused() }));
-    router.put("/settings/agent", async (c) => {
+    router.get("/settings/agent", access("admin"), async (c) => c.json({ paused: await settingsRepository.getAgentPaused() }));
+    router.put("/settings/agent", access("admin"), async (c) => {
         const body = agentSettingsSchema.safeParse(await c.req.json().catch(() => null));
         if (!body.success) throw new HTTPException(400, { message: "Provide a valid pause state" });
         const paused = await settingsRepository.setAgentPaused(body.data.paused);
@@ -244,7 +245,7 @@ export function createSettingsRouter(): Hono {
         return c.json({ paused });
     });
 
-    router.get("/settings/llm/status", async (c) => {
+    router.get("/settings/llm/status", access("viewer"), async (c) => {
         const modelRegistry = await modelRegistryPromise;
         const current = await settingsRepository.getLlmSettings();
         const model = current.provider && current.model ? modelRegistry.find(current.provider, current.model) : null;
@@ -255,12 +256,12 @@ export function createSettingsRouter(): Hono {
         });
     });
 
-    router.get("/settings/llm", async (c) => {
+    router.get("/settings/llm", access("admin"), async (c) => {
         const modelRegistry = await modelRegistryPromise;
         return c.json({ providers: listProviders(modelRegistry), current: await settingsRepository.getLlmSettings() });
     });
 
-    router.patch("/settings/llm", async (c) => {
+    router.patch("/settings/llm", access("admin"), async (c) => {
         const modelRegistry = await modelRegistryPromise;
         const body = llmPatchSchema.safeParse(await c.req.json().catch(() => null));
         if (!body.success) throw new HTTPException(400, { message: "Invalid LLM settings" });
@@ -276,7 +277,7 @@ export function createSettingsRouter(): Hono {
         return c.json(await settingsRepository.updateLlmSettings(updated));
     });
 
-    router.put("/settings/llm/providers/:provider", async (c) => {
+    router.put("/settings/llm/providers/:provider", access("admin"), async (c) => {
         const [modelRegistry, modelRuntime] = await Promise.all([modelRegistryPromise, modelRuntimePromise]);
         const provider = c.req.param("provider");
         requireProvider(provider, modelRegistry);
@@ -288,7 +289,7 @@ export function createSettingsRouter(): Hono {
         return c.json({ ok: true });
     });
 
-    router.delete("/settings/llm/providers/:provider", async (c) => {
+    router.delete("/settings/llm/providers/:provider", access("admin"), async (c) => {
         const [modelRegistry, modelRuntime] = await Promise.all([modelRegistryPromise, modelRuntimePromise]);
         const provider = c.req.param("provider");
         requireProvider(provider, modelRegistry);
@@ -298,7 +299,7 @@ export function createSettingsRouter(): Hono {
         return c.json({ ok: true });
     });
 
-    router.post("/settings/llm/providers/:provider/oauth/start", async (c) => {
+    router.post("/settings/llm/providers/:provider/oauth/start", access("admin"), async (c) => {
         const [modelRegistry, modelRuntime] = await Promise.all([modelRegistryPromise, modelRuntimePromise]);
         const provider = requireOAuthProvider(c.req.param("provider"));
         requireProvider(provider, modelRegistry);
@@ -307,7 +308,7 @@ export function createSettingsRouter(): Hono {
         return c.json({ sessionId });
     });
 
-    router.post("/settings/llm/providers/:provider/oauth/input", async (c) => {
+    router.post("/settings/llm/providers/:provider/oauth/input", access("admin"), async (c) => {
         const provider = requireOAuthProvider(c.req.param("provider"));
         const body = oauthInputSchema.safeParse(await c.req.json().catch(() => null));
         if (!body.success) throw new HTTPException(400, { message: "A valid OAuth session and input are required" });
@@ -320,7 +321,7 @@ export function createSettingsRouter(): Hono {
         return c.json({ ok: true });
     });
 
-    router.get("/settings/llm/providers/:provider/oauth/poll", (c) => {
+    router.get("/settings/llm/providers/:provider/oauth/poll", access("admin"), (c) => {
         const provider = requireOAuthProvider(c.req.param("provider"));
         const sessionId = c.req.query("sessionId");
         if (!sessionId) throw new HTTPException(400, { message: "Missing sessionId" });

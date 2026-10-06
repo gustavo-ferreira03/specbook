@@ -13,6 +13,7 @@ import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure, stallJob } from "./retry";
 import { canRunAgentJob, isAgentPaused } from "./pause";
 import { projectsRepository } from "../../infra/repositories/projects";
+import { withActor } from "../accounts/audit";
 
 const active = new Map<string, Promise<void>>();
 const resumeInstructions = "The human paused this investigation. When resumed, read the previous messages, suggestions and current browser state before continuing the original goal. Do not repeat completed actions or change the expected behavior.";
@@ -117,7 +118,7 @@ export async function drainJobs(): Promise<void> {
             const job = await jobsRepository.claim(row.id);
             if (!job) continue;
             if (await isAgentPaused(job.projectId)) { await jobsRepository.transition(job.id, "running", "paused", { startedAt: null, heartbeatAt: null }); continue; }
-            const execution = executeJob(job).catch((error) => logger.error("job failed", { jobId: job.id, error }))
+            const execution = withActor({ id: job.id, name: "Specbook", kind: "agent" }, () => executeJob(job)).catch((error) => logger.error("job failed", { jobId: job.id, error }))
                 .finally(() => { active.delete(job.id); void drainJobs(); });
             active.set(job.id, execution);
         }

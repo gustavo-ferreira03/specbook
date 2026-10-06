@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname, useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
+import { EmptyState } from "@/components/EmptyState";
 import { Settings } from "lucide-react";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { ContextFileCard } from "@/components/ContextFileCard";
@@ -22,6 +24,7 @@ type SettingsTab = (typeof SETTINGS_TABS)[number];
 const TAB_LABELS: [SettingsTab, string][] = [["general", "General"], ["git", "Git"], ["context", "Context"], ["credentials", "Credentials"], ["automation", "Automation"], ["ci", "CI/CD"]];
 
 function SettingsContent() {
+    const { canEdit, isAdmin } = useAuth();
     const { projectId } = useParams<{ projectId: string }>();
     const router = useRouter();
     const pathname = usePathname();
@@ -47,9 +50,10 @@ function SettingsContent() {
         router.replace(params.size ? `${pathname}?${params}` : pathname, { scroll: false });
     }
 
+    if (!canEdit) return <EmptyState title="Project settings are read-only" description="Your viewer account can read Specs, run results and evidence. Ask an editor to change project settings." />;
     return <div className="flex min-h-full flex-col bg-surface">
         <PageHeader title="Project settings" breadcrumbs={[{ label: projectName ?? "Project", href: `/p/${projectId}` }]} width="reading" bordered={false} className="pb-2 md:pb-3"
-            actions={<Button asChild variant="ghost"><Link href="/settings"><Settings size={14} /> Instance settings</Link></Button>} />
+            actions={isAdmin && <Button asChild variant="ghost"><Link href="/settings"><Settings size={14} /> Instance settings</Link></Button>} />
         <Tabs value={activeTab} onValueChange={selectTab} className="flex-1">
             <div className="border-b border-line bg-surface px-4 md:px-8">
                 <TabsList aria-label="Project settings sections" className="mx-auto w-full max-w-reading border-b-0">

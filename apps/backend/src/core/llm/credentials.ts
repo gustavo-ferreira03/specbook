@@ -1,5 +1,6 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { readFile } from "node:fs/promises";
+import { decryptSecret, encryptSecret } from "../credentials/crypto";
+import { writeProtectedFile } from "../credentials/files";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 
 type CredentialData = Record<string, Credential>;
@@ -25,7 +26,7 @@ export class FileCredentialStore implements CredentialStore {
 
     private async readData(): Promise<CredentialData> {
         try {
-            return JSON.parse(await readFile(this.filePath, "utf8")) as CredentialData;
+            return JSON.parse(decryptSecret(await readFile(this.filePath, "utf8"))) as CredentialData;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
             throw error;
@@ -33,9 +34,7 @@ export class FileCredentialStore implements CredentialStore {
     }
 
     private async writeData(data: CredentialData): Promise<void> {
-        await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-        await writeFile(this.filePath, JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
-        await chmod(this.filePath, 0o600);
+        await writeProtectedFile(this.filePath, encryptSecret(JSON.stringify(data)));
     }
 
     async read(providerId: string): Promise<Credential | undefined> {

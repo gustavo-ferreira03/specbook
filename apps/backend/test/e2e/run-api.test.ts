@@ -159,7 +159,7 @@ test("Store", async ({ page, step, secret }) => {
         };
         assert.deepEqual(evidence.steps.map((step) => step.label), steps);
         assert.equal(evidence.failedStep, "See the store");
-        assert.equal(evidence.video, "evidence/execution.webm");
+        assert.equal(evidence.video, null, "secret runs never record failure videos");
         assert.equal(evidence.reportUrl, null, "runs that type secrets keep no HTML report");
         const screenshot = await app.request(`/runs/${run.id}/artifacts/${evidence.steps[0].file}`);
         assert.equal(screenshot.headers.get("content-type"), "image/png");

@@ -93,9 +93,9 @@ function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyS
     const plain = options.specs.filter((spec) => spec.analysis.secretRefs.length === 0).map(file);
     const secret = options.specs.filter((spec) => spec.analysis.secretRefs.length > 0).map(file);
     const projects = [
-        // Traces record typed values and DOM snapshots, so Specs that type secrets never record one.
+        // Traces and videos can expose credentials, so Specs that type secrets record neither.
         plain.length ? { name: "specbook", testMatch: plain, use: { trace: "retain-on-failure" } } : null,
-        secret.length ? { name: "specbook-secrets", testMatch: secret, use: { trace: "off" } } : null,
+        secret.length ? { name: "specbook-secrets", testMatch: secret, use: { trace: "off", video: "off" } } : null,
     ].filter(Boolean);
     const reporter: unknown[] = [["line"], ["json", { outputFile: "results.json" }]];
     if (withHtmlReport) reporter.push(["html", { outputFolder: "../report", open: "never" }]);

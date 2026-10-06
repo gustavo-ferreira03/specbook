@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Job } from "../../infra/repositories/jobs";
 import { logger } from "../../infra/logger";
 import { storageRoot } from "../paths";
+import { withFileQueue } from "../operations/file-queue";
 
 export const jobMetricsPath = path.join(storageRoot, "metrics", "agent-events.jsonl");
 
@@ -26,10 +27,10 @@ export async function recordAgentMetric(job: Job, event: string, details: AgentM
         tokensUsed: job.tokensUsed, actionsUsed: job.actionsUsed, elapsedMs: job.elapsedMs,
         ...details,
     };
-    const write = writes.then(async () => {
+    const write = writes.then(() => withFileQueue(jobMetricsPath, async () => {
         await fs.mkdir(path.dirname(jobMetricsPath), { recursive: true });
         await fs.appendFile(jobMetricsPath, `${JSON.stringify(record)}\n`, "utf8");
-    });
+    }));
     writes = write.catch((error) => logger.warn("agent evaluation metric could not be written", { error }));
     await writes;
 }

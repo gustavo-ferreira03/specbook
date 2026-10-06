@@ -34,6 +34,7 @@ export interface BrowserToolPolicy {
 }
 
 export interface BrowserMcp {
+    workDir?: string;
     client: Client;
     tools: { name: string; description?: string; inputSchema: unknown }[];
     ensureBrowser: (signal?: AbortSignal) => Promise<void>;
@@ -41,7 +42,7 @@ export interface BrowserMcp {
     close: () => Promise<void>;
 }
 
-export async function launchBrowserMcp(opts: { workDir: string; display: string }): Promise<BrowserMcp> {
+export async function launchBrowserMcp(opts: { workDir: string; display: string; navigationOrigins?: string[] }): Promise<BrowserMcp> {
     await fs.mkdir(opts.workDir, { recursive: true });
     const userDataDir = path.join(opts.workDir, "profile");
     const defaultProfileDir = path.join(userDataDir, "Default");
@@ -60,9 +61,26 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string 
         }),
         "utf8",
     );
+    const initPage = path.join(opts.workDir, "navigation-policy.ts");
+    if (opts.navigationOrigins) {
+        await fs.writeFile(initPage, `export default async ({ page }) => {
+            const allowed = new Set(${JSON.stringify(opts.navigationOrigins)});
+            const session = await page.context().newCDPSession(page);
+            session.on("Fetch.requestPaused", (event) => {
+                let permitted = false;
+                try { permitted = allowed.has(new URL(event.request.url).origin); } catch {}
+                void session.send(permitted ? "Fetch.continueRequest" : "Fetch.failRequest", {
+                    requestId: event.requestId, ...(permitted ? {} : { errorReason: "BlockedByClient" }),
+                }).catch(() => undefined);
+            });
+            await session.send("Fetch.enable", { patterns: [{ resourceType: "Document", requestStage: "Request" }] });
+            page.on("close", () => void session.detach().catch(() => undefined));
+        };`, "utf8");
+    }
     const config = {
         browser: {
             browserName: "chromium",
+            ...(opts.navigationOrigins ? { initPage: [initPage], contextOptions: { serviceWorkers: "block" } } : {}),
             userDataDir,
             launchOptions: {
                 headless: false,
@@ -106,6 +124,7 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string 
         };
         return {
             client,
+            workDir: opts.workDir,
             tools: tools as BrowserMcp["tools"],
             ensureBrowser,
             navigate,
@@ -156,6 +175,14 @@ function extractMcpText(result: { content?: unknown }): string {
 
 export async function renderMcpResult(result: { content?: unknown }, workDir: string): Promise<string> {
     return inlineSnapshots(extractMcpText(result), workDir);
+}
+
+export async function readBrowserSnapshot(mcp: BrowserMcp, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
+    const result = await mcp.client.callTool({ name: "browser_snapshot", arguments: {} }, undefined, { signal });
+    if (result.isError) throw new Error("The current browser snapshot could not be read.");
+    const content = result as { content?: unknown };
+    return mcp.workDir ? renderMcpResult(content, mcp.workDir) : extractMcpText(content);
 }
 
 export async function getActiveTabUrl(mcp: BrowserMcp, signal?: AbortSignal): Promise<string | null> {

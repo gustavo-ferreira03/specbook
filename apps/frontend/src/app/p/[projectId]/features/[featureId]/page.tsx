@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useMemo, useRef, useState } from "react";
@@ -25,6 +27,7 @@ function isRunnable(spec: SpecSummary) {
 }
 
 export default function FeaturePage({ params }: { params: Promise<{ projectId: string; featureId: string }> }) {
+    const { canEdit } = useAuth();
     const { projectId, featureId } = use(params);
     const router = useRouter();
     const [features, setFeatures] = useState<Feature[] | null>(null);
@@ -190,7 +193,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                     <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                         <span className="font-mono [overflow-wrap:anywhere]">{feature.path}</span>
                         <span aria-hidden="true" className="text-ink-disabled">·</span>
-                        <FeatureFileDialog
+                        {canEdit && <FeatureFileDialog
                             featureId={feature.id}
                             featureTitle={feature.title}
                             onSaved={() => setRetryKey((key) => key + 1)}
@@ -199,10 +202,10 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                                     Edit source file
                                 </button>
                             )}
-                        />
+                        />}
                     </span>
                 }
-                actions={
+                actions={canEdit &&
                     <>
                         <FeatureEditDialog
                             feature={feature}
@@ -236,7 +239,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                             icon={FolderX}
                             title="No Specs in this feature yet"
                             description="Describe a behavior in a chat, or create a Spec by hand from the Specs page."
-                            action={<Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/chats/new`}>Start a chat</Link></Button>}
+                            action={canEdit && <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/chats/new`}>Start a chat</Link></Button>}
                         />
                     </div>
                 ) : (
