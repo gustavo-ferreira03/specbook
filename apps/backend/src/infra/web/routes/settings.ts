@@ -285,7 +285,7 @@ export function createSettingsRouter(): Hono {
         if (!body.success) throw new HTTPException(400, { message: "apiKey is required" });
         removeProviderOAuthSessions(provider);
         await llmCredentials.modify(provider, async () => ({ type: "api_key", key: body.data.apiKey }));
-        await modelRuntime.reloadConfig();
+        await modelRuntime.refresh({ allowNetwork: false, providers: [provider] });
         return c.json({ ok: true });
     });
 
@@ -295,7 +295,7 @@ export function createSettingsRouter(): Hono {
         requireProvider(provider, modelRegistry);
         removeProviderOAuthSessions(provider);
         await llmCredentials.delete(provider);
-        await modelRuntime.reloadConfig();
+        await modelRuntime.refresh({ allowNetwork: false, providers: [provider] });
         return c.json({ ok: true });
     });
 

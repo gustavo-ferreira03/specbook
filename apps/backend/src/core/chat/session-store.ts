@@ -37,10 +37,10 @@ export function extractText(message: AgentMessage | undefined): string {
 }
 
 /**
- * Writes the whole session file now. SessionManager only persists once the first
- * assistant message exists and offers no public flush, so Specbook relies on the
- * library's private `_rewriteFile` here (checked against @earendil-works/pi-coding-agent
- * 0.80.10). Keep every use of the private API behind this wrapper.
+ * Writes the whole session file now, including a chat without messages.
+ * SessionManager offers no public flush, so Specbook relies on the library's
+ * private `_rewriteFile` here (checked against @earendil-works/pi-coding-agent
+ * 1.0.4). Keep every use of the private API behind this wrapper.
  */
 export function flushSessionFile(sessionManager: SessionManager): void {
     const writable = sessionManager as unknown as { _rewriteFile(): void; flushed: boolean };

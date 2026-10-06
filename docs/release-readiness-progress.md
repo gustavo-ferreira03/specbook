@@ -67,6 +67,14 @@ A fresh production instance at the LAN address verified administrator creation, 
 
 Remaining external verification: the Docker quick start on a clean machine, native multi-architecture image execution, OS/browser vulnerability scan and actual registry signing/publication. Docker is unavailable here; those checks are encoded in the workflows and must succeed after Gus pushes. No push, tag, release or Pages deployment was performed. Follow [the release commands](releases.md#publish-the-prepared-release) and enable GitHub Pages with the Actions source.
 
+## Follow-up: PI update
+
+Gus requested updating the project's PI after the release phases. Both `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` move from 0.80.10 to the published stable 1.0.4, with the lockfile updated. Credential changes now call the canonical `ModelRuntime.refresh()` API. Session persistence remains compatible with existing JSONL files; the private flush wrapper was checked against the new implementation. Cache warming is disabled to preserve request accounting and avoid additional model calls during tools.
+
+Typecheck, the backend/operations build and all 279 tests passed with no skips. The 47 repository/security integration checks also passed after the cache warming adjustment; a separate runtime check confirms it is off. A temporary production backend verified encrypted credential saving/removal, refreshed provider availability and reopening an empty chat; its projects were deleted through the API and the temporary service stopped. Trivy reports zero HIGH/CRITICAL findings across 664 locked packages. Evidence: `/tmp/specbook-pi-update-tests.log`, `/tmp/specbook-pi-update-qa-result.json` and `/tmp/specbook-pi-update-vulnerabilities.json`.
+
+The original backend was restarted on PI 1.0.4; frontend-proxied `/health` and `/ready` pass. Azure is now named `azure` in PI's model catalog; deployments selecting that provider must follow the upstream naming change. OpenAI Codex and Anthropic credential formats remain compatible. No push or publication was performed.
+
 ## Environment and evidence
 
 - Development services currently use backend :4000 and frontend :4001; LAN address is `192.168.0.165`.

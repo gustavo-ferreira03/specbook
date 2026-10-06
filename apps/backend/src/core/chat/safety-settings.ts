@@ -28,6 +28,7 @@ export async function updateSecuritySettings(input: unknown): Promise<SecuritySe
 export async function agentSettings(): Promise<SettingsManager> {
     await getSecuritySettings();
     const settings = SettingsManager.inMemory();
+    settings.setCacheWarmingMode("off");
     // The SDK checks this for every provider request, including restored image history.
     settings.getBlockImages = () => !current.sendScreenshotsToModel;
     return settings;
