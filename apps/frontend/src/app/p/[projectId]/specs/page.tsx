@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { activateSpecs, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
-import { formatNumber } from "@/lib/format";
+import { countLabel, formatNumber } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { NO_SPECS_DESCRIPTION, countStatuses, statusMeta } from "@/lib/status";
 import { useRunBatch } from "@/lib/useRunBatch";
@@ -214,7 +214,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 actions={canEdit &&
                     <>
                         {createActions}
-                        {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || isRunning} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${activatable.length} ${activatable.length === 1 ? "draft" : "drafts"}`}</Button>}
+                        {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || isRunning} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${countLabel(activatable.length, "draft")}`}</Button>}
                         <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={isRunning} />
                         <div className="flex items-center">
                             <Button type="button" size="sm" className="rounded-r-none" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>

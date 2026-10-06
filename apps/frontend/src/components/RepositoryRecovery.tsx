@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { FileDiff, type ProposalFile } from "@/components/FileDiff";
-import { InlineFeedback, SettingsBlock, SettingsSection } from "@/components/SettingsLayout";
+import { InlineFeedback, SettingsBlock, SettingsSection, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, apiPath, errorMessage } from "@/lib/api";
+import { countLabel } from "@/lib/format";
 
 interface Recovery {
     dirty: boolean;
@@ -22,7 +23,7 @@ export function RepositoryRecovery({ projectId }: { projectId: string }) {
     const [open, setOpen] = useState(false);
     const [saving, setSaving] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [feedback, setFeedback] = useState<InlineFeedbackValue | null>(null);
     const trigger = useRef<HTMLButtonElement | null>(null);
     const load = useCallback(async () => {
         setLoading(true);
@@ -52,7 +53,7 @@ export function RepositoryRecovery({ projectId }: { projectId: string }) {
             <SettingsBlock>
                 {(recovery?.dirty || recovery?.blocked) && <p className="mb-3 text-body text-ink-muted">{recovery.message}</p>}
                 <InlineFeedback feedback={feedback} />
-                {recovery?.canSave && <Button ref={trigger} variant="outline" className="mt-2" onClick={() => { setFeedback(null); setOpen(true); }}>Review {recovery.files.length} changed {recovery.files.length === 1 ? "file" : "files"}</Button>}
+                {recovery?.canSave && <Button ref={trigger} variant="outline" className="mt-2" onClick={() => { setFeedback(null); setOpen(true); }}>Review {countLabel(recovery.files.length, "changed file")}</Button>}
                 {!recovery?.canSave && feedback?.type === "error" && <Button variant="outline" className="mt-2" onClick={() => void load()} disabled={loading}><RefreshCw size={14} /> Try again</Button>}
             </SettingsBlock>
         </SettingsSection>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { KeyRound } from "lucide-react";
-import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
+import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,7 +18,7 @@ export function SsoSettings() {
     const [callbackUrl, setCallbackUrl] = useState("");
     const [linked, setLinked] = useState(false);
     const [busy, setBusy] = useState(false);
-    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [feedback, setFeedback] = useState<InlineFeedbackValue | null>(null);
     const load = useCallback(async () => {
         try { const result = await api<{ sso: SsoConfig; linked: boolean }>("/settings/sso"); setSettings(result.sso); setLinked(result.linked); setDomains(result.sso.allowedEmailDomains.join("\n")); }
         catch (reason) { setFeedback({ type: "error", text: errorMessage(reason) }); }

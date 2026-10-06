@@ -20,7 +20,7 @@ import {
     X,
 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
-import { InlineFeedback, SettingsRow, SettingsSection, SettingsFooter } from "@/components/SettingsLayout";
+import { InlineFeedback, SettingsRow, SettingsSection, SettingsFooter, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,24 +43,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+    errorMessage,
     getLlmSettings,
-    api,
     pollLlmProviderOAuth,
     removeLlmProviderAuth,
     saveLlmProviderApiKey,
     startLlmProviderOAuth,
     submitLlmProviderOAuthInput,
+    testLlmConnection,
     updateLlmSettings,
 } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { countLabel } from "@/lib/format";
 import type { LlmAuthMethod, LlmCurrentSettings, LlmOAuthPrompt, LlmProvider, LlmSettingsResponse } from "@/lib/types";
 
-interface Feedback {
-    type: "success" | "error";
-    text: string;
-}
-
-interface ProviderFeedback extends Feedback {
+interface ProviderFeedback extends InlineFeedbackValue {
     providerId: string;
 }
 
@@ -85,10 +82,6 @@ function StepNumber({ children }: { children: React.ReactNode }) {
     return <span aria-hidden="true" className="tabular flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-selected text-meta font-semibold text-ink">{children}</span>;
 }
 
-function modelCountLabel(count: number) {
-    return `${count} ${count === 1 ? "model" : "models"}`;
-}
-
 export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () => void }) {
     const [settings, setSettings] = useState<LlmSettingsResponse | null>(null);
     const [draft, setDraft] = useState<LlmCurrentSettings | null>(null);
@@ -103,7 +96,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
     const [savingSettings, setSavingSettings] = useState(false);
     const [testing, setTesting] = useState(false);
     const [providerBusy, setProviderBusy] = useState<string | null>(null);
-    const [settingsFeedback, setSettingsFeedback] = useState<Feedback | null>(null);
+    const [settingsFeedback, setSettingsFeedback] = useState<InlineFeedbackValue | null>(null);
     const [providerFeedback, setProviderFeedback] = useState<ProviderFeedback | null>(null);
     const [oauthState, setOAuthState] = useState<OAuthState | null>(null);
     const [providersOpen, setProvidersOpen] = useState(false);
@@ -132,14 +125,12 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
         setSettings(null);
         setDraft(null);
         setLoadError("");
-        getLlmSettings()
+        refreshSettings()
             .then((result) => {
-                if (!active) return;
-                setSettings(result);
-                setDraft(result.current);
+                if (active) setDraft(result.current);
             })
             .catch((error) => {
-                if (active) setLoadError(error instanceof Error ? error.message : String(error));
+                if (active) setLoadError(errorMessage(error));
             });
         return () => {
             active = false;
@@ -165,18 +156,22 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
         handleProvidersOpenChange(true);
     }
 
+    async function saveDraft(value: LlmCurrentSettings) {
+        const current = await updateLlmSettings(value);
+        setDraft(current);
+        setSettings((settings) => (settings ? { ...settings, current } : settings));
+    }
+
     async function saveCurrentSettings(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (!draft) return;
         setSavingSettings(true);
         setSettingsFeedback(null);
         try {
-            const current = await updateLlmSettings(draft);
-            setDraft(current);
-            setSettings((value) => (value ? { ...value, current } : value));
+            await saveDraft(draft);
             setSettingsFeedback({ type: "success", text: "Agent model saved." });
         } catch (error) {
-            setSettingsFeedback({ type: "error", text: error instanceof Error ? error.message : String(error) });
+            setSettingsFeedback({ type: "error", text: errorMessage(error) });
         } finally {
             setSavingSettings(false);
         }
@@ -213,7 +208,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
             await refreshSettings();
             setProviderFeedback({ providerId, type: "success", text: "API key saved." });
         } catch (error) {
-            setProviderFeedback({ providerId, type: "error", text: error instanceof Error ? error.message : String(error) });
+            setProviderFeedback({ providerId, type: "error", text: errorMessage(error) });
         } finally {
             setProviderBusy(null);
         }
@@ -231,7 +226,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
             await refreshSettings();
             setProviderFeedback({ providerId, type: "success", text: "Authentication removed." });
         } catch (error) {
-            setProviderFeedback({ providerId, type: "error", text: error instanceof Error ? error.message : String(error) });
+            setProviderFeedback({ providerId, type: "error", text: errorMessage(error) });
         } finally {
             setProviderBusy(null);
         }
@@ -262,13 +257,13 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
                     oauthTimerRef.current = window.setTimeout(poll, 2000);
                 } catch (error) {
                     if (generation !== oauthGenerationRef.current) return;
-                    setOAuthState({ providerId, sessionId: started.sessionId, status: "error", error: error instanceof Error ? error.message : String(error) });
+                    setOAuthState({ providerId, sessionId: started.sessionId, status: "error", error: errorMessage(error) });
                 }
             };
             oauthTimerRef.current = window.setTimeout(poll, 500);
         } catch (error) {
             if (generation !== oauthGenerationRef.current) return;
-            setOAuthState({ providerId, status: "error", error: error instanceof Error ? error.message : String(error) });
+            setOAuthState({ providerId, status: "error", error: errorMessage(error) });
         }
     }
 
@@ -282,7 +277,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
             setManualOAuthInput("");
             setProviderFeedback({ providerId, type: "success", text: "Authorization submitted." });
         } catch (error) {
-            setProviderFeedback({ providerId, type: "error", text: error instanceof Error ? error.message : String(error) });
+            setProviderFeedback({ providerId, type: "error", text: errorMessage(error) });
         } finally {
             setProviderBusy(null);
         }
@@ -294,7 +289,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
         try {
             await submitLlmProviderOAuthInput(providerId, sessionId, optionId);
         } catch (error) {
-            setProviderFeedback({ providerId, type: "error", text: error instanceof Error ? error.message : String(error) });
+            setProviderFeedback({ providerId, type: "error", text: errorMessage(error) });
         } finally {
             setProviderBusy(null);
         }
@@ -363,16 +358,12 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
         setTesting(true);
         setSettingsFeedback(null);
         try {
-            if (hasChanges) {
-                const current = await updateLlmSettings(draft);
-                setDraft(current);
-                setSettings((value) => value ? { ...value, current } : value);
-            }
-            const result = await api<{ ok: true; message: string }>("/settings/llm/test", { method: "POST" });
+            if (hasChanges) await saveDraft(draft);
+            const result = await testLlmConnection();
             setSettingsFeedback({ type: "success", text: result.message });
             onConnectionTested?.();
         } catch (error) {
-            setSettingsFeedback({ type: "error", text: error instanceof Error ? error.message : String(error) });
+            setSettingsFeedback({ type: "error", text: errorMessage(error) });
         } finally {
             setTesting(false);
         }
@@ -457,7 +448,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
                                         </span>
                                         <div className="min-w-0 flex-1">
                                             <p className="truncate text-control font-medium text-ink">{provider.name}</p>
-                                            <p className="truncate text-meta text-ink-subtle">{modelCountLabel(provider.models.length)} · {providerAuthLabel(provider)}</p>
+                                            <p className="truncate text-meta text-ink-subtle">{countLabel(provider.models.length, "model")} · {providerAuthLabel(provider)}</p>
                                         </div>
                                         {provider.id === settings.current.provider && <Badge variant="secondary" size="sm">In use</Badge>}
                                     </li>
@@ -547,7 +538,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
                                                 <Button type="button" variant="ghost" className="h-auto min-h-14 w-full justify-start gap-3 rounded-lg px-3 py-2.5 text-left text-ink hover:text-ink">
                                                     <span className="min-w-0 flex-1">
                                                         <span className="block truncate text-control font-medium">{provider.name}</span>
-                                                        <span className="mt-0.5 block truncate text-meta font-normal text-ink-subtle">{modelCountLabel(provider.models.length)} · {providerAuthLabel(provider)}</span>
+                                                        <span className="mt-0.5 block truncate text-meta font-normal text-ink-subtle">{countLabel(provider.models.length, "model")} · {providerAuthLabel(provider)}</span>
                                                     </span>
                                                     {provider.configured ? (
                                                         <Badge variant="success" size="sm"><Check size={12} strokeWidth={2.25} aria-hidden="true" /> Connected</Badge>

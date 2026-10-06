@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { activateSpecs, deleteFeature, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
+import { countLabel } from "@/lib/format";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { countStatuses } from "@/lib/status";
@@ -145,7 +146,6 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
         );
     }
 
-    // Ancestors, root first, for the breadcrumb.
     const ancestors: Feature[] = [];
     const byId = new Map(features.map((item) => [item.id, item]));
     for (let parent = feature.parentId ? byId.get(feature.parentId) : undefined; parent && ancestors.length < 32; parent = parent.parentId ? byId.get(parent.parentId) : undefined) {
@@ -232,7 +232,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                                 <Button type="button" variant="outline" size="sm" onClick={onClick}><PencilLine size={13} /> Edit</Button>
                             )}
                         />
-                        {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || running} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${activatable.length} ${activatable.length === 1 ? "draft" : "drafts"}`}</Button>}
+                        {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || running} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${countLabel(activatable.length, "draft")}`}</Button>}
                         <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
                         <Button type="button" size="sm" onClick={() => runSpecs(scopedSpecs, `Run ${feature.title}`)} disabled={running || runnable.length === 0}>
                             <RunningIcon running={running} /> {running ? "Running…" : "Run all"}
@@ -268,7 +268,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                     <>
                         <SummaryStrip
                             counts={countStatuses(scopedSpecs)}
-                            trailing={childCount > 0 ? <span className="text-meta text-ink-subtle">Includes {childCount} {childCount === 1 ? "sub-feature" : "sub-features"}</span> : undefined}
+                            trailing={childCount > 0 ? <span className="text-meta text-ink-subtle">Includes {countLabel(childCount, "sub-feature")}</span> : undefined}
                         />
                         <SpecTable
                             projectId={projectId}
@@ -287,7 +287,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                 open={deleteOpen}
                 title="Delete feature?"
                 description={<>
-                    <strong className="font-semibold text-ink">{feature.title}</strong> will be removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {scopedSpecs.length} {scopedSpecs.length === 1 ? "Spec" : "Specs"}, run history, and evidence inside it. Earlier file revisions remain in Git history.
+                    <strong className="font-semibold text-ink">{feature.title}</strong> will be removed{childCount ? ` with ${countLabel(childCount, "nested feature")}` : ""}. This also deletes {countLabel(scopedSpecs.length, "Spec")}, run history, and evidence inside it. Earlier file revisions remain in Git history.
                 </>}
                 confirmLabel="Delete feature"
                 busy={deleting}

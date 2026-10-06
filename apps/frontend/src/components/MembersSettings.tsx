@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Copy, UserPlus } from "lucide-react";
-import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
+import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ export function MembersSettings() {
     const [role, setRole] = useState<Role>("viewer");
     const [inviteUrl, setInviteUrl] = useState("");
     const [busy, setBusy] = useState(false);
-    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [feedback, setFeedback] = useState<InlineFeedbackValue | null>(null);
     const load = useCallback(async () => { try { setData(await api<Members>("/settings/members")); return true; } catch (reason) { setFeedback({ type: "error", text: errorMessage(reason) }); return false; } }, []);
     useEffect(() => { void load(); }, [load]);
     async function mutate(path: string, method: string, body?: unknown) {

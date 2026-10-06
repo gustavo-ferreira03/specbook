@@ -25,7 +25,7 @@ import {
     TextCursorInput,
     Wrench,
 } from "lucide-react";
-import { formatDuration } from "@/lib/format";
+import { countLabel, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** One tool call of the current turn, as seen through the chat's SSE stream. */
@@ -111,7 +111,7 @@ export function TurnActivity({ steps }: { steps: ToolStep[] }) {
                     className="mb-1 inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-meta text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 >
                     <ChevronDown size={13} aria-hidden="true" />
-                    {hidden} earlier {hidden === 1 ? "step" : "steps"}
+                    {countLabel(hidden, "earlier step")}
                 </button>
             )}
             <ol className="space-y-px border-l border-line pl-3" aria-label="Agent steps in this turn">

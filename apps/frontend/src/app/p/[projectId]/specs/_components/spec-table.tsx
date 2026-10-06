@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatDuration, formatNumber } from "@/lib/format";
+import { countLabel, formatDuration, formatNumber } from "@/lib/format";
 import { SPEC_STATUS_ORDER, countStatuses, statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { Feature, Run, SpecSummary } from "@/lib/types";
@@ -149,11 +149,11 @@ function GroupHeader({ group, running, onRunGroup }: { group: SpecGroup; running
             <h2 className="min-w-0 truncate text-control font-semibold text-ink">
                 {group.href ? <Link href={group.href} className="rounded-sm hover:underline hover:underline-offset-2">{group.title}</Link> : group.title}
             </h2>
-            <span className="tabular text-meta text-ink-subtle" aria-label={`${group.specs.length} ${group.specs.length === 1 ? "Spec" : "Specs"}`}>{formatNumber(group.specs.length)}</span>
+            <span className="tabular text-meta text-ink-subtle" aria-label={countLabel(group.specs.length, "Spec")}>{formatNumber(group.specs.length)}</span>
             <span className="flex-1" />
             <GroupSummary specs={group.specs} />
             {canEdit && onRunGroup && runnable.length > 0 && (
-                <Button type="button" variant="ghost" size="sm" className="-mr-2 h-7 px-2" disabled={running} onClick={() => onRunGroup(group)} aria-label={`Run ${runnable.length} ${runnable.length === 1 ? "Spec" : "Specs"} in ${typeof group.title === "string" ? group.title : "this feature"}`}>
+                <Button type="button" variant="ghost" size="sm" className="-mr-2 h-7 px-2" disabled={running} onClick={() => onRunGroup(group)} aria-label={`Run ${countLabel(runnable.length, "Spec")} in ${typeof group.title === "string" ? group.title : "this feature"}`}>
                     <Play size={12} /> Run
                 </Button>
             )}

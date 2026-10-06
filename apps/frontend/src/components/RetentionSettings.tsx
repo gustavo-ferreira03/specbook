@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
+import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,7 +22,7 @@ const FIELDS: { key: keyof Retention; label: string; description: string }[] = [
 export function RetentionSettings() {
     const [data, setData] = useState<RetentionResponse | null>(null);
     const [busy, setBusy] = useState(false);
-    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [feedback, setFeedback] = useState<InlineFeedbackValue | null>(null);
     const load = useCallback(async () => { try { setData(await api<RetentionResponse>("/settings/retention")); } catch (reason) { setFeedback({ type: "error", text: errorMessage(reason) }); } }, []);
     useEffect(() => { void load(); }, [load]);
     async function save(event: React.FormEvent) {
