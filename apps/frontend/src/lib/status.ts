@@ -1,8 +1,8 @@
-import { AlertTriangle, Check, CircleDashed, LoaderCircle, X, type LucideIcon } from "lucide-react";
-import type { RunStatus, SpecStatus } from "./types";
+import { AlertTriangle, Check, CircleDashed, LoaderCircle, Pause, X, type LucideIcon } from "lucide-react";
+import type { RunStatus, SpecHealth, SpecStatus } from "./types";
 
-export type AnyStatus = SpecStatus | RunStatus;
-export type StatusTone = "success" | "danger" | "invalid" | "neutral" | "running";
+export type AnyStatus = SpecStatus | RunStatus | SpecHealth["status"];
+export type StatusTone = "success" | "danger" | "warning" | "invalid" | "neutral" | "running";
 
 export interface StatusMeta {
     /** Label for the current state of a Spec ("Failing", "Not run"). */
@@ -22,6 +22,7 @@ export interface StatusMeta {
 const TONES: Record<StatusTone, Pick<StatusMeta, "text" | "soft" | "chart">> = {
     success: { text: "text-success", soft: "bg-success-soft", chart: "bg-success-chart" },
     danger: { text: "text-danger", soft: "bg-danger-soft", chart: "bg-danger-chart" },
+    warning: { text: "text-warning", soft: "bg-warning-soft", chart: "bg-warning-chart" },
     invalid: { text: "text-invalid", soft: "bg-invalid-soft", chart: "bg-invalid-chart" },
     neutral: { text: "text-ink-subtle", soft: "bg-neutral-soft", chart: "bg-neutral-chart" },
     running: { text: "text-running", soft: "bg-running-soft", chart: "bg-running-chart" },
@@ -34,6 +35,11 @@ const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
     invalid: { label: "Invalid", runLabel: "Invalid", description: "The Spec files could not be read.", tone: "invalid", icon: AlertTriangle },
     unverified: { label: "Not run", runLabel: "Not run", description: "Not verified since it was created or changed.", tone: "neutral", icon: CircleDashed },
     running: { label: "Running", runLabel: "Running", description: "A verification is in progress.", tone: "running", icon: LoaderCircle },
+    passing: { label: "Passing", runLabel: "Passed", description: "The last check passed.", tone: "success", icon: Check },
+    failing: { label: "Failing", runLabel: "Failed", description: "The last check failed.", tone: "danger", icon: X },
+    flaky: { label: "Flaky", runLabel: "Passed on retry", description: "The check failed, then passed on retry.", tone: "warning", icon: AlertTriangle },
+    paused: { label: "Paused", runLabel: "Paused", description: "This check is waiting to continue.", tone: "neutral", icon: Pause },
+    not_checked: { label: "Not checked yet", runLabel: "Not checked yet", description: "There is no completed run for the current check.", tone: "neutral", icon: CircleDashed },
 };
 
 export function statusMeta(status: string): StatusMeta {

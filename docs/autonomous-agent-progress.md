@@ -115,10 +115,16 @@ Addendum 3 checkpoint: Inbox questions now include consequences, available befor
 
 Daily-limit diagnosis found partially funded investigations stopping before useful work, small planner allocations and blocked work reserving its full unused allowance. Dispatch now waits for a complete allocation, counts today's consumption separately from cumulative audit totals, and reserves only queued/running work's remaining allowance. Continue now grants one additional round for today; automatic continuation can resume the following day. Recovery preserves elapsed usage.
 
-Validation at this checkpoint: both app typechecks passed; 225 tests passed with SPECBOOK_TEST_VNC=1, including browser process cleanup, presentation filtering, chronological data, usage/recovery, continuation concurrency and decision actions. Inbox and Activity were inspected at desktop and phone widths in the running app. Browser fix is committed separately as 1cbf1c3.
+Validation at this checkpoint: both app typechecks passed; 225 tests passed with SPECBOOK_TEST_VNC=1, including browser process cleanup, presentation filtering, usage/recovery, continuation concurrency and decision actions. Inbox and Activity were inspected at desktop and phone widths in the running app. Browser fix is committed separately as 1cbf1c3; the execution and review changes are in 371d554. The remaining layout and timeline issues are addressed by addendum 4 below.
 
 ## Addendum 4: one project Overview
 
 Gus superseded the two-screen layout before further CI work. Replace Inbox and Activity navigation with Overview, keep their old URLs as redirects, and use fixed sections: Needs you, Working on it now, Problems found, one aggregated Paused row, and History grouped by day. Use compact rows with details in the existing side sheet. Status counts and Spec-tree dots must share a single health interpretation. Remove generic narrative and repeated timeline text, sort panel events chronologically, and preserve question wording, screenshots and file diffs in review details.
 
-This restructuring is in progress and will be committed separately. Verification must include Agora Leads, Swag Labs and a temporary empty project at 1440px and phone width.
+Overview now replaces both screens with compact rows and the existing side sheet. Decisions exclude bug reports and sort oldest first; current work is capped at two visible rows, queues and pauses are aggregated, and finished work is grouped by day. Per-Spec health drives the header and sidebar. Timelines sort by event time, include linked run evidence and omit filler. Failed, flaky and stopped history entries have distinct outcomes. Completed batches retain their own history without hiding later work on the same Specs. Old URLs preserve their anchors when opening Overview.
+
+Both app typechecks and five focused presentation/Overview tests passed. Live checks covered the Agora desktop/phone layout, actual sidebar health, old URL redirects, badge invalidation and project switching; the sheet returns focus to its opener. Gus sent addendum 5 during final verification, so the full six requested screenshots will be captured after replacing the daily-limit controls below.
+
+## Addendum 5: continuous autonomy with explicit pause
+
+Gus rejected the daily allowance and all cost controls. Remove daily accounting, advance reservations, extraUsage, Continue now and tomorrow-based pauses. Keep only a generous internal safeguard against runaway work. Add persistent pause/resume per project and globally, separate from observe/propose/act; stop running work cleanly and preserve its place for resumption. This is the active next change and will have its own commit.

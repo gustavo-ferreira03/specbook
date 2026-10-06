@@ -373,7 +373,7 @@ export async function markInterruptedBatches(): Promise<void> {
     }
 }
 
-export async function listCiBatches(projectId: string, limit = 20): Promise<RunBatch[]> {
+export async function listRunBatches(projectId: string, limit = 100, ciOnly = false): Promise<RunBatch[]> {
     const entries = await fs.readdir(runBatchesDir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") return [];
         throw error;
@@ -382,7 +382,11 @@ export async function listCiBatches(projectId: string, limit = 20): Promise<RunB
     for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const batch = await getRunBatch(entry.name);
-        if (batch?.projectId === projectId && batch.ci) batches.push(batch);
+        if (batch?.projectId === projectId && (!ciOnly || batch.ci)) batches.push(batch);
     }
     return batches.sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, limit);
+}
+
+export async function listCiBatches(projectId: string, limit = 20): Promise<RunBatch[]> {
+    return listRunBatches(projectId, limit, true);
 }

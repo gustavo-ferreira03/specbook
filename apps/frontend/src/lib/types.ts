@@ -325,13 +325,48 @@ export interface ActivityStory {
     title: string;
     summary: string;
     status: "working" | "queued" | "waiting" | "needs_attention" | "paused" | "completed" | "observing" | "stopped";
+    outcome?: "passed" | "failed" | "flaky" | "reviewed" | "stopped";
     nextStep: string;
     updatedAt: string;
     createdAt: string;
-    timeline: { id: string; label: string; detail: string; createdAt: string }[];
+    timeline: { id: string; label: string; detail: string; createdAt: string; specId?: string; runId?: string }[];
     jobIds: string[];
     specId?: string;
     runId?: string;
     inboxIds: string[];
     technicalDetails: string;
+}
+
+export interface SpecHealth {
+    status: "passing" | "failing" | "flaky" | "paused" | "not_checked" | "running";
+    label: string;
+    runId?: string;
+    lastCheckedAt: string | null;
+}
+
+export interface OverviewPausedGroup {
+    reason: "daily_limit" | "observation" | "access" | "service";
+    label: string;
+    count: number;
+    stories: ActivityStory[];
+    specIds: string[];
+}
+
+export interface OverviewResponse {
+    summary: AgentSummary & {
+        verdict: string;
+        nextCheck: string;
+        nextCheckAt: string | null;
+        problemCount: number;
+        specHealth: { total: number; passing: number; failing: number; flaky: number; paused: number; not_checked: number; running: number };
+    };
+    specHealth: Record<string, SpecHealth>;
+    needsYou: PresentedInboxItem[];
+    working: ActivityStory[];
+    queued: ActivityStory[];
+    problems: PresentedInboxItem[];
+    paused: OverviewPausedGroup[];
+    history: ActivityStory[];
+    items: PresentedInboxItem[];
+    stories: ActivityStory[];
 }

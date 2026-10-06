@@ -666,18 +666,23 @@ describe("plain-language autonomous presentation", () => {
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, verification: { id: crypto.randomUUID(), status: "passed", sourceHash: sourceHashOf(source), screenshots: ["evidence/step-01.png", "evidence/step-02.png"] } } });
         await jobsRepository.update(job.id, { status: "completed" });
         await jobsRepository.log(job.id, "browser_snapshot:completed", "Captured the page");
+        await jobsRepository.log(job.id, "proposal:verified", `${item.id}: passed`);
         for (const key of ["changed:one", "changed:two"]) await stewardRepository.signal({ projectId, key, kind: "invalid_spec", title: "Internal invalid status", body: "Internal detail", payload: { specIds: [spec.id] } });
         const view = await projectPresentation(projectId);
         assert.equal(view.activity.length, 1);
         assert.equal(view.activity[0]?.subject.id, spec.id);
-        assert.deepEqual(view.activity[0]?.timeline.map((entry) => entry.label), ["Noticed", "Investigated", "Your decision"]);
+        assert.deepEqual(new Set(view.activity[0]?.timeline.map((entry) => entry.label)), new Set(["Noticed", "Tested update", "Your decision"]));
+        const times = view.activity[0]!.timeline.map((entry) => entry.createdAt);
+        assert.deepEqual(times, [...times].sort(), "decision and evidence dates are chronological even when investigation ends later");
+        assert.doesNotMatch(JSON.stringify(view.activity), /Reviewed the check and the available application evidence/);
+        assert.notEqual(view.activity[0]?.timeline[0]?.detail, view.activity[0]?.summary);
         assert.match(view.items[0]?.presentation.screenshots.before?.url ?? "", /step-01\.png$/);
         assert.match(view.items[0]?.presentation.screenshots.after?.url ?? "", /step-01\.png$/);
         assert.equal(view.items[0]?.presentation.type, "update");
         assert.equal(view.items[0]?.presentation.summary, "Missing results. The expected behavior stays the same.");
         assert.doesNotMatch(view.items[0]?.presentation.summary ?? "", /passed/);
         assert.match(view.items[0]?.presentation.workDone ?? "", /passed/);
-        assert.match(view.activity[0]?.title ?? "", /could not be checked/);
+        assert.match(view.activity[0]?.title ?? "", /needs an update before it can run/);
         assert.equal(view.summary.attentionCount, 1);
         assert.match(view.summary.statusText, /is watching/);
     });
@@ -708,5 +713,103 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(isInfrastructureFailure("BrowserUnavailableError"), true);
         assert.equal(isInfrastructureFailure("Specbook couldn’t start its browser."), true);
         assert.equal(isInfrastructureFailure("Specbook could not start its browser."), true);
+    });
+
+    test("overview separates ordered decisions from bugs, aggregates pauses, and shares exact per-check health", async () => {
+        const { projectOverview } = await import("../../src/core/jobs/overview");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { db } = await import("../../src/infra/db/client");
+        const { inboxItems } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const projectId = await createProject("Organized overview");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Survey", "");
+        const checks = await Promise.all(["Passing", "Failing", "Flaky", "Paused one", "Paused two", "Unchecked", "Invalid"].map(async (title) => (await createSpec(projectId, feature.id, title)).spec));
+        const [passing, failing, flaky, pausedOne, pausedTwo, unchecked, invalid] = checks;
+        for (const spec of [passing!, failing!, flaky!]) {
+            const status = spec.id === failing!.id ? "failed" : "passed";
+            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+            await runsRepository.finishRun(run.id, status, 5, status === "failed" ? "Result did not appear" : null);
+            await specsRepository.updateSpecStatus(spec.id, status);
+            if (spec.id === flaky!.id) await runsRepository.markFlaky(run.id, run.id);
+        }
+        await specsRepository.updateSpecStatus(invalid!.id, "invalid", "spec.ts is missing");
+        const previous = await jobsRepository.create({ projectId, specId: pausedOne!.id, kind: "explore", chatId: crypto.randomUUID(), trigger: "steward", goal: "Explore surveys", budget: jobBudgetSchema.parse({}) });
+        await jobsRepository.update(previous.id, { status: "completed" });
+        for (const spec of [pausedOne!, pausedTwo!]) {
+            const job = await jobsRepository.create({ projectId, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Update check", budget: jobBudgetSchema.parse({}) });
+            await jobsRepository.update(job.id, { status: "budget_exceeded" });
+        }
+        const questionJob = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Clarify survey access", budget: jobBudgetSchema.parse({}) });
+        await jobsRepository.update(questionJob.id, { status: "blocked" });
+        const newer = await jobsRepository.addItem({ projectId, jobId: questionJob.id, kind: "question", title: "Should guests see survey results?", body: "Which results should be visible to guests?" });
+        const older = await jobsRepository.addItem({ projectId, jobId: questionJob.id, kind: "question", title: "Should drafts appear in the survey list?", body: "Should the survey list include drafts?" });
+        await db.update(inboxItems).set({ createdAt: "2024-01-01T00:00:00.000Z" }).where(eq(inboxItems.id, older.id));
+        await jobsRepository.addItem({ projectId, jobId: questionJob.id, kind: "bug_report", title: "Deleting a survey shows an error", body: "Deleting the survey leaves it in the list." });
+        const view = await projectOverview(projectId);
+        assert.deepEqual(view.needsYou.map((item) => item.id), [older.id, newer.id]);
+        assert.equal(view.summary.attentionCount, 2);
+        assert.equal(view.problems.length, 1);
+        assert.equal(view.summary.problemCount, 1);
+        assert.equal(view.paused.length, 1);
+        assert.equal(view.paused[0]?.reason, "daily_limit");
+        assert.equal(view.paused[0]?.count, 2);
+        assert.deepEqual(new Set(view.paused[0]?.specIds), new Set([pausedOne!.id, pausedTwo!.id]));
+        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 2, flaky: 1, paused: 2, not_checked: 1, running: 0 });
+        assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
+        assert.equal(view.specHealth[invalid!.id]?.label, "Check needs an update");
+        assert.equal(view.specHealth[flaky!.id]?.status, "flaky");
+        assert.equal(view.history.some((story) => story.id === `job:${previous.id}`), true, "later paused work does not erase an earlier finished episode");
+        assert.equal(view.stories.some((story) => story.inboxIds.includes(older.id)), true, "pending decisions retain a detail timeline");
+        assert.equal(view.history.some((story) => story.inboxIds.includes(older.id)), false);
+        assert.match(view.summary.nextCheck, /resumes tomorrow/);
+    });
+
+    test("overview keeps a batch live through retry and links the final grouped result to run evidence", async () => {
+        const { projectOverview } = await import("../../src/core/jobs/overview");
+        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
+        const { runBatchesDir } = await import("../../src/core/paths");
+        const projectId = await createProject("Batch overview");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
+        const { spec } = await createSpec(projectId, feature.id, "Sign in");
+        const commitSha = await repoGit.getHeadSha(projectId);
+        const original = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha, automate: true });
+        await runsRepository.finishRun(original.id, "failed", 10, "Login button was not visible");
+        const batchId = crypto.randomUUID();
+        await fs.mkdir(path.join(runBatchesDir, batchId), { recursive: true });
+        await fs.writeFile(path.join(runBatchesDir, batchId, "batch.json"), JSON.stringify({
+            id: batchId, projectId, label: "Login checks", status: "failed", startedAt: original.startedAt, durationMs: 10, failReason: null,
+            specs: [{ runId: original.id, specId: spec.id, commitSha, sourceHash: spec.sourceHash, markdownHash: spec.markdownHash, title: spec.title, status: "failed", durationMs: 10, failReason: "Login button was not visible" }],
+        } satisfies import("../../src/core/runner/batch").RunBatch));
+        const pending = await projectOverview(projectId);
+        assert.equal(pending.working.length, 1);
+        assert.equal(pending.working[0]?.id, `batch:${batchId}`);
+        assert.equal(pending.history.some((story) => story.id === `batch:${batchId}`), false);
+        const retry = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha, retryOf: original.id });
+        await runsRepository.finishRun(retry.id, "passed", 20, null);
+        await runsRepository.markFlaky(original.id, retry.id);
+        await runsRepository.acknowledgeAutomation(original.id);
+        await specsRepository.updateSpecStatus(spec.id, "passed");
+        const router = new Hono().route("/", createJobsRouter());
+        const response = await router.request(`/projects/${projectId}/overview`);
+        assert.equal(response.status, 200);
+        const view = await response.json() as Awaited<ReturnType<typeof projectOverview>>;
+        assert.equal(view.working.length, 0);
+        assert.equal(view.history.length, 1, "batch runs and retries are not repeated as standalone history rows");
+        assert.match(view.history[0]?.title ?? "", /1 passed on retry/);
+        assert.equal(view.history[0]?.outcome, "flaky");
+        assert.equal(view.history[0]?.timeline[0]?.specId, spec.id);
+        assert.equal(view.history[0]?.timeline[0]?.runId, retry.id);
+        assert.equal(view.history[0]?.updatedAt, new Date(Date.parse(retry.startedAt) + 20).toISOString());
+        assert.equal(view.specHealth[spec.id]?.status, "flaky");
+        assert.equal((await router.request(`/projects/${crypto.randomUUID()}/overview`)).status, 404);
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const runIntent = { kind: "run_specs" as const, goal: "Check login", reason: "Login changed", specIds: [spec.id], priority: 50 };
+        const finished = await stewardRepository.addIntent({ projectId, key: "login:old", fingerprint: "login:old", intent: runIntent, priority: 50, reason: runIntent.reason });
+        await stewardRepository.updateIntent(finished.id, { status: "completed", batchId });
+        await stewardRepository.addIntent({ projectId, key: "login:new", fingerprint: "login:new", intent: runIntent, priority: 50, reason: runIntent.reason });
+        const again = await projectOverview(projectId);
+        assert.equal(again.queued.length, 1, "an old completed batch cannot hide a new pending check of the same subject");
+        assert.equal(again.queued[0]?.specId, spec.id);
     });
 });

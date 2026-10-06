@@ -164,7 +164,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                             {specsError && <p role="alert" className="mt-1.5 text-meta text-danger">Specs could not load: {specsError}</p>}
                             {specIds.length > 0 && <p className="mt-1.5 break-words text-meta text-ink-subtle">{specIds.map((id) => specs.find((spec) => spec.id === id)?.title ?? "Unavailable Spec").join(", ")}</p>}
                         </SettingsRow>
-                        <SettingsRow label="Investigate failures" htmlFor="automation-heal" description="The agent sends verified fixes, bug reports, or questions to Inbox.">
+                        <SettingsRow label="Investigate failures" htmlFor="automation-heal" description="Find suggested updates, app problems, and questions in Overview.">
                             <Select value={healFailures ? "enabled" : "disabled"} onValueChange={(value) => { setHealFailures(value === "enabled"); setFeedback(null); }} disabled={saving}>
                                 <SelectTrigger id="automation-heal"><SelectValue /></SelectTrigger>
                                 <SelectContent><SelectItem value="enabled">Automatically investigate</SelectItem><SelectItem value="disabled">Review failures manually</SelectItem></SelectContent>

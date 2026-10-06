@@ -18,6 +18,7 @@ import type { ProposalVerification } from "./verification";
 
 interface Subject { type: "spec" | "feature" | "deployment" | "project"; id?: string; name: string }
 interface Screenshot { url: string; label: string }
+export type PresentedItem = Omit<InboxItem, "payload"> & { payload: Record<string, unknown>; presentation: InboxPresentation };
 export interface InboxPresentation {
     type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
     title: string;
@@ -37,10 +38,11 @@ export interface ActivityStory {
     title: string;
     summary: string;
     status: "working" | "queued" | "waiting" | "needs_attention" | "paused" | "completed" | "observing" | "stopped";
+    outcome?: "passed" | "failed" | "flaky" | "stopped" | "reviewed";
     nextStep: string;
     createdAt: string;
     updatedAt: string;
-    timeline: { id: string; label: string; detail: string; createdAt: string }[];
+    timeline: { id: string; label: string; detail: string; createdAt: string; specId?: string; runId?: string }[];
     jobIds: string[];
     inboxIds: string[];
     specId?: string;
@@ -136,7 +138,6 @@ export async function projectPresentation(projectId: string) {
         .map(async (spec) => [spec.id, await readSpecRawFiles(spec).catch(() => null)] as const)));
     const infrastructureJobs = new Set(jobs.filter((job) => !["completed", "cancelled"].includes(job.status) && (Boolean(job.systemError)
         || inbox.some((item) => item.jobId === job.id && item.kind === "question" && awaiting(item) && isInfrastructureFailure(`${item.title}\n${item.body}`)))) .map((job) => job.id));
-    type PresentedItem = Omit<InboxItem, "payload"> & { payload: Record<string, unknown>; presentation: InboxPresentation };
     const items: PresentedItem[] = [];
     for (const item of inbox) {
         if (item.kind === "note") continue;
@@ -167,7 +168,7 @@ export async function projectPresentation(projectId: string) {
             : type === "update" ? behaviorChange ? `Change what “${name}” checks?` : `Update the check for “${name}”?`
             : type === "new_check" ? `Add a check for “${string(params.title) ?? name}”?`
             : type === "feature" ? `Add “${string(params.title) ?? name}” to this project?`
-            : type === "bug" ? `${safeTitle?.replace(/[.!?]+$/, "") ?? `There may be a problem with “${name}”`}. Add a check to catch this?`
+            : type === "bug" ? safeTitle?.replace(/[.!?]+$/, "") ?? `A problem was reported in “${name}”`
             : credentialRequest ? `Can you provide access for “${name}”?` : safeTitle && safeTitle.endsWith("?") ? safeTitle : `Can you clarify what should happen in “${name}”?`;
         const originalRunId = string(item.payload.runId) ?? job?.runId;
         const originalRun = type === "update" && verified && originalRunId ? await runsRepository.getRun(originalRunId) : null;
@@ -218,7 +219,7 @@ export async function projectPresentation(projectId: string) {
         const { subject } = value;
         const orderedJobs = value.jobs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         const latestJob = orderedJobs[0];
-        const decisions = value.items.filter(awaiting);
+        const decisions = value.items.filter((item) => awaiting(item) && item.kind !== "bug_report");
         const questions = decisions.filter((item) => item.presentation.type === "question");
         const pendingIntent = value.intents.find((intent) => intent.status === "pending");
         const allocation = pendingIntent ? allocationFor(pendingIntent.intent.kind) : null;
@@ -233,14 +234,27 @@ export async function projectPresentation(projectId: string) {
         const signalsByTime = value.signals.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const noticed = signalsByTime[0];
         const latestItem = value.items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+        const currentSpec = specs.find((spec) => spec.id === subject.id);
+        const failureRunId = string(noticed?.payload.runId) ?? latestJob?.runId;
+        const failureRun = failureRunId ? await runsRepository.getRun(failureRunId) : null;
+        const failureReason = failureRun && specs.some((spec) => spec.id === failureRun.specId) && failureRun.failReason
+            ? plainReason(await clean(failureRun.failReason)) : undefined;
+        const invalidReason = currentSpec?.invalidReason ?? noticed?.body ?? "";
+        const invalidTitle = /missing.*spec\.ts|spec\.ts.*missing|no.*spec\.ts/i.test(invalidReason)
+            ? `The “${subject.name}” check has no executable test`
+            : `The “${subject.name}” check needs an update before it can run`;
         const title = subject.type === "spec" ? status === "completed" ? `“${subject.name}” was checked`
-            : noticed?.kind === "spec_failure" ? `A check of “${subject.name}” found a problem`
-            : noticed?.kind === "invalid_spec" ? `“${subject.name}” could not be checked`
+            : noticed?.kind === "spec_failure" ? `“${subject.name}”: ${failureReason ? failureReason.charAt(0).toLowerCase() + failureReason.slice(1).replace(/[.!?]+$/, "") : "the latest test run failed"}`
+            : noticed?.kind === "invalid_spec" || currentSpec?.status === "invalid" ? invalidTitle
             : noticed?.kind === "spec_changed" ? `“${subject.name}” changed` : `Reviewing “${subject.name}”`
             : subject.type === "deployment" ? status === "completed" ? "Checked the application after an update" : "Checking the application after an update"
-            : subject.type === "feature" ? `Reviewing coverage for “${subject.name}”` : `Keeping track of ${project.name}`;
-        const nextStep = status === "waiting" ? "Add the requested access in Settings, then answer the question in Inbox."
-            : status === "needs_attention" ? "Review the question in Inbox, or discuss the check in chat."
+            : subject.type === "feature" ? `Looking for missing checks in “${subject.name}”`
+            : latestJob?.kind === "coverage" || ["empty_project", "context_changed"].includes(noticed?.kind ?? "") ? `Looking for missing checks in ${project.name}`
+            : latestJob?.kind === "explore" ? `Exploring ${project.name} for application problems`
+            : noticed?.kind === "app_unavailable" ? `${project.name} did not respond to the latest connection check`
+            : `Reviewing changes to ${project.name}’s checks`;
+        const nextStep = status === "waiting" ? "Add the requested access in Settings, then answer the question."
+            : status === "needs_attention" ? "Review the suggestion, or discuss the check in chat."
             : status === "working" ? "Specbook is investigating. You can keep using the project."
             : status === "paused" ? "Continues tomorrow when the daily usage limit resets, or choose Continue now."
             : status === "queued" ? latestJob?.retryAt && latestJob.classification === "environment" ? "The application could not be reached. Specbook will try again shortly." : "Starts after the current check finishes."
@@ -252,24 +266,29 @@ export async function projectPresentation(projectId: string) {
             deployment: "A new deployment was reported.", deployment_changed: "An application update was detected.", stale_spec: "This check has not run recently.",
             context_changed: "The confirmed project information changed.", empty_project: "This project has no checks yet.", app_unavailable: "The application could not be reached.",
         };
+        const summary = decisions[0]?.presentation.summary ?? failureReason ?? (noticed ? noticedText[noticed.kind] : undefined) ?? "";
         const timeline: ActivityStory["timeline"] = [];
-        if (noticed) timeline.push({ id: noticed.id, label: "Noticed", detail: noticedText[noticed.kind] ?? "A change needs a closer look.", createdAt: noticed.createdAt });
-        const investigated = orderedJobs.find((job) => actions.get(job.id)?.some((action) => /:completed$|proposal:verified/.test(action.action)));
-        if (investigated) timeline.push({ id: `${investigated.id}:work`, label: investigated.status === "running" ? "Investigating" : "Investigated",
-            detail: "Reviewed the check and the available application evidence.", createdAt: investigated.updatedAt });
-        if (latestItem) timeline.push({ id: latestItem.id, label: awaiting(latestItem) ? "Your decision" : latestItem.status === "approved" ? "Saved" : latestItem.status === "answered" ? "Answered" : "Reviewed",
-            detail: awaiting(latestItem) ? latestItem.presentation.summary : latestItem.status === "approved" ? "The agreed change was saved to this project." : latestItem.status === "answered" ? "Your answer was sent to Specbook." : "The suggestion was set aside.", createdAt: latestItem.updatedAt });
+        const noticedDetail = noticed?.kind === "invalid_spec" ? plainReason(await clean(invalidReason)) : noticed ? noticedText[noticed.kind] : undefined;
+        if (noticed && noticedDetail && noticedDetail !== summary) timeline.push({ id: noticed.id, label: "Noticed", detail: noticedDetail, createdAt: noticed.createdAt });
+        for (const item of value.items) {
+            const verification = item.payload.verification as ProposalVerification | undefined;
+            if (!verification) continue;
+            const verifiedAction = actions.get(item.jobId)?.find((action) => action.action === "proposal:verified" && action.detail?.startsWith(`${item.id}:`));
+            if (verifiedAction) timeline.push({ id: `${item.id}:test`, label: "Tested update", detail: item.presentation.workDone, createdAt: verifiedAction.createdAt });
+        }
+        if (latestItem) timeline.push({ id: latestItem.id, label: awaiting(latestItem) ? latestItem.kind === "bug_report" ? "Problem found" : "Your decision" : latestItem.status === "approved" ? "Saved" : latestItem.status === "answered" ? "Answered" : "Reviewed",
+            detail: awaiting(latestItem) ? latestItem.presentation.title : latestItem.status === "approved" ? `Saved the approved change to “${subject.name}”.` : latestItem.status === "answered" ? `Received your answer about “${subject.name}”.` : `Set aside the suggestion for “${subject.name}”.`, createdAt: latestItem.updatedAt });
         else if (paused && latestJob) timeline.push({ id: `${latestJob.id}:pause`, label: "Paused for today", detail: "The daily usage limit was reached before this check was finished.", createdAt: latestJob.updatedAt });
-        else if (latestJob?.status === "completed") timeline.push({ id: `${latestJob.id}:complete`, label: "Completed", detail: "The latest review is complete; no decision is waiting for you.", createdAt: latestJob.updatedAt });
+        timeline.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
         const times = [...value.signals.map((signal) => signal.createdAt), ...value.jobs.flatMap((job) => [job.createdAt, job.updatedAt]), ...value.intents.flatMap((intent) => [intent.createdAt, intent.updatedAt]), ...value.items.map((item) => item.updatedAt)].sort();
         const technicalDetails = await clean(value.jobs.map((job) => (actions.get(job.id) ?? []).map((action) => `${action.action}${action.detail ? `: ${action.detail}` : ""}`).join("\n")).filter(Boolean).join("\n\n"));
         activity.push({ id, subject, title, status, nextStep, createdAt: times[0] ?? project.createdAt, updatedAt: times.at(-1) ?? project.createdAt,
-            summary: decisions[0]?.presentation.summary ?? (noticed ? noticedText[noticed.kind] : undefined) ?? (status === "queued" ? "Specbook has a check lined up for this project." : "Following the checks and application changes in this project."),
+            summary,
             timeline, jobIds: orderedJobs.map((job) => job.id), inboxIds: value.items.map((item) => item.id), specId: subject.type === "spec" ? subject.id : undefined,
             runId: latestJob?.runId ?? undefined, technicalDetails });
     }
     activity.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    const attentionCount = items.filter(awaiting).length;
+    const attentionCount = items.filter((item) => awaiting(item) && item.kind !== "bug_report").length;
     const activeCount = activity.filter((story) => story.status === "working").length;
     const queuedCount = activity.filter((story) => story.status === "queued").length;
     const lastCheckedAt = [...jobs.map((job) => job.updatedAt), ...signals.map((signal) => signal.createdAt)].sort().at(-1) ?? null;

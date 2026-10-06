@@ -1,6 +1,6 @@
 # <img src="apps/frontend/public/specbook-chat-icon.svg" width="32" height="32" align="absmiddle" alt=""> Specbook
 
-Specbook checks web applications through readable, executable Specs. Describe a flow in chat or let the project agent investigate failures, application changes, and missing coverage. Review its findings and proposed changes in the Inbox.
+Specbook checks web applications through readable, executable Specs. Describe a flow in chat or let the project agent investigate failures, application changes, and missing coverage. Review its findings and proposed changes in the project's Overview.
 
 Every project gets its own Git repository. Specs, Features, and confirmed project context remain ordinary files that a team can inspect and edit; SQLite only indexes them for the application.
 
@@ -62,9 +62,9 @@ The repository accepts the `main` branch only. Generated files and edits made in
 
 ## Autonomous QA
 
-The project steward observes failed runs, invalid or changed Specs, deployments, confirmed project context, new credentials, and requests from chat. It chooses work within a budget and records its progress in **Activity**. Jobs persist across backend restarts and use the same agent and browser tools as chat.
+Specbook observes failed runs, invalid or changed Specs, deployments, confirmed project context, new credentials, and requests from chat. **Overview** brings together decisions that need you, current work, application bugs, paused checks, and history by day. Each row opens a side panel with the evidence and next step. Work persists across backend restarts and uses the same agent and browser tools as chat.
 
-**Inbox** holds proposed Specs and fixes, bug reports, and questions. Review proposals as file diffs with added and removed lines. Approving a proposal commits it to the project's repository. Answering a question resumes the investigation; enter secrets in **Settings → Credentials**. The agent treats `spec.yml` as the behavior contract: changes to its steps or expected result always require human review.
+**Needs you** contains questions and suggested changes. Review the behavior and before/after screenshots where available; file diffs with added and removed lines are under **Technical details**. Approving a suggestion commits it to the project's repository. Answering a question resumes the investigation; enter secrets in **Settings → Credentials**. The agent treats `spec.yml` as the behavior contract: changes to its steps or expected result always require human review. The Specs tree shows each check's health alongside its name.
 
 **Settings → Automation** provides optional controls:
 
@@ -73,7 +73,7 @@ The project steward observes failed runs, invalid or changed Specs, deployments,
 
 A failed Spec runs once more before the healer investigates. Passing on retry marks it as flaky and keeps both attempts in its history. Persistent failures lead to a verified implementation patch, a bug report with evidence, or a question about the environment. Exploration can collect console and network failures, check safe links, and inspect accessibility with axe. Bug reports can be promoted to regression Spec proposals.
 
-Each project reserves up to 300,000 tokens and 30 active minutes per UTC day, with one active job per project. Equivalent work has a six-hour cooldown; blocked work and rejected proposals prevent repeated investigations. Schedules, webhooks, and steering fields are optional.
+Each project has a daily allowance of 300,000 tokens and 30 active minutes per UTC day, with one active investigation per project. Paused work appears in one row; **Continue now** allows another round today. Equivalent work has a six-hour cooldown; blocked work and rejected suggestions prevent repeated investigations. Schedules, webhooks, and steering fields are optional.
 
 ## CI/CD
 
@@ -99,13 +99,13 @@ The client uses Node.js built-ins and installs no packages. Settings provides th
 | `SPECBOOK_SPEC_IDS` | Comma-separated Spec IDs; use either this or `SPECBOOK_FEATURE_ID` |
 | `SPECBOOK_COMMIT_SHA`, `SPECBOOK_REF`, `SPECBOOK_BUILD_URL` | Commit, branch/tag, and pipeline link retained with the batch |
 | `SPECBOOK_FAIL_ON_FLAKY` | `true` to fail the gate when a Spec passes only on retry; default `false` |
-| `SPECBOOK_FAIL_ON_KNOWN_BUGS` | `true` to fail the gate for Specs with an open Inbox bug report at batch creation; default `false` |
+| `SPECBOOK_FAIL_ON_KNOWN_BUGS` | `true` to fail the gate for Specs with an open bug report at batch creation; default `false` |
 | `SPECBOOK_JUNIT_PATH`, `SPECBOOK_SUMMARY_PATH` | Output file paths; parent directories are created |
 | `SPECBOOK_TIMEOUT_SECONDS` | Maximum client wait; default `3600` |
 
 Preview URLs do not authorize access to stored credentials. To use a saved credential profile on a preview, add the preview's origin to that profile's allowed origins in **Settings → Credentials**.
 
-By default, Specs that pass on retry and failures covered by an open Inbox bug report do not fail the pipeline. They remain visible in the Markdown summary and appear as skipped cases in JUnit. Other failures fail the gate. The batch's execution status and its quality gate result are shown separately in **Settings → CI/CD**, with links to each Spec's evidence.
+By default, Specs that pass on retry and failures covered by an open bug report do not fail the pipeline. They remain visible in the Markdown summary and appear as skipped cases in JUnit. Other failures fail the gate. The batch's execution status and its quality gate result are shown separately in **Settings → CI/CD**, with links to each Spec's evidence.
 
 <details>
 <summary><strong>GitHub Actions</strong></summary>

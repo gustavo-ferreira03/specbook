@@ -9,6 +9,7 @@ import { HTTPException } from "hono/http-exception";
 import { abortChatTurn, isChatBusy } from "../../../core/chat/chat-registry";
 import { applyProposal } from "../../../core/jobs/proposals";
 import { projectPresentation } from "../../../core/jobs/presentation";
+import { projectOverview } from "../../../core/jobs/overview";
 import { createJobSchema, reviewSchema } from "../../../core/jobs/schemas";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
 import { jobsRepository } from "../../repositories/jobs";
@@ -20,6 +21,10 @@ import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors
 
 export function createJobsRouter(): Hono {
     const router = new Hono();
+    router.get("/projects/:id/overview", async (c) => {
+        if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
+        return c.json(await projectOverview(c.req.param("id")));
+    });
     router.post("/projects/:id/continue-now", async (c) => {
         if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
         try { await continueProject(c.req.param("id")); }

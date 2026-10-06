@@ -190,7 +190,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                 <SettingsRow label="Quality gate" description="These options are included in the snippet below.">
                     <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-1.5"><Label htmlFor="ci-flaky">Passes on retry</Label><Select value={String(failOnFlaky)} onValueChange={(value) => setFailOnFlaky(value === "true")}><SelectTrigger id="ci-flaky"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="false">Allow flaky Specs</SelectItem><SelectItem value="true">Fail the pipeline</SelectItem></SelectContent></Select></div>
-                        <div className="space-y-1.5"><Label htmlFor="ci-known-bugs">Open Inbox bug report</Label><Select value={String(failOnKnownBugs)} onValueChange={(value) => setFailOnKnownBugs(value === "true")}><SelectTrigger id="ci-known-bugs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="false">Allow known failures</SelectItem><SelectItem value="true">Fail the pipeline</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-1.5"><Label htmlFor="ci-known-bugs">Open app bug report</Label><Select value={String(failOnKnownBugs)} onValueChange={(value) => setFailOnKnownBugs(value === "true")}><SelectTrigger id="ci-known-bugs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="false">Allow known failures</SelectItem><SelectItem value="true">Fail the pipeline</SelectItem></SelectContent></Select></div>
                     </div>
                 </SettingsRow>
                 <SettingsBlock>
