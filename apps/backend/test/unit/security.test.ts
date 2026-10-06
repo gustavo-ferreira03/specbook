@@ -106,3 +106,45 @@ describe("security middleware", () => {
         assert.equal(git.status, 200);
     });
 });
+
+describe("bounded API documentation reads", () => {
+    test("pins an allowed address, excludes credentials and rejects redirects, binary data and oversized responses", async () => {
+        const http = await import("node:http");
+        const { readApiDocumentation } = await import("../../src/core/network/documentation");
+        let lookups = 0;
+        let visits = 0;
+        const server = http.createServer((request, response) => {
+            visits++;
+            assert.equal(request.headers.cookie, undefined);
+            assert.equal(request.headers.authorization, undefined);
+            assert.match(request.headers.host ?? "", /^docs\.example\.test:/);
+            if (request.url === "/redirect") { response.writeHead(302, { location: "http://127.0.0.1:1/private" }); response.end(); return; }
+            if (request.url === "/binary") { response.writeHead(200, { "content-type": "application/octet-stream" }); response.end("binary"); return; }
+            if (request.url === "/large") { response.writeHead(200, { "content-type": "text/plain" }); response.end("x".repeat(131_073)); return; }
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(JSON.stringify({ openapi: "3.1.0", paths: { "/health": { get: {} } } }));
+        });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const port = (server.address() as import("node:net").AddressInfo).port;
+        const origin = `http://docs.example.test:${port}`;
+        const options = { origins: [origin], allowPrivate: true, resolver: async () => { lookups++; return [{ address: "127.0.0.1", family: 4 }]; } };
+        try {
+            const document = await readApiDocumentation(`${origin}/openapi.json`, options);
+            assert.equal(lookups, 1);
+            assert.equal(document.contentType, "application/json");
+            assert.equal(JSON.parse(document.text).openapi, "3.1.0");
+            await assert.rejects(() => readApiDocumentation(`${origin}/redirect`, options), /redirects/);
+            await assert.rejects(() => readApiDocumentation(`${origin}/binary`, options), /did not return text/);
+            await assert.rejects(() => readApiDocumentation(`${origin}/large`, options), /larger than 128 KiB/);
+            assert.equal(visits, 4);
+            await assert.rejects(() => readApiDocumentation(`${origin}/openapi.json`, { ...options, origins: [] }), /origin is not allowed/);
+            await assert.rejects(() => readApiDocumentation(`${origin}/openapi.json`, { ...options, allowPrivate: false }), /Private, loopback/);
+            await assert.rejects(() => readApiDocumentation(`http://127.0.0.1:${port}/openapi.json`, { ...options, origins: [`http://127.0.0.1:${port}`], allowPrivate: false }), /Private, loopback/);
+            const controller = new AbortController();
+            controller.abort();
+            await assert.rejects(() => readApiDocumentation(`${origin}/openapi.json`, { ...options, signal: controller.signal }), /abort/i);
+            assert.equal(visits, 4);
+            assert.equal(lookups, 5, "blocked origins and cancelled requests never resolve; checked addresses are not looked up again by HTTP");
+        } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+    });
+});

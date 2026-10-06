@@ -169,7 +169,8 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
             }
         }
         if (!automation.cron || !automation.nextRunAt || Date.parse(automation.nextRunAt) > at.getTime() || await isAgentPaused(projectId)) return;
-        const available = await specsRepository.listSpecs(projectId);
+        const allSpecs = await specsRepository.listSpecs(projectId);
+        const available = allSpecs.filter((spec) => spec.lifecycle === "active");
         const selected = automation.specIds.length ? available.filter((spec) => automation.specIds.includes(spec.id)) : available;
         const runnable = selected.filter((spec) => spec.status !== "invalid");
         const ids = runnable.map((spec) => spec.id);
@@ -177,8 +178,12 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
         const nextRunAt = nextCronAt(automation.cron, at);
         if (!await schedulesRepository.claimDue(projectId, automation.nextRunAt, nextRunAt)) return;
         try {
-            if (automation.specIds.length && runnable.length !== automation.specIds.length) {
+            if (automation.specIds.length && (selected.some((spec) => spec.status === "invalid") || automation.specIds.some((id) => !allSpecs.some((spec) => spec.id === id)))) {
                 throw new Error("Some selected Specs are missing or invalid. Review the selected Specs before the next scheduled run.");
+            }
+            if (!selected.length) {
+                await schedulesRepository.update(projectId, { lastError: null });
+                return;
             }
             if (!ids.length) throw new Error("There are no runnable Specs. Add a Spec or resolve the invalid Specs before the next scheduled run.");
             await startSpecBatch(projectId, ids, "Scheduled run", {

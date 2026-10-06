@@ -54,7 +54,7 @@ async function intentFingerprint(projectId: string, intent: StewardIntent, sourc
     }
     const context = await projectContextsRepository.getLatestConfirmedProjectContext(projectId);
     const targets = specs.filter((spec) => !intent.specIds?.length || intent.specIds.includes(spec.id)).map((spec) => [spec.id, spec.sourceHash, spec.markdownHash]).sort();
-    return fingerprint({ kind: intent.kind, targets, context: context?.context, baseUrl: intent.baseUrl,
+    return fingerprint({ kind: intent.kind, targets, context: context?.context, baseUrl: intent.baseUrl, environment: intent.environment,
         goal: source === "user" ? intent.goal.replace(/\s+/g, " ").trim().toLowerCase() : undefined,
         regressionKey: key.startsWith("regression:") ? key : undefined });
 }
@@ -141,7 +141,7 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
         }
     } else if (kinds[signal.kind]) {
         await enqueueIntent(signal.projectId, {
-            kind: kinds[signal.kind], goal: signal.body, reason: signal.title, specIds, runId, baseUrl: typeof signal.payload.url === "string" ? signal.payload.url : undefined,
+            kind: kinds[signal.kind], goal: signal.body, reason: signal.title, specIds, runId, baseUrl: typeof signal.payload.url === "string" ? signal.payload.url : undefined, environment: typeof signal.payload.environment === "string" ? signal.payload.environment : undefined,
             priority: signal.kind === "spec_failure" ? 100 : signal.kind === "invalid_spec" ? 80 : 40,
         }, `signal:${signal.id}`);
     }
@@ -235,14 +235,16 @@ async function dispatchIntent(row: Intent): Promise<void> {
         return;
     }
     if (row.intent.kind === "run_specs") {
-        const selected = (await specsRepository.listSpecs(row.projectId)).filter((spec) => !row.intent.specIds?.length || row.intent.specIds.includes(spec.id));
-        if (row.intent.specIds?.length && (selected.length !== row.intent.specIds.length || selected.some((spec) => spec.status === "invalid"))) throw new Error("Some selected Specs are missing or invalid. Restore or update those Specs before retrying this selection.");
+        const allSpecs = await specsRepository.listSpecs(row.projectId);
+        const selected = allSpecs.filter((spec) => spec.lifecycle === "active" && (!row.intent.specIds?.length || row.intent.specIds.includes(spec.id)));
+        if (row.intent.specIds?.length && (row.intent.specIds.some((id) => !allSpecs.some((spec) => spec.id === id)) || selected.some((spec) => spec.status === "invalid"))) throw new Error("Some selected Specs are missing or invalid. Restore or update those Specs before retrying this selection.");
         const specs = selected.filter((spec) => spec.status !== "invalid");
         if (!specs.length) { await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "No runnable Specs yet." }); return; }
         if (areSpecsLocked(specs.map((spec) => spec.id)) || await runsRepository.hasRunningRuns(specs.map((spec) => spec.id))) return;
         if (await isAgentPaused(row.projectId)) return;
         await startSpecBatch(row.projectId, specs.map((spec) => spec.id), row.intent.reason, {
             baseUrl: row.intent.baseUrl,
+            environment: row.intent.environment,
             trigger: runTrigger,
             healFailures: runSignalForIntent(row, relatedIntents, signals)?.payload.healFailures !== false,
             onPrepared: async (batch) => {

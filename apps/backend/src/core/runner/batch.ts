@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import type { RunStatus } from "../../infra/db/schema";
+import { resolveRunEnvironment } from "../environments";
+import type { RunEnvironment, RunStatus } from "../../infra/db/schema";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { projectsRepository } from "../../infra/repositories/projects";
@@ -48,6 +49,7 @@ export interface RunBatch {
     label: string;
     trigger?: RunBatchTrigger;
     baseUrl?: string;
+    environment?: RunEnvironment;
     ci?: CiBatchMetadata;
     status: RunStatus;
     startedAt: string;
@@ -188,6 +190,7 @@ async function executeBatch(
                 projectId: batch.projectId,
                 directory: batchDir,
                 baseUrl,
+                environment: batch.environment,
                 specs: prepared.map((entry) => ({
                     key: entry.run.id,
                     source: entry.testSource,
@@ -237,6 +240,7 @@ async function prepareSpecBatch(
     healOnFailure: boolean,
     ci?: CiBatchMetadata,
     trigger: RunBatchTrigger = "manual",
+    environment?: RunEnvironment,
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
         await prepareRunRepositoryUnlocked(projectId);
@@ -252,6 +256,7 @@ async function prepareSpecBatch(
         for (const id of ids) {
             const spec = await specsRepository.getSpec(id);
             if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
+            if (trigger !== "manual" && spec.lifecycle === "draft") throw new Error(`Spec "${spec.title}" is a draft. Activate it before automatic runs.`);
             if (spec.status === "invalid") {
                 throw new Error(`Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
             }
@@ -262,7 +267,7 @@ async function prepareSpecBatch(
             const sourceHash = sourceHashOf(testSource);
             const markdownHash = markdownHashOf(markdown);
             if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
-                throw new Error(`The check "${spec.title}" changed while it was being prepared. Run it again to use the latest version.`);
+                throw new Error(`The Spec "${spec.title}" changed while it was being prepared. Run it again to use the latest version.`);
             }
             definitions.push({
                 spec,
@@ -278,7 +283,7 @@ async function prepareSpecBatch(
 
     const refsOf = (analysis: SpecAnalysis) => analysis.secretRefs.map((ref) => ref.envName);
     const refs = [...new Set(definitions.flatMap((definition) => refsOf(definition.analysis)))];
-    const { env: secretEnv, missing } = await resolveSecretEnv(projectId, refs);
+    const { env: secretEnv, missing } = await resolveSecretEnv(projectId, refs, environment?.credentialOverrides);
     if (missing.length > 0) {
         const titles = definitions
             .filter((definition) => refsOf(definition.analysis).some((ref) => missing.includes(ref)))
@@ -289,7 +294,7 @@ async function prepareSpecBatch(
     }
     const secrets: BatchSecrets = {
         env: secretEnv,
-        origins: await resolveSecretOriginPolicy(projectId, refs),
+        origins: await resolveSecretOriginPolicy(projectId, refs, environment),
         scrub: await projectSecretScrubber(projectId),
     };
 
@@ -300,9 +305,10 @@ async function prepareSpecBatch(
                 specId: definition.spec.id,
                 commitSha,
                 sourceHash: definition.sourceHash,
-                automate: true,
-                healOnFailure,
+                automate: definition.spec.lifecycle === "active",
+                healOnFailure: definition.spec.lifecycle === "active" && healOnFailure,
                 baseUrl,
+                environment,
             });
             createdRuns.push(run);
             await repoGit.withRepoLock(projectId, () => repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha));
@@ -319,6 +325,7 @@ async function prepareSpecBatch(
         label: label.trim().slice(0, 120) || "Run Specs",
         trigger,
         baseUrl,
+        environment,
         ...(ci ? { ci } : {}),
         status: "running",
         startedAt: new Date().toISOString(),
@@ -353,9 +360,10 @@ async function prepareSpecBatch(
     return { batch, prepared, secrets };
 }
 
-export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { baseUrl?: string; ci?: CiBatchMetadata; trigger?: RunBatchTrigger; healFailures?: boolean; rejectIfBusy?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {
+export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { environment?: string | RunEnvironment; baseUrl?: string; ci?: CiBatchMetadata; trigger?: RunBatchTrigger; healFailures?: boolean; rejectIfBusy?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {
     const project = await projectsRepository.getProject(projectId);
     if (!project) throw new Error("Project not found");
+    const environment = typeof options.environment === "object" ? options.environment : await resolveRunEnvironment(projectId, options.environment, options.baseUrl);
     const ids = [...new Set(specIds)];
     if (ids.length === 0) throw new Error("Select at least one Spec");
     if (options.rejectIfBusy && await runsRepository.hasRunningRuns(ids)) throw new ResourceBusyError("Selected Specs are already running; retry after they finish");
@@ -364,7 +372,7 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     let prepared: PreparedSpec[];
     let secrets: BatchSecrets;
     try {
-        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, options.baseUrl ?? project.baseUrl, options.healFailures !== false, options.ci, options.trigger ?? (options.ci ? "ci" : "manual")));
+        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, environment.baseUrl, options.healFailures !== false, options.ci, options.trigger ?? (options.ci ? "ci" : "manual"), environment));
         try {
             await options.onPrepared?.(batch);
         } catch (error) {
@@ -382,7 +390,7 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
         await releaseSpecLocks();
         throw error;
     }
-    const task = executeBatch(batch, prepared, options.baseUrl ?? project.baseUrl, secrets).finally(releaseSpecLocks);
+    const task = executeBatch(batch, prepared, environment.baseUrl, secrets).finally(releaseSpecLocks);
     activeBatches.set(batch.id, task);
     void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
     return batch;

@@ -13,6 +13,7 @@ import type {
     LlmRuntimeStatus,
     LlmSettingsResponse,
     Project,
+    ProjectEnvironment,
     ProjectContext,
     ProjectContextRevision,
     ProjectContextState,
@@ -139,8 +140,8 @@ export function getSpec(specId: string, options: { limit?: number; signal?: Abor
     return api(`${apiPath`/specs/${specId}`}${query}`, { signal: options.signal });
 }
 
-export function runSpec(specId: string): Promise<{ run: Run }> {
-    return api(apiPath`/specs/${specId}/run`, { method: "POST" });
+export function runSpec(specId: string, environment?: string): Promise<{ run: Run }> {
+    return api(`${apiPath`/specs/${specId}/run`}${environment ? `?environment=${encodeURIComponent(environment)}` : ""}`, { method: "POST" });
 }
 
 export function deleteSpec(specId: string): Promise<void> {
@@ -205,10 +206,10 @@ export function discardProjectContext(revisionId: string): Promise<{ revision: P
     return api(`/project-contexts/${encodeURIComponent(revisionId)}/discard`, { method: "POST" });
 }
 
-export function startRunBatch(projectId: string, specIds: string[], label: string): Promise<{ batch: RunBatch }> {
+export function startRunBatch(projectId: string, specIds: string[], label: string, environment?: string): Promise<{ batch: RunBatch }> {
     return api(`/projects/${encodeURIComponent(projectId)}/run-batches`, {
         method: "POST",
-        body: JSON.stringify({ specIds, label }),
+        body: JSON.stringify({ specIds, label, environment }),
     });
 }
 
@@ -437,4 +438,16 @@ export function resolveChatCredentialRequest(
         method: "POST",
         body: JSON.stringify(body),
     });
+}
+
+export function getEnvironments(projectId: string, signal?: AbortSignal): Promise<{ environments: ProjectEnvironment[] }> {
+    return api(apiPath`/projects/${projectId}/environments`, { signal });
+}
+
+export function setSpecLifecycle(specId: string, lifecycle: "draft" | "active"): Promise<{ spec: SpecDetail["spec"] }> {
+    return api(apiPath`/specs/${specId}/lifecycle`, { method: "PATCH", body: JSON.stringify({ lifecycle }) });
+}
+
+export function activateSpecs(projectId: string, specIds: string[]): Promise<{ activated: string[] }> {
+    return api(apiPath`/projects/${projectId}/specs/activate`, { method: "POST", body: JSON.stringify({ specIds }) });
 }

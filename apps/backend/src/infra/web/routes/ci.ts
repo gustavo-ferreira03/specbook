@@ -8,8 +8,10 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { authenticateCiToken, ciTokenInfo, issueCiToken } from "../../../core/ci/tokens";
-import { ciRunSchema, ciResultQuerySchema, deploySchema, ciSettingsSchema } from "../../../core/ci/schemas";
+import { ciRunSchema, ciResultQuerySchema, deploySchema } from "../../../core/ci/schemas";
 import { ciResult, junitResult, knownBugSpecIds, markdownResult } from "../../../core/ci/results";
+import { resolveRunEnvironment } from "../../../core/environments";
+import { environmentsRepository } from "../../repositories/environments";
 import { projectRunPolicy } from "../../../core/ci/targets";
 import { NetworkTargetError } from "../../../core/network/targets";
 import { backendRoot } from "../../../core/paths";
@@ -39,7 +41,7 @@ const projectAuth: MiddlewareHandler = async (c, next) => {
     await next();
 };
 
-async function acceptTrigger(c: Context, projectId: string, target?: string) {
+async function acceptTrigger(c: Context, projectId: string, target?: string, name?: string) {
     const token = c.req.header("authorization")!.slice("Bearer ".length);
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     if (!await ciRepository.consumeRequest(projectId, tokenHash)) {
@@ -47,7 +49,7 @@ async function acceptTrigger(c: Context, projectId: string, target?: string) {
         throw new HTTPException(429, { message: "CI trigger limit reached. Retry after the current minute." });
     }
     const project = await requireProject(projectId);
-    try { await projectRunPolicy(project, target ?? project.baseUrl); }
+    try { const environment = await resolveRunEnvironment(projectId, name, target); await projectRunPolicy(project, environment.baseUrl, undefined, environment); return environment; }
     catch (error) {
         if (error instanceof NetworkTargetError) throw new HTTPException(400, { message: error.message });
         throw error;
@@ -60,13 +62,7 @@ export function createCiSettingsRouter(): Hono {
         const id = c.req.param("id");
         const project = await requireProject(id);
         c.header("Cache-Control", "no-store");
-        return c.json({ allowedOrigins: project.ciAllowedOrigins, projectOrigin: new URL(project.baseUrl).origin, token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map((batch) => ciResult(batch, publicFrontendOrigin(c)))) });
-    });
-    router.put("/projects/:id/ci", access("editor"), zValidator("json", ciSettingsSchema), async (c) => {
-        const project = await requireProject(c.req.param("id"));
-        const allowedOrigins = [...new Set(c.req.valid("json").allowedOrigins)];
-        await projectsRepository.updateProject(project.id, { ciAllowedOrigins: allowedOrigins });
-        return c.json({ allowedOrigins });
+        return c.json({ environments: await environmentsRepository.list(id), token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map((batch) => ciResult(batch, publicFrontendOrigin(c)))) });
     });
     router.post("/projects/:id/ci/token", access("editor"), async (c) => {
         const id = c.req.param("id");
@@ -92,8 +88,8 @@ export function createCiRouter(): Hono {
     router.post("/ci/projects/:id/runs", access("ci-token"), projectAuth, zValidator("json", ciRunSchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
-        await acceptTrigger(c, projectId, input.baseUrl);
-        let specs = await specsRepository.listSpecs(projectId);
+        const environment = await acceptTrigger(c, projectId, input.baseUrl, input.environment);
+        let specs = (await specsRepository.listSpecs(projectId)).filter((spec) => spec.lifecycle === "active");
         if (input.featureId) {
             const feature = await featuresRepository.getFeature(input.featureId);
             if (!feature || feature.projectId !== projectId) throw new HTTPException(400, { message: "Feature not found in this project" });
@@ -101,7 +97,7 @@ export function createCiRouter(): Hono {
             specs = specs.filter((spec) => selected.has(spec.id));
         }
         if (input.specIds) {
-            if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected Specs must belong to this project" });
+            if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected Specs must be active and belong to this project" });
             specs = specs.filter((spec) => input.specIds!.includes(spec.id));
         }
         // All/Feature runs include runnable Specs. Explicitly selected invalid Specs report their validation error.
@@ -109,7 +105,7 @@ export function createCiRouter(): Hono {
         try {
             const batch = await startSpecBatch(projectId, specs.map((spec) => spec.id), "CI run", {
                 trigger: "ci",
-                baseUrl: input.baseUrl,
+                environment,
                 rejectIfBusy: true,
                 ci: { commitSha: input.commitSha, ref: input.ref, buildUrl: input.buildUrl, qualityGate: input.qualityGate, knownBugSpecIds: await knownBugSpecIds(projectId) },
             });
@@ -145,7 +141,7 @@ export function createCiRouter(): Hono {
     router.post("/ci/projects/:id/deploy", access("ci-token"), projectAuth, zValidator("json", deploySchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
-        await acceptTrigger(c, projectId, input.url);
+        const environment = await acceptTrigger(c, projectId, input.url, input.environment);
         const hash = crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
         const now = Date.now();
         const windowMs = 5 * 60_000;
@@ -159,7 +155,7 @@ export function createCiRouter(): Hono {
         await stewardRepository.signal({ projectId, key: `deploy:${key}`, kind: "deployment",
             title: `Deployment completed${input.environment ? `: ${input.environment}` : ""}`,
             body: `A deployment completed. Run the relevant Specs, then investigate failures. ${input.url ? `Deployment URL: ${input.url}.` : ""}`,
-            payload: input });
+            payload: { ...input, environment: environment.name, url: environment.baseUrl, environmentSnapshot: environment } });
         return c.json({ accepted: true }, 202);
     });
     return router;

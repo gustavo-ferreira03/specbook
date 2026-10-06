@@ -180,9 +180,21 @@ export async function listSecretValues(projectId: string): Promise<SecretValue[]
 export async function resolveSecretEnv(
     projectId: string,
     refs: string[],
+    overrides: Record<string, string> = {},
 ): Promise<{ env: Record<string, string>; missing: string[] }> {
     if (refs.length === 0) return { env: {}, missing: [] };
     const byEnvName = new Map((await listSecretValues(projectId)).map((secret) => [secret.envName, secret.value]));
+    const profiles = await credentialsRepository.listProfiles(projectId);
+    for (const [sourceName, targetId] of Object.entries(overrides)) {
+        const source = profiles.find((profile) => profile.name === sourceName);
+        const target = profiles.find((profile) => profile.id === targetId);
+        for (const field of source?.fields ?? []) {
+            const envName = secretEnvName(sourceName, field.key);
+            byEnvName.delete(envName);
+            const value = target?.fields.find((item) => item.key === field.key)?.value;
+            if (value) byEnvName.set(envName, decryptSecret(value));
+        }
+    }
     const env: Record<string, string> = {};
     const missing: string[] = [];
     for (const ref of refs) {

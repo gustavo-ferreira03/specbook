@@ -71,6 +71,7 @@ function withStorageShim(data: Buffer, type: string): Buffer {
 }
 
 const batchSchema = z.object({
+    environment: z.string().trim().min(1).max(80).optional(),
     specIds: z.array(z.string().uuid()).min(1),
     label: z.string().trim().min(1).max(120),
 });
@@ -140,7 +141,7 @@ export function createRunsRouter(): Hono {
 
     router.post("/specs/:id/run", access("editor"), async (c) => {
         try {
-            const run = await executeSpec(c.req.param("id"), { automate: true });
+            const run = await executeSpec(c.req.param("id"), { automate: true, environment: c.req.query("environment") });
             return c.json({ run });
         } catch (error) {
             throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
@@ -149,8 +150,8 @@ export function createRunsRouter(): Hono {
 
     router.post("/projects/:id/run-batches", access("editor"), zValidator("json", batchSchema), async (c) => {
         try {
-            const { specIds, label } = c.req.valid("json");
-            const batch = await startSpecBatch(c.req.param("id"), specIds, label);
+            const { specIds, label, environment } = c.req.valid("json");
+            const batch = await startSpecBatch(c.req.param("id"), specIds, label, { environment });
             return c.json({ batch }, 202);
         } catch (error) {
             throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
@@ -202,6 +203,7 @@ export function createRunsRouter(): Hono {
             video?: string | null;
             failedStep?: string | null;
             diagnostics?: import("../../../core/runner/evidence").RunDiagnostic[];
+            apiSteps?: import("../../../core/runner/evidence").ApiStepEvidence[];
             errorContext?: string;
         } = {};
         if (directory && available.has("evidence.json")) {
@@ -245,6 +247,8 @@ export function createRunsRouter(): Hono {
             reportAvailable: reportUrl !== null,
             reportUrl,
             diagnostics: manifest.diagnostics ?? [],
+            apiSteps: manifest.apiSteps ?? [],
+            environment: run.environment,
             errorContext: manifest.errorContext ?? null,
         });
     });

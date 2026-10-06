@@ -55,7 +55,7 @@ async function deploymentFingerprint(url: string): Promise<string> {
 export async function collectProjectSignals(project: Project, previous: ProjectObservation, at = Date.now()): Promise<ProjectObservation> {
     const observation: ProjectObservation = { deployment: previous.deployment };
     const [specs, credentials] = await Promise.all([
-        specsRepository.listSpecs(project.id), credentialsRepository.listProfiles(project.id),
+        specsRepository.listSpecs(project.id).then((specs) => specs.filter((spec) => spec.lifecycle === "active")), credentialsRepository.listProfiles(project.id),
     ]);
     const signal = (kind: string, key: string, title: string, body: string, payload: Record<string, unknown> = {}) =>
         stewardRepository.signal({ projectId: project.id, kind, key, title, body, payload });

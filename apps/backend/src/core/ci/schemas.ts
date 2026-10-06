@@ -13,6 +13,7 @@ export const qualityGateSchema = z.object({
 }).strict();
 
 export const ciRunSchema = z.object({
+    environment: z.string().trim().min(1).max(80).optional(),
     featureId: z.string().uuid().optional(),
     specIds: z.array(z.string().uuid()).min(1).max(500).optional(),
     baseUrl: httpUrlSchema.optional(),
@@ -32,11 +33,4 @@ export const deploySchema = z.object({
     url: httpUrlSchema.optional(),
     commitSha: z.string().trim().min(1).max(128).optional(),
     ref: z.string().trim().min(1).max(500).optional(),
-}).strict();
-
-export const ciSettingsSchema = z.object({
-    allowedOrigins: z.array(httpUrlSchema.refine((value) => {
-        const url = new URL(value);
-        return url.pathname === "/" && !url.search && !url.hostname.includes("*");
-    }, "Enter an origin without a path or query").transform((value) => new URL(value).origin)).max(50),
 }).strict();

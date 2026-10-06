@@ -37,7 +37,7 @@ import {
     tryReserveChatTurn,
     type ActiveChatSession,
 } from "./chat-registry";
-import { createContextTools } from "./context-tools";
+import { createContextTools, createSpecBatchTool, createApiDocumentationTool } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
 import { createExplorationTools } from "./exploration-tools";
 import { createBackgroundTaskTool } from "../steward/tools";
@@ -235,7 +235,7 @@ async function runReservedChatTurn(
         try {
             const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
             const profiles = await credentialsRepository.listProfiles(row.projectId);
-            const origins = [...new Set([new URL(startUrl).origin, ...profiles.flatMap((profile) => profile.allowedOrigins)])];
+            const origins = [...new Set([new URL(startUrl).origin, ...(turnPolicy?.environment?.allowedOrigins ?? []), ...profiles.flatMap((profile) => profile.allowedOrigins)])];
             chatBrowser = await getOrCreateChatBrowser(id, origins);
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision
@@ -276,6 +276,7 @@ async function runReservedChatTurn(
         const credentialTools = createCredentialTools({
             projectId: row.projectId,
             baseUrl: storedProject!.baseUrl,
+            environment: turnPolicy?.environment,
             chatId: id,
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
@@ -285,6 +286,8 @@ async function runReservedChatTurn(
         const sessionTools = createSessionTools({
             projectId: row.projectId,
             baseUrl: project.baseUrl,
+            productionBaseUrl: storedProject!.baseUrl,
+            environment: turnPolicy?.environment,
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
         });
@@ -302,14 +305,17 @@ async function runReservedChatTurn(
         const customTools = discoveryRevision
             ? [
                   ...browserTools,
-                  ...createContextTools(discoveryRevision.id, row.projectId),
+                  ...createContextTools(discoveryRevision.id, row.projectId, id),
+                  createApiDocumentationTool(row.projectId, turnPolicy?.environment),
                   ...credentialTools,
                   ...sessionTools,
                   ...explorationTools,
               ]
             : [
                   ...browserTools,
-                  ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl }),
+                  ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl, environment: turnPolicy?.environment }),
+                  createSpecBatchTool(row.projectId, id),
+                  createApiDocumentationTool(row.projectId, turnPolicy?.environment),
                   ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`)] : []),
                   ...credentialTools,
                   ...sessionTools,

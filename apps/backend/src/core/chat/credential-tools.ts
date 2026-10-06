@@ -5,6 +5,8 @@ import { getActiveTabUrl, renderMcpResult, type BrowserMcp } from "../browser/mc
 import { registerCredentialRequest, resolveCredentialRequest, waitForCredentialRequest } from "./credential-requests";
 import { decryptSecret } from "../credentials/crypto";
 import { getProfileByName, listPublicProfiles } from "../credentials/profiles";
+import { credentialsRepository } from "../../infra/repositories/credentials";
+import type { RunEnvironment } from "../../infra/db/schema";
 
 const fillSecretSchema = z.object({
     profile: z.string(),
@@ -29,6 +31,7 @@ function text(value: string) {
 export interface CredentialToolOptions {
     projectId: string;
     baseUrl: string;
+    environment?: RunEnvironment;
     chatId: string;
     mcp: BrowserMcp | null;
     workDir: string | null;
@@ -45,7 +48,16 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 "List the project's credential profiles and which fields have a value (hasValue). Values are never included. Enter every field with fill_secret (browser) or secret('<profile>', '<field>') in spec.ts.",
             parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute() {
-                return text(JSON.stringify(await listPublicProfiles(options.projectId)));
+                const profiles = await listPublicProfiles(options.projectId);
+                const targets = new Map(profiles.map((profile) => [profile.id, { ...profile }]));
+                for (const profile of profiles) {
+                    const overrideId = options.environment?.credentialOverrides[profile.name];
+                    if (!overrideId) continue;
+                    const target = targets.get(overrideId);
+                    profile.fields = profile.fields.map((field) => ({ ...field, hasValue: target?.fields.some((item) => item.key === field.key && item.hasValue) ?? false }));
+                    profile.allowedOrigins = target ? [...new Set([new URL(options.environment!.configuredBaseUrl).origin, ...target.allowedOrigins])] : [];
+                }
+                return text(JSON.stringify(profiles));
             },
         }),
         defineTool({
@@ -60,8 +72,10 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 if (!options.mcp || !options.workDir) {
                     return text("fill_secret failed: the agent browser is not available this turn.");
                 }
-                const profile = await getProfileByName(options.projectId, params.profile);
+                const overrideId = options.environment?.credentialOverrides[params.profile];
+                const profile = overrideId ? await credentialsRepository.getProfile(overrideId) : await getProfileByName(options.projectId, params.profile);
                 if (!profile) return text(`fill_secret failed: no credential profile named "${params.profile}".`);
+                if (profile.projectId !== options.projectId) return text("fill_secret failed: the overridden profile does not belong to this project.");
                 const field = profile.fields.find((f) => f.key === params.field);
                 if (!field || field.value === "") {
                     return text(`fill_secret failed: profile "${params.profile}" has no field "${params.field}" with a value.`);
@@ -74,7 +88,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 } catch {
                     return text(`fill_secret failed: active page URL "${activeUrl}" is not a valid URL.`);
                 }
-                const allowed = new Set([new URL(options.baseUrl).origin, ...profile.allowedOrigins]);
+                const allowed = new Set([new URL(overrideId ? options.environment!.configuredBaseUrl : options.baseUrl).origin, ...profile.allowedOrigins]);
                 if (!allowed.has(origin)) {
                     return text(
                         `fill_secret refused: the active page origin ${origin} is not allowed for this credential (allowed: ${[...allowed].join(", ")}).`,

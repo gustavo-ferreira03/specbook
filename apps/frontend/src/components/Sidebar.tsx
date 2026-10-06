@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import {
     AlertCircle,
     LayoutDashboard,
+    ChartNoAxesCombined,
     ChevronRight,
     ChevronsUpDown,
     Compass,
@@ -42,6 +43,7 @@ import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { Chat, Feature, OverviewResponse, Project, RunBatch, SpecSummary } from "@/lib/types";
 import { NO_SPECS_DESCRIPTION } from "@/lib/status";
 import { useVisiblePolling } from "@/lib/usePolling";
+import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { useRunBatch } from "@/lib/useRunBatch";
 import { ConfirmDeleteDialog } from "./ConfirmDeleteDialog";
 import { EmptyState } from "./EmptyState";
@@ -112,6 +114,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const pathname = usePathname();
     const [projects, setProjects] = useState<Project[]>([]);
     const [features, setFeatures] = useState<Feature[]>([]);
+    const [environment, setEnvironment] = useState("Production");
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
     const [overview, setOverview] = useState<{ projectId: string; data: Pick<OverviewResponse, "summary" | "specHealth"> } | null>(null);
     const [chats, setChats] = useState<Chat[]>([]);
@@ -360,7 +363,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     }
 
     function runSpecBatch(title: string, selectedSpecs: SpecSummary[]) {
-        void runBatch.start(title, selectedSpecs.map((spec) => ({ id: spec.id, title: spec.title })));
+        void runBatch.start(title, selectedSpecs.map((spec) => ({ id: spec.id, title: spec.title })), environment);
     }
 
     // Row actions are revealed on hover and whenever focus is inside the row, so they stay
@@ -382,7 +385,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
         return (
             <div key={spec.id} className={rowClass(selected)}>
                 <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} pr-2 pl-2 ${selected ? "font-medium" : ""}`} title={health ? `${spec.title}: ${health.label}` : spec.title}>
-                    <StatusDot status={health?.status ?? spec.status} size={14} />
+                    <StatusDot status={spec.lifecycle === "draft" ? "draft" : health?.status ?? spec.status} size={14} />
                     <span className="min-w-0 flex-1 truncate">{spec.title}</span>
                 </Link>
                 <div className={rowActionsClass}>
@@ -652,6 +655,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}>
                         <Compass size={15} /> Project context
                     </Link>
+                    <Link href={`/p/${projectId}/coverage`} onClick={() => setDrawerOpen(false)} aria-current={pathname.endsWith("/coverage") ? "page" : undefined} className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname.endsWith("/coverage") ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}><ChartNoAxesCombined size={15} /> Coverage</Link>
+                    {canEdit && <div className="px-2 py-2"><EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} /></div>}
                     {(currentOverview?.summary.paused || currentOverview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{currentOverview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
                     {runtimeCopy && <Link
                         href={isAdmin ? "/settings?tab=model" : `/p/${projectId}/overview`}
@@ -732,6 +737,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 onConfirm={() => void deleteItem()}
             />
             <SpecRunDialog
+                environment={runBatch.environment ?? undefined}
                 open={runBatch.open}
                 onOpenChange={runBatch.setOpen}
                 title={runBatch.title}

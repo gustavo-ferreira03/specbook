@@ -8,10 +8,11 @@ export const CI_PROVIDERS = [
 
 export type CiProvider = typeof CI_PROVIDERS[number][0];
 
-export function ciSnippet(provider: CiProvider, apiUrl: string, projectId: string, failOnFlaky: boolean, failOnKnownBugs: boolean): string {
+export function ciSnippet(provider: CiProvider, apiUrl: string, projectId: string, failOnFlaky: boolean, failOnKnownBugs: boolean, environment = "production"): string {
     const env = {
         SPECBOOK_API_URL: apiUrl,
         SPECBOOK_PROJECT_ID: projectId,
+        SPECBOOK_ENVIRONMENT: environment,
         SPECBOOK_FAIL_ON_FLAKY: String(failOnFlaky),
         SPECBOOK_FAIL_ON_KNOWN_BUGS: String(failOnKnownBugs),
     };
@@ -20,13 +21,21 @@ export function ciSnippet(provider: CiProvider, apiUrl: string, projectId: strin
 
     switch (provider) {
         case "github": return `name: Specbook
-on: [workflow_dispatch]
+on: [workflow_dispatch, pull_request]
 jobs:
   verify:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    concurrency:
+      group: specbook-${projectId}-\${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     env:
 ${yamlEnv(6)}
       SPECBOOK_CI_TOKEN: \${{ secrets.SPECBOOK_CI_TOKEN }}
+      SPECBOOK_COMMENT_PROVIDER: github
+      GITHUB_TOKEN: \${{ github.token }}
       SPECBOOK_COMMIT_SHA: \${{ github.sha }}
       SPECBOOK_REF: \${{ github.ref_name }}
       SPECBOOK_BUILD_URL: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}
@@ -50,11 +59,18 @@ ${yamlEnv(6)}
             specbook-summary.md`;
         case "gitlab": return `specbook:
   image: node:26
+  resource_group: specbook-$SPECBOOK_PROJECT_ID-$CI_MERGE_REQUEST_IID
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web"'
   variables:
 ${yamlEnv(4)}
     SPECBOOK_COMMIT_SHA: "$CI_COMMIT_SHA"
     SPECBOOK_REF: "$CI_COMMIT_REF_NAME"
     SPECBOOK_BUILD_URL: "$CI_JOB_URL"
+    SPECBOOK_COMMENT_PROVIDER: "gitlab"
   script:
     - |
       ${download}

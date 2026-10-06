@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { and, desc, eq, inArray, lt, max, or } from "drizzle-orm";
 import { db } from "../db/client";
-import { runs, type RunStatus } from "../db/schema";
+import { runs, type RunStatus, type RunEnvironment } from "../db/schema";
 
 export type Run = typeof runs.$inferSelect;
 
@@ -9,7 +9,7 @@ export const DEFAULT_RUN_LIST_LIMIT = 50;
 export const MAX_RUN_LIST_LIMIT = 200;
 
 class RunsRepository {
-    async createRun(input: { specId: string; commitSha: string; sourceHash: string; automate?: boolean; healOnFailure?: boolean; retryOf?: string; baseUrl?: string }): Promise<Run> {
+    async createRun(input: { specId: string; commitSha: string; sourceHash: string; automate?: boolean; healOnFailure?: boolean; retryOf?: string; baseUrl?: string; environment?: RunEnvironment }): Promise<Run> {
         const row: Run = {
             id: crypto.randomUUID(),
             specId: input.specId,
@@ -24,6 +24,7 @@ class RunsRepository {
             retryOf: input.retryOf ?? null,
             flaky: false,
             baseUrl: input.baseUrl ?? null,
+            environment: input.environment ?? null,
         };
         await db.insert(runs).values(row);
         return row;

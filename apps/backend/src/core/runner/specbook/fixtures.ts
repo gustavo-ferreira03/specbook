@@ -9,6 +9,7 @@ import type { RunDiagnostic } from "../evidence.ts";
 import {
     createGuard,
     createSecret,
+    API_STEP_ATTACHMENT_PREFIX,
     FAILED_STEP_ANNOTATION,
     hardenFunctionConstructors,
     parseRuntime,
@@ -16,10 +17,12 @@ import {
     STEP_ATTACHMENT_PREFIX,
     unwrap,
     type RawPage,
+    type ApiRequestEvidence,
 } from "./guard.ts";
 
 type StepFn = (title: string, body: () => Promise<void>) => Promise<void>;
 type SecretFn = (profile: string, field: string) => object;
+type EvidenceState = { page?: Page; apiRequests: ApiRequestEvidence[] };
 
 hardenFunctionConstructors();
 
@@ -36,8 +39,15 @@ function diagnosticUrl(value: string): string | undefined {
     }
 }
 
-export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
-    page: async ({ page }, use, testInfo) => {
+export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvidence: EvidenceState }>({
+    _specbookEvidence: async ({}, use) => { await use({ apiRequests: [] }); },
+    request: async ({ request, _specbookEvidence }, use) => {
+        await use(guard.wrapRequest(request, (evidence) => {
+            if (_specbookEvidence.apiRequests.length < 30) _specbookEvidence.apiRequests.push(evidence);
+        }) as never);
+    },
+    page: async ({ page, _specbookEvidence }, use, testInfo) => {
+        _specbookEvidence.page = page;
         const navigation = runtime.navigationOrigins ? await page.context().newCDPSession(page) : null;
         if (navigation) {
             navigation.on("Fetch.requestPaused", (event) => {
@@ -86,9 +96,7 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
             }
         }
     },
-    step: async ({ page }, use, testInfo) => {
-        const real = unwrap<Page>(page, ["page"]);
-        if (!real) throw new Error("Specbook page is not available");
+    step: async ({ _specbookEvidence }, use, testInfo) => {
         let count = 0;
         let active = false;
         await use(async (title, body) => {
@@ -98,6 +106,8 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
             active = true;
             count += 1;
             const number = String(count).padStart(2, "0");
+            _specbookEvidence.apiRequests = [];
+            const real = _specbookEvidence.page;
             try {
                 await base.step(title, async () => {
                     await body();
@@ -105,6 +115,7 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
             } catch (error) {
                 testInfo.annotations.push({ type: FAILED_STEP_ANNOTATION, description: title });
                 try {
+                    if (!real) throw new Error("This step has no browser page");
                     const snapshot = await real.locator("body").ariaSnapshot({ timeout: 2000 });
                     const file = testInfo.outputPath("specbook-error-context.txt");
                     await fs.writeFile(file, snapshot.slice(0, 32_000), "utf8");
@@ -113,9 +124,16 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
                 throw error;
             } finally {
                 active = false;
+                const requests = _specbookEvidence.apiRequests;
+                if (requests.length > 0) {
+                    const file = testInfo.outputPath(`${API_STEP_ATTACHMENT_PREFIX}${number}.json`);
+                    await fs.writeFile(file, JSON.stringify(requests), "utf8");
+                    await testInfo.attach(`${API_STEP_ATTACHMENT_PREFIX}${number}`, { path: file, contentType: "application/json" });
+                }
                 // Evidence: the page as it looks after the step (or where it failed).
                 const file = testInfo.outputPath(`${STEP_ATTACHMENT_PREFIX}${number}.png`);
                 try {
+                    if (!real) throw new Error("This step has no browser page");
                     await real.screenshot({ path: file, timeout: 5000 });
                     await testInfo.attach(`${STEP_ATTACHMENT_PREFIX}${number}`, { path: file, contentType: "image/png" });
                 } catch {}
@@ -127,10 +145,13 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
     },
 });
 
-/** Playwright's expect, restricted to the Specbook page and its locators. */
+/** Playwright's expect for guarded pages, locators and API response values. */
 export function expect(target: unknown, ...rest: unknown[]) {
-    if (rest.length > 0) throw new Error("expect() takes only the page or a locator");
-    const real = unwrap(target, ["page", "locator"]);
-    if (!real) throw new Error("expect() takes only the page or a locator");
-    return baseExpect(real as never);
+    if (rest.length > 0) throw new Error("expect() takes one page, locator or API response value");
+    const real = unwrap(target, ["page", "locator", "apiResponse"]);
+    if (real) return baseExpect(real as never);
+    if (target === null || ["string", "number", "boolean"].includes(typeof target) || Array.isArray(target) || (typeof target === "object" && target !== null && [Object.prototype, null].includes(Object.getPrototypeOf(target)))) {
+        return baseExpect(target as never);
+    }
+    throw new Error("expect() takes the page, a locator or an API response value");
 }

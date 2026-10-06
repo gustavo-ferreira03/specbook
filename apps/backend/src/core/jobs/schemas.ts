@@ -5,7 +5,7 @@ export const jobLimitsSchema = z.object({
     maxActions: z.number().int().min(1).max(10_000).default(500),
 }).strict();
 export const createJobSchema = z.object({
-    kind: z.enum(["review", "failure_triage", "regenerate", "coverage", "explore"]).default("review"),
+    kind: z.enum(["review", "failure_triage", "regenerate", "coverage", "explore", "generate_spec"]).default("review"),
     specId: z.string().uuid().optional(),
     runId: z.string().uuid().optional(),
     goal: z.string().trim().min(1).max(12000).default("Review this project's Specs and propose useful improvements. Ask when blocked."),
@@ -25,6 +25,21 @@ export const newSpecProposalSchema = z.object({
     featureId: z.string(), title: z.string().min(1), description: z.string(),
     humanSpec: humanSpecSchema, testSource: z.string().min(1),
 });
+export const specCandidateSchema = z.object({
+    title: z.string().trim().min(1).max(200),
+    goal: z.string().trim().min(1).max(1000),
+    feature: z.string().trim().min(1).max(200),
+    featureId: z.string().uuid().optional(),
+    why: z.string().trim().min(1).max(2000),
+    apiDocsUrl: z.string().url().max(2000).optional(),
+}).strict();
+export const specBatchProposalSchema = z.object({
+    title: z.string().trim().min(1).max(200).default("Which Specs would you like to add?"),
+    candidates: z.array(specCandidateSchema).min(1).max(40),
+}).strict();
+export const selectSpecBatchSchema = z.object({
+    candidateIds: z.array(z.string().uuid()).min(1).max(40),
+}).strict();
 export const fixProposalSchema = z.object({
     specId: z.string(), title: z.string().optional(), description: z.string().optional(),
     humanSpec: humanSpecSchema.optional(), testSource: z.string().optional(),
@@ -40,7 +55,7 @@ export const reviewSchema = z.object({
 });
 export type JobLimits = z.infer<typeof jobLimitsSchema>;
 export type JobStatus = "queued" | "running" | "paused" | "blocked" | "completed" | "stalled" | "cancelled";
-export type InboxKind = "new_spec" | "spec_fix" | "feature" | "question" | "bug_report" | "note";
+export type InboxKind = "new_spec" | "spec_fix" | "spec_batch" | "feature" | "question" | "bug_report" | "note";
 
 export const triageSchema = z.object({
     classification: z.enum(["test_drift", "application_bug", "environment"]),

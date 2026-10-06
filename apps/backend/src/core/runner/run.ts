@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { RunStatus } from "../../infra/db/schema";
+import { resolveRunEnvironment } from "../environments";
+import type { RunEnvironment, RunStatus } from "../../infra/db/schema";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
@@ -51,6 +52,7 @@ interface RunOptions {
     retryOf?: string;
     expected?: { sourceHash: string; markdownHash: string };
     baseUrl?: string;
+    environment?: string | RunEnvironment;
     signal?: AbortSignal;
 }
 
@@ -63,8 +65,8 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
     const snapshot = await repoGit.withRepoLock(project.id, async () => {
         await prepareRunRepositoryUnlocked(project.id);
         const spec = await specsRepository.getSpec(specId);
-        if (!spec) throw new Error("This check was removed. Refresh the project to see its current checks.");
-        if (spec.status === "invalid") throw new Error(`This check needs repair before it can run. ${spec.invalidReason ?? "Open the check and choose Repair in chat."}`);
+        if (!spec) throw new Error("This Spec was removed. Refresh the project to see its current Specs.");
+        if (spec.status === "invalid") throw new Error(`This Spec needs repair before it can run. ${spec.invalidReason ?? "Open the Spec and choose Repair in chat."}`);
         const [testSource, markdown, commitSha] = await Promise.all([
             fs.readFile(path.join(repoGit.getRepoDir(spec.projectId), specTestFile(spec.path)), "utf8"),
             fs.readFile(path.join(repoGit.getRepoDir(spec.projectId), specYamlFile(spec.path)), "utf8"),
@@ -76,27 +78,28 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
     const sourceHash = sourceHashOf(testSource);
     const markdownHash = markdownHashOf(markdown);
     if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
-        throw new Error("The check changed while it was being prepared. Run it again to use the latest version.");
+        throw new Error("The Spec changed while it was being prepared. Run it again to use the latest version.");
     }
     if (options.expected && (sourceHash !== options.expected.sourceHash || markdownHash !== options.expected.markdownHash)) {
         throw new StaleRunError("Spec changed after the failed run; retry skipped");
     }
     const analysis = analyzeForRun(spec.title, testSource, markdown);
 
+    const environment = typeof options.environment === "object" ? options.environment : await resolveRunEnvironment(project.id, options.environment, options.baseUrl);
     const refs = analysis.secretRefs.map((ref) => ref.envName);
-    const { env: secretEnv, missing } = await resolveSecretEnv(spec.projectId, refs);
+    const { env: secretEnv, missing } = await resolveSecretEnv(spec.projectId, refs, environment.credentialOverrides);
     if (missing.length > 0) {
         throw new Error(
             `Spec "${spec.title}" references credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
         );
     }
-    const baseUrl = options.baseUrl ?? project.baseUrl;
-    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, refs);
+    const baseUrl = environment.baseUrl;
+    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, refs, environment);
     const scrub = await projectSecretScrubber(spec.projectId);
 
     const run = await runsRepository.createRun({
-        specId: spec.id, commitSha, sourceHash, automate: options.automate,
-        healOnFailure: options.healOnFailure, retryOf: options.retryOf, baseUrl,
+        specId: spec.id, commitSha, sourceHash, automate: spec.lifecycle === "active" && options.automate,
+        healOnFailure: spec.lifecycle === "active" && options.healOnFailure !== false, retryOf: options.retryOf, baseUrl, environment,
     });
     try {
         await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
@@ -124,6 +127,7 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
                 projectId: spec.projectId,
                 directory: outputDir,
                 baseUrl,
+                environment,
                 specs: [{ key: run.id, source: testSource, analysis, outputDir }],
                 timeoutMs: RUN_TIMEOUT_MS,
                 secretEnv,

@@ -1,4 +1,5 @@
-import { jobBaseUrl } from "./environment";
+import { selectedSpecInstructions, selectedSpecResult, recoverSpecBatches } from "./spec-batches";
+import { jobEnvironment } from "./environment";
 import { cancelStaleTriage, prepareTriageGoal } from "./triage";
 import { closeChatBrowser } from "../browser/sessions";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
@@ -72,15 +73,24 @@ async function executeJob(job: Job): Promise<void> {
             }, remaining);
             await jobsRepository.log(job.id, "started");
             if ((await jobsRepository.get(job.id))?.status !== "running") return;
-            await runChatTurn(job.chatId, job.pendingMessage, undefined, createJobPolicy(job, abort, await jobBaseUrl(job)));
+            const environment = await jobEnvironment(job);
+            await runChatTurn(job.chatId, job.kind === "generate_spec" ? await selectedSpecInstructions(job) : job.pendingMessage, undefined, createJobPolicy(job, abort, environment.baseUrl, environment));
         }
         if (stopped) return;
         const current = await jobsRepository.get(job.id);
         const messages = await getChatMessages(job.chatId);
         const last = messages?.filter((message) => message.role === "agent").at(-1)?.content;
         if (current?.status === "running") {
-            if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
+            const selected = job.kind === "generate_spec" ? await selectedSpecResult(job) : null;
+            if (selected?.specId && selected.runId && selected.status !== "running") {
+                await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
+            } else if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
                 await retryInfrastructure(job, last || "The agent service could not complete its response.");
+            } else if (selected?.status === "running") {
+                await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 15_000).toISOString(),
+                    pendingMessage: "The selected draft's first run is still running. Use run_spec to inspect its saved result. Do not create another Spec or start another run." });
+            } else if (selected) {
+                await stallJob(job, selected.specId ? "The draft was saved, but its first result is missing." : "The selected Spec has no saved runnable draft.");
             } else {
                 const body = await scrub(last);
                 const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
@@ -174,6 +184,7 @@ export async function startJobWorker(): Promise<void> {
         }
     }
     stopped = false;
+    await recoverSpecBatches();
     timer = setInterval(() => void drainJobs().catch((error) => logger.error("job queue failed", { error })), 2000);
     timer.unref();
     await drainJobs();

@@ -39,6 +39,23 @@ function errorOf(source: string): string {
 }
 
 describe("analyzeSpecSource: accepted Specs", () => {
+    test("accepts deterministic API requests and only response assertions", () => {
+        const source = spec(`const response = await request.post("/api/orders", {
+            headers: { "Authorization": secret("service", "token"), "Content-Type": "application/json" },
+            data: { customer: { email: secret("service", "email") }, items: [{ sku: "chair", quantity: 1 }], enabled: true, note: null },
+            timeout: 5000,
+        });
+        await expect(response).toBeOK();
+        await expect(response.status()).toBe(201);
+        await expect(response.headers()["content-type"]).toContain("application/json");
+        await expect(await response.json()).toMatchObject({ order: { status: "created" }, items: [{ sku: "chair" }] });`, "request, step, secret");
+        const result = analyzeSpecSource(source);
+        assert.ok(result.ok, result.ok ? "" : result.error);
+        assert.deepEqual(result.analysis.secretRefs.map((ref) => ref.envName), ["SPECBOOK_SECRET_SERVICE_TOKEN", "SPECBOOK_SECRET_SERVICE_EMAIL"]);
+        for (const method of ["get", "post", "put", "patch", "delete"]) {
+            assert.equal(analyzeSpecSource(spec(`await request.${method}("https://api.example.com/resource");`, "request, step")).ok, true);
+        }
+    });
     test("accepts the helper Spec and a realistic login Spec", () => {
         assert.equal(analyzeSpecSource(VALID_SPEC).ok, true);
         const result = analyzeSpecSource(LOGIN_SPEC);
@@ -94,6 +111,38 @@ describe("analyzeSpecSource: accepted Specs", () => {
             const result = analyzeSpecSource(spec(statement));
             assert.ok(result.ok, `${statement}: ${result.ok ? "" : result.error}`);
         }
+    });
+});
+
+describe("API request validation", () => {
+    test("rejects arbitrary requests, dynamic values, secret assertions and response escapes", () => {
+        const prefix = 'const response = await request.get("/api/resource");';
+        const cases = [
+            'await request.fetch("/api/resource");',
+            'await request.get("//evil.example.com");',
+            'await request.get("file:///etc/passwd");',
+            'await request.get("https://user:password@example.com/");',
+            'await request.get("/api/" + "resource");',
+            'await request.get("/api", { ignoreHTTPSErrors: true });',
+            'await request.get("/api", { maxRedirects: 20 });',
+            'await request.get("/api", { timeout: 0 });',
+            'await request.get("/api", { headers: { token: 123 } });',
+            'await request.post("/api", { data: { value: process.env.HOME } });',
+            'await request.post("/api", { data: { ...response } });',
+            'await request.get("/api", { headers: { ["token"]: "x" } });',
+            `${prefix} await expect(response).toHaveProperty("status", 200);`,
+            `${prefix} await expect(response.status()).toBe(secret("service", "token"));`,
+            `${prefix} await expect(response.headers().constructor).toBe(1);`,
+            `${prefix} await expect(response.json()).toMatchObject({ ok: true });`,
+            `${prefix} await expect(await response.text()).toBe("x");`,
+            `${prefix} const raw = response; await expect(raw).toBeOK();`,
+            `${prefix} await response.dispose();`,
+            `${prefix} await response.constructor.constructor("return process")();`,
+        ];
+        for (const body of cases) assert.equal(analyzeSpecSource(spec(body, "request, step, secret")).ok, false, body);
+        assert.equal(analyzeSpecSource(spec('await request.get("/api");', "page, step")).ok, false);
+        const scoped = 'import { test, expect } from "specbook"; test("API", async ({ request, step }) => { await step("A", async () => { const response = await request.get("/api"); }); await step("B", async () => { await expect(response.status()).toBe(200); }); });';
+        assert.equal(analyzeSpecSource(scoped).ok, false);
     });
 });
 
@@ -287,14 +336,16 @@ describe("agent instructions", () => {
         const { readFile } = await import("node:fs/promises");
         const prompt = await readFile(new URL("../../src/core/chat/prompts/standard-system-prompt.txt", import.meta.url), "utf8");
         const lines = prompt.split("\n");
-        const start = lines.findIndex((line) => line.startsWith("- Example"));
-        const steps = JSON.parse(/humanSpec\.steps: (\[.*\])\)/.exec(lines[start])?.[1] ?? "[]") as string[];
-        const body: string[] = [];
-        for (const line of lines.slice(start + 1)) {
-            if (!line.startsWith("  ")) break;
-            body.push(line.slice(2));
+        const starts = lines.map((line, index) => /^- (?:API example|Example)/.test(line) ? index : -1).filter((index) => index >= 0);
+        assert.equal(starts.length, 2);
+        for (const start of starts) {
+            const steps = JSON.parse(/humanSpec\.steps: (\[.*\])\)/.exec(lines[start])?.[1] ?? "[]") as string[];
+            const body: string[] = [];
+            for (const line of lines.slice(start + 1)) {
+                if (!line.startsWith("  ")) break;
+                body.push(line.slice(2));
+            }
+            assert.deepEqual(validateSpecSource(body.join("\n"), { steps }), { ok: true });
         }
-        assert.deepEqual(validateSpecSource(body.join("\n"), { steps }), { ok: true });
-        assert.equal(steps.length, 3);
     });
 });

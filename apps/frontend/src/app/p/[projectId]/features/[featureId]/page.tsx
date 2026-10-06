@@ -8,14 +8,16 @@ import { use, useEffect, useMemo, useRef, useState } from "react";
 import { FolderX, PencilLine, RefreshCw, Trash2 } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/EmptyState";
+import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { FeatureEditDialog } from "@/components/FeatureEditDialog";
 import { FeatureFileDialog } from "@/components/FeatureFileDialog";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { SpecRunDialog } from "@/components/SpecRunDialog";
 import { SummaryStrip } from "@/components/SummaryStrip";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { deleteFeature, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
+import { activateSpecs, deleteFeature, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { countStatuses } from "@/lib/status";
 import { useRunBatch } from "@/lib/useRunBatch";
@@ -34,6 +36,9 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
     const [specs, setSpecs] = useState<SpecSummary[] | null>(null);
     const [loadError, setLoadError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
+    const [environment, setEnvironment] = useState("Production");
+    const [activating, setActivating] = useState(false);
+    const [actionError, setActionError] = useState("");
     const runBatch = useRunBatch(projectId);
     const running = runBatch.running;
     const [deleteOpen, setDeleteOpen] = useState(false);
@@ -162,11 +167,23 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
         })),
     ];
     const runnable = scopedSpecs.filter(isRunnable);
+    const drafts = scopedSpecs.filter((spec) => spec.lifecycle === "draft");
+    const activatable = drafts.filter(isRunnable);
 
     function runSpecs(selected: SpecSummary[], label: string) {
         const targets = selected.filter(isRunnable);
         if (targets.length === 0) return;
-        void runBatch.start(label, targets.map((spec) => ({ id: spec.id, title: spec.title })));
+        void runBatch.start(label, targets.map((spec) => ({ id: spec.id, title: spec.title })), environment);
+    }
+
+    async function activateDrafts() {
+        setActivating(true);
+        setActionError("");
+        try {
+            await activateSpecs(projectId, activatable.map((spec) => spec.id));
+            setRetryKey((key) => key + 1);
+        } catch (error) { setActionError(errorMessage(error)); }
+        finally { setActivating(false); }
     }
 
     async function confirmDelete() {
@@ -214,6 +231,8 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                                 <Button type="button" variant="outline" size="sm" onClick={onClick}><PencilLine size={13} /> Edit</Button>
                             )}
                         />
+                        {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || running} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${activatable.length} ${activatable.length === 1 ? "draft" : "drafts"}`}</Button>}
+                        <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
                         <Button type="button" size="sm" onClick={() => runSpecs(scopedSpecs, `Run ${feature.title}`)} disabled={running || runnable.length === 0}>
                             <RunningIcon running={running} /> {running ? "Running…" : "Run all"}
                         </Button>
@@ -233,6 +252,8 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                 }
             />
             <PageContainer width="data" innerClassName="space-y-6">
+                {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}</AlertDescription></Alert>}
+                {drafts.length > 0 && <p className="text-control text-ink-muted">Drafts run only when you choose. Activate the Specs you trust to include them in scheduled runs and CI.</p>}
                 {groups.length === 0 ? (
                     <div className="rounded-xl border border-line">
                         <EmptyState
@@ -265,7 +286,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                 open={deleteOpen}
                 title="Delete feature?"
                 description={<>
-                    <strong className="font-semibold text-ink">{feature.title}</strong> will be removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {scopedSpecs.length} active {scopedSpecs.length === 1 ? "Spec" : "Specs"}, run history, and evidence inside it. Earlier file revisions remain in Git history.
+                    <strong className="font-semibold text-ink">{feature.title}</strong> will be removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {scopedSpecs.length} {scopedSpecs.length === 1 ? "Spec" : "Specs"}, run history, and evidence inside it. Earlier file revisions remain in Git history.
                 </>}
                 confirmLabel="Delete feature"
                 busy={deleting}
@@ -286,6 +307,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                 reportUrl={runBatch.reportUrl}
                 error={runBatch.error}
                 warning={runBatch.warning}
+                environment={runBatch.environment}
             />
         </div>
     );

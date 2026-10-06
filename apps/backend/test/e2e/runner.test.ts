@@ -54,7 +54,18 @@ before(async () => {
     app = await listen((request, response) => {
         response.setHeader("content-type", "text/html");
         explorationRequests.push(`${request.method} ${request.url}`);
-        if (request.url === "/explore") {
+        if (request.url === "/api/echo") {
+            response.setHeader("content-type", "application/json");
+            response.setHeader("set-cookie", `session=${SECRET}`);
+            let body = "";
+            request.on("data", (chunk) => { body += chunk; });
+            request.on("end", () => {
+                response.end(JSON.stringify({ ok: true, method: request.method, token: request.headers["x-token"], data: body ? JSON.parse(body) : null }));
+            });
+        } else if (request.url === "/api/redirect-out") {
+            response.writeHead(307, { location: `${origin(evil)}/api/secret-target` });
+            response.end();
+        } else if (request.url === "/explore") {
             response.end(`<html><head><title>Exploration</title></head><body><h1>Explore</h1>
 <img src="/bad-image"><a href="/http-error?token=${SECRET}">Unavailable page</a>
 <a href="/delete-account">Account link</a><a href="/%64elete-account">Encoded action</a>
@@ -254,6 +265,49 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         const passingEvidence = JSON.parse(await fs.readFile(path.join(passingDirectory, "evidence.json"), "utf8"));
         assert.ok(passingEvidence.diagnostics.some((entry: { message: string }) => entry.message === "Console failure ••••"));
         assert.equal(passingEvidence.errorContext, undefined);
+    });
+});
+
+describe("Playwright runner (API)", () => {
+    test("uses no browser page, redacts secret request/response evidence and rejects off-origin redirects", { timeout: 90_000 }, async () => {
+        const directory = tempDir("specbook-api-");
+        const passDir = path.join(directory, "pass");
+        const blockDir = path.join(directory, "blocked");
+        const source = `import { test, expect } from "specbook";
+test("API echo", async ({ request, step, secret }) => {
+    await step("Send a request with a protected token", async () => {
+        const response = await request.post("/api/echo", { headers: { "x-token": secret("service", "token") }, data: { email: secret("service", "token"), value: 42 } });
+        await expect(response).toBeOK();
+        await expect(response.status()).toBe(200);
+        await expect(response.headers()["content-type"]).toBe("application/json");
+        await expect(await response.json()).toMatchObject({ ok: true, method: "POST", data: { value: 42 } });
+    });
+});`;
+        const blocked = source.replace('"/api/echo"', '"/api/redirect-out"');
+        const outcome = await runPlaywrightSuite({
+            directory: path.join(directory, "batch"), baseUrl: origin(app),
+            specs: [suiteSpec("api-pass", source, passDir), suiteSpec("api-blocked", blocked, blockDir)], timeoutMs: 75_000,
+            secretEnv: { SPECBOOK_SECRET_SERVICE_TOKEN: SECRET },
+            secretOrigins: { defaultOrigins: [origin(app)], byRef: { SPECBOOK_SECRET_SERVICE_TOKEN: [origin(app)] } },
+            scrub: createSecretScrubber([SECRET]),
+        });
+        assert.equal(outcome.processFailure, null);
+        assert.equal(outcome.results.get("api-pass")?.status, "passed");
+        assert.equal(outcome.results.get("api-blocked")?.status, "failed");
+        assert.match(outcome.results.get("api-blocked")?.failReason ?? "", /API request origin is not allowed/);
+        assert.ok(!externalRequests.includes("/api/secret-target"));
+        const text = await fs.readFile(path.join(passDir, "evidence.json"), "utf8");
+        assert.ok(!text.includes(SECRET));
+        const evidence = JSON.parse(text);
+        assert.deepEqual(evidence.steps, [], "API-only checks do not create a browser page or blank screenshots");
+        assert.equal(evidence.video, null);
+        assert.equal(evidence.apiSteps[0].label, "Send a request with a protected token");
+        assert.equal(evidence.apiSteps[0].requests[0].method, "POST");
+        assert.equal(evidence.apiSteps[0].requests[0].status, 200);
+        assert.equal(evidence.apiSteps[0].requests[0].requestHeaders["x-token"], "••••");
+        assert.equal(outcome.reportAvailable, false);
+        const results = await fs.readFile(path.join(directory, "batch", "results.json"), "utf8");
+        assert.ok(!results.includes(SECRET));
     });
 });
 

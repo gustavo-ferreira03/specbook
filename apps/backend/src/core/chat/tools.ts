@@ -2,7 +2,7 @@ import { z } from "zod";
 import { featureProposalSchema, newSpecProposalSchema, fixProposalSchema } from "../jobs/schemas";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { HumanSpec } from "../../infra/db/schema";
+import type { HumanSpec, RunEnvironment } from "../../infra/db/schema";
 import { featuresRepository } from "../../infra/repositories/features";
 import { specsRepository } from "../../infra/repositories/specs";
 import { readSpecRawFiles } from "../repo/manual";
@@ -51,6 +51,7 @@ function rejectionText(tool: string, error: string): string {
 
 export interface DomainToolOptions {
     baseUrl?: string;
+    environment?: RunEnvironment;
     scrub?: (value: string) => Promise<string>;
     metrics?: TurnMetricsRecorder;
 }
@@ -205,7 +206,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     return text(`Spec ${params.specId} not found in this project.`);
                 }
                 try {
-                    const run = await executeSpec(spec.id, { persistFailures: false, baseUrl: options.baseUrl, signal });
+                    const run = await executeSpec(spec.id, { persistFailures: false, baseUrl: options.baseUrl, environment: options.environment, signal });
                     metrics?.runSpecOutcome({
                         specId: spec.id,
                         runId: run.id,

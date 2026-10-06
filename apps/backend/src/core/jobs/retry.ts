@@ -3,17 +3,24 @@ import { createProjectScrubber } from "../credentials/scrub";
 import { specsRepository } from "../../infra/repositories/specs";
 import { jobLimitsSchema } from "./schemas";
 import { isAgentPaused } from "./pause";
+import { sanitizeTechnicalDetails } from "./presentation-errors";
 
 export const MAX_SAFETY_RETRIES = 2;
 
 async function askAboutStalledWork(job: Job): Promise<void> {
     const existing = (await jobsRepository.inbox(job.projectId)).some((item) => item.jobId === job.id && item.kind === "question" && ["pending", "applying"].includes(item.status));
     if (existing) return;
-    const spec = job.specId ? await specsRepository.getSpec(job.specId) : null;
+    let spec = job.specId ? await specsRepository.getSpec(job.specId) : null;
+    const source = job.kind === "generate_spec" ? (await jobsRepository.inbox(job.projectId)).find((item) => item.kind === "spec_batch"
+        && (item.payload.specBatch as { candidates?: { jobId?: string }[] } | undefined)?.candidates?.some((candidate) => candidate.jobId === job.id)) : null;
+    const candidate = (source?.payload.specBatch as { candidates?: { jobId?: string; specId?: string; title?: string }[] } | undefined)?.candidates?.find((candidate) => candidate.jobId === job.id);
+    if (!spec && candidate?.specId) spec = await specsRepository.getSpec(candidate.specId);
+    const name = spec?.title ?? candidate?.title;
+    const scrub = createProjectScrubber(job.projectId);
     await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "question",
-        title: `I couldn’t finish ${spec ? `the Spec “${spec.title}”` : "this investigation"}. Look at it together?`,
-        body: await createProjectScrubber(job.projectId)(`${job.stopReason ?? "The investigation has not reached a confirmed result."}\nI tried another approach but still could not confirm the expected result. Your explanation of the flow or missing prerequisite can help me continue.`),
-        payload: { waitingFor: "investigation", language: "en", specId: job.specId, runId: job.runId } });
+        title: await scrub(`I couldn’t finish ${name ? `the Spec “${name}”` : "this investigation"}. Look at it together?`),
+        body: sanitizeTechnicalDetails(await scrub(`${job.stopReason ?? "The investigation has not reached a confirmed result."}\nI tried another approach but still could not confirm the expected result. Your explanation of the flow can help me continue.`)),
+        payload: { waitingFor: "investigation", language: "en", specId: spec?.id ?? job.specId, runId: job.runId, ...(source ? { sourceItemId: source.id } : {}) } });
 }
 
 export async function stallJob(job: Job, fallback: string): Promise<void> {

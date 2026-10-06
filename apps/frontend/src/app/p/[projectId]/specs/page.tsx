@@ -7,6 +7,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import { ChevronDown, FileCheck2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { NewFeatureDialog, NewSpecDialog } from "@/components/CreateStructureDialogs";
 import { EmptyState } from "@/components/EmptyState";
+import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { SpecRunDialog } from "@/components/SpecRunDialog";
 import { SummaryStrip } from "@/components/SummaryStrip";
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage, getProjectTree, isAbortError } from "@/lib/api";
+import { activateSpecs, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
 import { formatNumber } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { NO_SPECS_DESCRIPTION, countStatuses, statusMeta } from "@/lib/status";
@@ -24,10 +25,11 @@ import { cn } from "@/lib/utils";
 import type { Feature, SpecStatus, SpecSummary } from "@/lib/types";
 import { RunningIcon, SpecTable, SpecTableSkeleton, orderFeatures, lastRunsOf, type SpecGroup } from "./_components/spec-table";
 
-type StatusFilter = "all" | SpecStatus;
+type StatusFilter = "all" | "draft" | SpecStatus;
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
     { value: "all", label: "All" },
+    { value: "draft", label: "Drafts" },
     { value: "failed", label: "Failing" },
     { value: "invalid", label: "Invalid" },
     { value: "unverified", label: "Not run" },
@@ -54,6 +56,9 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const [retryKey, setRetryKey] = useState(0);
     const [filter, setFilter] = useState<StatusFilter>("all");
     const [query, setQuery] = useState("");
+    const [environment, setEnvironment] = useState("Production");
+    const [activating, setActivating] = useState(false);
+    const [actionError, setActionError] = useState("");
     const runBatch = useRunBatch(projectId);
     const isRunning = runBatch.running;
 
@@ -160,7 +165,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
 
     const counts = countStatuses(specs);
     const needle = query.trim().toLowerCase();
-    const visible = (spec: SpecSummary) => (filter === "all" || spec.status === filter) && (!needle || spec.title.toLowerCase().includes(needle));
+    const visible = (spec: SpecSummary) => (filter === "all" || (filter === "draft" ? spec.lifecycle === "draft" : spec.status === filter)) && (!needle || spec.title.toLowerCase().includes(needle));
     const filtering = filter !== "all" || needle.length > 0;
 
     const knownFeatureIds = new Set(features.map((feature) => feature.id));
@@ -182,20 +187,34 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     function handleRun(selected: SpecSummary[], label: string) {
         const runnable = selected.filter((spec) => spec.status !== "invalid");
         if (runnable.length === 0) return;
-        void runBatch.start(label, runnable.map((spec) => ({ id: spec.id, title: spec.title })));
+        void runBatch.start(label, runnable.map((spec) => ({ id: spec.id, title: spec.title })), environment);
     }
 
     const runnableCount = specs.filter((spec) => spec.status !== "invalid").length;
+    const drafts = specs.filter((spec) => spec.lifecycle === "draft");
+    const activatable = drafts.filter((spec) => spec.status !== "invalid");
+    const filterCount = (value: StatusFilter) => value === "all" ? specs.length : value === "draft" ? drafts.length : counts[value] ?? 0;
+
+    async function activateDrafts() {
+        setActivating(true);
+        setActionError("");
+        try {
+            await activateSpecs(projectId, activatable.map((spec) => spec.id));
+            setRetryKey((key) => key + 1);
+        } catch (error) { setActionError(errorMessage(error)); }
+        finally { setActivating(false); }
+    }
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader
                 title="Specs"
-               
                 width="data"
                 actions={canEdit &&
                     <>
                         {createActions}
+                        {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || isRunning} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${activatable.length} ${activatable.length === 1 ? "draft" : "drafts"}`}</Button>}
+                        <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={isRunning} />
                         <div className="flex items-center">
                             <Button type="button" size="sm" className="rounded-r-none" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>
                                 <RunningIcon running={isRunning} size={13} /> {isRunning ? "Running…" : "Run all"}
@@ -233,16 +252,18 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             />
             <PageContainer width="data" innerClassName="space-y-6">
                 {syncWarning && <Alert variant="warning" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
+                {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}</AlertDescription></Alert>}
+                {drafts.length > 0 && <p className="text-control text-ink-muted">{plural(drafts.length, "Draft")} can be run manually. Activate the Specs you trust to include them in scheduled runs and CI.</p>}
 
                 <SummaryStrip counts={counts} />
 
                 <div className="space-y-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div role="group" aria-label="Filter by status" className="-mx-1 flex flex-wrap items-center gap-1">
-                            {FILTERS.filter((item) => item.value === "all" || (counts[item.value] ?? 0) > 0).map((item) => {
+                            {FILTERS.filter((item) => item.value === "all" || filterCount(item.value) > 0).map((item) => {
                                 const active = filter === item.value;
-                                const count = item.value === "all" ? specs.length : counts[item.value] ?? 0;
-                                const Icon = item.value === "all" ? null : statusMeta(item.value).icon;
+                                const count = filterCount(item.value);
+                                const Icon = item.value === "all" || item.value === "draft" ? null : statusMeta(item.value).icon;
                                 return (
                                     <Button
                                         key={item.value}
@@ -313,6 +334,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 reportUrl={runBatch.reportUrl}
                 error={runBatch.error}
                 warning={runBatch.warning}
+                environment={runBatch.environment}
             />
         </div>
     );
