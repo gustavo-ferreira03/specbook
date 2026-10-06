@@ -372,3 +372,16 @@ export interface OverviewResponse {
     items: PresentedInboxItem[];
     stories: ActivityStory[];
 }
+
+export interface SetupStatus {
+    needsAdmin: boolean;
+    modelReady: boolean;
+    needsProject: boolean;
+    completed: boolean;
+}
+
+export interface SystemReadiness {
+    ok: boolean;
+    checkedAt: string;
+    checks: { id: string; label: string; ok: boolean; message: string; nextStep?: string }[];
+}

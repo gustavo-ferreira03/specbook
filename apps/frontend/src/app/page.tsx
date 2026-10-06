@@ -42,7 +42,7 @@ function HomeContent() {
     const [startUrlEdited, setStartUrlEdited] = useState(false);
     const [safetyNotes, setSafetyNotes] = useState("");
     const [advancedOpen, setAdvancedOpen] = useState(false);
-    const [llmReady, setLlmReady] = useState(true);
+    const [llmReady, setLlmReady] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -94,6 +94,10 @@ function HomeContent() {
     async function createWithDiscovery(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         setCreateError("");
+        if (!llmReady) {
+            setCreateError("Connect a model in instance settings before starting discovery.");
+            return;
+        }
         setSubmitting("discovery");
         let project: Project;
         try {
@@ -291,7 +295,7 @@ function HomeContent() {
                                     <AlertTitle>No agent model is configured</AlertTitle>
                                     <AlertDescription>
                                         You can create the project now. Discovery needs a model before it can run
-                                        {returnProject ? <>: <Link href={`/p/${returnProject.id}/settings?tab=model`}>set one up in Settings</Link>.</> : "; set one up in the project settings under Model."}
+                                        <>: <Link href="/settings?tab=model">connect one in instance settings</Link>.</>
                                     </AlertDescription>
                                 </div>
                             </Alert>
@@ -299,7 +303,7 @@ function HomeContent() {
                         {createError && <Alert variant="danger" role="alert"><AlertDescription>{createError}</AlertDescription></Alert>}
                     </div>
                     <div className="flex flex-col gap-2 border-t border-line bg-surface-soft px-5 py-4">
-                        <Button type="submit" size="lg" disabled={busy} className="w-full">
+                        <Button type="submit" size="lg" disabled={busy || !llmReady} className="w-full">
                             {submitting === "discovery" ? <><LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" /> Creating project...</> : <>Create project and explore <ArrowRight size={15} /></>}
                         </Button>
                         <Button type="button" variant="outline" onClick={createWithoutDiscovery} disabled={busy} className="w-full">

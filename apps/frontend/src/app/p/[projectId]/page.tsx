@@ -413,7 +413,7 @@ function ContextPanel({
                         {!llmReady && (
                             <Alert variant="warning" role="status" className="mt-4">
                                 <AlertTitle>No agent model is configured</AlertTitle>
-                                <AlertDescription>Discovery needs one. <Link href={`/p/${projectId}/settings?tab=model`}>Set up a model in Settings</Link>.</AlertDescription>
+                                <AlertDescription>Discovery needs one. <Link href="/settings?tab=model">Set up a model in Settings</Link>.</AlertDescription>
                             </Alert>
                         )}
                         <div className="mt-5">

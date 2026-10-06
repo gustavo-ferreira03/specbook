@@ -785,7 +785,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const modelMissing = modelReady === false;
     const composerDisabled = discoveryTerminal || modelMissing;
     const chatsHref = `/p/${projectId}/chats`;
-    const modelSettingsHref = `/p/${projectId}/settings?tab=model`;
+    const modelSettingsHref = "/settings?tab=model";
 
     useEffect(() => {
         // Autosize, including text set programmatically (suggestions, the Spec prefill, a failed send).

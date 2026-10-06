@@ -243,6 +243,105 @@ describe("project, feature and spec through the writer", () => {
     });
 });
 
+describe("first-run setup", () => {
+    async function setupApp() {
+        const { createSetupRouter } = await import("../../src/infra/web/routes/setup");
+        const { createSettingsRouter } = await import("../../src/infra/web/routes/settings");
+        const { createProjectContextsRouter } = await import("../../src/infra/web/routes/project-contexts");
+        const { handleRequestError } = await import("../../src/infra/web/errors");
+        const setup = new Hono();
+        setup.onError(handleRequestError);
+        setup.route("/", createSetupRouter());
+        setup.route("/", createSettingsRouter());
+        setup.route("/", createProjectContextsRouter());
+        return setup;
+    }
+
+    test("demo creates an ordinary project with public credentials and discovery requires a connected model", async () => {
+        const setup = await setupApp();
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { listSecretValues } = await import("../../src/core/credentials/profiles");
+        const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
+        const { chatsRepository } = await import("../../src/infra/repositories/chats");
+        await settingsRepository.updateLlmSettings({ provider: "", model: "" });
+        const status = await (await setup.request("/setup/status")).json();
+        assert.equal(status.needsAdmin, false);
+        assert.equal(status.modelReady, false);
+        assert.equal(status.completed, false);
+        const response = await setup.request("/setup/demo", { method: "POST" });
+        assert.equal(response.status, 201);
+        const { project } = await response.json();
+        assert.equal(project.baseUrl, "https://www.saucedemo.com");
+        assert.equal(await repoBare.bareExists(project.id), true);
+        assert.deepEqual((await listSecretValues(project.id)).map(({ field, value }) => ({ field, value })), [
+            { field: "username", value: "standard_user" }, { field: "password", value: "secret_sauce" },
+        ]);
+        assert.deepEqual(await chatsRepository.listChatRows(project.id), []);
+        const discovery = await setup.request(`/projects/${project.id}/context-discoveries`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+        assert.equal(discovery.status, 409);
+        assert.match((await discovery.json()).error, /Connect a model in global Settings/);
+        assert.equal(await projectContextsRepository.getActiveProjectContextDraft(project.id), null);
+    });
+
+    test("test connection makes a bounded request and presents provider errors without raw secrets", async (t) => {
+        const setup = await setupApp();
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { modelRegistryPromise, modelRuntimePromise } = await import("../../src/core/llm/runtime");
+        const missing = await setup.request("/settings/llm/test", { method: "POST" });
+        assert.equal(missing.status, 400);
+        assert.equal((await missing.json()).code, "model_not_configured");
+        const registry = await modelRegistryPromise;
+        const runtime = await modelRuntimePromise;
+        const model = registry.getAll()[0];
+        assert.ok(model);
+        await settingsRepository.updateLlmSettings({ provider: model.provider, model: model.id });
+        t.mock.method(registry, "hasConfiguredAuth", () => true);
+        let called = 0;
+        t.mock.method(runtime, "completeSimple", async (_model: unknown, context: Parameters<typeof runtime.completeSimple>[1], options: Parameters<typeof runtime.completeSimple>[2]) => {
+            called++;
+            assert.equal(context.messages[0].content, "Reply with OK.");
+            assert.equal(options?.maxTokens, 16);
+            assert.ok(options?.signal instanceof AbortSignal);
+            if (called === 1) throw new Error("401 invalid API key sk-never-expose");
+            return { stopReason: "stop" };
+        });
+        try {
+            const failed = await setup.request("/settings/llm/test", { method: "POST" });
+            assert.equal(failed.status, 400);
+            const body = await failed.json();
+            assert.equal(body.code, "provider_auth");
+            assert.match(body.nextStep, /reconnect/);
+            assert.doesNotMatch(JSON.stringify(body), /sk-never-expose/);
+            const passed = await setup.request("/settings/llm/test", { method: "POST" });
+            assert.equal(passed.status, 200);
+            assert.equal((await passed.json()).ok, true);
+            assert.equal((await (await setup.request("/setup/status")).json()).modelReady, true);
+        } finally { await settingsRepository.updateLlmSettings({ provider: "", model: "" }); }
+    });
+
+    test("readiness checks both Chromium builds and reports missing programs with installation instructions", async (t) => {
+        const setup = await setupApp();
+        const access = fs.access.bind(fs);
+        t.mock.method(fs, "access", async (file: Parameters<typeof fs.access>[0], mode: Parameters<typeof fs.access>[1]) => {
+            if (/chrome|chromium|Xvfb|x11vnc/.test(String(file))) throw new Error("ENOENT /home/server/private");
+            return access(file, mode);
+        });
+        const response = await setup.request("/ready");
+        assert.equal(response.status, 503);
+        const status = await response.json();
+        assert.equal(status.ok, false);
+        assert.deepEqual(status.checks.map((check: { id: string }) => check.id), ["database", "storage", "chromium", "mcp_chromium", "xvfb", "x11vnc"]);
+        assert.equal(status.checks[0].ok, true);
+        assert.equal(status.checks[1].ok, true);
+        assert.equal(status.checks[2].ok, false);
+        assert.equal(status.checks[3].ok, false);
+        assert.ok(status.checks[4].nextStep);
+        assert.doesNotMatch(JSON.stringify(status), /private|ENOENT/);
+        const { storageRoot } = await import("../../src/core/paths");
+        assert.equal((await fs.readdir(storageRoot)).some((name) => name.startsWith(".ready-")), false);
+    });
+});
+
 describe("autonomous job proposals", () => {
     test("Inbox file previews match the committed bytes for additions and behavior changes", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
@@ -1239,4 +1338,57 @@ describe("existing checks baseline", () => {
         }
     });
 
+});
+
+describe("repository recovery", () => {
+    test("reviews all edits and rejects an obsolete review before committing", async () => {
+        const { createRepositoryRecoveryRoutes } = await import("../../src/infra/web/routes/repository-recovery");
+        const recoveryApp = new Hono();
+        recoveryApp.route("/", createRepositoryRecoveryRoutes());
+        const projectId = await createProject("Pending edits");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
+        const { spec } = await createSpec(projectId, feature.id, "Sign in");
+        const root = repoGit.getRepoDir(projectId);
+        const target = path.join(root, spec.path, "spec.yml");
+        const before = await fs.readFile(target, "utf8");
+        const after = before.replace("title: Sign in", "title: Reviewed sign in");
+        await fs.writeFile(target, after);
+        await fs.writeFile(path.join(root, "notes.md"), "Keep these notes.\n");
+        const head = await repoGit.getHeadSha(projectId);
+        const endpoint = `/projects/${projectId}/repository/recovery`;
+        const preview = await (await recoveryApp.request(endpoint)).json() as { dirty: boolean; canSave: boolean; fingerprint: string; files: { path: string; before: string | null; after: string }[] };
+        assert.equal(preview.canSave, true);
+        assert.equal(preview.files.length, 2);
+        assert.equal(preview.files.find((file) => file.path.endsWith("spec.yml"))?.before, before);
+        assert.equal(preview.files.find((file) => file.path.endsWith("spec.yml"))?.after, after);
+        assert.equal(await repoGit.getHeadSha(projectId), head, "preview never commits behavior changes");
+        await fs.writeFile(path.join(root, "notes.md"), "Keep these updated notes.\n");
+        const save = (fingerprint: string) => recoveryApp.request(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fingerprint }) });
+        assert.equal((await save(preview.fingerprint)).status, 409);
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+        const fresh = await (await recoveryApp.request(endpoint)).json() as typeof preview;
+        assert.equal((await save(fresh.fingerprint)).status, 200);
+        assert.notEqual(await repoGit.getHeadSha(projectId), head);
+        assert.equal(await fs.readFile(target, "utf8"), after, "explicit review preserves the exact behavior edit");
+        assert.equal((await specsRepository.getSpec(spec.id))?.title, "Reviewed sign in");
+        assert.equal((await repoGit.getProjectGit(projectId).status()).isClean(), true);
+        assert.equal((await save(fresh.fingerprint)).status, 409, "a consumed review cannot commit again");
+    });
+
+    test("does not expose symlink targets or change files while an update is in progress", async () => {
+        const { repositoryRecoveryUnlocked, prepareRunRepositoryUnlocked } = await import("../../src/core/repo/recovery");
+        const projectId = await createProject("Unsafe pending edit");
+        const root = repoGit.getRepoDir(projectId);
+        const outside = path.join(tempDir(), "recovery-outside.txt");
+        await fs.writeFile(outside, "do not expose this file");
+        await fs.symlink(outside, path.join(root, "pending.md"));
+        const preview = await repoGit.withRepoLock(projectId, () => repositoryRecoveryUnlocked(projectId));
+        assert.equal(preview.canSave, false);
+        assert.deepEqual(preview.files, []);
+        assert.doesNotMatch(JSON.stringify(preview), /do not expose|recovery-outside/);
+        await fs.unlink(path.join(root, "pending.md"));
+        await fs.writeFile(path.join(root, ".git", "index.lock"), "active operation");
+        await assert.rejects(() => repoGit.withRepoLock(projectId, () => prepareRunRepositoryUnlocked(projectId)), /files are being updated/);
+        assert.equal(await fs.readFile(path.join(root, ".git", "index.lock"), "utf8"), "active operation");
+    });
 });

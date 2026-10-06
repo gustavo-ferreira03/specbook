@@ -10,7 +10,6 @@ import { createSchedulesRouter } from "./infra/web/routes/schedules";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { handleRequestError } from "./infra/web/errors";
 import { WebSocketServer } from "ws";
 import { closeAllChatBrowsers } from "./core/browser/sessions";
 import { getVncSession, proxyVncSession } from "./core/browser/vnc";
@@ -31,6 +30,9 @@ import { createProjectsRouter } from "./infra/web/routes/projects";
 import { createRunsRouter } from "./infra/web/routes/runs";
 import { createSettingsRouter } from "./infra/web/routes/settings";
 import { createSpecsRouter } from "./infra/web/routes/specs";
+import { createSetupRouter } from "./infra/web/routes/setup";
+import { createRepositoryRecoveryRoutes } from "./infra/web/routes/repository-recovery";
+import { handleRequestError } from "./infra/web/errors";
 import {
     buildHostAllowlist,
     csrfGuard,
@@ -86,6 +88,8 @@ app.use("*", jsonBodyLimit());
 app.onError(handleRequestError);
 
 app.get("/health", (c) => c.json({ ok: true }));
+app.route("/", createSetupRouter());
+app.route("/", createRepositoryRecoveryRoutes());
 app.route("/", createProjectsRouter());
 app.route("/", createJobsRouter());
 app.route("/", createStewardRouter());

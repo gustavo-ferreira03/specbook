@@ -658,7 +658,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </Link>
                     {(currentOverview?.summary.paused || currentOverview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{currentOverview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
                     <Link
-                        href={`${settingsHref}?tab=model`}
+                        href="/settings?tab=model"
                         className="flex min-h-10 items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring"
                     >
                         <span className={`size-2 shrink-0 rounded-full ${runtimeDot}`} aria-hidden="true" />
@@ -673,7 +673,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             aria-current={onSettings ? "page" : undefined}
                             className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:h-8 ${onSettings ? "bg-surface-selected font-medium text-ink" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
                         >
-                            <Settings size={15} /> Settings
+                            <Settings size={15} /> Project settings
                         </Link>
                         <ThemeToggle />
                     </div>

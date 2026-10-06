@@ -4,7 +4,8 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { llmCredentials, modelRegistryPromise, modelRuntimePromise } from "../../../core/llm/runtime";
+import { configuredModel, llmCredentials, modelRegistryPromise, modelRuntimePromise } from "../../../core/llm/runtime";
+import { providerFailure, providerFailureMessage } from "../../../core/jobs/presentation-errors";
 import { settingsRepository } from "../../repositories/settings";
 import { pauseAgentJobs, resumeAgentJobs } from "../../../core/jobs/worker";
 
@@ -122,8 +123,7 @@ async function saveOAuthCredentials(id: string): Promise<void> {
 }
 
 function failOAuthSession(id: string, error: unknown): void {
-    const message = error instanceof Error ? error.message : String(error);
-    finishOAuthSession(id, "error", message || "Authentication failed. Please try again.");
+    finishOAuthSession(id, "error", providerFailureMessage(error));
 }
 
 function waitForPromptInput(session: OAuthSession): Promise<string> {
@@ -213,6 +213,26 @@ function listProviders(modelRegistry: Awaited<typeof modelRegistryPromise>): Pro
 
 export function createSettingsRouter(): Hono {
     const router = new Hono();
+
+    router.post("/settings/llm/test", async (c) => {
+        const selected = await configuredModel();
+        if (!selected.ready || !selected.model) {
+            return c.json({ error: "Connect a provider and choose a model first.", code: "model_not_configured", nextStep: "Save your model settings, then test the connection." }, 400);
+        }
+        try {
+            const runtime = await modelRuntimePromise;
+            const response = await runtime.completeSimple(selected.model, {
+                messages: [{ role: "user", content: "Reply with OK.", timestamp: Date.now() }],
+            }, { maxTokens: 16, signal: AbortSignal.timeout(30_000) });
+            if (response.stopReason === "error" || response.stopReason === "aborted") {
+                throw new Error(response.errorMessage || "Connection timed out");
+            }
+            return c.json({ ok: true, message: "Connection successful. Your model is ready." });
+        } catch (error) {
+            const failure = providerFailure(error);
+            return c.json({ error: failure.message, code: failure.code, nextStep: failure.nextStep }, 400);
+        }
+    });
 
     router.get("/settings/agent", async (c) => c.json({ paused: await settingsRepository.getAgentPaused() }));
     router.put("/settings/agent", async (c) => {
