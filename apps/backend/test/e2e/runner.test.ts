@@ -290,3 +290,61 @@ describe("exploratory page scan", { skip: !available }, () => {
         } finally { await client.close(); }
     });
 });
+
+describe("browser display ownership", { skip: process.env.SPECBOOK_TEST_VNC !== "1" ? "Set SPECBOOK_TEST_VNC=1 on a host with Xvfb and x11vnc" : false }, () => {
+    test("allocates across concurrent backends and cleans only its children after an abrupt exit", { timeout: 30_000 }, async () => {
+        const { spawn } = await import("node:child_process");
+        const net = await import("node:net");
+        const { startVncStack, stopVncStack, getVncSession } = await import("../../src/core/browser/vnc");
+        const { minimalChildEnv } = await import("../../src/core/runner/process");
+        const stacks: Awaited<ReturnType<typeof startVncStack>>[] = [];
+        let owner: ReturnType<typeof spawn> | undefined;
+        const listening = (port: number): Promise<boolean> => new Promise((resolve) => {
+            const socket = net.createConnection(port, "127.0.0.1");
+            const finish = (result: boolean) => { socket.destroy(); resolve(result); };
+            socket.once("data", (data) => finish(data.toString().startsWith("RFB ")));
+            socket.once("error", () => finish(false));
+            socket.setTimeout(1000, () => finish(false));
+        });
+        try {
+            await Promise.all([0, 1].map(async () => { stacks.push(await startVncStack()); }));
+            assert.equal(new Set(stacks.map((stack) => stack.display)).size, 2);
+            assert.equal(new Set(stacks.map((stack) => stack.port)).size, 2);
+            assert.ok((await Promise.all(stacks.map((stack) => listening(stack.port)))).every(Boolean));
+            const moduleUrl = new URL("../../src/core/browser/vnc.ts", import.meta.url).href;
+            owner = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+                import { startVncStack } from ${JSON.stringify(moduleUrl)};
+                console.log(JSON.stringify(await startVncStack()));
+            `], { stdio: ["pipe", "pipe", "pipe"], env: minimalChildEnv() });
+            const childStack = await new Promise<{ id: string; display: string; port: number }>((resolve, reject) => {
+                let output = "";
+                let error = "";
+                const timer = setTimeout(() => reject(new Error("Browser owner did not start")), 12_000);
+                owner!.stdout!.on("data", (chunk: Buffer) => {
+                    output += chunk.toString();
+                    if (output.includes("\n")) { clearTimeout(timer); resolve(JSON.parse(output.split("\n")[0])); }
+                });
+                owner!.stderr!.on("data", (chunk: Buffer) => { error += chunk.toString(); });
+                owner!.once("error", (cause) => { clearTimeout(timer); reject(cause); });
+                owner!.once("exit", () => { clearTimeout(timer); reject(new Error(error || "Browser owner exited before startup")); });
+            });
+            assert.ok(stacks.every((stack) => stack.display !== childStack.display && stack.port !== childStack.port));
+            assert.ok(await listening(childStack.port));
+            const lock = `/tmp/.X${childStack.display.slice(1)}-lock`;
+            const exit = new Promise<void>((resolve) => owner!.once("exit", () => resolve()));
+            owner.kill("SIGKILL");
+            await exit;
+            for (let attempt = 0; attempt < 60 && await listening(childStack.port); attempt++) await new Promise((resolve) => setTimeout(resolve, 50));
+            assert.equal(await listening(childStack.port), false, "the orphaned supervisor stops its own VNC process");
+            for (let attempt = 0; attempt < 60 && await fs.stat(lock).catch(() => null); attempt++) await new Promise((resolve) => setTimeout(resolve, 50));
+            assert.equal(await fs.stat(lock).catch(() => null), null, "the owned X server exits and removes its lock");
+            assert.ok((await Promise.all(stacks.map((stack) => listening(stack.port)))).every(Boolean), "another backend's displays keep running");
+            await Promise.all(stacks.map((stack) => stopVncStack(stack.id)));
+            assert.ok(stacks.every((stack) => getVncSession(stack.id) === null));
+            assert.ok((await Promise.all(stacks.map((stack) => listening(stack.port)))).every((open) => !open), "stop waits until the sockets are closed");
+        } finally {
+            if (owner?.exitCode === null && owner.signalCode === null) owner.kill("SIGTERM");
+            await Promise.all(stacks.map((stack) => stopVncStack(stack.id)));
+        }
+    });
+});

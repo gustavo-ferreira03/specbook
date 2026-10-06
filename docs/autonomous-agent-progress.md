@@ -100,3 +100,13 @@ Token usage is recorded after each model response, so a response can cross the t
 - `feat: show proposed changes as file diffs` records unified proposal review and this consolidated checkpoint.
 
 `apps/frontend/next-env.d.ts` was already modified when work began and is excluded from these commits. Nothing has been pushed.
+
+## Addendum 3: plain-language review and browser recovery
+
+Gus prioritized Inbox/Activity clarity over further CI work. The existing CI implementation is left in place while these screens are revised. Activity will group work into stories with a next step; Inbox will contain actionable questions, screenshots and consequences, with diffs/logs under Technical details.
+
+Vocabulary for user-facing copy: hide job; steward → Specbook; budget → daily usage limit; verification → test run; commit → save; spec fix → update to a check; proposal → suggestion. UI and generated summaries use English, preserving quoted project/Spec names. Spec remains the existing product term and is explained as a saved check of app behavior. Server paths and Specbook stack frames must never appear in the main text.
+
+Xvfb diagnosis: orphaned browser processes from earlier backend exits occupied every fixed display from :99 through :119. Display ownership only existed in the current process's map. The fix selects high candidate displays, checks existing sockets/locks, lets Xvfb claim its native lock atomically and waits for displayfd readiness. VNC binds an available port independently. Child supervisors close only their own processes when the backend's pipe closes, including abrupt termination; shutdown is awaited and no foreign lock is removed.
+
+Validation: a real test started two concurrent stacks and a third in another backend process, killed only that test backend, confirmed its browser processes/lock were cleaned up and the other two stayed available, then confirmed normal shutdown closed their ports. Existing user browser processes and locks were untouched. The test lives in the existing runner suite and is explicitly enabled with SPECBOOK_TEST_VNC=1.
