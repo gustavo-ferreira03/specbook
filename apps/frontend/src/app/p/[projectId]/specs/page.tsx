@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { activateSpecs, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
+import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { formatNumber } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { NO_SPECS_DESCRIPTION, countStatuses, statusMeta } from "@/lib/status";
@@ -56,7 +57,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const [retryKey, setRetryKey] = useState(0);
     const [filter, setFilter] = useState<StatusFilter>("all");
     const [query, setQuery] = useState("");
-    const [environment, setEnvironment] = useState("Production");
+    const [environment, setEnvironment] = useRunEnvironment(projectId);
     const [activating, setActivating] = useState(false);
     const [actionError, setActionError] = useState("");
     const runBatch = useRunBatch(projectId);
@@ -253,7 +254,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             <PageContainer width="data" innerClassName="space-y-6">
                 {syncWarning && <Alert variant="warning" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
                 {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}</AlertDescription></Alert>}
-                {drafts.length > 0 && <p className="text-control text-ink-muted">{plural(drafts.length, "Draft")} can be run manually. Activate the Specs you trust to include them in scheduled runs and CI.</p>}
+                {drafts.length > 0 && <p className="text-control text-ink-muted">{plural(drafts.length, "draft")} can only be run manually. Activate the Specs you trust to include them in scheduled runs and CI.</p>}
 
                 <SummaryStrip counts={counts} />
 

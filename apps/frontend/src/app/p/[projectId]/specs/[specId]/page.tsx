@@ -27,6 +27,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, setSpecLifecycle, updateSpec, updateSpecFiles } from "@/lib/api";
+import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -437,7 +438,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const [actionError, setActionError] = useState("");
     const [runRefreshError, setRunRefreshError] = useState("");
     const [running, setRunning] = useState(false);
-    const [environment, setEnvironment] = useState("Production");
+    const [environment, setEnvironment] = useRunEnvironment(projectId);
     const [changingLifecycle, setChangingLifecycle] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
     const [editing, setEditing] = useState(false);
@@ -680,7 +681,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 title={spec.title}
                 breadcrumbs={crumbs}
                 width="reading"
-                titleAdornment={<><Badge variant="neutral">{spec.lifecycle === "draft" ? "Draft" : "Active"}</Badge>{latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}</>}
+                titleAdornment={<>{spec.lifecycle === "draft" && <Badge variant="neutral">Draft</Badge>}{latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}</>}
                 description={spec.description || undefined}
                 actions={
                     <>

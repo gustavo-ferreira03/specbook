@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { activateSpecs, deleteFeature, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
+import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { countStatuses } from "@/lib/status";
 import { useRunBatch } from "@/lib/useRunBatch";
@@ -36,7 +37,7 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
     const [specs, setSpecs] = useState<SpecSummary[] | null>(null);
     const [loadError, setLoadError] = useState("");
     const [retryKey, setRetryKey] = useState(0);
-    const [environment, setEnvironment] = useState("Production");
+    const [environment, setEnvironment] = useRunEnvironment(projectId);
     const [activating, setActivating] = useState(false);
     const [actionError, setActionError] = useState("");
     const runBatch = useRunBatch(projectId);
