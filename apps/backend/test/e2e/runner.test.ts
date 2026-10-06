@@ -61,6 +61,13 @@ before(async () => {
 <a href="${origin(evil)}/offsite">External page</a><a href="/redirect-out">Moved page</a>
 <a href="/head-unsupported">Old handler</a><input><button></button>
 <script>console.error("Broken widget ${SECRET}");fetch("/http-error?password=${SECRET}");</script></body></html>`);
+        } else if (request.url === "/policy") {
+            response.end(`<h1>Policy</h1><button onclick="fetch('/unsafe-action')">Delete account</button>
+<button onclick="document.querySelector('h1').textContent = 'Opened'">Products</button>
+<a href="${origin(evil)}/policy-offsite">External</a><a href="/policy-redirect">Moved</a>`);
+        } else if (request.url === "/policy-redirect") {
+            response.writeHead(302, { location: `${origin(evil)}/policy-redirect-target` });
+            response.end();
         } else if (request.url === "/redirect-out") {
             response.writeHead(302, { location: `${origin(evil)}/redirect-target` });
             response.end();
@@ -171,7 +178,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.match(guard?.failReason ?? "", /Refusing to type a secret: the current page origin is not allowed/);
         const guardEvidence = JSON.parse(await fs.readFile(path.join(guardDir, "evidence.json"), "utf8"));
         assert.equal(guardEvidence.failedStep, "Type the password on the other origin");
-        assert.equal(guardEvidence.video, null, "secret runs never record failure videos");
+        assert.equal(guardEvidence.video, null, "secret runs must not record values in failure videos");
 
         assert.equal(outcome.reportAvailable, false, "no HTML report when a Spec types secrets");
         assert.ok(!existsSync(path.join(directory, "batch", "report")));
@@ -345,6 +352,47 @@ describe("browser display ownership", { skip: process.env.SPECBOOK_TEST_VNC !== 
         } finally {
             if (owner?.exitCode === null && owner.signalCode === null) owner.kill("SIGTERM");
             await Promise.all(stacks.map((stack) => stopVncStack(stack.id)));
+        }
+    });
+});
+
+
+describe("agent browser policy (real MCP)", { skip: process.env.SPECBOOK_TEST_VNC !== "1" }, () => {
+    test("verifies actual click targets and blocks off-origin documents including redirects", { timeout: 90_000 }, async () => {
+        const { launchBrowserMcp, readBrowserSnapshot } = await import("../../src/core/browser/mcp");
+        const { startVncStack, stopVncStack } = await import("../../src/core/browser/vnc");
+        const { createDiscoveryBrowserPolicy } = await import("../../src/core/chat/discovery-policy");
+        const stack = await startVncStack();
+        const directory = tempDir("specbook-browser-policy-");
+        let mcp: Awaited<ReturnType<typeof launchBrowserMcp>> | undefined;
+        try {
+            mcp = await launchBrowserMcp({ workDir: directory, display: stack.display, navigationOrigins: [origin(app)] });
+            const navigation = await mcp.client.callTool({ name: "browser_navigate", arguments: { url: `${origin(app)}/policy` } });
+            assert.ok(!navigation.isError, JSON.stringify(navigation));
+            const snapshot = await readBrowserSnapshot(mcp);
+            const ref = (name: string) => {
+                const target = snapshot.split("\n").find((line) => line.includes(`"${name}"`))?.match(/\[ref=([^\]]+)\]/)?.[1];
+                assert.ok(target, snapshot);
+                return target;
+            };
+            const policy = createDiscoveryBrowserPolicy({ brief: { startUrl: origin(app) } } as Parameters<typeof createDiscoveryBrowserPolicy>[0], mcp);
+            await assert.rejects(policy.beforeCall!("browser_click", { target: `aria-ref=${ref("Delete account")}`, element: "Products" }), /actual button Delete account/);
+            const args = { target: `aria-ref=${ref("Products")}`, element: "Products" };
+            await policy.beforeCall!("browser_click", args);
+            const click = await mcp.client.callTool({ name: "browser_click", arguments: args });
+            assert.ok(!click.isError, JSON.stringify(click));
+            assert.match(await readBrowserSnapshot(mcp), /Opened/);
+            assert.ok(!explorationRequests.some((entry) => entry.includes("unsafe-action")));
+
+            // Exercise the network guard directly, bypassing the tool's URL check.
+            await mcp.navigate(`${origin(app)}/policy-redirect`);
+            await mcp.navigate(`${origin(evil)}/policy-offsite`);
+            await mcp.navigate(`${origin(app)}/policy`);
+            assert.match(await readBrowserSnapshot(mcp), /Policy/);
+            assert.ok(!externalRequests.some((url) => url.startsWith("/policy-")), "forbidden documents are never fetched, even through allowed-origin redirects");
+        } finally {
+            await mcp?.close();
+            await stopVncStack(stack.id);
         }
     });
 });

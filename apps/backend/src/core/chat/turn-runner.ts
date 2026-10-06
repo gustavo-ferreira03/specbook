@@ -1,5 +1,4 @@
 import path from "node:path";
-import { auditTools } from "../accounts/audit";
 import type { TurnPolicy } from "../jobs/policy";
 import {
     createAgentSession,
@@ -17,11 +16,14 @@ import { modelRegistryPromise, modelRuntimePromise } from "../llm/runtime";
 import { storageRoot } from "../paths";
 import { createProjectScrubber } from "../credentials/scrub";
 import { chatsRepository } from "../../infra/repositories/chats";
+import { credentialsRepository } from "../../infra/repositories/credentials";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
 import { logger } from "../../infra/logger";
+import { auditTools } from "../accounts/audit";
+import { agentSettings } from "./safety-settings";
 import {
     ChatBusyError,
     clearActiveChatSession,
@@ -39,7 +41,7 @@ import { createContextTools } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
 import { createExplorationTools } from "./exploration-tools";
 import { createBackgroundTaskTool } from "../steward/tools";
-import { createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy } from "./discovery-policy";
+import { createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy, createOriginBrowserPolicy } from "./discovery-policy";
 import { TurnMetricsRecorder, type TurnTrigger } from "./metrics";
 import { buildSystemPrompt } from "./prompts";
 import {
@@ -231,11 +233,14 @@ async function runReservedChatTurn(
         let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null = null;
         const scrub = createProjectScrubber(row.projectId);
         try {
-            chatBrowser = await getOrCreateChatBrowser(id);
+            const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
+            const profiles = await credentialsRepository.listProfiles(row.projectId);
+            const origins = [...new Set([new URL(startUrl).origin, ...profiles.flatMap((profile) => profile.allowedOrigins)])];
+            chatBrowser = await getOrCreateChatBrowser(id, origins);
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision
-                ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp), sanitizeResult: scrub }
-                : turnPolicy ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp), sanitizeResult: scrub } : { sanitizeResult: scrub };
+                ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp, origins), sanitizeResult: scrub }
+                : turnPolicy ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub } : { ...createOriginBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub };
             const policy: BrowserToolPolicy = {
                 ...basePolicy,
                 beforeCall: async (toolName, args, signal) => {
@@ -328,6 +333,7 @@ async function runReservedChatTurn(
             customTools: auditTools(row.projectId, id, turnPolicy ? turnPolicy.tools(customTools) : customTools),
             resourceLoader,
             sessionManager,
+            settingsManager: await agentSettings(),
         });
         const active: ActiveChatSession = { session, sessionManager, aborted: false };
         activeSession = active;

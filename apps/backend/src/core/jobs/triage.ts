@@ -1,3 +1,4 @@
+import { getSecuritySettings } from "../chat/safety-settings";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
@@ -54,7 +55,7 @@ export function createTriageTools(job: Job, abort: () => void) {
                 const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
                     { type: "text", text: await scrub(JSON.stringify({ run, evidence, artifactBase: `/runs/${run.id}/artifacts/` })) },
                 ];
-                for (const step of (evidence.steps ?? []).slice(-2)) {
+                for (const step of (await getSecuritySettings()).sendScreenshotsToModel ? (evidence.steps ?? []).slice(-2) : []) {
                     if (!/^evidence\/step-\d{2,3}\.png$/.test(step.file)) continue;
                     const file = path.join(directory, step.file);
                     const bytes = await fs.readFile(file).catch(() => null);

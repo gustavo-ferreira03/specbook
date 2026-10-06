@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BrowserMcp } from "../../src/core/browser/mcp";
-import { createDiscoveryBrowserPolicy, DISCOVERY_BROWSER_TOOLS } from "../../src/core/chat/discovery-policy";
+import { createDiscoveryBrowserPolicy, createOriginBrowserPolicy, DISCOVERY_BROWSER_TOOLS, snapshotClickTarget } from "../../src/core/chat/discovery-policy";
 import type { ProjectContextRevisionRow } from "../../src/infra/repositories/project-contexts";
 
 const START_URL = "https://app.example.com/start";
 
-function fakeMcp(urls: string[]) {
+function fakeMcp(urls: string[], snapshot = '- button "Products" [ref=e1]') {
     const calls: { name: string; arguments: unknown }[] = [];
     const navigations: string[] = [];
     let current = 0;
@@ -16,7 +16,7 @@ function fakeMcp(urls: string[]) {
                 calls.push(request);
                 if (request.name === "browser_navigate_back") current = Math.min(current + 1, urls.length - 1);
                 const url = urls[current];
-                return { content: [{ type: "text", text: `- Page URL: ${url}` }] };
+                return { content: [{ type: "text", text: request.name === "browser_snapshot" ? snapshot : `- Page URL: ${url}` }] };
             },
         },
         tools: [],
@@ -29,9 +29,9 @@ function fakeMcp(urls: string[]) {
     return { mcp, calls, navigations };
 }
 
-function policyFor(urls: string[] = [START_URL]) {
+function policyFor(urls: string[] = [START_URL], snapshot?: string) {
     const revision = { brief: { goal: "", startUrl: START_URL, safetyNotes: [] } } as unknown as ProjectContextRevisionRow;
-    const fake = fakeMcp(urls);
+    const fake = fakeMcp(urls, snapshot);
     return { policy: createDiscoveryBrowserPolicy(revision, fake.mcp), ...fake };
 }
 
@@ -48,7 +48,7 @@ describe("discovery browser policy", () => {
         await policy.beforeCall!("browser_navigate", { url: "https://app.example.com/other?x=1" });
         await assert.rejects(policy.beforeCall!("browser_navigate", { url: "https://evil.example.com/" }), /outside the discovery origin/);
         await assert.rejects(policy.beforeCall!("browser_navigate", { url: "http://app.example.com/" }), /outside the discovery origin/);
-        await assert.rejects(policy.beforeCall!("browser_navigate", { url: "https://app.example.com@evil.com/" }), /outside/);
+        await assert.rejects(policy.beforeCall!("browser_navigate", { url: "https://app.example.com@evil.com/" }), /without embedded credentials/);
         await assert.rejects(policy.beforeCall!("browser_navigate", { url: "javascript:alert(1)" }), /only HTTP and HTTPS/);
         await assert.rejects(policy.beforeCall!("browser_navigate", { url: "not a url" }), /not a valid URL/);
     });
@@ -59,14 +59,35 @@ describe("discovery browser policy", () => {
         await policy.beforeCall!("browser_tabs", { action: "list" });
     });
 
-    test("destructive-looking clicks are refused, in English and Portuguese", async () => {
+    test("clicks use the actual snapshot target even when the model gives an innocent description", async () => {
+        for (const name of ["Delete account", "Salvar alterações", "Excluir", "Log out", "Place order", "Finalizar compra"]) {
+            const { policy } = policyFor([START_URL], `- button "${name}" [ref=e1]`);
+            await assert.rejects(policy.beforeCall!("browser_click", { target: "aria-ref=e1", element: "Products menu" }), /actual button/, name);
+        }
+        for (const name of ["Products", "Ver detalhes do pedido", "Next page", "Dashboard"]) {
+            const { policy } = policyFor([START_URL], `- link "${name}" [ref=e1]`);
+            await policy.beforeCall!("browser_click", { ref: "e1", element: "Delete something" });
+        }
         const { policy } = policyFor();
-        for (const element of ["Delete account button", "Salvar alterações", "Excluir", "Log out link", "Place order", "Finalizar compra"]) {
-            await assert.rejects(policy.beforeCall!("browser_click", { element }), /Click rejected/, element);
-        }
-        for (const element of ["Products menu", "Ver detalhes do pedido", "Next page", "Dashboard link"]) {
-            await policy.beforeCall!("browser_click", { element });
-        }
+        await assert.rejects(policy.beforeCall!("browser_click", { target: "button", element: "Products" }), /reference/);
+        await assert.rejects(policy.beforeCall!("browser_click", { ref: "e999" }), /missing or ambiguous/);
+        await assert.rejects(policy.beforeCall!("browser_type", { submit: true, target: "aria-ref=e1", text: "value" }), /Submitting/);
+    });
+
+    test("snapshot references include interactive parents and decode escaped names", () => {
+        assert.match(snapshotClickTarget('- button "Delete account" [ref=e1]\n  - img "Icon" [ref=e2]', "e2"), /Delete account/);
+        assert.equal(snapshotClickTarget('- button "\\u0044elete" [ref=e1]', "e1"), "button Delete");
+        assert.throws(() => snapshotClickTarget('- button [ref=e1]', "e1"), /no accessible name/);
+        assert.throws(() => snapshotClickTarget('- button "First" [ref=e1]\n- button "Second" [ref=e1]', "e1"), /ambiguous/);
+    });
+
+    test("interactive chat keeps tools available but rejects inspecting another origin", async () => {
+        const { mcp } = fakeMcp(["https://elsewhere.example/"]);
+        const policy = createOriginBrowserPolicy(START_URL, mcp, ["https://login.example.com"]);
+        assert.equal(policy.allowedTools, undefined);
+        await policy.beforeCall!("browser_navigate", { url: "https://login.example.com/signin" });
+        await assert.rejects(policy.beforeCall!("browser_snapshot", {}), /before inspecting/);
+        await assert.rejects(policy.beforeCall!("browser_navigate", { url: "https://elsewhere.example/" }), /outside the project origin/);
     });
 
     test("after a call that left the origin, goes back and reports it", async () => {
