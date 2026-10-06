@@ -382,17 +382,6 @@ export function updateFeature(
     });
 }
 
-export function getFeatureFile(featureId: string): Promise<{ feature: Feature; yaml: string | null }> {
-    return api(`/features/${encodeURIComponent(featureId)}/file`);
-}
-
-export function updateFeatureFile(featureId: string, yaml: string): Promise<{ feature: Feature }> {
-    return api(`/features/${encodeURIComponent(featureId)}/file`, {
-        method: "PUT",
-        body: JSON.stringify({ yaml }),
-    });
-}
-
 export function getContextFile(projectId: string): Promise<{ yaml: string | null; contextSyncError: string | null }> {
     return api(`/projects/${encodeURIComponent(projectId)}/context-file`);
 }

@@ -10,17 +10,14 @@ import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { FeatureEditDialog } from "@/components/FeatureEditDialog";
-import { FeatureFileDialog } from "@/components/FeatureFileDialog";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { SpecRunDialog } from "@/components/SpecRunDialog";
-import { SummaryStrip } from "@/components/SummaryStrip";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deleteFeature, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
 import { countLabel } from "@/lib/format";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
-import { countStatuses } from "@/lib/status";
 import { useRunBatch } from "@/lib/useRunBatch";
 import type { Feature, SpecSummary } from "@/lib/types";
 import { RunningIcon, SpecTable, SpecTableSkeleton, orderFeatures, lastRunsOf, type SpecGroup } from "../../specs/_components/spec-table";
@@ -192,22 +189,6 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                 breadcrumbs={crumbs}
                 width="data"
                 description={feature.description || undefined}
-                meta={
-                    <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                        <span className="font-mono [overflow-wrap:anywhere]">{feature.path}</span>
-                        <span aria-hidden="true" className="text-ink-disabled">·</span>
-                        {canEdit && <FeatureFileDialog
-                            featureId={feature.id}
-                            featureTitle={feature.title}
-                            onSaved={() => setRetryKey((key) => key + 1)}
-                            renderTrigger={(onClick) => (
-                                <button type="button" onClick={onClick} className="rounded-sm underline-offset-2 outline-none hover:text-ink hover:underline focus-visible:ring-2 focus-visible:ring-ring">
-                                    Edit source file
-                                </button>
-                            )}
-                        />}
-                    </span>
-                }
                 actions={canEdit &&
                     <>
                         <FeatureEditDialog
@@ -248,10 +229,6 @@ export default function FeaturePage({ params }: { params: Promise<{ projectId: s
                     </div>
                 ) : (
                     <>
-                        <SummaryStrip
-                            counts={countStatuses(scopedSpecs)}
-                            trailing={childCount > 0 ? <span className="text-meta text-ink-subtle">Includes {countLabel(childCount, "sub-feature")}</span> : undefined}
-                        />
                         <SpecTable
                             projectId={projectId}
                             label={`Specs in ${feature.title}`}

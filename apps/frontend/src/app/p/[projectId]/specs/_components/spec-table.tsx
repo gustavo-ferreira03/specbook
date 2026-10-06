@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { countLabel, formatDuration, formatNumber } from "@/lib/format";
+import { countLabel, environmentLabel, formatDuration, formatNumber } from "@/lib/format";
 import { SPEC_STATUS_ORDER, countStatuses, statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { Feature, Run, SpecSummary } from "@/lib/types";
@@ -82,7 +82,7 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
 function LastRunText({ run }: { run: Run | null | undefined }) {
     if (run === undefined) return <Skeleton className="ml-auto h-3 w-20" />;
     if (run === null) return <span className="text-ink-subtle" aria-label="Not run">—</span>;
-    return <span className="inline-flex flex-wrap items-center gap-x-1.5 sm:flex-col sm:items-end"><RelativeTime value={run.startedAt} /><span className="text-meta text-ink-subtle" title={run.baseUrl ?? undefined}>{run.environment?.name ?? "Production"}</span></span>;
+    return <span className="inline-flex flex-wrap items-center gap-x-1.5 sm:flex-col sm:items-end"><RelativeTime value={run.startedAt} />{environmentLabel(run.environment?.name) && <span className="text-meta text-ink-subtle" title={run.baseUrl ?? undefined}>{run.environment!.name}</span>}</span>;
 }
 
 function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; spec: SpecSummary; run: Run | null | undefined; running: boolean; onRun?: (spec: SpecSummary) => void }) {
@@ -126,12 +126,12 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                                 aria-label={`Run ${spec.title}`}
                                 disabled={running}
                                 onClick={() => onRun(spec)}
-                                className="opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 disabled:opacity-0 group-hover/row:disabled:opacity-45 [@media(hover:none)]:opacity-100"
+                                className="text-ink-subtle hover:text-ink disabled:opacity-45"
                             >
                                 <Play size={13} />
                             </Button>
                         </TooltipTrigger>
-                        <TooltipContent>Run Spec</TooltipContent>
+                        <TooltipContent>Run</TooltipContent>
                     </Tooltip>
                 )}
             </span>

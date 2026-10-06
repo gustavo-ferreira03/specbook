@@ -10,7 +10,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { SpecRunDialog } from "@/components/SpecRunDialog";
-import { SummaryStrip } from "@/components/SummaryStrip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -237,8 +236,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             />
             <PageContainer width="data" innerClassName="space-y-6">
                 {syncWarning && <Alert variant="warning" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
-
-                <SummaryStrip counts={counts} />
 
                 <div className="space-y-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

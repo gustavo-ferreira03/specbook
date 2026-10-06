@@ -9,14 +9,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { deleteProject, getProject, updateProject } from "@/lib/api";
+import { deleteProject, getProject, updateProject, errorMessage } from "@/lib/api";
 import type { Project } from "@/lib/types";
 
 export function ProjectSettingsCard({ projectId }: { projectId: string }) {
     const router = useRouter();
     const [project, setProject] = useState<Project | null>(null);
     const [name, setName] = useState("");
-    const [baseUrl, setBaseUrl] = useState("");
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
@@ -33,9 +32,8 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
             const result = await getProject(projectId);
             setProject(result.project);
             setName(result.project.name);
-            setBaseUrl(result.project.baseUrl);
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            setError(errorMessage(err));
         } finally {
             setLoading(false);
         }
@@ -45,20 +43,19 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
         void refresh();
     }, [refresh]);
 
-    const dirty = project !== null && (name.trim() !== project.name || baseUrl.trim() !== project.baseUrl);
+    const dirty = project !== null && name.trim() !== project.name;
 
     async function save() {
         setSaving(true);
         setError("");
         setSaved(false);
         try {
-            const result = await updateProject(projectId, { name: name.trim(), baseUrl: baseUrl.trim() });
+            const result = await updateProject(projectId, { name: name.trim() });
             setProject(result.project);
             setName(result.project.name);
-            setBaseUrl(result.project.baseUrl);
             setSaved(true);
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            setError(errorMessage(err));
         } finally {
             setSaving(false);
         }
@@ -71,17 +68,17 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
             await deleteProject(projectId);
             router.push("/");
         } catch (err) {
-            setDeleteError(err instanceof Error ? err.message : String(err));
+            setDeleteError(errorMessage(err));
             setDeleting(false);
         }
     }
 
     return (
         <div className="space-y-10">
-            <SettingsSection id="project-settings-heading" title="Project" description="The project name and default Production address.">
+            <SettingsSection id="project-settings-heading" title="Project" description="The Production address is set in Environments.">
                 {loading && (
                     <div aria-label="Loading project settings" aria-busy="true" role="status">
-                        {[0, 1].map((row) => (
+                        {[0].map((row) => (
                             <SettingsBlock key={row} className="grid gap-3 md:grid-cols-[13rem_1fr] md:gap-8">
                                 <Skeleton className="h-4 w-24 md:mt-2.5" />
                                 <Skeleton className="h-9" />
@@ -105,15 +102,11 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
                         <SettingsRow label="Project name" htmlFor="project-name">
                             <Input id="project-name" value={name} onChange={(event) => { setName(event.target.value); setSaved(false); }} disabled={saving} autoComplete="off" />
                         </SettingsRow>
-                        <SettingsRow label="Production URL" htmlFor="project-base-url">
-                            <Input id="project-base-url" type="url" inputMode="url" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setSaved(false); }} placeholder="https://staging.example.com" disabled={saving} className="font-mono text-meta" aria-describedby="project-base-url-help" />
-                            <p id="project-base-url-help" className="mt-1.5 text-meta text-ink-subtle">Use an address the self-hosted runtime can reach. Chats start here. Add other destinations in Environments.</p>
-                        </SettingsRow>
                         <SettingsFooter
                             feedback={error ? <InlineFeedback feedback={{ type: "error", text: error }} /> : saved && !dirty ? <InlineFeedback feedback={{ type: "success", text: "Project saved." }} /> : dirty ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}
                         >
-                            {dirty && <Button type="button" variant="ghost" onClick={() => { setName(project.name); setBaseUrl(project.baseUrl); setError(""); }} disabled={saving}>Cancel</Button>}
-                            <Button type="submit" disabled={saving || !dirty || !name.trim() || !baseUrl.trim()}>{saving ? "Saving…" : "Save changes"}</Button>
+                            {dirty && <Button type="button" variant="ghost" onClick={() => { setName(project.name); setError(""); }} disabled={saving}>Cancel</Button>}
+                            <Button type="submit" disabled={saving || !dirty || !name.trim()}>{saving ? "Saving…" : "Save changes"}</Button>
                         </SettingsFooter>
                     </form>
                 )}

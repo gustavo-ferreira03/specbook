@@ -28,7 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
-import { formatDateTime, formatDuration } from "@/lib/format";
+import { formatDateTime, formatDuration, environmentLabel } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { HumanSpec, Run, RunEvidence, SpecDetail } from "@/lib/types";
@@ -186,7 +186,7 @@ function VerificationBanner({
         detail = (
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                 <RelativeTime value={latestRun.startedAt} />
-                <Dot /><span title={latestRun.baseUrl ?? undefined}>{latestRun.environment?.name ?? "Production"}</span>
+                {environmentLabel(latestRun.environment?.name) && <><Dot /><span title={latestRun.baseUrl ?? undefined}>{latestRun.environment!.name}</span></>}
                 {latestRun.durationMs !== null && <><Dot /><span className="tabular">took {formatDuration(latestRun.durationMs)}</span></>}
                 {failedStep && <><Dot /><span>stopped at “{failedStep}”</span></>}
                 {lastStep && <><Dot /><span>last captured step {lastStep.number}: {lastStep.label}</span></>}
@@ -374,7 +374,7 @@ function RunEntry({
                     {run.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
-                        <Dot /><span title={run.baseUrl ?? undefined}>{run.environment?.name ?? "Production"}</span>
+                        {environmentLabel(run.environment?.name) && <><Dot /><span title={run.baseUrl ?? undefined}>{run.environment!.name}</span></>}
                         {run.durationMs !== null && <><Dot /><span className="tabular">{formatDuration(run.durationMs)}</span></>}
                         {run.commitSha && <><Dot /><span className="font-mono" title="Commit">{run.commitSha.slice(0, 7)}</span></>}
                     </span>

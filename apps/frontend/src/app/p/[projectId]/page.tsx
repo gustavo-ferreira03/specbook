@@ -10,6 +10,7 @@ import {
     ChevronRight,
     Compass,
     ExternalLink,
+    FileCode2,
     LoaderCircle,
     PencilLine,
     RefreshCw,
@@ -18,6 +19,7 @@ import {
     X,
 } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { ContextFileCard } from "@/components/ContextFileCard";
 import { ContextReadout } from "@/components/ContextReadout";
 import { DraftReview } from "@/components/DraftReview";
 import { EmptyState } from "@/components/EmptyState";
@@ -167,6 +169,7 @@ function ContextPanel({
     const [discardDiscoveryOpen, setDiscardDiscoveryOpen] = useState(false);
     const [discardDiscoveryError, setDiscardDiscoveryError] = useState("");
     const [updateMode, setUpdateMode] = useState(false);
+    const [yamlMode, setYamlMode] = useState(false);
     const discardDiscoveryTriggerRef = useRef<HTMLButtonElement>(null);
 
     async function discardUnfinishedDiscovery(revisionId: string) {
@@ -249,9 +252,8 @@ function ContextPanel({
 
             {draft && !draftHasProposal && (
                 <section aria-labelledby="overview-context-heading">
-                    <SectionHeader id="overview-context-heading" title="Discovery in progress" className="mb-3" />
                     <div className="rounded-xl border border-line p-4 sm:p-5">
-                        <div className="flex items-center gap-2 text-control font-medium text-ink">
+                        <div id="overview-context-heading" className="flex items-center gap-2 text-control font-medium text-ink">
                             <LoaderCircle size={14} className="animate-spin text-ink-muted motion-reduce:animate-none" aria-hidden="true" />
                             Discovery in progress
                         </div>
@@ -326,11 +328,14 @@ function ContextPanel({
                         description={draft
                             ? "Stays active until the draft above replaces it."
                             : <>{confirmed.confirmedAt ? <RelativeTime value={confirmed.confirmedAt} prefix="Confirmed" /> : "Confirmed"} · supplied to every new chat</>}
-                        actions={canEdit && !draft && (
+                        actions={canEdit && !draft && <>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => setYamlMode((value) => !value)} aria-expanded={yamlMode}>
+                                {yamlMode ? <><X size={14} /> Close YAML</> : <><FileCode2 size={14} /> Edit YAML</>}
+                            </Button>
                             <Button type="button" variant="outline" size="sm" onClick={() => setUpdateMode((value) => !value)} aria-expanded={updateMode}>
                                 {updateMode ? <><X size={14} /> Cancel update</> : <><PencilLine size={14} /> Update context</>}
                             </Button>
-                        )}
+                        </>}
                         className="mb-3"
                     />
                     <div className="overflow-hidden rounded-xl border border-line">
@@ -344,6 +349,7 @@ function ContextPanel({
                         )}
                         <ConfirmedContextSummary context={confirmed.context} />
                     </div>
+                    {yamlMode && !draft && <div className="mt-6"><ContextFileCard projectId={projectId} /></div>}
                 </section>
             )}
         </div>

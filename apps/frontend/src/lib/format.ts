@@ -77,3 +77,8 @@ export function formatDuration(durationMs: number): string {
     const seconds = Math.round((durationMs % 60_000) / 1000);
     return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
+
+/** Run environment worth showing: Production is the default, so only other environments are named. */
+export function environmentLabel(name: string | null | undefined): string | undefined {
+    return name && name !== "Production" ? name : undefined;
+}

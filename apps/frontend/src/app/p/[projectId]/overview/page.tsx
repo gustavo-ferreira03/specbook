@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requestTask as requestProjectTask, setStewardPaused } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { environmentLabel, formatDateTime } from "@/lib/format";
 import { useProjectOverview } from "@/lib/projectOverview";
 import type { OverviewResponse, RecentRun } from "@/lib/types";
 
@@ -67,6 +67,8 @@ function RunOutcome({ run }: { run: RecentRun }) {
 }
 
 function runCounts(run: RecentRun) {
+    // A single Spec's outcome is already the row icon; counts only add information for batches.
+    if (run.counts.passed + run.counts.failed + run.counts.flaky + run.counts.running <= 1) return "";
     return `${run.counts.passed} passed · ${run.counts.failed} failed${run.counts.flaky ? ` · ${run.counts.flaky} flaky` : ""}${run.counts.running ? ` · ${run.counts.running} running` : ""}`;
 }
 
@@ -129,14 +131,14 @@ function RecentRuns({ runs, onOpen }: { runs: RecentRun[]; onOpen: (selection: S
     return <OverviewSection id="recent-runs" title="Recent runs">
         {[...groups].map(([trigger, group]) => <div key={trigger} className="mt-4 first:mt-0">
             <h3 className="mb-1 text-meta font-medium text-ink-subtle">{RUN_TRIGGERS[trigger]}</h3>
-            <RowList>{group.map((run) => <OverviewRow key={run.id} icon={<RunOutcome run={run} />} title={run.subject.name} annotation={[run.environment?.name, runCounts(run)].filter(Boolean).join(" · ")} detail={`${run.occurrences > 1 ? `${run.occurrences} runs · Last ` : ""}${formatDateTime(run.updatedAt, { seconds: true })}`} onClick={() => onOpen({ type: "story", id: run.id })} />)}</RowList>
+            <RowList>{group.map((run) => <OverviewRow key={run.id} icon={<RunOutcome run={run} />} title={run.subject.name} annotation={[environmentLabel(run.environment?.name), runCounts(run)].filter(Boolean).join(" · ")} detail={`${run.occurrences > 1 ? `${run.occurrences} runs · Last ` : ""}${formatDateTime(run.updatedAt, { seconds: true })}`} onClick={() => onOpen({ type: "story", id: run.id })} />)}</RowList>
         </div>)}
         {runs.length > limit && <ShowMore label="Show more runs" onClick={() => setLimit((count) => count + 10)} />}
     </OverviewSection>;
 }
 
 export default function OverviewPage({ params }: { params: Promise<{ projectId: string }> }) {
-    const { canEdit } = useAuth();
+    const { canEdit, isAdmin } = useAuth();
     const { projectId } = use(params);
     const { data, failed, reload } = useProjectOverview();
     const [selected, setSelected] = useState<Selection | null>(null);
@@ -221,10 +223,9 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
         <PageHeader title="Overview" width="data"
             description={data?.summary.globallyPaused ? "Specbook is paused across all projects." : data?.summary.paused ? "Specbook is paused for this project." : undefined}
             actions={data && canEdit && <>
-                <BusyButton busy={requestingTask === "coverage"} icon={Search} disabled={requestingTask !== null} onClick={() => void requestTask("coverage")}>Find uncovered areas</BusyButton>
                 <BusyButton busy={requestingTask === "explore"} icon={ScanSearch} disabled={requestingTask !== null} onClick={() => void requestTask("explore")}>Explore app</BusyButton>
                 {data.summary.globallyPaused
-                    ? <Button asChild variant="ghost" size="sm"><Link href={`/p/${projectId}/settings?tab=automation#agent-pause-heading`}><Play size={14} /> Resume in settings</Link></Button>
+                    ? isAdmin && <Button asChild variant="ghost" size="sm"><Link href="/settings?tab=security#agent-pause-heading"><Play size={14} /> Resume in settings</Link></Button>
                     : <BusyButton busy={savingPause} icon={data.summary.paused ? Play : Pause} variant="ghost" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</BusyButton>}
             </>} />
         <PageContainer width="data" innerClassName="space-y-7">
