@@ -12,7 +12,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, getRunEvidence, isAbortError } from "@/lib/api";
-import { formatDuration } from "@/lib/format";
+import { countLabel, formatDuration } from "@/lib/format";
 import type { RunBatch, RunEvidence } from "@/lib/types";
 
 export type SpecBatchStatus = "queued" | "running" | "passed" | "failed" | "error" | "skipped" | "unknown";
@@ -130,7 +130,6 @@ export function SpecRunDialog({
     const failed = items.filter((item) => item.status === "failed" || item.status === "error").length;
     const skipped = items.filter((item) => item.status === "skipped").length;
 
-    const noun = items.length === 1 ? "Spec" : "Specs";
     const summary = [`${passed} passed`, failed ? `${failed} failed` : "", skipped ? `${skipped} skipped` : ""].filter(Boolean).join(", ");
 
     return (
@@ -140,8 +139,8 @@ export function SpecRunDialog({
                     <DialogTitle>{title}</DialogTitle>
                     <DialogDescription>
                         {running
-                            ? `Running ${items.length} ${noun} together. You can keep this open to follow along.`
-                            : `${summary} across ${items.length} ${noun}.`}
+                            ? `Running ${countLabel(items.length, "Spec")} together. You can keep this open to follow along.`
+                            : `${summary} across ${countLabel(items.length, "Spec")}.`}
                     </DialogDescription>
                     {environment && <p className="mt-1 break-words text-meta text-ink-muted"><span className="font-medium text-ink">{environment.name}</span> · {environment.baseUrl}</p>}
                 </DialogHeader>

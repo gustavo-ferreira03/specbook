@@ -250,7 +250,7 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
                     {story && <StoryDetails story={story} projectId={projectId} onDecision={(id) => open({ type: "item", id })} />}
                     {failure && <>
                         <p className="text-body text-ink">{failure.triageStatus}</p>
-                        {failure.inboxIds.map((id) => data?.items.find((item) => item.id === id)).filter((item) => Boolean(item)).map((item) => item && <Button key={item.id} variant="outline" className="h-auto max-w-full whitespace-normal text-left" onClick={() => open({ type: "item", id: item.id })}>{item.presentation.type === "bug" ? "View the bug report" : "Review the suggestion"}<ChevronRight size={14} /></Button>)}
+                        {failure.inboxIds.flatMap((id) => data?.items.find((item) => item.id === id) ?? []).map((item) => <Button key={item.id} variant="outline" className="h-auto max-w-full whitespace-normal text-left" onClick={() => open({ type: "item", id: item.id })}>{item.presentation.type === "bug" ? "View the bug report" : "Review the suggestion"}<ChevronRight size={14} /></Button>)}
                         {failureStory
                             ? <StoryDetails story={failureStory} showDecisions={false} projectId={projectId} onDecision={(id) => open({ type: "item", id })} />
                             : <Button asChild variant="outline"><Link href={`/p/${projectId}/specs/${failure.specId}${failure.runId ? `#run-${failure.runId}` : ""}`}>View the Spec and evidence</Link></Button>}
