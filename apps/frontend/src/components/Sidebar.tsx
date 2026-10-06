@@ -184,7 +184,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
         const { signal } = controller;
         try {
             const [health, llm] = await Promise.all([getHealth(signal), getLlmRuntimeStatus()]);
-            if (!signal.aborted) setRuntime(!health.ok ? "offline" : llm.ready ? "online" : "setup");
+            // Only a model that was set up and stopped working needs attention here; the composer covers a missing one.
+            if (!signal.aborted) setRuntime(!health.ok ? "offline" : !llm.ready && llm.provider && llm.model ? "setup" : "online");
         } catch (error) {
             if (!signal.aborted && !isAbortError(error)) setRuntime("offline");
         }
@@ -425,7 +426,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
 
     // Only problems the user can act on get a row; a healthy runtime stays silent.
     const runtimeCopy = runtime === "setup"
-        ? ["Model setup needed", isAdmin ? "Choose a provider" : "Ask an administrator"]
+        ? ["Model unavailable", isAdmin ? "Reconnect the provider" : "Ask an administrator"]
         : runtime === "offline" ? ["Runtime unavailable", "Backend is not responding"] : null;
     const runtimeDot = runtime === "setup" ? "bg-warning-chart" : "bg-danger";
     const settingsHref = `/p/${projectId}/settings`;

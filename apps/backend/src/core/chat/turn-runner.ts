@@ -39,6 +39,7 @@ import {
 } from "./chat-registry";
 import { createContextTools, createSpecBatchTool, createApiDocumentationTool, createChatResultsTool } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
+import { confirmDiscoveredContext } from "./discovery";
 import { createExplorationTools } from "./exploration-tools";
 import { createBackgroundTaskTool } from "../steward/tools";
 import { createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy, createOriginBrowserPolicy } from "./discovery-policy";
@@ -476,6 +477,11 @@ async function runReservedChatTurn(
             unsubscribe();
             session.dispose();
             clearActiveChatSession(id, session);
+        }
+        if (discoveryRevision && !active.aborted && !promptFailed) {
+            await confirmDiscoveredContext(discoveryRevision.id).catch((error) =>
+                logger.warn("discovered context was not confirmed", { chatId: id, error }),
+            );
         }
         if (active.aborted && !timedOut) metrics.fail("aborted", "user_abort");
         if (modelError && !active.aborted && !promptFailed) {

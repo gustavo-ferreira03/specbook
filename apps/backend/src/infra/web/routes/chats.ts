@@ -11,6 +11,7 @@ import { chatResults } from "../../../core/chat/results";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import {
     abortChatTurn,
+    chatTitle,
     createChat,
     getChatQueueState,
     getChatView,
@@ -35,10 +36,13 @@ const SSE_HEARTBEAT_MS = 20_000;
 export function createChatsRouter(): Hono {
     const router = new Hono();
 
-    router.post("/projects/:id/chats", access("editor"), async (c) => {
+    router.post("/projects/:id/chats", access("editor"), zValidator("json", messageSchema), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
-        return c.json({ chat: await createChat(project.id) });
+        const { text } = c.req.valid("json");
+        const chat = await createChat(project.id, {}, chatTitle(text));
+        startChatTurn(chat.id, text);
+        return c.json({ chat });
     });
 
     router.get("/projects/:id/chats", access("viewer"), async (c) => {

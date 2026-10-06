@@ -117,6 +117,11 @@ export function listProjectChats(projectId: string, signal?: AbortSignal): Promi
     return api(apiPath`/projects/${projectId}/chats`, { signal });
 }
 
+/** Creates a chat with its first message; the agent starts replying right away. */
+export function startProjectChat(projectId: string, text: string): Promise<{ chat: { id: string } }> {
+    return api(apiPath`/projects/${projectId}/chats`, { method: "POST", body: JSON.stringify({ text }) });
+}
+
 export function getHealth(signal?: AbortSignal): Promise<{ ok: boolean }> {
     return api("/health", { signal });
 }

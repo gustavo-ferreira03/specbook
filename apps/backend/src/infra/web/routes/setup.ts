@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { createProfile } from "../../../core/credentials/profiles";
 import { deleteProjectData } from "../../../core/deletion";
 import { configuredModel } from "../../../core/llm/runtime";
+import { discoverProjectContext } from "../../../core/chat/discovery";
 import { createProject, publicProject } from "../../../core/projects";
 import { systemStatus } from "../../../core/system-status";
 import { projectsRepository } from "../../repositories/projects";
@@ -35,7 +36,7 @@ export function createSetupRouter(): Hono {
             await deleteProjectData(project.id);
             throw error;
         }
-        return c.json({ project: publicProject(project) }, 201);
+        return c.json({ project: publicProject(project), discoveryChatId: await discoverProjectContext(project.id) }, 201);
     });
 
     return router;

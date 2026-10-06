@@ -171,6 +171,8 @@ export async function resumeAgentJobs(projectId?: string): Promise<void> {
     }
     const { processProjectSteward } = await import("../steward/engine");
     for (const project of projects) if (!await isAgentPaused(project.id)) await processProjectSteward(project.id, false);
+    const { discoverPendingProjectContexts } = await import("../chat/discovery");
+    discoverPendingProjectContexts();
     void drainJobs();
 }
 

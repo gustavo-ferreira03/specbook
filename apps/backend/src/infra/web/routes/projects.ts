@@ -6,6 +6,7 @@ import { z } from "zod";
 import { deleteProjectData, ResourceBusyError } from "../../../core/deletion";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { YamlParseError } from "../../../core/repo/yaml";
+import { discoverProjectContext } from "../../../core/chat/discovery";
 import { createProject, publicProject } from "../../../core/projects";
 import { createManualSpec, editContextFile, readContextRaw } from "../../../core/repo/manual";
 import { createAreaFeatures } from "../../../core/repo/writer";
@@ -59,7 +60,7 @@ export function createProjectsRouter(): Hono {
     router.post("/projects", access("editor"), zValidator("json", createProjectSchema), async (c) => {
         const { name, baseUrl } = c.req.valid("json");
         const project = await createProject(name, baseUrl);
-        return c.json({ project: publicProject(project) });
+        return c.json({ project: publicProject(project), discoveryChatId: await discoverProjectContext(project.id) });
     });
 
     router.get("/projects", access("viewer"), async (c) => {

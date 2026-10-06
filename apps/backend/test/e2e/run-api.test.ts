@@ -79,7 +79,8 @@ test("chat events disable compression and buffering in the frontend proxy", asyn
     const { createChatsRouter } = await import("../../src/infra/web/routes/chats");
     const project = await projectsRepository.createProject("Streaming", "https://example.com");
     const chatApp = new Hono().route("/", createChatsRouter());
-    const { chat } = await (await chatApp.request(`/projects/${project.id}/chats`, { method: "POST" })).json();
+    const { createChat } = await import("../../src/core/chat/session-store");
+    const chat = await createChat(project.id);
     const response = await chatApp.request(`/chats/${chat.id}/events`);
     assert.equal(response.headers.get("cache-control"), "no-cache, no-transform");
     assert.equal(response.headers.get("x-accel-buffering"), "no");
