@@ -1,4 +1,5 @@
-import { jobBaseUrl } from "./environment";
+import { selectedSpecInstructions, recoverSpecBatches } from "./spec-batches";
+import { jobEnvironment } from "./environment";
 import { cancelStaleTriage, prepareTriageGoal } from "./triage";
 import { closeChatBrowser } from "../browser/sessions";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
@@ -72,7 +73,8 @@ async function executeJob(job: Job): Promise<void> {
             }, remaining);
             await jobsRepository.log(job.id, "started");
             if ((await jobsRepository.get(job.id))?.status !== "running") return;
-            await runChatTurn(job.chatId, job.pendingMessage, undefined, createJobPolicy(job, abort, await jobBaseUrl(job)));
+            const environment = await jobEnvironment(job);
+            await runChatTurn(job.chatId, job.kind === "generate_spec" ? await selectedSpecInstructions(job) : job.pendingMessage, undefined, createJobPolicy(job, abort, environment.baseUrl, environment));
         }
         if (stopped) return;
         const current = await jobsRepository.get(job.id);
@@ -174,6 +176,7 @@ export async function startJobWorker(): Promise<void> {
         }
     }
     stopped = false;
+    await recoverSpecBatches();
     timer = setInterval(() => void drainJobs().catch((error) => logger.error("job queue failed", { error })), 2000);
     timer.unref();
     await drainJobs();

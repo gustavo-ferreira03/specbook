@@ -1129,7 +1129,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.failing.some((item) => item.specId === invalid!.id), false, "an invalid implementation is not a failing application check");
         assert.equal(view.needsYou.some((item) => item.id === invalidFinding.id), true, "a finding without a current failing check remains a reviewable decision");
         assert.equal(view.summary.paused, true);
-        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, invalid: 1 });
+        assert.deepEqual(view.summary.specHealth, { total: 7, draft: 0, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, invalid: 1 });
         assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
         assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
         assert.equal(view.specHealth[invalid!.id]?.status, "invalid");
@@ -1712,5 +1712,92 @@ describe("accounts, roles and session security", () => {
             const { clientSecret: _secret, ...unchanged } = config;
             assert.equal((await call("PUT", "/settings/sso", { ...unchanged, enabled: false, passwordLoginEnabled: true })).status, 200);
         }
+    });
+});
+
+describe("selected batch suggestions", () => {
+    test("requires discovery confirmation, validates selection and resumes only selected checks after restart", async () => {
+        const { chatsRepository } = await import("../../src/infra/repositories/chats");
+        const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { proposeSpecBatch, selectSpecBatch, presentSpecBatch, recoverSpecBatches } = await import("../../src/core/jobs/spec-batches");
+        const projectId = await createProject("Selected checks");
+        await stewardRepository.update(projectId, { paused: true });
+        const revision = await projectContextsRepository.createProjectContextDraft(projectId, { startUrl: "https://app.example.com", goal: "Find useful checks", safetyNotes: [] });
+        const chatId = crypto.randomUUID();
+        await chatsRepository.insertChat(chatId, projectId, { contextRevisionId: revision.id });
+        const input = { candidates: [
+            { title: "Sign-in form", goal: "Show the username and password fields.", feature: "Authentication", why: "Users need an entry point." },
+            { title: "Catalog", goal: "Display the product catalog.", feature: "Catalog", why: "Users need to find a product." },
+        ] };
+        const item = await proposeSpecBatch(projectId, chatId, input, { contextRevisionId: revision.id });
+        assert.equal((await proposeSpecBatch(projectId, chatId, input, { contextRevisionId: revision.id })).id, item.id);
+        const view = await presentSpecBatch(item);
+        assert.equal(view.contextReviewRequired, true);
+        await assert.rejects(() => selectSpecBatch(item, [view.candidates[0]!.id]), /confirm the discovery context/);
+        await projectContextsRepository.confirmProjectContextRevision(revision.id);
+        await assert.rejects(() => selectSpecBatch(item, [crypto.randomUUID()]), /Choose at least one/);
+        await assert.rejects(() => selectSpecBatch(item, [view.candidates[0]!.id, view.candidates[0]!.id]), /without duplicates/);
+        const selected = await selectSpecBatch(item, [view.candidates[0]!.id]);
+        const progress = await presentSpecBatch(selected);
+        assert.equal(progress.contextReviewRequired, false);
+        assert.equal(progress.candidates[0]!.selected, true);
+        assert.equal(progress.candidates[0]!.state, "queued");
+        assert.equal(progress.candidates[1]!.selected, undefined);
+        assert.equal(progress.candidates[1]!.jobId, undefined);
+        const child = await jobsRepository.get(progress.candidates[0]!.jobId!);
+        assert.equal(child?.kind, "generate_spec");
+        assert.equal(child?.status, "paused");
+        assert.equal((await specsRepository.listSpecs(projectId)).length, 0);
+        const chatCount = (await chatsRepository.listChatRows(projectId)).length;
+        await selectSpecBatch(item, [view.candidates[0]!.id]);
+        await recoverSpecBatches();
+        assert.equal((await chatsRepository.listChatRows(projectId)).length, chatCount);
+        assert.equal((await jobsRepository.list(projectId)).filter((job) => job.kind === "generate_spec").length, 1);
+        await assert.rejects(() => selectSpecBatch(item, [view.candidates[1]!.id]), /already been selected/);
+    });
+
+    test("rejects cross-project suggestions and generation outside the selected title and feature", async () => {
+        const { chatsRepository } = await import("../../src/infra/repositories/chats");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { proposeSpecBatch, selectSpecBatch, presentSpecBatch, selectedSpecInstructions, createSelectedSpec, selectedSpecResult } = await import("../../src/core/jobs/spec-batches");
+        const projectId = await createProject("Generated draft");
+        const otherId = await createProject("Other suggestions");
+        await stewardRepository.update(projectId, { paused: true });
+        const feature = await writer.createFeatureInRepo(projectId, null, "Authentication", "");
+        const otherFeature = await writer.createFeatureInRepo(otherId, null, "Other", "");
+        const chatId = crypto.randomUUID();
+        await chatsRepository.insertChat(chatId, projectId);
+        const candidate = { title: "Sign-in form", goal: "Show the sign-in form.", feature: feature.title, featureId: feature.id, why: "Every user starts here." };
+        await assert.rejects(() => proposeSpecBatch(otherId, chatId, { candidates: [candidate] }), /conversation belongs/);
+        await assert.rejects(() => proposeSpecBatch(projectId, chatId, { candidates: [{ ...candidate, featureId: otherFeature.id }] }), /another project/);
+        const item = await proposeSpecBatch(projectId, chatId, { candidates: [candidate] });
+        const initial = await presentSpecBatch(item);
+        const selected = await selectSpecBatch(item, [initial.candidates[0]!.id]);
+        const choice = (await presentSpecBatch(selected)).candidates[0]!;
+        const specId = (selected.payload.specBatch as { candidates: { specId: string }[] }).candidates[0]!.specId;
+        const job = (await jobsRepository.get(choice.jobId!))!;
+        await selectedSpecInstructions(job);
+        const input = { featureId: feature.id, title: candidate.title, description: candidate.goal, humanSpec: HUMAN_SPEC, testSource: VALID_SPEC };
+        await assert.rejects(() => createSelectedSpec(job, { ...input, title: "Unexpected check" }), /only the selected Spec/);
+        await assert.rejects(() => createSelectedSpec(job, { ...input, featureId: otherFeature.id }), /only the selected Spec/);
+        await assert.rejects(() => createSelectedSpec(job, { ...input, testSource: "process.exit(0)" }), /Import|test|allowed|top-level/);
+        assert.equal((await specsRepository.listSpecs(projectId)).length, 0);
+        const { spec } = await writer.createSpecInRepo({ ...input, projectId, id: specId, lifecycle: "draft" });
+        const run = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(projectId), sourceHash: spec.sourceHash, baseUrl: "https://app.example.com", automate: false });
+        await runsRepository.finishRun(run.id, "passed", 12, null);
+        const count = await commitCount(projectId);
+        const result = await createSelectedSpec(job, input);
+        assert.equal(result.specId, spec.id);
+        assert.equal(result.runId, run.id);
+        assert.equal(result.status, "passed");
+        assert.equal(result.lifecycle, "draft");
+        assert.equal((await selectedSpecResult(job)).runId, run.id);
+        await createSelectedSpec(job, input);
+        assert.equal(await commitCount(projectId), count);
+        assert.equal((await runsRepository.listRuns(spec.id)).length, 1);
+        assert.equal((await presentSpecBatch((await jobsRepository.item(item.id))!)).candidates[0]!.state, "passed");
     });
 });

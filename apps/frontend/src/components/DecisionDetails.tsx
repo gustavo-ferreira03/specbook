@@ -7,6 +7,7 @@ import { Check, LoaderCircle, MessageSquareText, X } from "lucide-react";
 import { FileDiff } from "@/components/FileDiff";
 import { StoryTimeline } from "@/components/StoryDetails";
 import { TechnicalDetails } from "@/components/TechnicalDetails";
+import { SpecBatchDecision } from "@/components/SpecBatchDecision";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/components/AuthProvider";
@@ -122,13 +123,14 @@ export function DecisionDetails({ projectId, item, story, onChange }: { projectI
     }
 
     return <div className="space-y-5">
-        {!pending && <Badge variant={item.status === "applying" ? "running" : item.status === "approved" || item.status === "answered" ? "success" : "neutral"}>{item.status === "applying" ? <LoaderCircle size={12} className="animate-spin motion-reduce:animate-none" /> : item.status === "rejected" ? <X size={12} /> : <Check size={12} />}{stateLabel}</Badge>}
+        {!pending && view.type !== "batch" && <Badge variant={item.status === "applying" ? "running" : item.status === "approved" || item.status === "answered" ? "success" : "neutral"}>{item.status === "applying" ? <LoaderCircle size={12} className="animate-spin motion-reduce:animate-none" /> : item.status === "rejected" ? <X size={12} /> : <Check size={12} />}{stateLabel}</Badge>}
         <div className="space-y-2"><p className="text-body text-ink">{view.summary}</p>{view.workDone && <p className="text-body text-ink-muted">{view.workDone}</p>}</div>
         <Screenshots item={item} />
         <SuggestedBehavior item={item} />
+        {view.type === "batch" && <SpecBatchDecision key={item.id} projectId={projectId} item={item} onChange={onChange} />}
         {item.answer && <p className="whitespace-pre-wrap break-words text-body text-ink-muted"><span className="font-medium">Your answer: </span>{item.answer}</p>}
         {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError.message}</AlertDescription></Alert>}
-        {pending && <div className="space-y-3">
+        {pending && view.type !== "batch" && <div className="space-y-3">
             {canEdit && view.type === "question" && !view.credentialRequest && <div className="space-y-2"><Label htmlFor={`answer-${item.id}`} className="text-body">Your answer</Label><Textarea id={`answer-${item.id}`} className="text-body" value={answers[item.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [item.id]: event.target.value }))} disabled={busy !== null} aria-describedby={`answer-help-${item.id}`} /><p id={`answer-help-${item.id}`} className="text-meta text-ink-subtle">Keep passwords in <Link className="underline underline-offset-2 hover:text-ink" href={`/p/${projectId}/settings?tab=credentials`}>Settings → Credentials</Link>.</p></div>}
             <div className="flex flex-wrap gap-2">{actions(item)}</div>
             <p className="text-meta text-ink-subtle">{view.consequence}</p>

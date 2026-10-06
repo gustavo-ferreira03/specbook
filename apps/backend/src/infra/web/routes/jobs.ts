@@ -10,7 +10,8 @@ import { HTTPException } from "hono/http-exception";
 import { abortChatTurn, isChatBusy } from "../../../core/chat/chat-registry";
 import { applyProposal } from "../../../core/jobs/proposals";
 import { projectOverview } from "../../../core/jobs/overview";
-import { createJobSchema, reviewSchema } from "../../../core/jobs/schemas";
+import { createJobSchema, reviewSchema, selectSpecBatchSchema } from "../../../core/jobs/schemas";
+import { presentSpecBatch, selectSpecBatch } from "../../../core/jobs/spec-batches";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
 import { jobsRepository } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
@@ -70,6 +71,16 @@ ${item.body}`.slice(0, 6000),
         }, `regression:${item.id}`, "user");
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, regressionIntentId: intent.id } });
         return c.json({ intentId: intent.id }, 202);
+    });
+    router.post("/projects/:id/inbox/:itemId/select", access("editor"), zValidator("json", selectSpecBatchSchema), async (c) => {
+        const item = await jobsRepository.item(c.req.param("itemId"));
+        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Suggestion not found" });
+        try {
+            const selected = await selectSpecBatch(item, c.req.valid("json").candidateIds);
+            return c.json({ item: { ...selected, payload: { ...selected.payload, specBatch: await presentSpecBatch(selected) } } }, 202);
+        } catch (error) {
+            throw new HTTPException(409, { message: sanitizeTechnicalDetails(error instanceof Error ? error.message : String(error)) });
+        }
     });
     router.post("/projects/:id/inbox/:itemId/discuss", access("editor"), async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));

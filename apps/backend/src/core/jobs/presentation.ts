@@ -14,12 +14,13 @@ import { sourceHashOf } from "../repo/writer";
 import { proposalFiles } from "./preview";
 import { isInfrastructureFailure, sanitizeTechnicalDetails } from "./presentation-errors";
 import type { ProposalVerification } from "./verification";
+import { presentSpecBatch } from "./spec-batches";
 
 interface Subject { type: "spec" | "feature" | "deployment" | "project"; id?: string; name: string }
 interface Screenshot { url: string; label: string }
 export type PresentedItem = Omit<InboxItem, "payload"> & { payload: Record<string, unknown>; presentation: InboxPresentation };
 export interface InboxPresentation {
-    type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
+    type: "update" | "new_check" | "batch" | "feature" | "bug" | "question" | "help";
     title: string;
     summary: string;
     workDone: string;
@@ -158,7 +159,13 @@ export async function projectPresentation(projectId: string) {
         const unfinished = item.payload.requiresVerification === true && !verified;
         if (unfinished && awaiting(item) && job && (active(job.status) || (job.status === "stalled" && job.retryAt))) continue;
         if (unfinished && awaiting(item) && inbox.some((other) => other.id !== item.id && other.createdAt > item.createdAt && awaiting(other) && subjectKey(forItem(other)) === subjectKey(subject))) continue;
-        const type: InboxPresentation["type"] = unfinished && awaiting(item) ? "help" : item.kind === "spec_fix" ? "update" : item.kind === "new_spec" ? "new_check" : item.kind === "feature" ? "feature" : item.kind === "bug_report" ? "bug" : "question";
+        const batch = item.kind === "spec_batch" ? await presentSpecBatch(item) : undefined;
+        const selectedChecks = batch?.candidates.filter((candidate) => candidate.selected) ?? [];
+        const finishedChecks = selectedChecks.filter((candidate) => ["passed", "failed", "stopped"].includes(candidate.state));
+        const batchTitle = item.status !== "approved" ? `Which of these ${batch?.candidates.length} Specs would you like to add?`
+            : finishedChecks.length === selectedChecks.length ? `${selectedChecks.length} selected Spec${selectedChecks.length === 1 ? "" : "s"}: ${selectedChecks.filter((candidate) => candidate.state === "passed").length} passed${selectedChecks.some((candidate) => candidate.state !== "passed") ? ", review the remaining results" : ""}`
+            : `Creating selected Specs: ${finishedChecks.length} of ${selectedChecks.length} finished`;
+        const type: InboxPresentation["type"] = unfinished && awaiting(item) ? "help" : item.kind === "spec_fix" ? "update" : item.kind === "new_spec" ? "new_check" : item.kind === "spec_batch" ? "batch" : item.kind === "feature" ? "feature" : item.kind === "bug_report" ? "bug" : "question";
         const credentialRequest = item.payload.waitingFor === "credentials";
         const name = subject.type === "project" ? string(params.title) ?? "this check" : subject.name;
         const behaviorChange = item.kind === "spec_fix" && (params.humanSpec !== undefined || params.title !== undefined || params.description !== undefined);
@@ -166,6 +173,7 @@ export async function projectPresentation(projectId: string) {
         const title = type === "help" ? `I couldn’t update “${name}” by myself. Look at it together?`
             : type === "update" ? behaviorChange ? `Change what “${name}” checks?` : `Update the check for “${name}”?`
             : type === "new_check" ? `Add a check for “${string(params.title) ?? name}”?`
+            : type === "batch" ? batchTitle
             : type === "feature" ? `Add “${string(params.title) ?? name}” to this project?`
             : type === "bug" ? safeTitle?.replace(/[.!?]+$/, "") ?? `A problem was reported in “${name}”`
             : credentialRequest ? `Can you provide access for “${name}”?` : safeTitle && safeTitle.endsWith("?") ? safeTitle : `Can you clarify what should happen in “${name}”?`;
@@ -177,15 +185,17 @@ export async function projectPresentation(projectId: string) {
         const summary = type === "help" ? plainReason(verification?.failReason ?? job?.stopReason ?? item.body)
             : type === "update" ? behaviorChange ? "This suggestion changes the behavior described by the check. Review the expected result before saving it." : verified ? `${updateReason} The expected behavior stays the same.` : "Review this suggested update to the check before saving it to the project."
             : type === "new_check" ? "This would add a check for a behavior that is not yet covered. Review the steps and expected result before saving it."
+            : type === "batch" ? batch!.contextReviewRequired ? "Confirm the discovery context, then select the Specs you want to create." : item.status === "approved" ? "Each selected Spec is saved as a draft. Review its first result before activating it." : "Select the Specs you want. Each one will be created as a draft, validated and run once."
             : type === "feature" ? "This would organize related checks under a new area of the project."
             : type === "bug" ? plainExcerpt(item.body.split(/\n\s*\n/)[0] ?? "") ?? "The application did not behave as expected. The existing check has been left unchanged."
             : credentialRequest ? "Add the requested sign-in details in Settings, then let Specbook know. Do not put passwords in your reply."
             : plainExcerpt(item.body) ?? "Specbook needs your explanation of the expected behavior before it can continue. Discuss the check in chat to clarify it.";
         const browserWork = actions.get(item.jobId)?.some((action) => /(?:browser_|scan_page).*:completed$/.test(action.action));
-        const workDone = verification ? verification.status === "passed" ? "Tried the suggested update in a test run; it passed." : "Tried an update, but the test run did not pass."
+        const workDone = type === "batch" ? "" : verification ? verification.status === "passed" ? "Tried the suggested update in a test run; it passed." : "Tried an update, but the test run did not pass."
             : type === "question" ? "Paused here so your answer can guide the next step." : browserWork ? "Inspected the application and recorded the available evidence." : "Prepared this suggestion for your review.";
         const consequence = type === "update" ? "Saves the updated check to this project; you can undo it from history."
             : type === "new_check" ? "Adds the check to this project; future runs can verify this behavior."
+            : type === "batch" ? "Creates only your selected drafts. Drafts stay out of automatic runs until you activate them."
             : type === "feature" ? "Adds an area to organize this project’s checks."
             : type === "bug" ? "Requests a regression check for review. The current check stays unchanged."
             : type === "help" ? "Discuss it in chat, or set this suggestion aside without changing the check." : "Your answer lets Specbook continue this check.";
@@ -194,7 +204,7 @@ export async function projectPresentation(projectId: string) {
         const presentation: InboxPresentation = { type, title, summary, workDone, consequence, credentialRequest,
             screenshots: await screenshotsFor(projectId, item, job, specs).catch(() => ({})), technicalDetails, activityId: subjectKey(subject),
             specId: subject.type === "spec" ? subject.id : undefined, chatId: job?.chatId };
-        items.push({ ...item, title, body: summary, payload: { ...item.payload, files,
+        items.push({ ...item, title, body: summary, payload: { ...item.payload, files, ...(batch ? { specBatch: batch } : {}),
             ...(verification ? { verification: { ...verification, failReason: verification.failReason ? await clean(verification.failReason) : null } } : {}) }, presentation });
     }
     const groups = new Map<string, { subject: Subject; jobs: Job[]; signals: ProjectSignal[]; intents: Intent[]; items: PresentedItem[] }>();
@@ -270,7 +280,15 @@ export async function projectPresentation(projectId: string) {
             const verifiedAction = actions.get(item.jobId)?.find((action) => action.action === "proposal:verified" && action.detail?.startsWith(`${item.id}:`));
             if (verifiedAction) timeline.push({ id: `${item.id}:test`, label: "Tested update", detail: item.presentation.workDone, createdAt: verifiedAction.createdAt });
         }
-        if (latestItem) timeline.push({ id: latestItem.id, label: awaiting(latestItem) ? latestItem.kind === "bug_report" ? "Problem found" : "Your decision" : latestItem.status === "approved" ? "Saved" : latestItem.status === "answered" ? "Answered" : "Reviewed",
+        if (latestItem?.kind === "spec_batch") {
+            const batch = await presentSpecBatch(latestItem);
+            const selected = batch.candidates.filter((candidate) => candidate.selected);
+            timeline.push({ id: latestItem.id, label: latestItem.status === "approved" ? "Selected" : "Suggested",
+                detail: latestItem.status === "approved" ? `${selected.length} Spec${selected.length === 1 ? "" : "s"} selected to create as drafts.` : latestItem.presentation.title,
+                createdAt: batch.selectedAt ?? latestItem.createdAt });
+            for (const candidate of selected) if (candidate.runId && candidate.finishedAt) timeline.push({ id: candidate.runId, label: "First run",
+                detail: `“${candidate.title}” ${candidate.state === "passed" ? "passed" : "did not pass"}.`, createdAt: candidate.finishedAt, specId: candidate.specId, runId: candidate.runId });
+        } else if (latestItem) timeline.push({ id: latestItem.id, label: awaiting(latestItem) ? latestItem.kind === "bug_report" ? "Problem found" : "Your decision" : latestItem.status === "approved" ? "Saved" : latestItem.status === "answered" ? "Answered" : "Reviewed",
             detail: awaiting(latestItem) ? latestItem.presentation.title : latestItem.status === "approved" ? `Saved the approved change to “${subject.name}”.` : latestItem.status === "answered" ? `Received your answer about “${subject.name}”.` : `Set aside the suggestion for “${subject.name}”.`, createdAt: latestItem.updatedAt });
         else if (paused && latestJob) timeline.push({ id: `${latestJob.id}:pause`, label: "Paused by you", detail: globallyPaused ? "Specbook is paused across all projects." : "Specbook is paused for this project.", createdAt: settings.updatedAt });
         timeline.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
