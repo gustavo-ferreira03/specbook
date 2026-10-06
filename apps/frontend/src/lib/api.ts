@@ -2,6 +2,7 @@ import { invalidate, resourceForPath } from "./invalidation";
 import type {
     Chat,
     ChatState,
+    CoverageResponse,
     CredentialFieldInput,
     CredentialProfile,
     Feature,
@@ -12,6 +13,7 @@ import type {
     LlmOAuthStart,
     LlmRuntimeStatus,
     LlmSettingsResponse,
+    OverviewResponse,
     Project,
     ProjectEnvironment,
     ProjectContext,
@@ -281,6 +283,10 @@ export function getSpecAtCommit(
     return api(`/specs/${encodeURIComponent(specId)}/history/${encodeURIComponent(sha)}`);
 }
 
+export function testLlmConnection(): Promise<{ ok: true; message: string }> {
+    return api("/settings/llm/test", { method: "POST" });
+}
+
 export function getLlmSettings(): Promise<LlmSettingsResponse> {
     return api<LlmSettingsResponse>("/settings/llm");
 }
@@ -450,4 +456,20 @@ export function setSpecLifecycle(specId: string, lifecycle: "draft" | "active"):
 
 export function activateSpecs(projectId: string, specIds: string[]): Promise<{ activated: string[] }> {
     return api(apiPath`/projects/${projectId}/specs/activate`, { method: "POST", body: JSON.stringify({ specIds }) });
+}
+
+export function getOverview(projectId: string, signal?: AbortSignal): Promise<OverviewResponse> {
+    return api(apiPath`/projects/${projectId}/overview`, { signal });
+}
+
+export function getCoverage(projectId: string, environment: string, signal?: AbortSignal): Promise<CoverageResponse> {
+    return api(`${apiPath`/projects/${projectId}/coverage`}?environment=${encodeURIComponent(environment)}`, { signal });
+}
+
+export function requestTask(projectId: string, kind: "coverage" | "explore"): Promise<{ intentId: string; status: "queued" | "running" | "paused" }> {
+    return api(apiPath`/projects/${projectId}/tasks`, { method: "POST", body: JSON.stringify({ kind }) });
+}
+
+export function setStewardPaused(projectId: string, paused: boolean): Promise<unknown> {
+    return api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ paused }) });
 }

@@ -24,8 +24,6 @@ import {
     X,
 } from "lucide-react";
 import {
-    api,
-    apiPath,
     deleteChat,
     deleteFeature,
     deleteSpec,
@@ -41,7 +39,9 @@ import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { useAuth } from "@/components/AuthProvider";
 import { UserMenu } from "@/components/UserMenu";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
-import type { Chat, Feature, OverviewResponse, Project, RunBatch, SpecSummary } from "@/lib/types";
+import { countLabel } from "@/lib/format";
+import { useProjectOverview } from "@/lib/projectOverview";
+import type { Chat, Feature, Project, RunBatch, SpecSummary } from "@/lib/types";
 import { NO_SPECS_DESCRIPTION } from "@/lib/status";
 import { useVisiblePolling } from "@/lib/usePolling";
 import { useRunBatch } from "@/lib/useRunBatch";
@@ -116,7 +116,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const [features, setFeatures] = useState<Feature[]>([]);
     const [environment] = useRunEnvironment(projectId);
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
-    const [overview, setOverview] = useState<{ projectId: string; data: Pick<OverviewResponse, "summary" | "specHealth"> } | null>(null);
+    const { data: overview } = useProjectOverview();
     const [chats, setChats] = useState<Chat[]>([]);
     const [activeTab, setActiveTab] = useState<SidebarTab>(sectionFromPathname(pathname, projectId) ?? "specs");
     const [loaded, setLoaded] = useState(false);
@@ -175,18 +175,16 @@ export function Sidebar({ projectId }: { projectId: string }) {
         navigationRequestRef.current = controller;
         const { signal } = controller;
         try {
-            const [projectsResult, treeResult, chatsResult, overviewResult] = await Promise.all([
+            const [projectsResult, treeResult, chatsResult] = await Promise.all([
                 listProjects(signal),
                 getProjectTree(projectId, signal),
                 listProjectChats(projectId, signal),
-                api<OverviewResponse>(apiPath`/projects/${projectId}/overview`, { signal }).catch(() => null),
             ]);
             if (signal.aborted) return;
             setProjects(projectsResult.projects);
             setFeatures(treeResult.features);
             setSpecs(treeResult.specs);
             setChats(chatsResult.chats);
-            if (overviewResult) setOverview({ projectId, data: overviewResult });
             setLoadError("");
             setLoaded(true);
         } catch (error) {
@@ -219,7 +217,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
         return () => runtimeRequestRef.current?.abort();
     }, []);
 
-    useVisiblePolling(() => void refreshNavigation(), 5000);
+    useVisiblePolling(() => void refreshNavigation(), 60_000);
     useVisiblePolling(() => void checkRuntime(), 30000);
 
     useEffect(() => onInvalidate((event) => {
@@ -237,8 +235,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     }), [projectId]);
 
     const projectName = projects.find((project) => project.id === projectId)?.name ?? "Current project";
-    const currentOverview = overview?.projectId === projectId ? overview.data : null;
-    const attentionCount = currentOverview?.summary.attentionCount ?? 0;
+    const attentionCount = overview?.summary.attentionCount ?? 0;
     const knownFeatureIds = new Set(features.map((feature) => feature.id));
     const rootFeatures = features.filter((feature) => feature.parentId === null || !knownFeatureIds.has(feature.parentId));
     const ungroupedSpecs = specs.filter((spec) => !knownFeatureIds.has(spec.featureId));
@@ -381,7 +378,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     function renderSpec(spec: SpecSummary) {
         const href = `/p/${projectId}/specs/${spec.id}`;
         const selected = pathname === href;
-        const health = currentOverview?.specHealth[spec.id];
+        const health = overview?.specHealth[spec.id];
         return (
             <div key={spec.id} className={rowClass(selected)}>
                 <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} pr-2 pl-2 ${selected ? "font-medium" : ""}`} title={health ? `${spec.title}: ${health.label}` : spec.title}>
@@ -423,7 +420,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </CollapsibleTrigger>
                     <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} pr-2 font-medium ${selected ? "text-ink" : "text-ink"}`} title={feature.title}>
                         <span className="min-w-0 flex-1 truncate">{feature.title}</span>
-                        <span className="tabular text-meta font-normal text-ink-subtle" aria-label={`${count} ${count === 1 ? "Spec" : "Specs"}`}>{count}</span>
+                        <span className="tabular text-meta font-normal text-ink-subtle" aria-label={countLabel(count, "Spec")}>{count}</span>
                     </Link>
                     <div className={rowActionsClass}>
                         <RowAction
@@ -649,14 +646,14 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     <Link href={`/p/${projectId}/overview`} aria-current={pathname === `/p/${projectId}/overview` ? "page" : undefined}
                         className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}/overview` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}>
                         <LayoutDashboard size={15} /> Overview
-                        {attentionCount > 0 && <Badge variant="secondary" size="sm" className="ml-auto" aria-label={`${attentionCount} ${attentionCount === 1 ? "item needs" : "items need"} you`} title={`${attentionCount} need${attentionCount === 1 ? "s" : ""} you`}>{attentionCount}</Badge>}
+                        {attentionCount > 0 && <Badge variant="secondary" size="sm" className="ml-auto" aria-label={`${countLabel(attentionCount, "item needs", "items need")} you`} title={`${countLabel(attentionCount, "needs", "need")} you`}>{attentionCount}</Badge>}
                     </Link>
                     <Link href={`/p/${projectId}`} aria-current={pathname === `/p/${projectId}` ? "page" : undefined}
                         className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}>
                         <Compass size={15} /> Project context
                     </Link>
                     <Link href={`/p/${projectId}/coverage`} onClick={() => setDrawerOpen(false)} aria-current={pathname.endsWith("/coverage") ? "page" : undefined} className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname.endsWith("/coverage") ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}><ChartNoAxesCombined size={15} /> Coverage</Link>
-                    {(currentOverview?.summary.paused || currentOverview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{currentOverview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
+                    {(overview?.summary.paused || overview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{overview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
                     {runtimeCopy && <Link
                         href={isAdmin ? "/settings?tab=model" : `/p/${projectId}/overview`}
                         className="flex min-h-10 items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring"
@@ -722,7 +719,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     const specCount = specs.filter((spec) => featureIds.has(spec.featureId)).length;
                     const childCount = featureIds.size - 1;
                     return <>
-                        <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong> will be removed{childCount ? ` with ${childCount} nested ${childCount === 1 ? "feature" : "features"}` : ""}. This also deletes {specCount} active {specCount === 1 ? "Spec" : "Specs"}, run history, and evidence inside it. Earlier file revisions remain in Git history.
+                        <strong className="font-semibold text-ink">{deleteTarget.item.title}</strong> will be removed{childCount ? ` with ${countLabel(childCount, "nested feature")}` : ""}. This also deletes {countLabel(specCount, "active Spec")}, run history, and evidence inside it. Earlier file revisions remain in Git history.
                     </>;
                 })() : null}
                 confirmLabel={deleteTarget?.kind === "chat" ? "Delete chat" : deleteTarget?.kind === "spec" ? "Delete Spec" : "Delete feature"}
