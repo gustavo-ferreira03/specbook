@@ -23,7 +23,7 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
 import { logger } from "../../infra/logger";
 import { auditTools } from "../accounts/audit";
-import { agentSettings } from "./safety-settings";
+import { agentSettings, getSecuritySettings } from "./safety-settings";
 import {
     ChatBusyError,
     clearActiveChatSession,
@@ -242,6 +242,7 @@ async function runReservedChatTurn(
                     : { ...createOriginBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub };
             const policy: BrowserToolPolicy = {
                 ...basePolicy,
+                sendScreenshots: async () => (await getSecuritySettings()).sendScreenshotsToModel,
                 beforeCall: async (toolName, args, signal) => {
                     await browser.mcp.ensureBrowser(signal);
                     await basePolicy.beforeCall?.(toolName, args, signal);

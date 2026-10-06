@@ -9,7 +9,8 @@ import { minimalChildEnv } from "../runner/process";
 import { browserFailureMessage } from "../jobs/presentation-errors";
 
 export const SCREEN_WIDTH = 1280;
-export const SCREEN_HEIGHT = 800;
+/** Fits the 1280x720 page viewport below Chromium's ~87px tab strip and toolbar. */
+export const SCREEN_HEIGHT = 810;
 
 export interface VncSession {
     id: string;

@@ -20,6 +20,8 @@ const TEST_TIMEOUT_MS = 100_000;
 const EXPECT_TIMEOUT_MS = 5_000;
 const ACTION_TIMEOUT_MS = 15_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
+/** Also the agent browser's viewport, so coordinates it uses replay identically. */
+export const SPEC_VIEWPORT = { width: 1280, height: 720 };
 
 export interface SuiteSpec {
     /** Run id: names the test file (tests/<key>.spec.ts) and the result. */
@@ -119,8 +121,8 @@ function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyS
             baseURL: options.baseUrl,
             browserName: "chromium",
             headless: true,
-            viewport: { width: 1280, height: 720 },
-            video: { mode: "retain-on-failure", size: { width: 1280, height: 720 } },
+            viewport: SPEC_VIEWPORT,
+            video: { mode: "retain-on-failure", size: SPEC_VIEWPORT },
             screenshot: "off",
             trace: "off",
             actionTimeout: ACTION_TIMEOUT_MS,

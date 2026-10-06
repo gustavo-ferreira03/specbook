@@ -91,6 +91,17 @@ describe("analyzeSpecSource: accepted Specs", () => {
             'await page.getByText("a").and(page.getByRole("button")).or(page.locator("b")).nth(-1).last().click();',
             'await page.locator("li", { has: page.getByRole("link"), hasText: "x" }).click();',
             'await page.keyboard.type("hello");',
+            "await page.mouse.move(400, 300);",
+            "await page.mouse.down();",
+            "await page.mouse.move(600.5, -20, { steps: 10 });",
+            'await page.mouse.up({ button: "left" });',
+            'await page.mouse.click(10, 20, { button: "right", clickCount: 1 });',
+            "await page.mouse.dblclick(10, 20);",
+            "await page.mouse.wheel(0, 300);",
+            'await page.getByText("Card").dragTo(page.getByRole("list", { name: "Done" }));',
+            'await page.getByText("Card").dragTo(page.locator("#done"), { targetPosition: { x: 5, y: 5 }, steps: 5 });',
+            'await page.locator("canvas").click({ position: { x: 10, y: 20 } });',
+            'await page.locator("canvas").hover({ position: { x: 10, y: 20 } });',
             "await expect(page).toHaveTitle(/Shop/);",
             'await expect(page.locator("input")).toHaveValues(["a", "b"]);',
             'await expect(page.locator("input")).toHaveAttribute("type", "email");',
@@ -261,7 +272,22 @@ describe("analyzeSpecSource: rejected expressions and escape attempts", () => {
         ['await (page.getByText("a") as any).click();', /not allowed/],
         ['await page.getByText<string>("a").click();', /Type arguments/],
         ['await page.keyboard.down("Shift");', /keyboard\.down\(\) is not allowed/],
-        ['await page.mouse.click(1, 1);', /Property "mouse" is not allowed/],
+        ['await page.mouse.drag(1, 1);', /mouse\.drag\(\) is not allowed/],
+        ['await page.mouse.move("1", 1);', /coordinates must be literal numbers/],
+        ['await page.mouse.move(1);', /takes 2 literal numbers/],
+        ['await page.mouse.move(1, 2, 3);', /options must be a literal object/],
+        ['await page.mouse.click(1, 2, { button: "left" }, 4);', /takes 2 literal numbers/],
+        ['await page.mouse.down(1, 2);', /takes no coordinates/],
+        ['await page.mouse.wheel(0, 1, { steps: 1 });', /takes 2 literal numbers/],
+        ['const x = page.getByText("a");\n        await page.mouse.move(x, 1);', /coordinates must be literal numbers/],
+        ['await page.mouse.move(1 + 1, 1);', /coordinates must be literal numbers/],
+        ['await page.mouse.move(1, 1, { steps: page.getByText("a") });', /Expressions cannot be used as values/],
+        ['await expect(page.mouse).toBeVisible();', /takes the page or a locator/],
+        ['const m = page.mouse;', /Only locators can be stored/],
+        ['await page.getByText("a").dragTo("#b");', /dragTo\(\) takes the target locator/],
+        ['await page.getByText("a").dragTo();', /dragTo\(\) takes the target locator/],
+        ['await page.getByText("a").dragTo(undeclared);', /"undeclared" is not available/],
+        ['await page.getByText("a").dragTo(page.mouse);', /Property "mouse" is not allowed|takes the target locator/],
         ['await page.locator("a").nth("1").click();', /nth\(\) takes one number/],
         ['await page.locator("a").first(1).click();', /takes no arguments/],
         ['await page.locator("a").and("b").click();', /not allowed|takes one locator/],
@@ -332,12 +358,12 @@ describe("named steps", () => {
 });
 
 describe("agent instructions", () => {
-    test("the spec.ts example in the standard system prompt passes the validator", async () => {
+    test("the spec.ts examples in the standard system prompt pass the validator", async () => {
         const { readFile } = await import("node:fs/promises");
         const prompt = await readFile(new URL("../../src/core/chat/prompts/standard-system-prompt.txt", import.meta.url), "utf8");
         const lines = prompt.split("\n");
-        const starts = lines.map((line, index) => /^- (?:API example|Example)/.test(line) ? index : -1).filter((index) => index >= 0);
-        assert.equal(starts.length, 2);
+        const starts = lines.map((line, index) => /^- (?:API example|Drawing example|Example)/.test(line) ? index : -1).filter((index) => index >= 0);
+        assert.equal(starts.length, 3);
         for (const start of starts) {
             const steps = JSON.parse(/humanSpec\.steps: (\[.*\])\)/.exec(lines[start])?.[1] ?? "[]") as string[];
             const body: string[] = [];
