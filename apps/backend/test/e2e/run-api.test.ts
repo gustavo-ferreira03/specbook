@@ -551,19 +551,30 @@ test("Store", async ({ page, step }) => {
         }
     });
 
-    test("failed retry emits one steward signal, and interrupted retry is never repeated", async () => {
+    test("failed retry emits one original-failure signal even after a crash before acknowledgement", async (t) => {
         const { processRunFailures } = await import("../../src/core/jobs/failures");
         const { runsRepository } = await import("../../src/infra/repositories/runs");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { project, spec } = await failingSpec("/failure-signal");
         const original = await executeSpec(spec.id, { automate: true });
+        const acknowledge = runsRepository.acknowledgeAutomation.bind(runsRepository);
+        const interruptedAck = t.mock.method(runsRepository, "acknowledgeAutomation", async (id: string) => {
+            if (id === original.id) throw new Error("Backend stopped before acknowledging the original failure");
+            await acknowledge(id);
+        });
         await processRunFailures();
+        interruptedAck.mock.restore();
         const retry = (await runsRepository.retryFor(original.id))!;
         assert.equal(retry.status, "failed");
         assert.equal((await stewardRepository.signals(project.id))[0]?.payload.runId, retry.id);
+        assert.equal((await stewardRepository.signals(project.id))[0]?.key, `failure:${original.id}`);
+        assert.equal((await stewardRepository.signals(project.id))[0]?.payload.originalRunId, original.id);
+        assert.equal((await runsRepository.getRun(original.id))?.automationPending, true);
+        assert.equal((await runsRepository.getRun(retry.id))?.automationPending, false);
         await processRunFailures();
         assert.equal((await stewardRepository.signals(project.id)).length, 1);
         assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
+        assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
 
         const recovered = await failingSpec("/interrupted-retry");
         const failed = await executeSpec(recovered.spec.id, { automate: true });
@@ -574,6 +585,43 @@ test("Store", async ({ page, step }) => {
         assert.equal((await runsRepository.listRuns(recovered.spec.id)).length, 2);
         assert.equal((await stewardRepository.signals(recovered.project.id))[0]?.payload.runId, interrupted.id);
         assert.equal((await stewardRepository.signals(recovered.project.id)).length, 1);
+    });
+
+    test("retry preparation failures back off without skipping the flaky check or starting triage", async (t) => {
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { project, spec } = await failingSpec("/flaky-deferred-retry");
+        const original = await executeSpec(spec.id, { automate: true });
+        const unsaved = path.join(repoGit.getRepoDir(project.id), "pending.txt");
+        await fs.writeFile(unsaved, "Temporarily uncommitted changes");
+        let now = Date.now();
+        t.mock.method(Date, "now", () => now);
+        try {
+            await processRunFailures();
+            assert.equal(await runsRepository.retryFor(original.id), null);
+            assert.equal((await runsRepository.getRun(original.id))?.automationPending, true);
+            assert.equal((await stewardRepository.signals(project.id)).length, 0);
+            assert.equal((await jobsRepository.list(project.id)).length, 0);
+            now += 15_000;
+            await processRunFailures();
+            assert.equal(await runsRepository.retryFor(original.id), null);
+            await fs.unlink(unsaved);
+            now += 15_000;
+            await processRunFailures();
+            assert.equal(await runsRepository.retryFor(original.id), null, "the second preparation error doubles the retry delay");
+            now += 15_000;
+            await processRunFailures();
+            const retry = (await runsRepository.retryFor(original.id))!;
+            assert.equal(retry.status, "passed");
+            assert.equal(retry.flaky, true);
+            assert.equal((await runsRepository.getRun(original.id))?.automationPending, false);
+            assert.equal((await stewardRepository.signals(project.id)).length, 0);
+            assert.equal((await jobsRepository.list(project.id)).length, 0);
+            assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
+        } finally {
+            t.mock.restoreAll();
+            await fs.rm(unsaved, { force: true });
+        }
     });
 
     test("retry retains the preview URL even when the project's base URL changes", async () => {

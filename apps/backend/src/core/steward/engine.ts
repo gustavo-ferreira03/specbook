@@ -49,9 +49,9 @@ export async function enqueueIntent(projectId: string, input: unknown, key: stri
             runKey: intent.kind === "run_specs" ? key : undefined }) });
 }
 
-export async function recordFailureSignal(projectId: string, runId: string, specId: string, title: string): Promise<void> {
-    await stewardRepository.signal({ projectId, key: `failure:${runId}`, kind: "spec_failure", title: `“${title}” failed`,
-        body: "Investigate the failed step and evidence to distinguish test drift, an application bug, or an environment problem.", payload: { runId, specIds: [specId] } });
+export async function recordFailureSignal(projectId: string, runId: string, specId: string, title: string, originalRunId = runId): Promise<void> {
+    await stewardRepository.signal({ projectId, key: `failure:${originalRunId}`, kind: "spec_failure", title: `“${title}” failed`,
+        body: "Investigate the failed step and evidence to distinguish test drift, an application bug, or an environment problem.", payload: { runId, originalRunId, specIds: [specId] } });
 }
 
 async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<void> {
