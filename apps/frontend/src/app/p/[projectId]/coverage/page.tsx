@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiPath, errorMessage } from "@/lib/api";
+import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { useVisiblePolling } from "@/lib/usePolling";
 
 type Counts = Record<"passing" | "failing" | "flaky" | "draft" | "notRun" | "invalid" | "running", number>;
@@ -31,7 +32,7 @@ const healthLabels: Record<keyof Counts, string> = { passing: "passing", failing
 export default function CoveragePage() {
     const { projectId } = useParams<{ projectId: string }>();
     const { canEdit } = useAuth();
-    const [environment, setEnvironment] = useState("Production");
+    const [environment, setEnvironment] = useRunEnvironment(projectId);
     const [data, setData] = useState<Coverage | null>(null);
     const [error, setError] = useState("");
     const [requesting, setRequesting] = useState(false);

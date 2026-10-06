@@ -67,7 +67,7 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
     return (
         <>
             <Button type="button" variant="outline" size="sm" onClick={() => changeOpen(true)}>
-                <FolderPlus size={13} /> New Feature
+                <FolderPlus size={13} /> New feature
             </Button>
             <Dialog open={open} onOpenChange={changeOpen}>
                 <DialogContent className="max-w-md">
