@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -86,20 +87,20 @@ async function specDetail(spec: Spec, runLimit?: number) {
 export function createSpecsRouter(): Hono {
     const router = new Hono();
 
-    router.get("/specs/:id", async (c) => {
+    router.get("/specs/:id", access("viewer"), async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         const limit = Number.parseInt(c.req.query("limit") ?? "", 10);
         return c.json(await specDetail(spec, Number.isFinite(limit) && limit > 0 ? limit : undefined));
     });
 
-    router.patch("/specs/:id", zValidator("json", updateSpecSchema), async (c) => {
+    router.patch("/specs/:id", access("editor"), zValidator("json", updateSpecSchema), async (c) => {
         const result = await updateSpecWithLock(c.req.param("id"), c.req.valid("json")).catch(mapManualError);
         if (!result) throw new HTTPException(404, { message: "Spec not found" });
         return c.json(await specDetail(result.spec));
     });
 
-    router.put("/specs/:id/files", zValidator("json", editFilesSchema), async (c) => {
+    router.put("/specs/:id/files", access("editor"), zValidator("json", editFilesSchema), async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         const body = c.req.valid("json");
@@ -107,7 +108,7 @@ export function createSpecsRouter(): Hono {
         return c.json(await specDetail(updated));
     });
 
-    router.delete("/specs/:id", async (c) => {
+    router.delete("/specs/:id", access("editor"), async (c) => {
         try {
             if (!(await deleteSpecData(c.req.param("id")))) {
                 throw new HTTPException(404, { message: "Spec not found" });

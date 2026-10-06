@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -8,7 +9,7 @@ import { schedulesRepository } from "../../repositories/schedules";
 
 export function createSchedulesRouter(): Hono {
     const router = new Hono();
-    router.get("/projects/:id/automation", async (c) => {
+    router.get("/projects/:id/automation", access("editor"), async (c) => {
         const id = c.req.param("id");
         if (!await projectsRepository.getProject(id)) throw new HTTPException(404, { message: "Project not found" });
         return c.json({
@@ -16,7 +17,7 @@ export function createSchedulesRouter(): Hono {
             notifications: await schedulesRepository.notifications(id),
         });
     });
-    router.put("/projects/:id/automation", zValidator("json", automationSettingsSchema), async (c) => {
+    router.put("/projects/:id/automation", access("editor"), zValidator("json", automationSettingsSchema), async (c) => {
         const id = c.req.param("id");
         if (!await projectsRepository.getProject(id)) throw new HTTPException(404, { message: "Project not found" });
         try {

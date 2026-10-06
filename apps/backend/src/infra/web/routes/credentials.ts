@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -48,27 +49,27 @@ function mapDomainError(error: unknown): never {
 export function createCredentialsRouter(): Hono {
     const router = new Hono();
 
-    router.get("/projects/:id/credentials", async (c) => {
+    router.get("/projects/:id/credentials", access("viewer"), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ profiles: await listPublicProfiles(project.id) });
     });
 
-    router.post("/projects/:id/credentials", zValidator("json", createSchema), async (c) => {
+    router.post("/projects/:id/credentials", access("editor"), zValidator("json", createSchema), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         const profile = await createProfile(project.id, c.req.valid("json")).catch(mapDomainError);
         return c.json({ profile });
     });
 
-    router.put("/credentials/:id", zValidator("json", updateSchema), async (c) => {
+    router.put("/credentials/:id", access("editor"), zValidator("json", updateSchema), async (c) => {
         const row = await credentialsRepository.getProfile(c.req.param("id"));
         if (!row) throw new HTTPException(404, { message: "Credential profile not found" });
         const profile = await updateProfile(row, c.req.valid("json")).catch(mapDomainError);
         return c.json({ profile });
     });
 
-    router.delete("/credentials/:id", async (c) => {
+    router.delete("/credentials/:id", access("editor"), async (c) => {
         const row = await credentialsRepository.getProfile(c.req.param("id"));
         if (!row) throw new HTTPException(404, { message: "Credential profile not found" });
         await deleteProfile(row);
@@ -76,7 +77,7 @@ export function createCredentialsRouter(): Hono {
     });
 
     router.post(
-        "/chats/:chatId/credential-requests/:requestId",
+        "/chats/:chatId/credential-requests/:requestId", access("editor"),
         zValidator("json", requestResolutionSchema),
         async (c) => {
             const chatId = c.req.param("chatId");

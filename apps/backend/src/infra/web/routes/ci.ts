@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { publicFrontendOrigin } from "../security";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -55,25 +56,25 @@ async function acceptTrigger(c: Context, projectId: string, target?: string) {
 
 export function createCiSettingsRouter(): Hono {
     const router = new Hono();
-    router.get("/projects/:id/ci", async (c) => {
+    router.get("/projects/:id/ci", access("viewer"), async (c) => {
         const id = c.req.param("id");
         const project = await requireProject(id);
         c.header("Cache-Control", "no-store");
         return c.json({ allowedOrigins: project.ciAllowedOrigins, projectOrigin: new URL(project.baseUrl).origin, token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map((batch) => ciResult(batch, publicFrontendOrigin(c)))) });
     });
-    router.put("/projects/:id/ci", zValidator("json", ciSettingsSchema), async (c) => {
+    router.put("/projects/:id/ci", access("editor"), zValidator("json", ciSettingsSchema), async (c) => {
         const project = await requireProject(c.req.param("id"));
         const allowedOrigins = [...new Set(c.req.valid("json").allowedOrigins)];
         await projectsRepository.updateProject(project.id, { ciAllowedOrigins: allowedOrigins });
         return c.json({ allowedOrigins });
     });
-    router.post("/projects/:id/ci/token", async (c) => {
+    router.post("/projects/:id/ci/token", access("editor"), async (c) => {
         const id = c.req.param("id");
         await requireProject(id);
         c.header("Cache-Control", "no-store");
         return c.json(await issueCiToken(id));
     });
-    router.delete("/projects/:id/ci/token", async (c) => {
+    router.delete("/projects/:id/ci/token", access("editor"), async (c) => {
         await requireProject(c.req.param("id"));
         await ciRepository.revokeToken(c.req.param("id"));
         return c.body(null, 204);
@@ -83,12 +84,12 @@ export function createCiSettingsRouter(): Hono {
 
 export function createCiRouter(): Hono {
     const router = new Hono();
-    router.get("/ci/projects/:id/client.mjs", projectAuth, async (c) => {
+    router.get("/ci/projects/:id/client.mjs", access("ci-token"), projectAuth, async (c) => {
         c.header("Content-Type", "text/javascript; charset=utf-8");
         c.header("X-Content-Type-Options", "nosniff");
         return c.body(await fs.readFile(path.join(backendRoot, "scripts", "specbook-ci.mjs"), "utf8"));
     });
-    router.post("/ci/projects/:id/runs", projectAuth, zValidator("json", ciRunSchema), async (c) => {
+    router.post("/ci/projects/:id/runs", access("ci-token"), projectAuth, zValidator("json", ciRunSchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
         await acceptTrigger(c, projectId, input.baseUrl);
@@ -118,7 +119,7 @@ export function createCiRouter(): Hono {
             throw new HTTPException(error instanceof ResourceBusyError ? 409 : 400, { message: error instanceof Error ? error.message : String(error) });
         }
     });
-    router.get("/ci/runs/:batchId", async (c) => {
+    router.get("/ci/runs/:batchId", access("ci-token"), async (c) => {
         if (!c.req.header("authorization")) throw new HTTPException(401, { message: "A valid project CI bearer token is required" });
         const id = c.req.param("batchId");
         if (!z.string().uuid().safeParse(id).success) throw new HTTPException(404, { message: "CI batch not found" });
@@ -141,7 +142,7 @@ export function createCiRouter(): Hono {
         if (format === "markdown") return c.body(markdownResult(result), 200, { "Content-Type": "text/markdown; charset=utf-8" });
         return c.json(result);
     });
-    router.post("/ci/projects/:id/deploy", projectAuth, zValidator("json", deploySchema), async (c) => {
+    router.post("/ci/projects/:id/deploy", access("ci-token"), projectAuth, zValidator("json", deploySchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
         await acceptTrigger(c, projectId, input.url);

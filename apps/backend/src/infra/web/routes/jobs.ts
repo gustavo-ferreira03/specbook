@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { closeChatBrowser } from "../../../core/browser/sessions";
 import { enqueueIntent } from "../../../core/steward/engine";
 import fs from "node:fs/promises";
@@ -19,7 +20,7 @@ import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors
 
 export function createJobsRouter(): Hono {
     const router = new Hono();
-    router.get("/projects/:id/overview", async (c) => {
+    router.get("/projects/:id/overview", access("viewer"), async (c) => {
         if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
         return c.json(await projectOverview(c.req.param("id")));
     });
@@ -27,16 +28,16 @@ export function createJobsRouter(): Hono {
         if (!await projectsRepository.getProject(c.req.param("id")!)) throw new HTTPException(404, { message: "Project not found" });
         await next();
     });
-    router.get("/projects/:id/jobs", async (c) => c.json({ jobs: await jobsRepository.list(c.req.param("id")) }));
-    router.post("/projects/:id/jobs", zValidator("json", createJobSchema), async (c) => {
+    router.get("/projects/:id/jobs", access("viewer"), async (c) => c.json({ jobs: await jobsRepository.list(c.req.param("id")) }));
+    router.post("/projects/:id/jobs", access("editor"), zValidator("json", createJobSchema), async (c) => {
         return c.json({ job: await enqueueJob(c.req.param("id"), c.req.valid("json")) }, 202);
     });
-    router.get("/projects/:id/jobs/:jobId", async (c) => {
+    router.get("/projects/:id/jobs/:jobId", access("viewer"), async (c) => {
         const job = await jobsRepository.get(c.req.param("jobId"));
         if (!job || job.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Job not found" });
         return c.json({ job, actions: await jobsRepository.actions(job.id) });
     });
-    router.post("/projects/:id/jobs/:jobId/cancel", async (c) => {
+    router.post("/projects/:id/jobs/:jobId/cancel", access("editor"), async (c) => {
         const job = await jobsRepository.get(c.req.param("jobId"));
         if (!job || job.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Job not found" });
         if (!["queued", "running", "blocked", "paused", "stalled"].includes(job.status)) throw new HTTPException(409, { message: "Job already stopped" });
@@ -45,7 +46,7 @@ export function createJobsRouter(): Hono {
         await jobsRepository.log(job.id, "cancelled", "Cancelled by human");
         return c.json({ ok: true });
     });
-    router.get("/projects/:id/inbox/:itemId/evidence/:file{.+}", async (c) => {
+    router.get("/projects/:id/inbox/:itemId/evidence/:file{.+}", access("viewer"), async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));
         if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
         const verification = item.payload.verification as ProposalVerification | undefined;
@@ -56,7 +57,7 @@ export function createJobsRouter(): Hono {
         if (await fs.realpath(target) !== target) throw new HTTPException(400, { message: "Invalid artifact path" });
         return c.body(new Uint8Array(await fs.readFile(target)), 200, { "Content-Type": "image/png", "Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff" });
     });
-    router.post("/projects/:id/inbox/:itemId/promote", async (c) => {
+    router.post("/projects/:id/inbox/:itemId/promote", access("editor"), async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));
         if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
         if (item.kind !== "bug_report") throw new HTTPException(400, { message: "Only bug reports can be promoted to regression coverage" });
@@ -70,7 +71,7 @@ ${item.body}`.slice(0, 6000),
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, regressionIntentId: intent.id } });
         return c.json({ intentId: intent.id }, 202);
     });
-    router.post("/projects/:id/inbox/:itemId/discuss", async (c) => {
+    router.post("/projects/:id/inbox/:itemId/discuss", access("editor"), async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));
         if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
         const existing = typeof item.payload.discussionChatId === "string" ? await chatsRepository.getChatRow(item.payload.discussionChatId) : null;
@@ -80,7 +81,7 @@ ${item.body}`.slice(0, 6000),
         startChatTurn(chat.id, `Help me understand this suggestion and decide what to do. Explain it in plain English. Do not change files unless I ask you to.\n${item.title}\n${sanitizeTechnicalDetails(item.body)}\nSuggestion reference: ${item.id}.`);
         return c.json({ chatId: chat.id });
     });
-    router.post("/projects/:id/inbox/:itemId/review", zValidator("json", reviewSchema), async (c) => {
+    router.post("/projects/:id/inbox/:itemId/review", access("editor"), zValidator("json", reviewSchema), async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));
         if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
         const { action, answer } = c.req.valid("json");

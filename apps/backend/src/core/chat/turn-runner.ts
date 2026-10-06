@@ -1,4 +1,5 @@
 import path from "node:path";
+import { auditTools } from "../accounts/audit";
 import type { TurnPolicy } from "../jobs/policy";
 import {
     createAgentSession,
@@ -324,7 +325,7 @@ async function runReservedChatTurn(
             modelRuntime,
             cwd,
             noTools: "builtin",
-            customTools: turnPolicy ? turnPolicy.tools(customTools) : customTools,
+            customTools: auditTools(row.projectId, id, turnPolicy ? turnPolicy.tools(customTools) : customTools),
             resourceLoader,
             sessionManager,
         });

@@ -1,3 +1,5 @@
+import { access } from "../access";
+import { watchSession } from "../../../core/accounts/sessions";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -32,19 +34,19 @@ const SSE_HEARTBEAT_MS = 20_000;
 export function createChatsRouter(): Hono {
     const router = new Hono();
 
-    router.post("/projects/:id/chats", async (c) => {
+    router.post("/projects/:id/chats", access("editor"), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ chat: await createChat(project.id) });
     });
 
-    router.get("/projects/:id/chats", async (c) => {
+    router.get("/projects/:id/chats", access("viewer"), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ chats: await listChats(project.id) });
     });
 
-    router.get("/chats/:id", async (c) => {
+    router.get("/chats/:id", access("viewer"), async (c) => {
         const id = c.req.param("id");
         const [row, view] = await Promise.all([chatsRepository.getChatRow(id), getChatView(id)]);
         if (!row || !view) throw new HTTPException(404, { message: "Chat not found" });
@@ -77,10 +79,11 @@ export function createChatsRouter(): Hono {
         });
     });
 
-    router.get("/chats/:id/events", async (c) => {
+    router.get("/chats/:id/events", access("viewer"), async (c) => {
         const id = c.req.param("id");
         if (!(await chatsRepository.getChatRow(id))) throw new HTTPException(404, { message: "Chat not found" });
         c.res = streamSSE(c, async (stream) => {
+            let releaseSession = () => {};
             const notify = (event: ChatUpdateEvent) =>
                 void stream
                     .writeSSE({
@@ -94,16 +97,19 @@ export function createChatsRouter(): Hono {
             stream.onAbort(() => {
                 clearInterval(heartbeat);
                 unsubscribe();
+                releaseSession();
             });
+            if (c.get("user")) releaseSession = await watchSession(c.req.raw.headers, () => stream.abort());
+            if (stream.aborted) { releaseSession(); return; }
             await stream.writeSSE({ event: "connected", data: "" });
-            await new Promise<void>((resolve) => stream.onAbort(resolve));
+            await new Promise<void>((resolve) => stream.aborted ? resolve() : stream.onAbort(resolve));
         });
         c.header("Cache-Control", "no-cache, no-transform");
         c.header("X-Accel-Buffering", "no");
         return c.res;
     });
 
-    router.delete("/chats/:id", async (c) => {
+    router.delete("/chats/:id", access("editor"), async (c) => {
         try {
             if (await jobsRepository.forChat(c.req.param("id"))) throw new HTTPException(409, { message: "Job sessions are retained for audit" });
             if (!(await deleteChatData(c.req.param("id")))) {
@@ -117,7 +123,7 @@ export function createChatsRouter(): Hono {
         }
     });
 
-    router.post("/chats/:id/message", zValidator("json", messageSchema), async (c) => {
+    router.post("/chats/:id/message", access("editor"), zValidator("json", messageSchema), async (c) => {
         const id = c.req.param("id");
         await assertChatWritable(id);
         const { text } = c.req.valid("json");
@@ -129,7 +135,7 @@ export function createChatsRouter(): Hono {
         return c.json({ ok: true });
     });
 
-    router.post("/chats/:id/follow-up", zValidator("json", messageSchema), async (c) => {
+    router.post("/chats/:id/follow-up", access("editor"), zValidator("json", messageSchema), async (c) => {
         const id = c.req.param("id");
         await assertChatWritable(id, { allowBusy: true });
         const { text } = c.req.valid("json");
@@ -141,7 +147,7 @@ export function createChatsRouter(): Hono {
         }
     });
 
-    router.post("/chats/:id/abort", async (c) => {
+    router.post("/chats/:id/abort", access("editor"), async (c) => {
         const id = c.req.param("id");
         await assertChatWritable(id, { allowBusy: true });
         try {
@@ -152,7 +158,7 @@ export function createChatsRouter(): Hono {
         }
     });
 
-    router.patch("/chats/:id/messages/:messageId", zValidator("json", messageSchema), async (c) => {
+    router.patch("/chats/:id/messages/:messageId", access("editor"), zValidator("json", messageSchema), async (c) => {
         const id = c.req.param("id");
         await assertChatWritable(id);
         const { text } = c.req.valid("json");
@@ -164,7 +170,7 @@ export function createChatsRouter(): Hono {
         }
     });
 
-    router.post("/chats/:id/messages/:messageId/retry", async (c) => {
+    router.post("/chats/:id/messages/:messageId/retry", access("editor"), async (c) => {
         const id = c.req.param("id");
         await assertChatWritable(id);
         try {

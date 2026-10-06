@@ -1,3 +1,4 @@
+import { access } from "../access";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { zValidator } from "@hono/zod-validator";
@@ -137,7 +138,7 @@ async function batchReportAvailable(batchId: string): Promise<boolean> {
 export function createRunsRouter(): Hono {
     const router = new Hono();
 
-    router.post("/specs/:id/run", async (c) => {
+    router.post("/specs/:id/run", access("editor"), async (c) => {
         try {
             const run = await executeSpec(c.req.param("id"), { automate: true });
             return c.json({ run });
@@ -146,7 +147,7 @@ export function createRunsRouter(): Hono {
         }
     });
 
-    router.post("/projects/:id/run-batches", zValidator("json", batchSchema), async (c) => {
+    router.post("/projects/:id/run-batches", access("editor"), zValidator("json", batchSchema), async (c) => {
         try {
             const { specIds, label } = c.req.valid("json");
             const batch = await startSpecBatch(c.req.param("id"), specIds, label);
@@ -156,7 +157,7 @@ export function createRunsRouter(): Hono {
         }
     });
 
-    router.get("/run-batches/:id", async (c) => {
+    router.get("/run-batches/:id", access("viewer"), async (c) => {
         const batch = await getRunBatch(c.req.param("id"));
         if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
         const reportAvailable = await batchReportAvailable(batch.id);
@@ -166,27 +167,27 @@ export function createRunsRouter(): Hono {
         });
     });
 
-    router.get("/specs/:id/runs", zValidator("query", runListSchema), async (c) => {
+    router.get("/specs/:id/runs", access("viewer"), zValidator("query", runListSchema), async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         const { limit, before } = c.req.valid("query");
         return c.json({ runs: await runsRepository.listRuns(spec.id, { limit, before }) });
     });
 
-    router.get("/runs/:id", async (c) => {
+    router.get("/runs/:id", access("viewer"), async (c) => {
         const run = await runsRepository.getRun(c.req.param("id"));
         if (!run) throw new HTTPException(404, { message: "Run not found" });
         return c.json({ run });
     });
 
-    router.get("/runs/:id/artifacts", async (c) => {
+    router.get("/runs/:id/artifacts", access("viewer"), async (c) => {
         const runId = c.req.param("id");
         await requireRun(runId);
         const directory = await realRunDirectory(runId);
         return c.json({ files: directory ? await listArtifactFiles(directory) : [] });
     });
 
-    router.get("/runs/:id/evidence", async (c) => {
+    router.get("/runs/:id/evidence", access("viewer"), async (c) => {
         const runId = c.req.param("id");
         const run = await runsRepository.getRun(runId);
         if (!run) throw new HTTPException(404, { message: "Run not found" });
@@ -248,7 +249,7 @@ export function createRunsRouter(): Hono {
         });
     });
 
-    router.get("/run-batches/:id/artifacts/:file{.+}", async (c) => {
+    router.get("/run-batches/:id/artifacts/:file{.+}", access("viewer"), async (c) => {
         const batchId = c.req.param("id");
         if (!(await getRunBatch(batchId))) throw new HTTPException(404, { message: "Run batch not found" });
         const directory = await realBatchDirectory(batchId);
@@ -274,7 +275,7 @@ export function createRunsRouter(): Hono {
         return c.body(new Uint8Array(withStorageShim(data, type)), 200, artifactHeaders(type));
     });
 
-    router.get("/runs/:id/artifacts/:file{.+}", async (c) => {
+    router.get("/runs/:id/artifacts/:file{.+}", access("viewer"), async (c) => {
         const runId = c.req.param("id");
         await requireRun(runId);
         const directory = await realRunDirectory(runId);

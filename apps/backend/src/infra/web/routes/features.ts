@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -47,7 +48,7 @@ function mapManualError(error: unknown): never {
 export function createFeaturesRouter(): Hono {
     const router = new Hono();
 
-    router.post("/projects/:id/features", zValidator("json", createFeatureSchema), async (c) => {
+    router.post("/projects/:id/features", access("editor"), zValidator("json", createFeatureSchema), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         const { parentId, title, description } = c.req.valid("json");
@@ -61,27 +62,27 @@ export function createFeaturesRouter(): Hono {
         return c.json({ feature });
     });
 
-    router.patch("/features/:id", zValidator("json", updateFeatureSchema), async (c) => {
+    router.patch("/features/:id", access("editor"), zValidator("json", updateFeatureSchema), async (c) => {
         const feature = await featuresRepository.getFeature(c.req.param("id"));
         if (!feature) throw new HTTPException(404, { message: "Feature not found" });
         const updated = await updateFeatureInRepo(feature, c.req.valid("json")).catch(mapManualError);
         return c.json({ feature: updated });
     });
 
-    router.get("/features/:id/file", async (c) => {
+    router.get("/features/:id/file", access("viewer"), async (c) => {
         const feature = await featuresRepository.getFeature(c.req.param("id"));
         if (!feature) throw new HTTPException(404, { message: "Feature not found" });
         return c.json({ feature, yaml: await readFeatureRaw(feature) });
     });
 
-    router.put("/features/:id/file", zValidator("json", editFileSchema), async (c) => {
+    router.put("/features/:id/file", access("editor"), zValidator("json", editFileSchema), async (c) => {
         const feature = await featuresRepository.getFeature(c.req.param("id"));
         if (!feature) throw new HTTPException(404, { message: "Feature not found" });
         const updated = await editFeatureFile(feature, c.req.valid("json").yaml).catch(mapManualError);
         return c.json({ feature: updated });
     });
 
-    router.delete("/features/:id", async (c) => {
+    router.delete("/features/:id", access("editor"), async (c) => {
         try {
             if (!(await deleteFeatureData(c.req.param("id")))) {
                 throw new HTTPException(404, { message: "Feature not found" });

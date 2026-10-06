@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -70,7 +71,7 @@ export function createProjectContextsRouter(): Hono {
     const router = new Hono();
 
     router.post(
-        "/projects/:id/context-discoveries",
+        "/projects/:id/context-discoveries", access("editor"),
         zValidator("json", discoveryBriefSchema),
         async (c) => {
             const project = await projectsRepository.getProject(c.req.param("id"));
@@ -106,7 +107,7 @@ export function createProjectContextsRouter(): Hono {
         },
     );
 
-    router.get("/projects/:id/context", async (c) => {
+    router.get("/projects/:id/context", access("viewer"), async (c) => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         const [confirmed, draft] = await Promise.all([
@@ -116,13 +117,13 @@ export function createProjectContextsRouter(): Hono {
         return c.json({ confirmed, draft });
     });
 
-    router.get("/project-contexts/:id", async (c) => {
+    router.get("/project-contexts/:id", access("viewer"), async (c) => {
         const revision = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
         if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
         return c.json({ revision });
     });
 
-    router.patch("/project-contexts/:id", zValidator("json", draftPatchSchema), async (c) => {
+    router.patch("/project-contexts/:id", access("editor"), zValidator("json", draftPatchSchema), async (c) => {
         const revision = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
         if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
         if (revision.status !== "draft") {
@@ -136,7 +137,7 @@ export function createProjectContextsRouter(): Hono {
         return c.json({ revision: updated });
     });
 
-    router.post("/project-contexts/:id/confirm", async (c) => {
+    router.post("/project-contexts/:id/confirm", access("editor"), async (c) => {
         const initial = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
         if (!initial) throw new HTTPException(404, { message: "Context revision not found" });
         return projectContextsRepository.withProjectContextDraftLock(initial.projectId, async () => {
@@ -162,7 +163,7 @@ export function createProjectContextsRouter(): Hono {
         });
     });
 
-    router.post("/project-contexts/:id/discard", async (c) => {
+    router.post("/project-contexts/:id/discard", access("editor"), async (c) => {
         const initial = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
         if (!initial) throw new HTTPException(404, { message: "Context revision not found" });
         return projectContextsRepository.withProjectContextDraftLock(initial.projectId, async () => {

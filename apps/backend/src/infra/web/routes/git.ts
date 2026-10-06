@@ -1,3 +1,4 @@
+import { access } from "../access";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
@@ -32,12 +33,12 @@ async function loadProject(id: string): Promise<Project> {
 export function createGitRouter(): Hono {
     const router = new Hono();
 
-    router.get("/projects/:id/git/remote", async (c) => {
+    router.get("/projects/:id/git/remote", access("viewer"), async (c) => {
         const project = await loadProject(c.req.param("id"));
         return c.json({ remote: await remoteAccessOf(c, project) });
     });
 
-    router.post("/projects/:id/git/remote/token", async (c) => {
+    router.post("/projects/:id/git/remote/token", access("editor"), async (c) => {
         const project = await loadProject(c.req.param("id"));
         const token = await repoGit.withRepoLock(project.id, async () => {
             await repoGit.ensureProjectRepo(project.id, { create: true });
@@ -49,19 +50,19 @@ export function createGitRouter(): Hono {
         return c.json({ token, remote: await remoteAccessOf(c, await loadProject(project.id)) });
     });
 
-    router.delete("/projects/:id/git/remote/token", async (c) => {
+    router.delete("/projects/:id/git/remote/token", access("editor"), async (c) => {
         const project = await loadProject(c.req.param("id"));
         await revokeGitAccessToken(project.id);
         return c.json({ remote: await remoteAccessOf(c, await loadProject(project.id)) });
     });
 
-    router.get("/specs/:id/history", async (c) => {
+    router.get("/specs/:id/history", access("viewer"), async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         return c.json({ entries: await specHistory(spec) });
     });
 
-    router.get("/specs/:id/history/:sha", async (c) => {
+    router.get("/specs/:id/history/:sha", access("viewer"), async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         return c.json(await specAtCommit(spec, c.req.param("sha")));
