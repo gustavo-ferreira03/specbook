@@ -33,7 +33,8 @@ export function createDiscoveryBrowserPolicy(
     const origin = new URL(revision.brief.startUrl).origin;
     return {
         allowedTools: DISCOVERY_BROWSER_TOOLS,
-        beforeCall: async (toolName, args) => {
+        beforeCall: async (toolName, args, signal) => {
+            signal?.throwIfAborted();
             if (toolName === "browser_navigate") {
                 const target = String(args.url ?? "");
                 let parsed: URL;
@@ -64,14 +65,16 @@ export function createDiscoveryBrowserPolicy(
                 }
             }
         },
-        afterCall: async () => {
-            const active = await getActiveTabUrl(mcp);
+        afterCall: async (_name, _args, _result, signal) => {
+            signal?.throwIfAborted();
+            const active = await getActiveTabUrl(mcp, signal);
             if (!active || isWithinDiscoveryOrigin(active, origin)) return;
-            await mcp.client.callTool({ name: "browser_navigate_back", arguments: {} }).catch(() => undefined);
-            const afterBack = await getActiveTabUrl(mcp);
+            await mcp.client.callTool({ name: "browser_navigate_back", arguments: {} }, undefined, { signal }).catch(() => undefined);
+            const afterBack = await getActiveTabUrl(mcp, signal);
             if (afterBack && !isWithinDiscoveryOrigin(afterBack, origin)) {
-                await mcp.navigate(revision.brief.startUrl).catch(() => undefined);
+                await mcp.navigate(revision.brief.startUrl, signal).catch(() => undefined);
             }
+            signal?.throwIfAborted();
             throw new Error(
                 `The page left the discovery origin ${origin} (it reached ${active}). The browser returned to the allowed origin; the external destination was not inspected.`,
             );
@@ -84,9 +87,9 @@ export function createAutonomousBrowserPolicy(startUrl: string, mcp: BrowserMcp)
     const policy = createDiscoveryBrowserPolicy({ brief: { startUrl } as ProjectContextRevisionRow["brief"] }, mcp);
     const allowed = new Set([...DISCOVERY_BROWSER_TOOLS, "browser_console_messages", "browser_network_requests", "browser_take_screenshot"]);
     return {
-        beforeCall: async (name, args) => {
+        beforeCall: async (name, args, signal) => {
             if (!allowed.has(name)) throw new Error("This browser action needs human authorization. Explain the blocker in the Inbox before proceeding.");
-            await policy.beforeCall?.(name, args);
+            await policy.beforeCall?.(name, args, signal);
         },
         afterCall: policy.afterCall,
     };

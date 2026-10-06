@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createCiRouter, createCiSettingsRouter } from "./infra/web/routes/ci";
 import { startSteward, stopSteward } from "./core/steward/engine";
 import { createStewardRouter } from "./infra/web/routes/steward";
 import { startFailureMonitor, stopFailureMonitor } from "./core/jobs/failures";
@@ -90,6 +91,8 @@ app.get("/health", (c) => c.json({ ok: true }));
 app.route("/", createProjectsRouter());
 app.route("/", createJobsRouter());
 app.route("/", createStewardRouter());
+app.route("/", createCiRouter());
+app.route("/", createCiSettingsRouter());
 app.route("/", createSchedulesRouter());
 app.route("/", createSpecsRouter());
 app.route("/", createRunsRouter());

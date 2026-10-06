@@ -50,6 +50,7 @@ function rejectionText(tool: string, error: string): string {
 }
 
 export interface DomainToolOptions {
+    baseUrl?: string;
     scrub?: (value: string) => Promise<string>;
     metrics?: TurnMetricsRecorder;
 }
@@ -204,7 +205,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     return text(`Spec ${params.specId} not found in this project.`);
                 }
                 try {
-                    const run = await executeSpec(spec.id, { persistFailures: false, signal });
+                    const run = await executeSpec(spec.id, { persistFailures: false, baseUrl: options.baseUrl, signal });
                     metrics?.runSpecOutcome({
                         specId: spec.id,
                         runId: run.id,

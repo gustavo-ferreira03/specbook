@@ -90,7 +90,7 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
         );
     }
     const baseUrl = options.baseUrl ?? project.baseUrl;
-    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, baseUrl, refs);
+    const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, refs);
     const scrub = await projectSecretScrubber(spec.projectId);
 
     const run = await runsRepository.createRun({

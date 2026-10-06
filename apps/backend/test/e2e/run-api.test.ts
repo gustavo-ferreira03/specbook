@@ -33,11 +33,25 @@ const available = await chromiumAvailable();
 let site: http.Server;
 let baseUrl = "";
 const flakyRequests = new Map<string, number>();
+const previewCredentials: string[] = [];
 
 before(async () => {
     await runMigrations();
     site = http.createServer((request, response) => {
         response.setHeader("content-type", "text/html");
+        if (request.url === "/credential-preview") {
+            response.end(`<form method="post" action="/credential-receiver"><label>Password <input type="password" name="password" oninput="fetch('/credential-receiver', { method: 'POST', body: this.value })"></label><button>Continue</button></form>`);
+            return;
+        }
+        if (request.url === "/credential-receiver") {
+            let body = "";
+            request.on("data", (chunk) => { body += chunk.toString(); });
+            request.on("end", () => {
+                previewCredentials.push(body);
+                response.end("<h1>Credentials received</h1>");
+            });
+            return;
+        }
         if (request.url?.startsWith("/flaky")) {
             const count = (flakyRequests.get(request.url) ?? 0) + 1;
             flakyRequests.set(request.url, count);
@@ -113,10 +127,48 @@ test("Store", async ({ page, step, secret }) => {
             assert.ok(!(await fs.readFile(path.join(runsDir, run.id, file), "utf8")).includes("s3cret-value"), file);
         }
     });
+
+    test("a preview override cannot receive saved credentials until its origin is explicitly allowed", { timeout: 120_000 }, async () => {
+        const { getProfileByName, updateProfile } = await import("../../src/core/credentials/profiles");
+        const project = await projectsRepository.createProject("Preview credential boundary", "http://127.0.0.1:1");
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        await createProfile(project.id, { name: "shopper", fields: [{ key: "password", value: "preview-trust-secret" }] });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
+        const steps = ["Open preview", "Enter password", "Submit credentials"];
+        const testSource = `import { test, expect } from "specbook";
+test("Preview credentials", async ({ page, step, secret }) => {
+    await step("Open preview", async () => {
+        await page.goto("/credential-preview");
+    });
+    await step("Enter password", async () => {
+        await page.getByLabel("Password").fill(secret("shopper", "password"));
+    });
+    await step("Submit credentials", async () => {
+        await page.getByRole("button", { name: "Continue" }).click();
+        await expect(page.getByRole("heading")).toHaveText("Credentials received");
+    });
+});
+`;
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Preview credentials", description: "",
+            humanSpec: { preconditions: [], steps, expectedResult: "Credentials received", postconditions: [] }, testSource });
+        assert.equal(spec.status, "unverified", spec.invalidReason ?? "");
+        previewCredentials.length = 0;
+        const blocked = await executeSpec(spec.id, { baseUrl });
+        assert.equal(blocked.status, "failed");
+        assert.equal(blocked.failedStep, "Enter password");
+        assert.match(blocked.failReason ?? "", /current page origin is not allowed/);
+        assert.deepEqual(previewCredentials, [], "neither typing events nor form submission may expose the saved secret");
+        const profile = (await getProfileByName(project.id, "shopper"))!;
+        await updateProfile(profile, { allowedOrigins: [new URL(baseUrl).origin], fields: [{ key: "password" }] });
+        const allowed = await executeSpec(spec.id, { baseUrl });
+        assert.equal(allowed.status, "passed", allowed.failReason ?? "");
+        assert.ok(previewCredentials.some((body) => body === "preview-trust-secret" || body === "password=preview-trust-secret"), "explicitly trusted preview receives the credential");
+        assert.equal((await projectsRepository.getProject(project.id))?.baseUrl, "http://127.0.0.1:1", "a run override does not change the canonical trusted origin");
+    });
 });
 
 describe("proposal verification", { skip: available ? false : "Chromium is not installed" }, () => {
-    test("verifies a candidate without changing the contract or index, then applies on approval", async () => {
+    test("verifies in the failed preview environment, preserves the contract, and applies on approval", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { specsRepository } = await import("../../src/infra/repositories/specs");
         const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
@@ -130,7 +182,11 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
         const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Candidate", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const directory = path.join(repoGit.getRepoDir(project.id), spec.path);
         const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf8");
-        const job = await jobsRepository.create({ projectId: project.id, chatId: "candidate-test", trigger: "manual", kind: "failure_triage", specId: spec.id, goal: "Heal", budget: jobBudgetSchema.parse({}) });
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const originalRun = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(project.id), sourceHash: spec.sourceHash, baseUrl });
+        await runsRepository.finishRun(originalRun.id, "failed", 1, "Preview locator drift");
+        await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1" });
+        const job = await jobsRepository.create({ projectId: project.id, runId: originalRun.id, chatId: "candidate-test", trigger: "manual", kind: "failure_triage", specId: spec.id, goal: "Heal", budget: jobBudgetSchema.parse({}) });
         const running = (await jobsRepository.claim(job.id))!;
         await jobsRepository.update(job.id, { classification: "test_drift" });
         await assert.rejects(() => proposeMutation(running, "update_spec", { specId: spec.id, humanSpec: HUMAN_SPEC, testSource: VALID_SPEC }), /implementation/);
@@ -139,6 +195,7 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
         const head = await repoGit.getHeadSha(project.id);
         const result = await verifyProposal(running, proposal);
         assert.equal(result.status, "passed", result.failReason ?? "");
+        assert.equal(result.baseUrl, baseUrl);
         assert.ok(result.screenshots.length);
         assert.equal(await repoGit.getHeadSha(project.id), head);
         assert.equal((await specsRepository.getSpec(spec.id))?.status, "unverified");

@@ -28,16 +28,16 @@ const ALLOWED_TOOLS = new Set([
 
 export interface BrowserToolPolicy {
     allowedTools?: ReadonlySet<string>;
-    beforeCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>;
-    afterCall?: (toolName: string, args: Record<string, unknown>, result: string) => Promise<void>;
+    beforeCall?: (toolName: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<void>;
+    afterCall?: (toolName: string, args: Record<string, unknown>, result: string, signal?: AbortSignal) => Promise<void>;
     sanitizeResult?: (text: string) => Promise<string> | string;
 }
 
 export interface BrowserMcp {
     client: Client;
     tools: { name: string; description?: string; inputSchema: unknown }[];
-    ensureBrowser: () => Promise<void>;
-    navigate: (url: string) => Promise<void>;
+    ensureBrowser: (signal?: AbortSignal) => Promise<void>;
+    navigate: (url: string, signal?: AbortSignal) => Promise<void>;
     close: () => Promise<void>;
 }
 
@@ -98,11 +98,11 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string 
     try {
         await client.connect(transport);
         const { tools } = await client.listTools();
-        const ensureBrowser = async () => {
-            await client.callTool({ name: "browser_tabs", arguments: { action: "list" } });
+        const ensureBrowser = async (signal?: AbortSignal) => {
+            await client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal });
         };
-        const navigate = async (url: string) => {
-            await client.callTool({ name: "browser_navigate", arguments: { url } });
+        const navigate = async (url: string, signal?: AbortSignal) => {
+            await client.callTool({ name: "browser_navigate", arguments: { url } }, undefined, { signal });
         };
         return {
             client,
@@ -158,9 +158,10 @@ export async function renderMcpResult(result: { content?: unknown }, workDir: st
     return inlineSnapshots(extractMcpText(result), workDir);
 }
 
-export async function getActiveTabUrl(mcp: BrowserMcp): Promise<string | null> {
+export async function getActiveTabUrl(mcp: BrowserMcp, signal?: AbortSignal): Promise<string | null> {
     try {
-        const result = await mcp.client.callTool({ name: "browser_tabs", arguments: { action: "list" } });
+        signal?.throwIfAborted();
+        const result = await mcp.client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal });
         const text = extractMcpText(result as { content?: unknown });
         const pageUrl = text.match(/^- Page URL: (\S+)/m);
         if (pageUrl) return pageUrl[1];
@@ -168,6 +169,7 @@ export async function getActiveTabUrl(mcp: BrowserMcp): Promise<string | null> {
         const listedUrl = currentTab?.match(/\]\((\S+)\)/);
         return listedUrl ? listedUrl[1] : null;
     } catch {
+        signal?.throwIfAborted();
         return null;
     }
 }
@@ -188,7 +190,8 @@ export function bridgeBrowserTools(
                 parameters: Type.Unsafe<Record<string, unknown>>(
                     tool.inputSchema as Parameters<typeof Type.Unsafe>[0],
                 ),
-                async execute(_id, params) {
+                async execute(_id, params, signal) {
+                    signal?.throwIfAborted();
                     const args = (params ?? {}) as Record<string, unknown>;
                     const clean = async (value: string) =>
                         policy?.sanitizeResult ? await policy.sanitizeResult(value) : value;
@@ -199,15 +202,17 @@ export function bridgeBrowserTools(
                     });
                     if (policy?.beforeCall) {
                         try {
-                            await policy.beforeCall(tool.name, args);
+                            await policy.beforeCall(tool.name, args, signal);
                         } catch (error) {
+                            signal?.throwIfAborted();
                             return toolError(error instanceof Error ? error.message : String(error));
                         }
                     }
                     let resultText = "";
                     let callError = "";
                     try {
-                        const result = await mcp.client.callTool({ name: tool.name, arguments: args });
+                        signal?.throwIfAborted();
+                        const result = await mcp.client.callTool({ name: tool.name, arguments: args }, undefined, { signal });
                         resultText = await renderMcpResult(result as { content?: unknown }, workDir);
                     } catch (error) {
                         callError = `browser tool failed: ${String(error)}`;
@@ -215,11 +220,13 @@ export function bridgeBrowserTools(
                     }
                     if (policy?.afterCall) {
                         try {
-                            await policy.afterCall(tool.name, args, resultText);
+                            await policy.afterCall(tool.name, args, resultText, signal);
                         } catch (error) {
+                            signal?.throwIfAborted();
                             return toolError(error instanceof Error ? error.message : String(error));
                         }
                     }
+                    signal?.throwIfAborted();
                     if (callError) return toolError(callError);
                     return {
                         content: [{ type: "text" as const, text: (await clean(resultText)) || "(no output)" }],

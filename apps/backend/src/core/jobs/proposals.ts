@@ -1,3 +1,4 @@
+import { jobBaseUrl } from "./environment";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
@@ -87,7 +88,9 @@ export async function applyProposal(item: InboxItem): Promise<string> {
         if (item.payload.requiresVerification) {
             const verified = item.payload.verification as { sourceHash: string; baseUrl: string };
             const project = await projectsRepository.getProject(item.projectId);
-            if (verified.sourceHash !== sourceHashOf(patch.testSource ?? "") || verified.baseUrl !== project?.baseUrl) {
+            const job = await jobsRepository.get(item.jobId);
+            const override = job ? await jobBaseUrl(job) : undefined;
+            if (verified.sourceHash !== sourceHashOf(patch.testSource ?? "") || verified.baseUrl !== (override ?? project?.baseUrl)) {
                 throw new Error("Proposal source or project URL changed; verify again before approval");
             }
         }

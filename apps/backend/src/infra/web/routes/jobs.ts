@@ -1,3 +1,4 @@
+import { closeChatBrowser } from "../../../core/browser/sessions";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { proposalDirectory, type ProposalVerification } from "../../../core/jobs/verification";
@@ -31,7 +32,7 @@ export function createJobsRouter(): Hono {
         if (!job || job.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Job not found" });
         if (!["queued", "running", "blocked"].includes(job.status)) throw new HTTPException(409, { message: "Job already stopped" });
         await jobsRepository.update(job.id, { status: "cancelled" });
-        if (isChatBusy(job.chatId)) await abortChatTurn(job.chatId);
+        if (isChatBusy(job.chatId)) await Promise.all([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
         await jobsRepository.log(job.id, "cancelled", "Cancelled by human");
         return c.json({ ok: true });
     });

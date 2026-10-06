@@ -244,6 +244,8 @@ describe("project, feature and spec through the writer", () => {
 });
 
 describe("autonomous job proposals", () => {
+
+
     test("proposals preserve the contract, reject stale edits, and replay approval once", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeMutation, applyProposal } = await import("../../src/core/jobs/proposals");
@@ -415,4 +417,89 @@ describe("project steward", () => {
         item.payload.params = { specId: crypto.randomUUID(), testSource: `page.fill(".locator('new')")` };
         assert.equal(isLocatorOnlyFix(item), false, "input data cannot masquerade as a locator change");
     });
+
+    test("replays changed Spec and deploy signals once after a crash, while retaining real reversions", async (t) => {
+        const { collectProjectSignals } = await import("../../src/core/steward/signals");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const projectId = await createProject("Observation recovery");
+        const project = (await projectsRepository.getProject(projectId))!;
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const { spec } = await createSpec(projectId, feature.id, "Store");
+        let build = "a";
+        t.mock.method(globalThis, "fetch", async () => new Response(`<script src="/${build}.js"></script>`));
+        let at = Date.now();
+        let observation = await collectProjectSignals(project, {}, at);
+        await stewardRepository.update(projectId, { observation });
+        const originalHash = spec.sourceHash;
+        for (const [index, version] of ["b", "a", "b"].entries()) {
+            at += 300_001;
+            build = version;
+            await specsRepository.updateSpecRecord(spec.id, { sourceHash: version === "a" ? originalHash : "changed-source" });
+            const persisted = (await stewardRepository.get(projectId)).observation;
+            observation = await collectProjectSignals(project, persisted, at);
+            // Simulate the process stopping after signal INSERT, before saving its observation.
+            const replay = await collectProjectSignals(project, persisted, at + 1000);
+            assert.deepEqual(replay.specGenerations, observation.specGenerations);
+            assert.equal(replay.deployment?.generation, observation.deployment?.generation);
+            const signals = await stewardRepository.signals(projectId);
+            assert.equal(signals.filter((signal) => signal.kind === "spec_changed").length, index + 1);
+            assert.equal(signals.filter((signal) => signal.kind === "deployment_changed").length, index + 1);
+            assert.equal(observation.specGenerations?.[spec.id], index + 1);
+            await stewardRepository.update(projectId, { observation });
+        }
+    });
+
+    test("run preparation blockers create one budgeted investigation and retry only after it finishes", async () => {
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
+        await stopJobWorker();
+        const projectId = await createProject("Missing run access");
+        await stewardRepository.update(projectId, { lastPlannerAt: new Date().toISOString() });
+        const feature = await writer.createFeatureInRepo(projectId, null, "Sign in", "");
+        const source = VALID_SPEC.replace("{ page, step }", "{ page, step, secret }")
+            .replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByLabel("Email").fill(secret("shopper", "email"));');
+        const { spec } = await createSpec(projectId, feature.id, "Sign in", source);
+        const intent = await enqueueIntent(projectId, { kind: "run_specs", goal: "Verify the preview", reason: "A preview deployed", specIds: [spec.id], baseUrl: "https://preview.example.com" }, "deploy:missing-access");
+        await processProjectSteward(projectId, false);
+        const failed = (await stewardRepository.intents(projectId)).find((item) => item.id === intent.id)!;
+        assert.equal(failed.status, "failed");
+        assert.match(failed.reason, /credentials.*not configured/);
+        const investigation = (await stewardRepository.intents(projectId)).find((item) => item.key === `run-blocker:${intent.id}`)!;
+        assert.equal(investigation.intent.kind, "explore");
+        assert.equal(investigation.intent.baseUrl, "https://preview.example.com");
+        assert.deepEqual(investigation.intent.specIds, [spec.id]);
+        assert.match(investigation.intent.goal, /Inbox.*remain blocked/);
+        await processProjectSteward(projectId, false);
+        const job = (await jobsRepository.get(investigation.id))!;
+        assert.equal(job.status, "queued");
+        assert.equal(job.budget.maxTokens, 100_000);
+        await jobsRepository.update(job.id, { status: "blocked" });
+        const question = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Credentials needed", body: "Configure the shopper profile", payload: { waitingFor: "credentials" } });
+        await processProjectSteward(projectId, false);
+        assert.equal((await stewardRepository.intents(projectId)).filter((item) => item.key.startsWith("resume-run:")).length, 0);
+        await stewardRepository.signal({ projectId, kind: "credentials_changed", key: "access:changed", title: "Access changed", body: "Inspect the new profiles" });
+        await processProjectSteward(projectId, false);
+        assert.equal((await jobsRepository.get(job.id))?.status, "queued");
+        assert.equal((await jobsRepository.item(question.id))?.status, "answered");
+        // Even if an agent incorrectly finishes before access is usable, do not spin on failing preparation.
+        await jobsRepository.update(job.id, { status: "completed" });
+        await processProjectSteward(projectId, false);
+        await processProjectSteward(projectId, false);
+        const intents = await stewardRepository.intents(projectId);
+        const resumed = intents.find((item) => item.key === `resume-run:${intent.id}:${investigation.id}`)!;
+        assert.equal(resumed.intent.baseUrl, "https://preview.example.com");
+        assert.deepEqual(resumed.intent.specIds, [spec.id]);
+        assert.equal((await jobsRepository.list(projectId)).length, 1, "the matching recent investigation prevents an unbounded retry loop");
+        assert.equal(intents.filter((item) => item.key.startsWith("run-blocker:")).length, 2);
+        assert.equal(intents.find((item) => item.key === `run-blocker:${resumed.id}`)?.status, "ignored");
+    });
+
+
+
+
+
+
+
 });

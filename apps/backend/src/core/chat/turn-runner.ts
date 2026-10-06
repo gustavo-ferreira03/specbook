@@ -171,7 +171,8 @@ async function runReservedChatTurn(
             return;
         }
         previousUserCount = userMessageCount(sessionManager);
-        const project = await projectsRepository.getProject(row.projectId);
+        const storedProject = await projectsRepository.getProject(row.projectId);
+        const project = storedProject && turnPolicy?.baseUrl ? { ...storedProject, baseUrl: turnPolicy.baseUrl } : storedProject;
         if (!project) {
             metrics.fail("error", "project_missing");
             ensureUserMessage(sessionManager, userText, previousUserCount);
@@ -230,15 +231,15 @@ async function runReservedChatTurn(
                 : turnPolicy ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp), sanitizeResult: scrub } : { sanitizeResult: scrub };
             const policy: BrowserToolPolicy = {
                 ...basePolicy,
-                beforeCall: async (toolName, args) => {
-                    await browser.mcp.ensureBrowser();
-                    await basePolicy.beforeCall?.(toolName, args);
+                beforeCall: async (toolName, args, signal) => {
+                    await browser.mcp.ensureBrowser(signal);
+                    await basePolicy.beforeCall?.(toolName, args, signal);
                     beginChatBrowserTool(id, toolName);
                     publishChatUpdate(id);
                 },
-                afterCall: async (toolName, args, result) => {
+                afterCall: async (toolName, args, result, signal) => {
                     try {
-                        await basePolicy.afterCall?.(toolName, args, result);
+                        if (!signal?.aborted) await basePolicy.afterCall?.(toolName, args, result, signal);
                     } finally {
                         endChatBrowserTool(id, toolName);
                         publishChatUpdate(id);
@@ -256,7 +257,7 @@ async function runReservedChatTurn(
 
         const credentialTools = createCredentialTools({
             projectId: row.projectId,
-            baseUrl: project.baseUrl,
+            baseUrl: storedProject!.baseUrl,
             chatId: id,
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
@@ -278,7 +279,7 @@ async function runReservedChatTurn(
               ]
             : [
                   ...browserTools,
-                  ...createDomainTools(row.projectId, { scrub, metrics }),
+                  ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl }),
                   ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`)] : []),
                   ...credentialTools,
                   ...sessionTools,

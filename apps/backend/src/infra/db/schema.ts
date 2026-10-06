@@ -290,3 +290,11 @@ export const stewardIntents = sqliteTable("steward_intents", {
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (table) => [uniqueIndex("steward_intent_key").on(table.projectId, table.key)]);
+
+export const projectCiTokens = sqliteTable("project_ci_tokens", {
+    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash"),
+    tokenPrefix: text("token_prefix"),
+    createdAt: text("created_at"),
+    lastUsedAt: text("last_used_at"),
+});

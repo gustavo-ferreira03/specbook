@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { httpUrlSchema } from "../ci/schemas";
 
 export const intentKindSchema = z.enum(["triage", "regenerate", "coverage", "explore", "run_specs", "planner"]);
 
@@ -8,6 +9,7 @@ export const stewardIntentSchema = z.object({
     reason: z.string().trim().min(1).max(2000),
     specIds: z.array(z.string().uuid()).max(100).optional(),
     runId: z.string().uuid().optional(),
+    baseUrl: httpUrlSchema.optional(),
     priority: z.number().int().min(0).max(100).default(50),
 }).strict().superRefine((intent, context) => {
     if (intent.kind === "triage" && !intent.runId) {

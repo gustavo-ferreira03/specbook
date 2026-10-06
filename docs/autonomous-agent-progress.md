@@ -79,3 +79,17 @@ Steward validation: all 191 tests passed before starting the next feature, inclu
 Failures now rerun once before triage. A unique retry reference survives restart; the monitor checks the original source and YAML hashes before retrying or healing. Pass-on-retry flags both attempts as flaky and emits no healer signal. Disabling healing still allows the retry. Runs persist the actual URL so preview retries cannot accidentally run against the project's default URL.
 
 History retains both attempts, a link to the first attempt and existing warning badges for flaky Specs. Nine real-browser tests passed, including restart replay, changed contracts and URL overrides. Live verification produced one failed attempt and one passing retry, preserved the YAML bytes, showed both attempts in the UI and created no job.
+
+## CI/CD (implemented)
+
+Migration 0014 adds hashed, project-scoped CI tokens independent of Git tokens. Settings → CI/CD creates, rotates and revokes a token, supplies snippets for GitHub Actions, GitLab CI, Bitbucket Pipelines, CircleCI and Jenkins, and lists batches with commit/ref/build metadata and evidence links. No GitHub API or GitHub App integration is involved.
+
+Authenticated endpoints start all/selected/Feature Specs, wait with bounded long polling, export JSON/JUnit/Markdown, download the dependency-free Node client, and accept generic deployment signals. Quality gates snapshot existing Inbox bugs at batch creation and waive known failures and flaky results by default. Busy Specs return 409 without queuing an orphan batch. The client retries transient GET failures within its deadline and never retries POST.
+
+Preview URLs persist through batch execution, retry, healer investigation and isolated proposal verification. They do not grant credential access: stored secrets retain their canonical project/profile origins. A real-browser test verified that an untrusted preview receives no typing event or form submission, then passes after explicit origin authorization. Browser, credential and session calls now propagate cancellation to MCP; cancelling a job also closes its browser.
+
+Steward collection now uses deterministic observation generations to deduplicate crash replays while retaining real reversions. A failed run prerequisite creates a budgeted investigation and an Inbox question; completion can retry the original environment without an unlimited retry loop.
+
+Validation: 209 tests and both app typechecks passed before the final review. Six CI-specific tests pass, including atomic busy rejection and client reconnection. Live checks covered token creation/rotation/revocation, real Chromium on a preview URL, the client and report exports, deploy signals, and the settings UI at desktop/390px. Provider-specific deploy adapters are optional and are not included; all providers can use the generic endpoint.
+
+Next: finish exploration/coverage verification and replace proposal field dumps with file diffs as requested by Gus. Then consolidate this log and delete only the temporary verification projects via the API.

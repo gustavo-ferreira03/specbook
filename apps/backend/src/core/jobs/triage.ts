@@ -53,7 +53,7 @@ export function createTriageTools(job: Job, abort: () => void) {
                 const kind = triage.classification === "application_bug" ? "bug_report" : triage.classification === "environment" ? "question" : "note";
                 const item = await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind,
                     title: `Failure triage: ${triage.classification.replaceAll("_", " ")}`, body,
-                    payload: { runId: job.runId, specId: job.specId, classification: triage.classification } });
+                    payload: { runId: job.runId, specId: job.specId, classification: triage.classification, ...(triage.classification === "environment" && /credential|session|login|sign.in|authentication|credencia|sessão/i.test(triage.reason) ? { waitingFor: "credentials" } : {}) } });
                 if (kind === "question") {
                     await jobsRepository.transition(job.id, "running", "blocked");
                     abort();

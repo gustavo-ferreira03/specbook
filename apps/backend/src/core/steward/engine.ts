@@ -37,7 +37,11 @@ export async function enqueueIntent(projectId: string, input: unknown, key: stri
     intent.goal = await scrub(intent.goal);
     intent.reason = await scrub(intent.reason);
     return stewardRepository.addIntent({ projectId, key, intent, priority: intent.priority, reason: intent.reason,
-        fingerprint: fingerprint({ kind: intent.kind, targets, context: context?.context, runKey: intent.kind === "run_specs" ? key : undefined }) });
+        fingerprint: fingerprint({ kind: intent.kind, targets, context: context?.context, baseUrl: intent.baseUrl,
+            runBlocker: key.startsWith("run-blocker:"),
+            goal: ["coverage", "explore"].includes(intent.kind) && !key.startsWith("run-blocker:") ? intent.goal.replace(/\s+/g, " ").trim().toLowerCase() : undefined,
+            regressionKey: key.startsWith("regression:") ? key : undefined,
+            runKey: intent.kind === "run_specs" ? key : undefined }) });
 }
 
 export async function recordFailureSignal(projectId: string, runId: string, specId: string, title: string): Promise<void> {
@@ -55,7 +59,7 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
     };
     if (signal.kind === "credentials_changed") {
         for (const item of await jobsRepository.inbox(signal.projectId)) {
-            if (item.kind !== "question" || item.status !== "pending" || item.title !== "Credentials needed") continue;
+            if (item.kind !== "question" || item.status !== "pending" || item.payload.waitingFor !== "credentials") continue;
             const job = await jobsRepository.get(item.jobId);
             if (job?.status !== "blocked" || !await jobsRepository.claimItem(item.id)) continue;
             try { await jobsRepository.answer(item, "Credential profiles changed. Check the available profiles and continue if the requested access is now available."); }
@@ -63,7 +67,7 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
         }
     } else if (kinds[signal.kind]) {
         await enqueueIntent(signal.projectId, {
-            kind: kinds[signal.kind], goal: signal.body, reason: signal.title, specIds, runId,
+            kind: kinds[signal.kind], goal: signal.body, reason: signal.title, specIds, runId, baseUrl: typeof signal.payload.url === "string" ? signal.payload.url : undefined,
             priority: signal.kind === "spec_failure" ? 100 : signal.kind === "invalid_spec" ? 80 : 40,
         }, `signal:${signal.id}`);
     }
@@ -104,6 +108,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
         // A bounded number of batches prevents a rapidly changing deploy fingerprint from flooding the runner.
         if (siblings.filter((item) => item.batchId && Date.now() - Date.parse(item.createdAt) < day).length >= 12) return;
         await startSpecBatch(row.projectId, specs.map((spec) => spec.id), row.intent.reason, {
+            baseUrl: row.intent.baseUrl,
             onPrepared: async (batch) => { await stewardRepository.updateIntent(row.id, { status: "running", batchId: batch.id }); },
         });
         return;
@@ -116,7 +121,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const decisions = inbox.filter((item) => ["approved", "rejected", "dismissed"].includes(item.status)).slice(0, 12).map((item) => ({ title: item.title, status: item.status }));
     const goal = kind === "planner"
         ? `Review this compact project digest and submit prioritized intents with propose_intents. Do not execute the planned work in this turn.\n${JSON.stringify({ context: context?.context, specs: specs.map((spec) => ({ id: spec.id, title: spec.title, status: spec.status })), decisions, recentWork: projectJobs.slice(0, 8).map((job) => ({ goal: job.goal.slice(0, 200), status: job.status, classification: job.classification })) }).slice(0, 10000)}`
-        : `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${kind === "regenerate" ? "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval." : "Compare confirmed areas, roles and rules to the existing Specs before proposing additional coverage. Investigate in the browser and ask when blocked."}\nRecent human decisions: ${JSON.stringify(decisions)}`;
+        : `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${kind === "regenerate" ? "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval." : kind === "explore" ? "Investigate the stated problem, inspect available access, and ask through the Inbox when a prerequisite needs human help. Keep this investigation focused on its goal." : "Compare confirmed areas, roles and rules to the existing Specs before proposing additional coverage. Investigate in the browser and ask when blocked."}\nRecent human decisions: ${JSON.stringify(decisions)}`;
     const job = await enqueueJob(row.projectId, { kind, goal: goal.slice(0, 12000), trigger: row.intent.kind === "triage" ? "spec_failure" : "steward",
         specId: row.intent.specIds?.[0], runId: row.intent.runId,
         budget: { maxTokens: Math.min(kind === "planner" ? 20_000 : 100_000, remaining.tokens), wallTimeMs: Math.min(kind === "planner" ? 120_000 : 600_000, remaining.wallTimeMs), maxActions: kind === "planner" ? 8 : 80 },
@@ -135,8 +140,16 @@ export async function processProjectSteward(projectId: string, collect = true): 
         for (const intent of intents.filter((intent) => intent.status === "running")) {
             const job = intent.jobId ? await jobsRepository.get(intent.jobId) : null;
             const batch = intent.batchId ? await getRunBatch(intent.batchId) : null;
-            if (job && ["completed", "cancelled", "budget_exceeded"].includes(job.status)) await stewardRepository.updateIntent(intent.id, { status: job.status === "completed" ? "completed" : "failed" });
-            else if (batch && batch.status !== "running") await stewardRepository.updateIntent(intent.id, { status: batch.status === "passed" ? "completed" : "failed" });
+            if (job && ["completed", "cancelled", "budget_exceeded"].includes(job.status)) {
+                if (intent.key.startsWith("run-blocker:")) {
+                    const original = intents.find((item) => item.id === intent.key.slice("run-blocker:".length));
+                    if (original?.intent.kind === "run_specs") {
+                        if (original.status === "pending") await stewardRepository.updateIntent(original.id, { status: "failed", reason: "Run preparation was handed to an investigation." });
+                        if (job.status === "completed") await enqueueIntent(projectId, original.intent, `resume-run:${original.id}:${intent.id}`);
+                    }
+                }
+                await stewardRepository.updateIntent(intent.id, { status: job.status === "completed" ? "completed" : "failed" });
+            } else if (batch && batch.status !== "running") await stewardRepository.updateIntent(intent.id, { status: batch.status === "passed" ? "completed" : "failed" });
         }
         if (settings.autonomy === "observe") return;
         if (settings.autonomy === "act") await applyTrustedFixes(projectId);
@@ -150,7 +163,15 @@ export async function processProjectSteward(projectId: string, collect = true): 
             try { await dispatchIntent(intent); }
             catch (error) {
                 const scrub = createProjectScrubber(projectId);
-                await stewardRepository.updateIntent(intent.id, { status: "failed", reason: await scrub(String(error)) });
+                const reason = await scrub(String(error));
+                if (intent.intent.kind === "run_specs") {
+                    await enqueueIntent(projectId, {
+                        kind: "explore", specIds: intent.intent.specIds, baseUrl: intent.intent.baseUrl, priority: 90,
+                        reason: "The requested Specs need help before they can run.",
+                        goal: `Investigate why this run could not start: ${reason.slice(0, 1500)}. Original goal: ${intent.intent.goal.slice(0, 3000)}. Check the available credential profiles and other prerequisites. If access or a human decision is needed, request it through the Inbox and remain blocked until it is resolved. Do not change spec.yml. Once the prerequisite is restored, finish this investigation; the steward will retry the original run.`,
+                    }, `run-blocker:${intent.id}`);
+                }
+                await stewardRepository.updateIntent(intent.id, { status: "failed", reason });
                 logger.warn("steward intent failed", { projectId, intentId: intent.id, error });
             }
         }

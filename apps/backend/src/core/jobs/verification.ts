@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { jobBaseUrl } from "./environment";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
@@ -44,6 +45,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     if (stepsError) throw new Error(stepsError);
     const project = await projectsRepository.getProject(job.projectId);
     if (!project) throw new Error("Project not found");
+    const baseUrl = await jobBaseUrl(job) ?? project.baseUrl;
     const spec = await specsRepository.getSpec(patch.specId);
     if (!spec || spec.projectId !== job.projectId) throw new Error("Spec no longer exists");
     const raw = await repoGit.withRepoLock(job.projectId, () => readSpecRawFiles(spec));
@@ -54,7 +56,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     const refs = analysis.analysis.secretRefs.map((ref) => ref.envName);
     const { env: secretEnv, missing } = await resolveSecretEnv(job.projectId, refs);
     if (missing.length) throw new Error(`Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`);
-    const secretOrigins = await resolveSecretOriginPolicy(job.projectId, project.baseUrl, refs);
+    const secretOrigins = await resolveSecretOriginPolicy(job.projectId, refs);
     const scrub = await projectSecretScrubber(job.projectId);
     const id = crypto.randomUUID();
     const directory = proposalDirectory(item, id);
@@ -67,7 +69,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         if (!current || current.status !== "running") throw new Error("Job is no longer running");
         const remaining = current.budget.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
         if (remaining <= 0) throw new Error("Job wall time exhausted");
-        return runPlaywrightSuite({ directory, baseUrl: project.baseUrl,
+        return runPlaywrightSuite({ directory, baseUrl,
             specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, outputDir: directory }],
             timeoutMs: Math.min(120_000, remaining), secretEnv, secretOrigins, scrub, signal });
     }, signal);
@@ -76,7 +78,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     const verification: ProposalVerification = {
         id, status: outcome.processFailure ? "error" : result?.status ?? "error", durationMs: result?.durationMs ?? null,
         failReason: scrub(outcome.processFailure ?? result?.failReason ?? "") || null, failedStep: result?.failedStep ?? null,
-        sourceHash: sourceHashOf(patch.testSource), baseUrl: project.baseUrl, screenshots: manifest.steps.map((step) => step.file),
+        sourceHash: sourceHashOf(patch.testSource), baseUrl, screenshots: manifest.steps.map((step) => step.file),
     };
     const current = await jobsRepository.item(item.id);
     if (current?.status !== "pending") throw new Error("Proposal was reviewed during verification");

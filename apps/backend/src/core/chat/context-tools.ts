@@ -24,7 +24,7 @@ export const projectContextSchema = z.object({
 
 export const projectContextJsonSchema = projectContextSchema.toJSONSchema();
 
-const projectContextType = Type.Unsafe(projectContextJsonSchema);
+const proposeProjectContextSchema = z.object({ context: projectContextSchema });
 
 function text(value: string) {
     return {
@@ -41,7 +41,7 @@ export function createContextTools(revisionId: string, projectId: string) {
             label: "get_project_context_draft",
             description:
                 "Read the current project-context draft for this discovery, including the brief and the saved context.",
-            parameters: Type.Object({}),
+            parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute() {
                 const revision = await projectContextsRepository.getProjectContextRevision(revisionId);
                 if (!revision) return text("The discovery draft for this chat no longer exists.");
@@ -60,9 +60,9 @@ export function createContextTools(revisionId: string, projectId: string) {
             label: "propose_project_context",
             description:
                 "Save the complete structured project context as the draft for this discovery. Provide every field; the whole draft content is replaced. The user reviews and confirms it later; this tool never confirms.",
-            parameters: Type.Object({ context: projectContextType }),
+            parameters: Type.Unsafe<z.infer<typeof proposeProjectContextSchema>>(proposeProjectContextSchema.toJSONSchema()),
             async execute(_id, params) {
-                const parsed = projectContextSchema.safeParse(params.context);
+                const parsed = proposeProjectContextSchema.safeParse(params);
                 if (!parsed.success) {
                     return text(`The proposed context is invalid: ${parsed.error.issues[0]?.message ?? "schema mismatch"}. Provide the complete ProjectContext object.`);
                 }
@@ -73,7 +73,7 @@ export function createContextTools(revisionId: string, projectId: string) {
                 }
                 const updated = await projectContextsRepository.replaceProjectContextDraft(
                     revisionId,
-                    parsed.data as ProjectContext,
+                    parsed.data.context as ProjectContext,
                 );
                 return text(
                     JSON.stringify({

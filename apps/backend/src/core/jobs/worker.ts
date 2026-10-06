@@ -1,3 +1,4 @@
+import { jobBaseUrl } from "./environment";
 import { prepareTriageGoal } from "./triage";
 import { closeChatBrowser } from "../browser/sessions";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
@@ -39,7 +40,10 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
 async function executeJob(job: Job): Promise<void> {
     const started = Date.now();
     const scrub = createProjectScrubber(job.projectId);
-    const abort = () => { void abortChatTurn(job.chatId).catch(() => undefined); };
+    const abort = () => {
+        void abortChatTurn(job.chatId).catch(() => undefined);
+        void closeChatBrowser(job.chatId).catch(() => undefined);
+    };
     const remaining = job.budget.wallTimeMs - job.elapsedMs;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -51,7 +55,7 @@ async function executeJob(job: Job): Promise<void> {
             }, remaining);
             await jobsRepository.log(job.id, "started");
             if ((await jobsRepository.get(job.id))?.status !== "running") return;
-            await runChatTurn(job.chatId, job.pendingMessage, undefined, createJobPolicy(job, abort));
+            await runChatTurn(job.chatId, job.pendingMessage, undefined, createJobPolicy(job, abort, await jobBaseUrl(job)));
         }
         if (stopped) return;
         const current = await jobsRepository.get(job.id);
@@ -64,7 +68,7 @@ async function executeJob(job: Job): Promise<void> {
             await jobsRepository.transition(job.id, "running", blocked ? "blocked" : "completed");
         } else if (current?.status === "budget_exceeded") {
             await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Job budget reached",
-                body: "The job stopped at its configured budget. Review its proposals and audit log before starting another job." });
+                body: "The job stopped at its configured budget. Review its proposals and activity log. The steward will consider follow-up work within the next available budget." });
         }
     } catch (error) {
         const current = await jobsRepository.get(job.id);
@@ -115,6 +119,6 @@ export async function stopJobWorker(): Promise<void> {
     clearInterval(timer);
     for (const id of active) {
         const job = await jobsRepository.get(id);
-        if (job) await abortChatTurn(job.chatId).catch(() => undefined);
+        if (job) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
     }
 }
