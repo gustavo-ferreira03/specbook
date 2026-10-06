@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react";
 import {
     AlertCircle,
     LayoutDashboard,
-    ChartNoAxesCombined,
     ChevronRight,
     ChevronsUpDown,
     Compass,
@@ -42,11 +41,9 @@ import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { countLabel } from "@/lib/format";
 import { useProjectOverview } from "@/lib/projectOverview";
 import type { Chat, Feature, Project, RunBatch, SpecSummary } from "@/lib/types";
-import { NO_SPECS_DESCRIPTION } from "@/lib/status";
 import { useVisiblePolling } from "@/lib/usePolling";
 import { useRunBatch } from "@/lib/useRunBatch";
 import { ConfirmDeleteDialog } from "./ConfirmDeleteDialog";
-import { EmptyState } from "./EmptyState";
 import { FeatureEditDialog } from "./FeatureEditDialog";
 import { LogoMark } from "./LogoMark";
 import { RelativeTime } from "./RelativeTime";
@@ -70,21 +67,13 @@ import {
 import { ScrollArea } from "./ui/scroll-area";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "./ui/sheet";
 import { Skeleton } from "./ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-type SidebarTab = "chats" | "specs";
 type RuntimeState = "checking" | "online" | "setup" | "offline";
 type DeleteTarget =
     | { kind: "chat"; item: Chat }
     | { kind: "spec"; item: SpecSummary }
     | { kind: "feature"; item: Feature };
-
-function sectionFromPathname(pathname: string, projectId: string): SidebarTab | null {
-    if (pathname === `/p/${projectId}/specs` || pathname.startsWith(`/p/${projectId}/specs/`)) return "specs";
-    if (pathname === `/p/${projectId}/chats` || pathname.startsWith(`/p/${projectId}/chats/`)) return "chats";
-    return null;
-}
 
 function RowAction({ label, tooltip, onClick, disabled, danger, children }: { label: string; tooltip: string; onClick: () => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
     return (
@@ -117,7 +106,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
     const { data: overview } = useProjectOverview();
     const [chats, setChats] = useState<Chat[]>([]);
-    const [activeTab, setActiveTab] = useState<SidebarTab>(sectionFromPathname(pathname, projectId) ?? "specs");
     const [loaded, setLoaded] = useState(false);
     const [loadError, setLoadError] = useState("");
     const [runtime, setRuntime] = useState<RuntimeState>("checking");
@@ -131,8 +119,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const [deleteError, setDeleteError] = useState("");
     const deleteTriggerRef = useRef<HTMLElement | null>(null);
     const navigationRequestRef = useRef<AbortController | null>(null);
-    const tabNavigatedRef = useRef(false);
-    const tabPointerDownRef = useRef(false);
     const runtimeRequestRef = useRef<AbortController | null>(null);
     const runBatch = useRunBatch(projectId, {
         onProgress: (batch: RunBatch) => {
@@ -155,8 +141,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
         setDrawerOpen(false);
         setDesktopProjectMenuOpen(false);
         setMobileProjectMenuOpen(false);
-        const section = sectionFromPathname(pathname, projectId);
-        if (section) setActiveTab(section);
     }, [pathname, projectId]);
 
     useEffect(() => {
@@ -238,6 +222,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const knownFeatureIds = new Set(features.map((feature) => feature.id));
     const rootFeatures = features.filter((feature) => feature.parentId === null || !knownFeatureIds.has(feature.parentId));
     const ungroupedSpecs = specs.filter((spec) => !knownFeatureIds.has(spec.featureId));
+    const recentChats = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
+    const overviewHref = `/p/${projectId}/overview`;
 
     useEffect(() => {
         const activeSpec = specs.find((spec) => pathname === `/p/${projectId}/specs/${spec.id}`);
@@ -286,26 +272,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
         setDesktopProjectMenuOpen(false);
         setMobileProjectMenuOpen(false);
         router.push(`/p/${id}`);
-    }
-
-    function openSection(tab: SidebarTab) {
-        if (tab === "specs") {
-            router.push(`/p/${projectId}/specs`);
-            return;
-        }
-        const latest = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-        router.push(latest ? `/p/${projectId}/chats/${latest.id}` : `/p/${projectId}/chats`);
-    }
-
-    // Radix changes the value on pointer down, then the click follows. Navigate once: from
-    // onValueChange when the tab changes, or from the click when the tab was already active.
-    function handleTabClick(tab: SidebarTab) {
-        tabPointerDownRef.current = false;
-        if (tabNavigatedRef.current) {
-            tabNavigatedRef.current = false;
-            return;
-        }
-        if (sectionFromPathname(pathname, projectId) !== tab) openSection(tab);
     }
 
     function openDelete(target: DeleteTarget) {
@@ -464,6 +430,18 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const settingsHref = `/p/${projectId}/settings`;
     const onSettings = pathname === settingsHref;
 
+    function renderNavLink(href: string, label: string, Icon: typeof Compass, extra?: React.ReactNode) {
+        const selected = pathname === href;
+        return (
+            <div className={`${rowClass(selected)} pr-1`}>
+                <Link href={href} onClick={() => setDrawerOpen(false)} aria-current={selected ? "page" : undefined} className={`flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:min-h-9 ${selected ? "font-medium" : ""}`}>
+                    <Icon size={15} aria-hidden="true" /> {label}
+                </Link>
+                {extra}
+            </div>
+        );
+    }
+
     function renderLoadError() {
         if (!loadError) return null;
         return (
@@ -488,15 +466,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         <Skeleton className="h-3 rounded-sm" style={{ width: `${width}%` }} />
                     </div>
                 ))}
-            </div>
-        );
-    }
-
-    function renderSectionLabel(label: string, action: React.ReactNode) {
-        return (
-            <div className="flex h-10 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
-                <h2 className="text-meta font-medium text-ink-subtle">{label}</h2>
-                {canEdit && action}
             </div>
         );
     }
@@ -551,29 +520,26 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </DropdownMenu>
                 </div>
 
-                <Tabs
-                    value={activeTab}
-                    onValueChange={(value) => {
-                        const tab = value as SidebarTab;
-                        setActiveTab(tab);
-                        tabNavigatedRef.current = tabPointerDownRef.current;
-                        openSection(tab);
-                    }}
-                    className="min-h-0 flex-1"
-                >
-                    <div className="px-3 pb-2">
-                        <TabsList variant="segmented" className="grid w-full grid-cols-2" aria-label="Project content">
-                            <TabsTrigger value="chats" className="h-9 md:h-8" onPointerDown={() => { tabPointerDownRef.current = true; }} onClick={() => handleTabClick("chats")}>
-                                <MessageSquare size={14} /> Chats
-                            </TabsTrigger>
-                            <TabsTrigger value="specs" className="h-9 md:h-8" onPointerDown={() => { tabPointerDownRef.current = true; }} onClick={() => handleTabClick("specs")}>
-                                <FileCheck2 size={14} /> Specs
-                            </TabsTrigger>
-                        </TabsList>
-                    </div>
-
-                    <TabsContent value="chats" className="data-[state=active]:flex data-[state=active]:flex-col">
-                        {renderSectionLabel("Chats", (
+                <ScrollArea className="min-h-0 flex-1">
+                    <nav aria-label="Project" className="w-full min-w-0 space-y-px px-2 pb-3">
+                        {renderNavLink(overviewHref, "Overview", LayoutDashboard, attentionCount > 0 && (
+                            <Badge variant="secondary" size="sm" className="ml-auto" aria-label={`${countLabel(attentionCount, "item needs", "items need")} you`} title={`${countLabel(attentionCount, "needs", "need")} you`}>{attentionCount}</Badge>
+                        ))}
+                        {renderNavLink(`/p/${projectId}/specs`, "Specs", FileCheck2, batchRunning && (
+                            <Button type="button" variant="ghost" size="sm" onClick={() => runBatch.setOpen(true)} className="h-7 gap-1 px-2 text-meta text-ink-muted">
+                                <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" /> View run
+                            </Button>
+                        ))}
+                        {renderLoadError()}
+                        {renderLoading()}
+                        {loaded && (
+                            <div className="space-y-px pb-1 pl-2">
+                                {rootFeatures.map((feature) => renderFeature(feature))}
+                                {ungroupedSpecs.map((spec) => renderSpec(spec))}
+                                {features.length === 0 && specs.length === 0 && !loadError && <p className="px-2 py-1.5 text-meta text-ink-subtle">No Specs yet</p>}
+                            </div>
+                        )}
+                        {renderNavLink(`/p/${projectId}/chats`, "Chats", MessageSquare, canEdit && (
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button asChild variant="ghost" size="icon-xs" className="text-ink-subtle" aria-label="New chat">
@@ -583,11 +549,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                 <TooltipContent>New chat</TooltipContent>
                             </Tooltip>
                         ))}
-                        {renderLoadError()}
-                        <ScrollArea className="min-h-0 flex-1">
-                            <div className="w-full min-w-0 space-y-px px-2 pb-3">
-                                {renderLoading()}
-                                {loaded && chats.map((chat) => {
+                        {loaded && (
+                            <div className="space-y-px pb-1 pl-2">
+                                {recentChats.map((chat) => {
                                     const href = `/p/${projectId}/chats/${chat.id}`;
                                     const selected = pathname === href;
                                     return (
@@ -606,50 +570,19 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                         </div>
                                     );
                                 })}
-                                {loaded && chats.length === 0 && !loadError && (
-                                    <EmptyState
-                                        size="compact"
-                                        icon={MessageSquare}
-                                        title="No chats yet"
-                                        description="Describe a behavior to start."
-                                        action={canEdit && <Button asChild size="sm" variant="outline"><Link href={`/p/${projectId}/chats/new`}><Plus size={14} /> New chat</Link></Button>}
-                                    />
+                                {chats.length > recentChats.length && (
+                                    <Link href={`/p/${projectId}/chats`} className="flex min-h-8 items-center rounded-md px-2.5 text-meta text-ink-subtle outline-none hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-ring">
+                                        All {chats.length} chats
+                                    </Link>
                                 )}
+                                {chats.length === 0 && !loadError && <p className="px-2 py-1.5 text-meta text-ink-subtle">No chats yet</p>}
                             </div>
-                        </ScrollArea>
-                    </TabsContent>
-
-                    <TabsContent value="specs" className="data-[state=active]:flex data-[state=active]:flex-col">
-                        {renderSectionLabel("Specs by feature", batchRunning && (
-                            <Button type="button" variant="ghost" size="sm" onClick={() => runBatch.setOpen(true)} className="h-7 gap-1 px-2 text-meta text-ink-muted">
-                                <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" /> View run
-                            </Button>
-                        ))}
-                        {renderLoadError()}
-                        <ScrollArea className="min-h-0 flex-1">
-                            <div className="w-full min-w-0 space-y-px px-2 pb-3">
-                                {renderLoading()}
-                                {loaded && rootFeatures.map((feature) => renderFeature(feature))}
-                                {loaded && ungroupedSpecs.map((spec) => renderSpec(spec))}
-                                {loaded && features.length === 0 && specs.length === 0 && !loadError && (
-                                    <EmptyState size="compact" icon={FileCheck2} title="No Specs yet" description={NO_SPECS_DESCRIPTION} />
-                                )}
-                            </div>
-                        </ScrollArea>
-                    </TabsContent>
-                </Tabs>
+                        )}
+                        {renderNavLink(`/p/${projectId}`, "App", Compass)}
+                    </nav>
+                </ScrollArea>
 
                 <div className="shrink-0 space-y-1 border-t border-line p-2">
-                    <Link href={`/p/${projectId}/overview`} aria-current={pathname === `/p/${projectId}/overview` ? "page" : undefined}
-                        className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}/overview` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}>
-                        <LayoutDashboard size={15} /> Overview
-                        {attentionCount > 0 && <Badge variant="secondary" size="sm" className="ml-auto" aria-label={`${countLabel(attentionCount, "item needs", "items need")} you`} title={`${countLabel(attentionCount, "needs", "need")} you`}>{attentionCount}</Badge>}
-                    </Link>
-                    <Link href={`/p/${projectId}`} aria-current={pathname === `/p/${projectId}` ? "page" : undefined}
-                        className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname === `/p/${projectId}` ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}>
-                        <Compass size={15} /> Project context
-                    </Link>
-                    <Link href={`/p/${projectId}/coverage`} onClick={() => setDrawerOpen(false)} aria-current={pathname.endsWith("/coverage") ? "page" : undefined} className={`flex min-h-9 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring ${pathname.endsWith("/coverage") ? "bg-surface-selected font-medium text-ink" : "text-ink-muted"}`}><ChartNoAxesCombined size={15} /> Coverage</Link>
                     {(overview?.summary.paused || overview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{overview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
                     {runtimeCopy && <Link
                         href={isAdmin ? "/settings?tab=model" : `/p/${projectId}/overview`}
@@ -661,17 +594,17 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <span className="block truncate text-meta text-ink-subtle">{runtimeCopy[1]}</span>
                         </span>
                     </Link>}
-                    <UserMenu />
                     <div className="flex items-center justify-between gap-2">
                         {canEdit && <Link
                             href={settingsHref}
                             aria-current={onSettings ? "page" : undefined}
                             className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:h-8 ${onSettings ? "bg-surface-selected font-medium text-ink" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
                         >
-                            <Settings size={15} /> Project settings
+                            <Settings size={15} /> Settings
                         </Link>}
                         <ThemeToggle />
                     </div>
+                    <UserMenu />
                 </div>
             </>
         );

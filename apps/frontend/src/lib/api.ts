@@ -444,8 +444,8 @@ export function getOverview(projectId: string, signal?: AbortSignal): Promise<Ov
     return api(apiPath`/projects/${projectId}/overview`, { signal });
 }
 
-export function getCoverage(projectId: string, environment: string, signal?: AbortSignal): Promise<CoverageResponse> {
-    return api(`${apiPath`/projects/${projectId}/coverage`}?environment=${encodeURIComponent(environment)}`, { signal });
+export function getCoverage(projectId: string, signal?: AbortSignal): Promise<CoverageResponse> {
+    return api(apiPath`/projects/${projectId}/coverage`, { signal });
 }
 
 export function requestTask(projectId: string, kind: "coverage" | "explore"): Promise<{ intentId: string; status: "queued" | "running" | "paused" }> {

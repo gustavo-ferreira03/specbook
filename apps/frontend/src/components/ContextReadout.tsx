@@ -1,6 +1,6 @@
 import type { ProjectContext } from "@/lib/types";
 
-export function ContextReadout({ context }: { context: ProjectContext }) {
+export function ContextReadout({ context, renderArea }: { context: ProjectContext; renderArea?: (name: string) => React.ReactNode }) {
     const lists: { title: string; items: string[] }[] = [
         { title: "Business rules", items: context.businessRules },
         { title: "UI patterns", items: context.uiPatterns },
@@ -21,6 +21,7 @@ export function ContextReadout({ context }: { context: ProjectContext }) {
                                     <p className="mt-0.5 font-mono text-meta text-ink-subtle [overflow-wrap:anywhere]">{area.routes.join("  ·  ")}</p>
                                 )}
                                 {area.description && <p className="mt-1 text-ink-muted">{area.description}</p>}
+                                {renderArea?.(area.name)}
                             </div>
                         ))}
                     </div>
