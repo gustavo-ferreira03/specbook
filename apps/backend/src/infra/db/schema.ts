@@ -7,7 +7,7 @@ export interface HumanSpec {
     postconditions: string[];
 }
 
-export type SpecStatus = "unverified" | "passed" | "failed" | "invalid" | "conflict";
+export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface LlmSettings {
@@ -52,10 +52,6 @@ export const projects = sqliteTable("projects", {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
-    gitRemoteUrl: text("git_remote_url"),
-    gitToken: text("git_token"),
-    gitPushError: text("git_push_error"),
-    gitConflictPaths: text("git_conflict_paths", { mode: "json" }).$type<string[] | null>(),
     contextSyncError: text("context_sync_error"),
     gitAccessTokenHash: text("git_access_token_hash"),
     gitAccessTokenPrefix: text("git_access_token_prefix"),

@@ -1,26 +1,14 @@
 import path from "node:path";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
-import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { withSpecLock } from "../specs/lifecycle";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
-import { repoRemote } from "./remote";
 import { readOptionalRepoFile, writeRepoFile } from "./safe-fs";
 import { createSpecInRepo, featureYamlFile, specTestFile, specYamlFile } from "./writer";
 
-export class RepoConflictError extends Error {}
-
-async function assertNoSyncConflict(projectId: string): Promise<void> {
-    const project = await projectsRepository.getProject(projectId);
-    if (project?.gitConflictPaths?.length) {
-        throw new RepoConflictError("Resolve the git sync conflict before editing this project");
-    }
-}
-
 async function commitAndReindex(projectId: string, message: string): Promise<void> {
     await repoGit.commitAll(projectId, message);
-    repoRemote.schedulePush(projectId);
     await reindexProjectUnlocked(projectId);
 }
 
@@ -65,7 +53,6 @@ export async function readContextRaw(projectId: string): Promise<string | null> 
 export async function editSpecFiles(spec: Spec, input: { yaml?: string; testSource?: string }): Promise<Spec> {
     return withSpecLock(spec.id, () =>
         repoGit.withRepoLock(spec.projectId, async () => {
-            await assertNoSyncConflict(spec.projectId);
             await repoGit.assertRepoWritableUnlocked(spec.projectId);
             const root = repoGit.getRepoDir(spec.projectId);
             if (input.yaml !== undefined) {
@@ -98,7 +85,6 @@ export async function createManualSpec(projectId: string, featureId: string, tit
 
 export async function editFeatureFile(feature: Feature, yaml: string): Promise<Feature> {
     return repoGit.withRepoLock(feature.projectId, async () => {
-        await assertNoSyncConflict(feature.projectId);
         await repoGit.assertRepoWritableUnlocked(feature.projectId);
         const root = repoGit.getRepoDir(feature.projectId);
         await writeRepoFile(root, path.join(root, featureYamlFile(feature.path)), yaml);
@@ -111,7 +97,6 @@ export async function editFeatureFile(feature: Feature, yaml: string): Promise<F
 
 export async function editContextFile(projectId: string, yaml: string): Promise<void> {
     await repoGit.withRepoLock(projectId, async () => {
-        await assertNoSyncConflict(projectId);
         await repoGit.assertRepoWritableUnlocked(projectId);
         const root = repoGit.getRepoDir(projectId);
         await writeRepoFile(root, path.join(root, "context.yml"), yaml);

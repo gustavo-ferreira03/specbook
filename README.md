@@ -50,7 +50,7 @@ The same setup is available as `docker compose up -d` with the repository's `doc
 
 ### Clone a project repository
 
-Open **Settings → GitHub** in a project and create a repository access token. The token is shown once. Use `specbook` as the username when Git prompts for credentials:
+Open **Settings → Git** in a project and create a repository access token. The token is shown once. Use `specbook` as the username when Git prompts for credentials:
 
 ```bash
 git clone https://your-specbook-host/git/<project-id>.git

@@ -7,7 +7,6 @@ import { beginChatDeletion, cancelChatDeletion, isChatBusy, isChatDeleting, remo
 import { runsDir } from "./paths";
 import { repoBare } from "./repo/bare";
 import { repoGit } from "./repo/git";
-import { repoRemote } from "./repo/remote";
 import { deleteFeatureDirectory, deleteSpecFiles } from "./repo/writer";
 import { getRunBatch, getRunBatchDirectory } from "./runner/batch";
 import { areSpecsLocked, ResourceBusyError, withSpecLock, withSpecLocks } from "./specs/lifecycle";
@@ -146,16 +145,12 @@ export async function deleteProjectData(id: string): Promise<boolean> {
         throw new ResourceBusyError("Wait for a running Spec verification to finish before deleting this project");
     }
 
-    // Deleting a project never touches its Git history: nothing is committed and
-    // no pending push may run, so the GitHub remote keeps every file.
-    repoRemote.cancelScheduledPush(id);
 
     for (const chat of chatRows) {
         await deleteChatData(chat.id);
     }
 
     const runIds = await repoGit.withRepoLock(id, async () => {
-        repoRemote.cancelScheduledPush(id);
         const projectSpecIds = (await specsRepository.listSpecs(id)).map((spec) => spec.id);
         if (await runsRepository.hasRunningRuns(projectSpecIds)) {
             throw new ResourceBusyError("Wait for a running Spec verification to finish before deleting this project");
@@ -185,7 +180,6 @@ export async function deleteProjectData(id: string): Promise<boolean> {
         }
         return runRows.map((run) => run.id);
     });
-    repoRemote.cancelScheduledPush(id);
 
     await fs.rm(path.join(runsDir, "proposals", id), { recursive: true, force: true });
     await removeRunDirectories(runIds).catch((error: unknown) => {

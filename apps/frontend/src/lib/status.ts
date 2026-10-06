@@ -1,8 +1,8 @@
-import { AlertTriangle, Check, CircleDashed, GitMerge, LoaderCircle, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, LoaderCircle, X, type LucideIcon } from "lucide-react";
 import type { RunStatus, SpecStatus } from "./types";
 
 export type AnyStatus = SpecStatus | RunStatus;
-export type StatusTone = "success" | "danger" | "invalid" | "neutral" | "running" | "conflict";
+export type StatusTone = "success" | "danger" | "invalid" | "neutral" | "running";
 
 export interface StatusMeta {
     /** Label for the current state of a Spec ("Failing", "Not run"). */
@@ -25,7 +25,6 @@ const TONES: Record<StatusTone, Pick<StatusMeta, "text" | "soft" | "chart">> = {
     invalid: { text: "text-invalid", soft: "bg-invalid-soft", chart: "bg-invalid-chart" },
     neutral: { text: "text-ink-subtle", soft: "bg-neutral-soft", chart: "bg-neutral-chart" },
     running: { text: "text-running", soft: "bg-running-soft", chart: "bg-running-chart" },
-    conflict: { text: "text-conflict", soft: "bg-conflict-soft", chart: "bg-conflict-chart" },
 };
 
 const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
@@ -35,7 +34,6 @@ const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
     invalid: { label: "Invalid", runLabel: "Invalid", description: "The Spec files could not be read.", tone: "invalid", icon: AlertTriangle },
     unverified: { label: "Not run", runLabel: "Not run", description: "Not verified since it was created or changed.", tone: "neutral", icon: CircleDashed },
     running: { label: "Running", runLabel: "Running", description: "A verification is in progress.", tone: "running", icon: LoaderCircle },
-    conflict: { label: "Conflict", runLabel: "Conflict", description: "Local and remote changes conflict.", tone: "conflict", icon: GitMerge },
 };
 
 export function statusMeta(status: string): StatusMeta {
@@ -44,7 +42,7 @@ export function statusMeta(status: string): StatusMeta {
 }
 
 /** Display order for summaries: problems first, then not run, then passing. */
-export const SPEC_STATUS_ORDER: SpecStatus[] = ["failed", "invalid", "conflict", "unverified", "passed"];
+export const SPEC_STATUS_ORDER: SpecStatus[] = ["failed", "invalid", "unverified", "passed"];
 
 export type StatusCounts = Partial<Record<SpecStatus, number>>;
 

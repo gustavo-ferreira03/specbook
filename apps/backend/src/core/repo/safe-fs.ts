@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-// Project repositories accept content from Git pushes and GitHub pulls, so any
+// Project repositories accept content from Git pushes, so any
 // path inside them may be a symlink planted to reach files outside the repo.
 // Every read or write of repo content goes through these helpers.
 

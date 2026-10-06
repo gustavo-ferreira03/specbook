@@ -8,7 +8,6 @@ import { specsRepository } from "../../infra/repositories/specs";
 import { readSpecRawFiles } from "../repo/manual";
 import { createFeatureInRepo, createSpecInRepo, updateSpecInRepo } from "../repo/writer";
 import { parseSpecYaml } from "../repo/yaml";
-import { syncBeforeMutation } from "../repo/sync";
 import { executeSpec } from "../runner/run";
 import { analyzeSpecSource, stepTitlesError } from "../runner/validate";
 import { withSpecLock } from "../specs/lifecycle";
@@ -121,7 +120,6 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             description: "Create a feature in the current project's Spec tree. Check list_features first and reuse existing features.",
             parameters: Type.Unsafe<z.infer<typeof featureProposalSchema>>(featureProposalSchema.toJSONSchema()),
             async execute(_id, params) {
-                await syncBeforeMutation(projectId);
                 if (params.parentId) {
                     const parent = await featuresRepository.getFeature(params.parentId);
                     if (!parent || parent.projectId !== projectId) {
@@ -143,7 +141,6 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             description: "Create a human-readable Spec and its executable spec.ts (testSource), written in the restricted Playwright Test subset of your Playwright rules. spec.ts must contain one test() whose step() titles are exactly humanSpec.steps, in order.",
             parameters: Type.Unsafe<z.infer<typeof newSpecProposalSchema>>(newSpecProposalSchema.toJSONSchema()),
             async execute(_id, params) {
-                await syncBeforeMutation(projectId);
                 const feature = await featuresRepository.getFeature(params.featureId);
                 if (!feature || feature.projectId !== projectId) {
                     return text(`Feature ${params.featureId} not found in this project.`);
@@ -170,14 +167,10 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             description: "Update a Spec and commit the change to its git history. Call get_spec first. Omitted fields keep their current values, and the status resets to unverified. When humanSpec.steps change, send the matching testSource too: step() titles must equal humanSpec.steps.",
             parameters: Type.Unsafe<z.infer<typeof fixProposalSchema>>(fixProposalSchema.toJSONSchema()),
             async execute(_id, params) {
-                await syncBeforeMutation(projectId);
                 return withSpecLock(params.specId, async () => {
                     const spec = await specsRepository.getSpec(params.specId);
                     if (!spec || spec.projectId !== projectId) {
                         return text(`Spec ${params.specId} not found in this project.`);
-                    }
-                    if (spec.status === "conflict") {
-                        return text(`Spec ${params.specId} has a git sync conflict. Ask the user to resolve it in the UI first.`);
                     }
                     const raw = await readSpecRawFiles(spec);
                     const testSource = params.testSource ?? raw.testSource;

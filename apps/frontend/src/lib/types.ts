@@ -1,4 +1,4 @@
-export type SpecStatus = "unverified" | "passed" | "failed" | "invalid" | "conflict";
+export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface Project {
@@ -6,15 +6,6 @@ export interface Project {
     name: string;
     baseUrl: string;
     createdAt: string;
-}
-
-export interface GitStatus {
-    remoteUrl: string | null;
-    hasToken: boolean;
-    pushError: string | null;
-    conflictPaths: string[] | null;
-    contextSyncError: string | null;
-    externalSyncError: string | null;
 }
 
 export interface GitAccessTokenInfo {
@@ -30,11 +21,6 @@ export interface GitRemoteAccess {
     headSha: string | null;
     token: GitAccessTokenInfo;
     externalSyncError: string | null;
-}
-
-export interface GitSyncOutcome {
-    status: "no-remote" | "clean" | "updated" | "conflict";
-    conflictedPaths: string[];
 }
 
 export interface Feature {

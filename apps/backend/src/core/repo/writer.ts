@@ -5,14 +5,11 @@ import { runBatch } from "../../infra/db/client";
 import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { projectContextsRepository, type ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
-import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { validateSpecSource, type SpecSourceValidation } from "../runner/validate";
 import { acquireSpecLocks, areSpecsLocked, ResourceBusyError, withSpecLock } from "../specs/lifecycle";
-import { SyncConflictError } from "./errors";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
-import { repoRemote } from "./remote";
 import { assertRepoPathSafe, readOptionalRepoFile, readRepoFile, writeRepoFile } from "./safe-fs";
 import { uniqueSlug } from "./slug";
 import {
@@ -83,13 +80,6 @@ function movedPath(candidate: string, from: string, to: string): string {
     return `${to}${candidate.slice(from.length)}`;
 }
 
-export async function assertNoSyncConflict(projectId: string): Promise<void> {
-    const project = await projectsRepository.getProject(projectId);
-    if (project?.gitConflictPaths?.length) {
-        throw new SyncConflictError("Resolve the git sync conflict before editing this project");
-    }
-}
-
 /** The allowlist check of spec.ts plus the named-steps rule; the same validation the indexer applies. */
 export function validateSpec(source: string, humanSpec: HumanSpec | null): SpecValidation {
     return validateSpecSource(source, humanSpec);
@@ -121,7 +111,6 @@ async function mutateRepoUnlocked<T>(
     work: () => Promise<T>,
     options: RepoMutationOptions = {},
 ): Promise<{ result: T; commitSha: string }> {
-    await assertNoSyncConflict(projectId);
     await repoGit.assertRepoWritableUnlocked(projectId);
     if (options.expectedHead && options.expectedHead !== await repoGit.getHeadSha(projectId)) {
         throw new Error("The repository changed since this proposal. Ask the job to prepare a new proposal.");
@@ -136,7 +125,6 @@ async function mutateRepoUnlocked<T>(
         throw error;
     }
     const commitSha = await repoGit.commitAll(projectId, options.commitMessage ?? message);
-    repoRemote.schedulePush(projectId);
     return { result, commitSha };
 }
 
@@ -320,9 +308,6 @@ export async function updateSpecInRepo(
         const { commitSha } = await mutateRepoUnlocked(spec.projectId, `spec: update "${patch.title ?? spec.title}"`, async () => {
             const current = await specsRepository.getSpec(spec.id);
             if (!current) throw new Error("Spec not found");
-            if (current.status === "conflict") {
-                throw new SyncConflictError("Resolve the git sync conflict of this Spec before editing it");
-            }
             const currentYaml = await readFile(current.projectId, specYamlFile(current.path));
             if (options.expectedSpec && (currentYaml !== options.expectedSpec.yaml
                 || await readOptionalFile(current.projectId, specTestFile(current.path)) !== options.expectedSpec.testSource)) {
@@ -399,21 +384,17 @@ export async function updateSpecWithLock(
 
 export async function deleteSpecFiles(spec: Spec): Promise<void> {
     await repoGit.withRepoLock(spec.projectId, async () => {
-        await assertNoSyncConflict(spec.projectId);
         await repoGit.assertRepoWritableUnlocked(spec.projectId);
         await fs.rm(await safePath(spec.projectId, spec.path), { recursive: true, force: true });
         await repoGit.commitAll(spec.projectId, `spec: delete "${spec.title}"`);
-        repoRemote.schedulePush(spec.projectId);
     });
 }
 
 export async function deleteFeatureDirectory(projectId: string, featurePath: string, title: string): Promise<void> {
     await repoGit.withRepoLock(projectId, async () => {
-        await assertNoSyncConflict(projectId);
         await repoGit.assertRepoWritableUnlocked(projectId);
         await fs.rm(await safePath(projectId, featurePath), { recursive: true, force: true });
         await repoGit.commitAll(projectId, `feature: delete "${title}"`);
-        repoRemote.schedulePush(projectId);
     });
 }
 

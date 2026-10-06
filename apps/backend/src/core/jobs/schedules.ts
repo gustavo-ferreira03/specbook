@@ -158,14 +158,14 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
         if (!automation.cron || !automation.nextRunAt || Date.parse(automation.nextRunAt) > at.getTime()) return;
         const available = await specsRepository.listSpecs(projectId);
         const selected = automation.specIds.length ? available.filter((spec) => automation.specIds.includes(spec.id)) : available;
-        const runnable = selected.filter((spec) => spec.status !== "invalid" && spec.status !== "conflict");
+        const runnable = selected.filter((spec) => spec.status !== "invalid");
         const ids = runnable.map((spec) => spec.id);
         if (areSpecsLocked(ids) || await runsRepository.hasRunningRuns(ids)) return;
         const nextRunAt = nextCronAt(automation.cron, at);
         if (!await schedulesRepository.claimDue(projectId, automation.nextRunAt, nextRunAt)) return;
         try {
             if (automation.specIds.length && runnable.length !== automation.specIds.length) {
-                throw new Error("Some selected Specs are missing, invalid or conflicted. Review the selected Specs before the next scheduled run.");
+                throw new Error("Some selected Specs are missing or invalid. Review the selected Specs before the next scheduled run.");
             }
             if (!ids.length) throw new Error("There are no runnable Specs. Add a Spec or resolve the invalid Specs before the next scheduled run.");
             await startSpecBatch(projectId, ids, "Scheduled run", {

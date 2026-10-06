@@ -25,7 +25,6 @@ import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { InlineFeedback, SettingsRow, SettingsSection, SettingsFooter } from "@/components/SettingsLayout";
 import { ContextFileCard } from "@/components/ContextFileCard";
 import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
-import { GitHubConnection } from "@/components/GitHubConnection";
 import { GitRemoteAccess } from "@/components/GitRemoteAccess";
 import { ProjectSettingsCard } from "@/components/ProjectSettingsCard";
 import { AutomationSettingsCard } from "@/components/AutomationSettingsCard";
@@ -548,7 +547,6 @@ function SettingsContent() {
                         <TabsContent value="git" className="flex-none">
                             <div className="space-y-10">
                                 <GitRemoteAccess projectId={projectId} oneTimeToken={gitOneTimeToken} onOneTimeTokenChange={setGitOneTimeToken} />
-                                <GitHubConnection projectId={projectId} />
                             </div>
                         </TabsContent>
 

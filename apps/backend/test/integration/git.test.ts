@@ -102,40 +102,6 @@ describe("repoBare", () => {
         assert.match((await stateError(project.id)) ?? "", /diverged/);
     });
 
-    test("publishAfterRewrite force-publishes a rebased checkout", async () => {
-        const project = await newProject();
-        const base = await repoGit.getHeadSha(project.id);
-        const published = await commitInCheckout(project.git, project.checkout, "a.txt", "v1");
-        await repoBare.publish(project.id, project.checkout);
-        // Simulate the GitHub sync rebase: the published commit is replaced.
-        await project.git.raw(["reset", "--hard", base]);
-        const rewritten = await commitInCheckout(project.git, project.checkout, "a.txt", "v1 rebased");
-        assert.equal((await repoBare.compare(project.id, project.checkout)).relation, "diverged");
-
-        await repoBare.publishAfterRewrite(project.id, project.checkout, published);
-        assert.equal(await repoBare.getBareHeadSha(project.id), rewritten);
-        assert.equal(await stateError(project.id), null);
-    });
-
-    test("publishAfterRewrite refuses to drop commits pushed by a client", async () => {
-        const project = await newProject();
-        const previousHead = await repoGit.getHeadSha(project.id);
-        const pushed = await pushCommit(await cloneBare(project.id), "client.txt", "client");
-        await project.git.raw(["reset", "--hard", previousHead]);
-        await commitInCheckout(project.git, project.checkout, "rebased.txt", "x");
-
-        await assert.rejects(repoBare.publishAfterRewrite(project.id, project.checkout, previousHead), BareStateError);
-        assert.equal(await repoBare.getBareHeadSha(project.id), pushed);
-        assert.match((await stateError(project.id)) ?? "", /not part of the GitHub sync/);
-    });
-
-    test("publishAfterRewrite behaves like publish without a rewrite", async () => {
-        const project = await newProject();
-        const previousHead = await repoGit.getHeadSha(project.id);
-        const sha = await commitInCheckout(project.git, project.checkout, "a.txt", "a");
-        await repoBare.publishAfterRewrite(project.id, project.checkout, previousHead);
-        assert.equal(await repoBare.getBareHeadSha(project.id), sha);
-    });
 });
 
 describe("pre-receive hook of the canonical repository", () => {

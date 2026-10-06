@@ -211,9 +211,6 @@ async function prepareSpecBatch(
             if (spec.status === "invalid") {
                 throw new Error(`Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
             }
-            if (spec.status === "conflict") {
-                throw new Error(`Spec "${spec.title}" has a git sync conflict`);
-            }
             const [markdown, testSource] = await Promise.all([
                 fs.readFile(path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)), "utf8"),
                 fs.readFile(path.join(repoGit.getRepoDir(projectId), specTestFile(spec.path)), "utf8"),

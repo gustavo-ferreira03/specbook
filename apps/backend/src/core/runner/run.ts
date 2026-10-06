@@ -52,7 +52,6 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
     const spec = await specsRepository.getSpec(specId);
     if (!spec) throw new Error("Spec not found");
     if (spec.status === "invalid") throw new Error(`Spec is invalid: ${spec.invalidReason ?? "unknown reason"}`);
-    if (spec.status === "conflict") throw new Error("Spec has a git sync conflict; resolve it before running");
     const project = await projectsRepository.getProject(spec.projectId);
     if (!project) throw new Error("Project not found");
     const snapshot = await repoGit.withRepoLock(spec.projectId, async () => {

@@ -229,35 +229,6 @@ class RepoBare {
         await this.recordStateError(projectId, null);
     }
 
-    /**
-     * Publishes after Specbook itself rewrote the checkout's history (the
-     * GitHub sync rebases local commits onto the remote). Commits that were
-     * already published are replaced, so the bare is force-updated, but only
-     * when everything the bare holds was part of the checkout before the
-     * rewrite; otherwise pushed work would be lost and the state is recorded.
-     */
-    async publishAfterRewrite(projectId: string, checkoutDir: string, previousHead: string): Promise<void> {
-        if (!(await this.bareExists(projectId))) return;
-        const { relation, bareSha, checkoutSha } = await this.compare(projectId, checkoutDir);
-        if (relation !== "diverged" || !bareSha) {
-            await this.publish(projectId, checkoutDir);
-            return;
-        }
-        const git = checkoutGit(checkoutDir);
-        const bareWasPublishedFromCheckout = bareSha === previousHead || (await this.isAncestor(git, bareSha, previousHead));
-        if (!bareWasPublishedFromCheckout) {
-            await this.fail(
-                projectId,
-                "The canonical repository has pushed commits that were not part of the GitHub sync; resolve it manually before Git access can continue",
-            );
-        }
-        console.warn(
-            `[specbook] force-publishing ${projectId} to its canonical repository after a sync rebase (${bareSha.slice(0, 12)} -> ${checkoutSha.slice(0, 12)})`,
-        );
-        await this.copyCheckoutIntoBare(projectId, checkoutDir);
-        await this.recordStateError(projectId, null);
-    }
-
     async getBareHeadSha(projectId: string): Promise<string | null> {
         return this.bareGit(projectId)
             .raw(["rev-parse", "--verify", "--quiet", MAIN_REF])

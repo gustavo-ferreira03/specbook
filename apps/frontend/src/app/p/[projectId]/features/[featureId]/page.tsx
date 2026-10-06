@@ -21,7 +21,7 @@ import type { Feature, SpecSummary } from "@/lib/types";
 import { RunningIcon, SpecTable, SpecTableSkeleton, orderFeatures, lastRunsOf, type SpecGroup } from "../../specs/_components/spec-table";
 
 function isRunnable(spec: SpecSummary) {
-    return spec.status !== "invalid" && spec.status !== "conflict";
+    return spec.status !== "invalid";
 }
 
 export default function FeaturePage({ params }: { params: Promise<{ projectId: string; featureId: string }> }) {

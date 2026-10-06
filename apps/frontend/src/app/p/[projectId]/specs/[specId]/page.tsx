@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, GitMerge, Images, Info, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, Info, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { RawFileEditor } from "@/components/RawFileEditor";
@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, resolveProjectGit, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
+import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -130,8 +130,6 @@ function VerificationBanner({
     latestRun,
     latestEvidence,
     running,
-    resolving,
-    onResolve,
 }: {
     projectId: string;
     detail: SpecDetail;
@@ -139,8 +137,6 @@ function VerificationBanner({
     latestRun: Run | undefined;
     latestEvidence: LoadedRunEvidence | undefined;
     running: boolean;
-    resolving: boolean;
-    onResolve: (keep: "local" | "remote") => void;
 }) {
     let status: string;
     let headline: string;
@@ -151,16 +147,6 @@ function VerificationBanner({
         status = "running";
         headline = "Verifying now";
         detail = "Running this Spec against the app. Results appear here when it finishes.";
-    } else if (spec.status === "conflict") {
-        status = "conflict";
-        headline = "Local and remote copies conflict";
-        detail = "Choose which copy should replace both files for this Spec.";
-        body = (
-            <div className="mt-3 flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" disabled={resolving} onClick={() => onResolve("local")}>Keep local</Button>
-                <Button type="button" size="sm" variant="outline" disabled={resolving} onClick={() => onResolve("remote")}>Keep remote</Button>
-            </div>
-        );
     } else if (spec.status === "invalid") {
         status = "invalid";
         headline = "This Spec can't run";
@@ -202,7 +188,7 @@ function VerificationBanner({
     }
 
     const meta = statusMeta(status);
-    const Icon = status === "conflict" ? GitMerge : meta.icon;
+    const Icon = meta.icon;
     return (
         <section aria-label="Verification status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className="flex gap-3.5 rounded-xl border border-line bg-surface p-4">
             <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full", meta.soft, meta.text)}>
@@ -367,7 +353,7 @@ function RunEntry({
     }, [loaded, onExpand, open, run.id]);
     const reportUrl = loaded?.data?.reportUrl;
     return (
-        <li className="relative pb-6 pl-8 last:pb-0">
+        <li id={`run-${run.id}`} className="relative scroll-mt-4 pb-6 pl-8 last:pb-0">
             {!last && <span aria-hidden="true" className="absolute top-5 bottom-0 left-[0.6875rem] w-px bg-line" />}
             <span aria-hidden="true" className={cn("absolute top-1.5 left-1.5 size-3 rounded-full ring-4 ring-surface", meta.chart)} />
             <Collapsible
@@ -431,7 +417,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const [loadError, setLoadError] = useState("");
     const [actionError, setActionError] = useState("");
     const [running, setRunning] = useState(false);
-    const [resolving, setResolving] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
     const [editing, setEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
@@ -594,27 +579,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         }
     }
 
-    async function resolveConflict(keep: "local" | "remote") {
-        if (!detail) return;
-        setResolving(true);
-        setActionError("");
-        try {
-            const { outcome } = await resolveProjectGit(projectId, [
-                { path: `${detail.spec.path}/spec.yml`, keep },
-                { path: `${detail.spec.path}/spec.ts`, keep },
-            ]);
-            if (outcome.status === "conflict") {
-                throw new Error("Other conflicting files still need an explicit choice in project settings.");
-            }
-            const nextDetail = await reloadDetail();
-            if (nextDetail) showDetail(nextDetail);
-        } catch (error) {
-            setActionError(errorMessage(error));
-        } finally {
-            setResolving(false);
-        }
-    }
-
     const specsCrumb: Crumb = { label: "Specs", href: `/p/${projectId}/specs` };
 
     if (loadError && !detail) {
@@ -665,10 +629,10 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 actions={
                     <>
                         <SpecHistoryDialog specId={specId} />
-                        <Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || spec.status === "conflict" || saving}>
+                        <Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
                             <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
                         </Button>
-                        <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid" || spec.status === "conflict"}>
+                        <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid"}>
                             <Play size={12} fill="currentColor" /> {running ? "Running..." : "Run Spec"}
                         </Button>
                     </>
@@ -690,8 +654,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                     latestRun={latestRun}
                     latestEvidence={latestRun ? evidence[latestRun.id] : undefined}
                     running={running}
-                    resolving={resolving}
-                    onResolve={(keep) => void resolveConflict(keep)}
                 />
                 </div>
 

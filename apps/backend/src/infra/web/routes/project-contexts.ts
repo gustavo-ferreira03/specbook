@@ -4,9 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { projectContextSchema } from "../../../core/chat/context-tools";
 import { createChat } from "../../../core/chat/session";
-import { SyncConflictError } from "../../../core/repo/errors";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
-import { syncBeforeMutation } from "../../../core/repo/sync";
 import { writeContextToRepo } from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";
@@ -58,7 +56,7 @@ export function resolveDiscoveryBrief(
 }
 
 function mapRepoError(error: unknown): never {
-    if (error instanceof SyncConflictError || error instanceof UnsafeRepoPathError) {
+    if (error instanceof UnsafeRepoPathError) {
         throw new HTTPException(409, { message: error.message });
     }
     if (error instanceof Error && /unfinished rebase|uncommitted changes/.test(error.message)) {
@@ -153,7 +151,6 @@ export function createProjectContextsRouter(): Hono {
             if (revision.context.areas.length === 0 && revision.context.unknowns.length === 0) {
                 throw new HTTPException(400, { message: "Confirmation requires at least one area or unknown" });
             }
-            await syncBeforeMutation(revision.projectId);
             const confirmed = await writeContextToRepo(revision.projectId, revision.context, {
                 confirmRevisionId: revision.id,
             }).catch(mapRepoError);

@@ -85,7 +85,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         || Boolean(webhookUrl.trim())
         || removeWebhook
     );
-    const runnable = specs.filter((spec) => spec.status !== "invalid" && spec.status !== "conflict");
+    const runnable = specs.filter((spec) => spec.status !== "invalid");
 
     async function save() {
         setSaving(true);

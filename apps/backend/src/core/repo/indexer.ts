@@ -11,7 +11,6 @@ import { specsRepository, type Spec, type SpecPatch } from "../../infra/reposito
 import { runsDir } from "../paths";
 import { repoBare } from "./bare";
 import { repoGit } from "./git";
-import { repoRemote } from "./remote";
 import { readOptionalRepoFile, UnsafeRepoPathError } from "./safe-fs";
 import { humanizeSlug } from "./slug";
 import {
@@ -180,7 +179,7 @@ function planSpecs(found: FoundSpec[], featuresByPath: Map<string, Feature>, exi
     }
 
     // A Spec that vanished from one path while identical content appeared at
-    // another was moved (a Feature renamed through a push or a GitHub pull):
+    // another was moved (a Feature renamed through a Git push):
     // keep its row, runs and status instead of recreating it.
     for (const entry of planned) {
         if (entry.existing || !entry.sourceHash || !entry.markdownHash) continue;
@@ -228,7 +227,6 @@ function planSpecs(found: FoundSpec[], featuresByPath: Map<string, Feature>, exi
             existing &&
             existing.sourceHash === entry.sourceHash &&
             existing.markdownHash === entry.markdownHash &&
-            existing.status !== "conflict" &&
             existing.status !== "invalid"
         ) {
             entry.status = existing.status;
@@ -419,7 +417,6 @@ export async function reindexProjectUnlocked(
     const workingTreeChanged = !(await repoGit.getProjectGit(projectId).status()).isClean();
     if (workingTreeChanged) {
         await repoGit.commitAll(projectId, "specbook: import working tree changes");
-        repoRemote.schedulePush(projectId);
     }
 
     await repoGit.publishToBareUnlocked(projectId).catch((error: unknown) => {

@@ -57,3 +57,9 @@ Optional schedules and webhook delivery were already prepared before the addenda
 The Activity/Inbox navigation changes are still uncommitted and need the steward activity endpoint. The unfinished steward tool draft is saved at `/tmp/specbook-steward-resume/tools.ts` while its engine is implemented; it is not wired into chat yet. Next: remove the mirror, complete steward and Activity, implement retry/flakiness, then CI/CD and the remaining coverage/exploration work. No manual-job UI should return.
 
 Schedule checkpoint validation: `pnpm typecheck` and all 194 tests pass. After restarting the backend, a real scheduled SauceDemo batch started at the next UTC minute and passed. The Automation tab loaded the persisted settings in the running frontend without console errors. Webhook retry is being checked against a temporary receiver.
+
+## GitHub mirror removal (implemented)
+
+Removed mirror routes, connection UI, remote credentials, background pulls/pushes, conflict resolution, force-publish after rebase and the mirror-only Spec status. Migration 0011 drops the four mirror columns; boot reindex derives current Spec status from files. Built-in Git Smart HTTP, scoped repository tokens, canonical bare repositories and Copilot OAuth remain. README now points to Settings → Git.
+
+Validation: `pnpm typecheck` and 189 tests pass (five mirror-only tests removed). Restarted the backend, confirmed the removed endpoint returns 404, and cloned/pushed the temporary QA repository with a scoped token, then revoked it. The optional schedule's running/passed webhook deliveries both succeeded on retry. General Git conflict/dirty-tree safeguards remain to protect externally edited repositories.

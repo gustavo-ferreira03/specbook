@@ -55,9 +55,6 @@
     --color-invalid: var(--sb-invalid);
     --color-invalid-soft: var(--sb-invalid-soft);
     --color-invalid-chart: var(--sb-invalid-chart);
-    --color-conflict: var(--sb-conflict);
-    --color-conflict-soft: var(--sb-conflict-soft);
-    --color-conflict-chart: var(--sb-conflict-chart);
     --color-info: var(--sb-info);
     --color-info-soft: var(--sb-info-soft);
     --color-neutral: var(--sb-ink-subtle);
@@ -185,9 +182,6 @@
     --sb-invalid: #aa5f16;
     --sb-invalid-soft: #fff1e4;
     --sb-invalid-chart: #ee9b46;
-    --sb-conflict: #8062ae;
-    --sb-conflict-soft: #f4efff;
-    --sb-conflict-chart: #9577c4;
     --sb-info: #406b9f;
     --sb-info-soft: #edf3fa;
     --sb-neutral-chart: oklch(84% 0.004 260);
@@ -252,9 +246,6 @@
     --sb-invalid: oklch(79% 0.12 58);
     --sb-invalid-soft: oklch(29.5% 0.05 50);
     --sb-invalid-chart: oklch(72% 0.14 55);
-    --sb-conflict: oklch(78% 0.1 300);
-    --sb-conflict-soft: oklch(29.5% 0.05 300);
-    --sb-conflict-chart: oklch(67% 0.12 300);
     --sb-info: oklch(78% 0.08 250);
     --sb-info-soft: oklch(29% 0.04 250);
     --sb-neutral-chart: oklch(42% 0 0);

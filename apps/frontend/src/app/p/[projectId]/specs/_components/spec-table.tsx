@@ -52,7 +52,7 @@ export interface SpecGroup {
 }
 
 function canRun(spec: SpecSummary) {
-    return spec.status !== "invalid" && spec.status !== "conflict";
+    return spec.status !== "invalid";
 }
 
 function GroupSummary({ specs }: { specs: SpecSummary[] }) {

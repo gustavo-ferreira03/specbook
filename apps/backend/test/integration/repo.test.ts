@@ -6,7 +6,6 @@ import path from "node:path";
 import { before, describe, test } from "node:test";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { simpleGit } from "simple-git";
 import { HUMAN_SPEC, tempDir, useTempStorage, VALID_SPEC } from "../helpers/storage";
 
 useTempStorage();
@@ -19,7 +18,6 @@ const writer = await import("../../src/core/repo/writer");
 const { reindexProject } = await import("../../src/core/repo/indexer");
 const { repoGit } = await import("../../src/core/repo/git");
 const { repoBare } = await import("../../src/core/repo/bare");
-const { repoRemote } = await import("../../src/core/repo/remote");
 const { projectsRepository } = await import("../../src/infra/repositories/projects");
 const { specsRepository } = await import("../../src/infra/repositories/specs");
 const { featuresRepository } = await import("../../src/infra/repositories/features");
@@ -193,35 +191,6 @@ describe("project, feature and spec through the writer", () => {
         assert.equal((await specsRepository.listSpecs(projectId)).length, 1);
     });
 
-    test("PATCH on a spec is blocked while the project has a sync conflict", async () => {
-        const projectId = await createProject();
-        const feature = await writer.createFeatureInRepo(projectId, null, "F", "");
-        const { spec } = await createSpec(projectId, feature.id, "Spec");
-        const commits = await commitCount(projectId);
-
-        await projectsRepository.setGitConflictPaths(projectId, ["specs/f/spec/spec.yml"]);
-        const blocked = await api("PATCH", `/specs/${spec.id}`, { title: "Novo título" });
-        assert.equal(blocked.status, 409);
-        assert.match(((await blocked.json()) as { error: string }).error, /sync conflict/);
-        assert.equal((await specsRepository.getSpec(spec.id))?.title, "Spec");
-        assert.equal(await commitCount(projectId), commits);
-
-        await projectsRepository.setGitConflictPaths(projectId, null);
-        const allowed = await api("PATCH", `/specs/${spec.id}`, { title: "Novo título" });
-        assert.equal(allowed.status, 200);
-        assert.equal((await specsRepository.getSpec(spec.id))?.path, "specs/f/novo-titulo");
-        assert.equal(await commitCount(projectId), commits + 1);
-    });
-
-    test("a spec in conflict status cannot be edited", async () => {
-        const projectId = await createProject();
-        const feature = await writer.createFeatureInRepo(projectId, null, "F", "");
-        const { spec } = await createSpec(projectId, feature.id, "Spec");
-        await specsRepository.updateSpecStatus(spec.id, "conflict");
-        const response = await api("PATCH", `/specs/${spec.id}`, { description: "x" });
-        assert.equal(response.status, 409);
-    });
-
     test("a spec.yml that is a symbolic link makes the spec invalid on reindex", async () => {
         const projectId = await createProject();
         const feature = await writer.createFeatureInRepo(projectId, null, "F", "");
@@ -243,36 +212,19 @@ describe("project, feature and spec through the writer", () => {
     });
 
     test("deleting a project removes its directories without committing or pushing", async () => {
-        // A local "GitHub" remote, to observe pushes.
-        const remoteDir = tempDir();
-        await simpleGit(remoteDir).init(["--bare", "--initial-branch=main"]);
         const projectId = await createProject();
-        await projectsRepository.updateGitConnection(projectId, remoteDir, null);
         const feature = await writer.createFeatureInRepo(projectId, null, "F", "");
         await createSpec(projectId, feature.id, "Spec");
-        await repoRemote.flushPush(projectId);
-        const remoteHead = (await simpleGit(remoteDir).raw(["rev-parse", "main"])).trim();
-        assert.equal(remoteHead, await repoGit.getHeadSha(projectId));
 
         const checkoutDir = repoGit.getRepoDir(projectId);
         const bareDir = repoBare.getBareRepoDir(projectId);
         const calls: string[] = [];
         const originals = {
             commitAll: repoGit.commitAll,
-            schedulePush: repoRemote.schedulePush,
-            flushPush: repoRemote.flushPush,
         };
         repoGit.commitAll = async (...args) => {
             calls.push("commitAll");
             return originals.commitAll.apply(repoGit, args);
-        };
-        repoRemote.schedulePush = (...args) => {
-            calls.push("schedulePush");
-            return originals.schedulePush.apply(repoRemote, args);
-        };
-        repoRemote.flushPush = async (...args) => {
-            calls.push("flushPush");
-            return originals.flushPush.apply(repoRemote, args);
         };
         try {
             const response = await api("DELETE", `/projects/${projectId}`);
@@ -280,7 +232,6 @@ describe("project, feature and spec through the writer", () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
         } finally {
             Object.assign(repoGit, { commitAll: originals.commitAll });
-            Object.assign(repoRemote, { schedulePush: originals.schedulePush, flushPush: originals.flushPush });
         }
         assert.deepEqual(calls, []);
         assert.equal(await projectsRepository.getProject(projectId), null);
@@ -288,7 +239,6 @@ describe("project, feature and spec through the writer", () => {
         assert.deepEqual(await featuresRepository.listFeatures(projectId), []);
         assert.ok(!existsSync(checkoutDir));
         assert.ok(!existsSync(bareDir));
-        assert.equal((await simpleGit(remoteDir).raw(["rev-parse", "main"])).trim(), remoteHead, "the remote keeps its history");
         assert.equal((await api("DELETE", `/projects/${projectId}`)).status, 404);
     });
 });
