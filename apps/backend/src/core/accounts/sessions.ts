@@ -4,11 +4,12 @@ import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { accountsRepository, type User } from "../../infra/repositories/accounts";
 import { publicFrontendOrigin } from "../../infra/web/security";
+import { tokenHash } from "./tokens";
 
 export const SESSION_AGE_SECONDS = 7 * 24 * 60 * 60;
 export const authEvents = new EventEmitter();
 authEvents.setMaxListeners(0);
-export const tokenHash = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
+export { tokenHash };
 export const randomToken = () => crypto.randomBytes(32).toString("hex");
 
 export function publicUser(user: User) {

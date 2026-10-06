@@ -1,17 +1,17 @@
 import { access } from "../access";
+import { loadProject } from "../load-project";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { automationSettingsSchema, publicAutomation, updateAutomation } from "../../../core/jobs/schedules";
 import { NetworkTargetError } from "../../../core/network/targets";
-import { projectsRepository } from "../../repositories/projects";
 import { schedulesRepository } from "../../repositories/schedules";
 
 export function createSchedulesRouter(): Hono {
     const router = new Hono();
     router.get("/projects/:id/automation", access("editor"), async (c) => {
         const id = c.req.param("id");
-        if (!await projectsRepository.getProject(id)) throw new HTTPException(404, { message: "Project not found" });
+        await loadProject(id);
         return c.json({
             automation: publicAutomation(id, await schedulesRepository.get(id)),
             notifications: await schedulesRepository.notifications(id),
@@ -19,7 +19,7 @@ export function createSchedulesRouter(): Hono {
     });
     router.put("/projects/:id/automation", access("editor"), zValidator("json", automationSettingsSchema), async (c) => {
         const id = c.req.param("id");
-        if (!await projectsRepository.getProject(id)) throw new HTTPException(404, { message: "Project not found" });
+        await loadProject(id);
         try {
             return c.json({
                 automation: await updateAutomation(id, c.req.valid("json")),
