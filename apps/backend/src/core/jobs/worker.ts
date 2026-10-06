@@ -8,8 +8,8 @@ import { abortChatTurn } from "../chat/chat-registry";
 import { createChat, getChatMessages } from "../chat/session-store";
 import { runChatTurn } from "../chat/turn-runner";
 import { createProjectScrubber } from "../credentials/scrub";
-import { createJobSchema } from "./schemas";
-import { createJobPolicy } from "./policy";
+import { createJobSchema, jobLimitsSchema } from "./schemas";
+import { AGENT_RULES_VERSION, createJobPolicy } from "./policy";
 import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure, stallJob } from "./retry";
 import { canRunAgentJob, isAgentPaused } from "./pause";
@@ -168,6 +168,30 @@ export async function resumeAgentJobs(projectId?: string): Promise<void> {
     void drainJobs();
 }
 
+/**
+ * A question asked under older agent rules may no longer apply (for example, permission to perform a Spec's own
+ * steps). Close it as outdated and let the job re-check under the current rules; it asks again only if still blocked.
+ */
+async function reviewOutdatedQuestions(): Promise<void> {
+    for (const project of await projectsRepository.listProjects()) {
+        if (await isAgentPaused(project.id)) continue;
+        for (const item of await jobsRepository.inbox(project.id)) {
+            if (item.kind !== "question" || item.status !== "pending" || Number(item.payload.rulesVersion ?? 1) >= AGENT_RULES_VERSION) continue;
+            const job = await jobsRepository.get(item.jobId);
+            if (job?.status !== "blocked" || !["regenerate", "failure_triage", "generate_spec"].includes(job.kind)) continue;
+            const allowance = jobLimitsSchema.parse({});
+            const resumed = await jobsRepository.transition(job.id, "blocked", "queued", {
+                limits: { maxActions: job.actionsUsed + allowance.maxActions, wallTimeMs: job.elapsedMs + allowance.wallTimeMs },
+                safetyRetries: 0, stopReason: null, retryAt: null,
+                pendingMessage: `Specbook updated its rules after you asked "${item.title}". The steps written in a Spec are now authorized, and saved credential profiles can be used to sign in. Your question was closed without a human answer. Re-check whether it still applies under these rules and continue the original goal; ask again only if you are still blocked. Inspect list_inbox before repeating work.`,
+            });
+            if (!resumed) continue;
+            await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, outdatedRules: true } });
+            await jobsRepository.log(job.id, "resumed", "The question was asked under older agent rules and was reviewed automatically.");
+        }
+    }
+}
+
 export async function startJobWorker(): Promise<void> {
     await jobsRepository.recover();
     // Internal service failures belong to automatic recovery, including earlier unanswered reports.
@@ -183,6 +207,7 @@ export async function startJobWorker(): Promise<void> {
             await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, internalRecovery: true } });
         }
     }
+    await reviewOutdatedQuestions();
     stopped = false;
     await recoverSpecBatches();
     timer = setInterval(() => void drainJobs().catch((error) => logger.error("job queue failed", { error })), 2000);
