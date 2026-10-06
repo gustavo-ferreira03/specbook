@@ -15,6 +15,7 @@ import { canRunAgentJob, isAgentPaused } from "./pause";
 import { projectsRepository } from "../../infra/repositories/projects";
 
 const active = new Map<string, Promise<void>>();
+const resumeInstructions = "The human paused this investigation. When resumed, read the previous messages, suggestions and current browser state before continuing the original goal. Do not repeat completed actions or change the expected behavior.";
 let polling = false;
 let stopped = false;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -126,7 +127,8 @@ export async function pauseAgentJobs(projectId?: string): Promise<void> {
     for (const project of projects) for (const job of await jobsRepository.list(project.id)) {
         if (["queued", "running"].includes(job.status)) {
             const changed = await jobsRepository.transition(job.id, job.status, "paused", {
-                pendingMessage: "The human paused this investigation. When resumed, read the previous messages, suggestions and current browser state before continuing the original goal. Do not repeat completed actions or change the expected behavior.",
+                pendingMessage: job.status === "running" && !job.pendingMessage.startsWith(resumeInstructions)
+                    ? `${resumeInstructions}\n\n${job.pendingMessage}` : job.pendingMessage,
             });
             if (changed) await jobsRepository.log(job.id, "paused", "The human paused the agent.");
         }

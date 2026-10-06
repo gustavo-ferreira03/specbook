@@ -703,6 +703,28 @@ describe("autonomous pause and decisions", () => {
         await settingsRepository.updateLlmSettings({ provider: "", model: "" });
     });
 
+    test("pausing retains queued triage evidence and running follow-up instructions", async () => {
+        const project = await projectWithWork();
+        const triageInstructions = "Investigate failed step Checkout using screenshot /evidence/failed.png and ARIA snapshot. Keep spec.yml unchanged.";
+        const queued = await jobsRepository.create({ projectId: project.id, chatId: crypto.randomUUID(), trigger: "spec_failure", kind: "failure_triage",
+            goal: "Investigate Checkout", pendingMessage: triageInstructions, limits: jobLimitsSchema.parse({}) });
+        const running = await createWork(project.id);
+        const followUp = "Human answer: use the operator account. Verify the saved draft before repeating the submission.";
+        await jobsRepository.update(running.id, { pendingMessage: followUp });
+        await jobsRepository.claim(running.id);
+        const endpoint = `/projects/${project.id}/steward`;
+        await put(endpoint, { paused: true });
+        assert.equal((await jobsRepository.get(queued.id))?.pendingMessage, triageInstructions);
+        const retained = (await jobsRepository.get(running.id))!.pendingMessage;
+        assert.match(retained, /The human paused/);
+        assert.ok(retained.endsWith(followUp));
+        await put(endpoint, { paused: false });
+        assert.equal((await jobsRepository.get(queued.id))?.pendingMessage, triageInstructions);
+        await jobsRepository.claim(running.id);
+        await put(endpoint, { paused: true });
+        assert.equal((await jobsRepository.get(running.id))?.pendingMessage, retained, "repeated pauses must not duplicate the reminder or replace the original request");
+    });
+
     test("concurrent resume requests preserve one investigation and reject invalid pause inputs", async () => {
         const project = await projectWithWork();
         const job = await createWork(project.id);
