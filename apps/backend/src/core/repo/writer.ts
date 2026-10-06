@@ -157,7 +157,6 @@ export async function createFeatureInRepo(
 
 export async function createSpecInRepo(input: {
     id?: string;
-    lifecycle?: "draft" | "active";
     projectId: string;
     featureId: string;
     title: string;
@@ -192,7 +191,6 @@ export async function createSpecInRepo(input: {
                     title: input.title,
                     description: input.description,
                     status: validation.ok ? "unverified" : "invalid",
-                    lifecycle: input.lifecycle ?? "active",
                     path: specPath,
                     sourceHash: sourceHashOf(input.testSource),
                     markdownHash: markdownHashOf(markdown),

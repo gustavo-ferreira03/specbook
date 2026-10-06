@@ -1169,7 +1169,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.failing.some((item) => item.specId === invalid!.id), false, "an invalid implementation is not a failing application check");
         assert.equal(view.needsYou.some((item) => item.id === invalidFinding.id), true, "a finding without a current failing check remains a reviewable decision");
         assert.equal(view.summary.paused, true);
-        assert.deepEqual(view.summary.specHealth, { total: 7, draft: 0, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, invalid: 1 });
+        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, invalid: 1 });
         assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
         assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
         assert.equal(view.specHealth[invalid!.id]?.status, "invalid");
@@ -1793,7 +1793,7 @@ describe("selected batch suggestions", () => {
             targetId = candidate.jobId;
             const job = (await read(targetId))!;
             if (outcome !== "missing_spec") {
-                const { spec } = await writer.createSpecInRepo({ projectId, id: candidate.specId, lifecycle: "draft", featureId: feature.id,
+                const { spec } = await writer.createSpecInRepo({ projectId, id: candidate.specId, featureId: feature.id,
                     title: "Sign-in form", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
                 if (outcome === "failed") {
                     const run = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(projectId), sourceHash: spec.sourceHash, automate: false });
@@ -1846,7 +1846,7 @@ describe("selected batch suggestions", () => {
                     assert.equal(questions.length, 1);
                     const question = questions[0]!;
                     assert.match(question.title, /Sign-in form/);
-                    assert.match(question.body, outcome === "missing_spec" ? /no saved runnable draft/ : /first result is missing/);
+                    assert.match(question.body, outcome === "missing_spec" ? /has not been saved/ : /first result is missing/);
                     assert.doesNotMatch(question.body, /missing access|credentials/i, "a model ending early does not prove an access problem");
                     assert.equal(question.payload.sourceItemId, item.id);
                     assert.ok(await jobsRepository.claimItem(question.id));
@@ -1914,7 +1914,7 @@ describe("selected batch suggestions", () => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeSpecBatch, selectSpecBatch, presentSpecBatch, selectedSpecInstructions, createSelectedSpec, selectedSpecResult } = await import("../../src/core/jobs/spec-batches");
-        const projectId = await createProject("Generated draft");
+        const projectId = await createProject("Generated Spec");
         const otherId = await createProject("Other suggestions");
         await stewardRepository.update(projectId, { paused: true });
         const feature = await writer.createFeatureInRepo(projectId, null, "Authentication", "");
@@ -1939,7 +1939,7 @@ describe("selected batch suggestions", () => {
         await assert.rejects(() => createSelectedSpec(job, { ...input, featureId: otherFeature.id }), /only the selected Spec/);
         await assert.rejects(() => createSelectedSpec(job, { ...input, testSource: "process.exit(0)" }), /Import|test|allowed|top-level/);
         assert.equal((await specsRepository.listSpecs(projectId)).length, 0);
-        const { spec } = await writer.createSpecInRepo({ ...input, projectId, id: specId, lifecycle: "draft" });
+        const { spec } = await writer.createSpecInRepo({ ...input, projectId, id: specId });
         const run = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(projectId), sourceHash: spec.sourceHash, baseUrl: "https://app.example.com", automate: false });
         await runsRepository.finishRun(run.id, "passed", 12, null);
         const count = await commitCount(projectId);
@@ -1947,7 +1947,6 @@ describe("selected batch suggestions", () => {
         assert.equal(result.specId, spec.id);
         assert.equal(result.runId, run.id);
         assert.equal(result.status, "passed");
-        assert.equal(result.lifecycle, "draft");
         assert.equal((await selectedSpecResult(job)).runId, run.id);
         await createSelectedSpec(job, input);
         assert.equal(await commitCount(projectId), count);

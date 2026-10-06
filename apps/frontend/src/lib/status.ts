@@ -31,7 +31,6 @@ const TONES: Record<StatusTone, Pick<StatusMeta, "text" | "soft" | "chart">> = {
 // One vocabulary for both spec states and health states: "Passing"/"Failing" describe a Spec now,
 // "Passed"/"Failed" describe a single run.
 const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
-    draft: { label: "Draft", runLabel: "Draft", description: "Run manually and activate when ready. Automatic runs exclude drafts.", tone: "neutral", icon: CircleDashed },
     passed: { label: "Passing", runLabel: "Passed", description: "The last run passed.", tone: "success", icon: Check },
     failed: { label: "Failing", runLabel: "Failed", description: "The last run failed.", tone: "danger", icon: X },
     error: { label: "Error", runLabel: "Error", description: "The run could not complete.", tone: "danger", icon: X },

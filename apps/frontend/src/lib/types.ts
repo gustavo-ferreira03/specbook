@@ -25,7 +25,6 @@ export interface SpecCandidate {
     featureId?: string;
     why: string;
     selected?: boolean;
-    lifecycle?: "draft" | "active";
     jobId?: string;
     specId?: string;
     runId?: string;
@@ -64,7 +63,6 @@ export interface SpecSummary {
     featureId: string;
     title: string;
     status: SpecStatus;
-    lifecycle: "draft" | "active";
     /** Most recent run, or null when the Spec was never run. */
     lastRun: Run | null;
 }
@@ -107,7 +105,6 @@ export interface SpecDetail {
         title: string;
         description: string;
         status: SpecStatus;
-    lifecycle: "draft" | "active";
         path: string;
         sourceHash: string;
         markdownHash: string;
@@ -368,7 +365,7 @@ export interface ActivityStory {
 }
 
 export interface SpecHealth {
-    status: "draft" | "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
+    status: "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
     label: string;
     runId?: string;
     lastCheckedAt: string | null;
@@ -396,7 +393,7 @@ export interface OverviewResponse {
         verdict: string;
         nextCheck: string;
         nextCheckAt: string | null;
-        specHealth: { total: number; draft: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; invalid: number };
+        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; invalid: number };
     };
     specHealth: Record<string, SpecHealth>;
     needsYou: PresentedInboxItem[];
@@ -406,7 +403,7 @@ export interface OverviewResponse {
     stories: ActivityStory[];
 }
 
-export type CoverageCounts = Record<"passing" | "failing" | "flaky" | "draft" | "notRun" | "invalid" | "running", number>;
+export type CoverageCounts = Record<"passing" | "failing" | "flaky" | "notRun" | "invalid" | "running", number>;
 
 export interface CoverageResponse {
     confirmed: boolean;

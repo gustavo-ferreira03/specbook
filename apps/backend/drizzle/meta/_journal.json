@@ -204,6 +204,13 @@
       "when": 1791301789199,
       "tag": "0028_retire_act_autonomy",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1791302113861,
+      "tag": "0029_remove_spec_lifecycle",
+      "breakpoints": true
     }
   ]
 }

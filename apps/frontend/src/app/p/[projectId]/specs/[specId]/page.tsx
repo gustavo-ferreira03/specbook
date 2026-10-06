@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, setSpecLifecycle, updateSpec, updateSpecFiles } from "@/lib/api";
+import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
@@ -431,7 +431,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const [runRefreshError, setRunRefreshError] = useState("");
     const [running, setRunning] = useState(false);
     const [environment, setEnvironment] = useRunEnvironment(projectId);
-    const [changingLifecycle, setChangingLifecycle] = useState(false);
     const [retryKey, setRetryKey] = useState(0);
     const [editing, setEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
@@ -565,17 +564,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         }
     }
 
-    async function changeLifecycle(lifecycle: "draft" | "active") {
-        setChangingLifecycle(true);
-        setActionError("");
-        try {
-            await setSpecLifecycle(specId, lifecycle);
-            const nextDetail = await reloadDetail();
-            if (nextDetail) showDetail(nextDetail);
-        } catch (error) { setActionError(errorMessage(error)); }
-        finally { setChangingLifecycle(false); }
-    }
-
     function startEditing() {
         if (!detail?.content) return;
         const { humanSpec } = detail.content;
@@ -673,13 +661,12 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 title={spec.title}
                 breadcrumbs={crumbs}
                 width="reading"
-                titleAdornment={<>{spec.lifecycle === "draft" && <Badge variant="neutral">Draft</Badge>}{latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}</>}
+                titleAdornment={latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                 description={spec.description || undefined}
                 actions={
                     <>
                         <SpecHistoryDialog specId={specId} />
-                        {canEdit && <><Button type="button" variant="outline" size="sm" onClick={() => void changeLifecycle(spec.lifecycle === "draft" ? "active" : "draft")} disabled={changingLifecycle || running || saving || (spec.lifecycle === "draft" && spec.status === "invalid")}>{changingLifecycle ? "Saving..." : spec.lifecycle === "draft" ? "Activate" : "Make draft"}</Button>
-                        <Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
+                        {canEdit && <><Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
                             <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
                         </Button>
                         <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
@@ -692,7 +679,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
             <PageContainer width="reading" className="min-w-0 [overflow-wrap:anywhere] lg:pb-14" innerClassName="space-y-9">
                 {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}{/pending file edits/.test(actionError) && <Link href={`/p/${projectId}/settings?tab=git`} className="mt-2 block font-medium underline underline-offset-2">Review pending edits</Link>}</AlertDescription></Alert>}
                 {runRefreshError && <Alert variant="warning" role="status"><AlertDescription>Run updates are delayed: {runRefreshError} Retrying…</AlertDescription></Alert>}
-                {spec.lifecycle === "draft" && <p className="text-control text-ink-muted">This draft can be run manually. Activate it when you trust the result to include it in scheduled runs and CI.</p>}
 
                 <div ref={bannerRef} className="scroll-mt-4 space-y-3">
                 {savedInvalid && spec.status === "invalid" && (

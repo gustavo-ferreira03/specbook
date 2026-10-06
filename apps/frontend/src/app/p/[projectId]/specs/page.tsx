@@ -16,9 +16,9 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { activateSpecs, errorMessage, getProjectTree, isAbortError } from "@/lib/api";
+import { errorMessage, getProjectTree, isAbortError } from "@/lib/api";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
-import { countLabel, formatNumber } from "@/lib/format";
+import { formatNumber } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { NO_SPECS_DESCRIPTION, countStatuses, statusMeta } from "@/lib/status";
 import { useRunBatch } from "@/lib/useRunBatch";
@@ -26,11 +26,10 @@ import { cn } from "@/lib/utils";
 import type { Feature, SpecStatus, SpecSummary } from "@/lib/types";
 import { RunningIcon, SpecTable, SpecTableSkeleton, orderFeatures, lastRunsOf, type SpecGroup } from "./_components/spec-table";
 
-type StatusFilter = "all" | "draft" | SpecStatus;
+type StatusFilter = "all" | SpecStatus;
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
     { value: "all", label: "All" },
-    { value: "draft", label: "Drafts" },
     { value: "failed", label: "Failing" },
     { value: "invalid", label: "Invalid" },
     { value: "unverified", label: "Not run" },
@@ -58,8 +57,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const [filter, setFilter] = useState<StatusFilter>("all");
     const [query, setQuery] = useState("");
     const [environment, setEnvironment] = useRunEnvironment(projectId);
-    const [activating, setActivating] = useState(false);
-    const [actionError, setActionError] = useState("");
     const runBatch = useRunBatch(projectId);
     const isRunning = runBatch.running;
 
@@ -166,7 +163,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
 
     const counts = countStatuses(specs);
     const needle = query.trim().toLowerCase();
-    const visible = (spec: SpecSummary) => (filter === "all" || (filter === "draft" ? spec.lifecycle === "draft" : spec.status === filter)) && (!needle || spec.title.toLowerCase().includes(needle));
+    const visible = (spec: SpecSummary) => (filter === "all" || spec.status === filter) && (!needle || spec.title.toLowerCase().includes(needle));
     const filtering = filter !== "all" || needle.length > 0;
 
     const knownFeatureIds = new Set(features.map((feature) => feature.id));
@@ -192,19 +189,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     }
 
     const runnableCount = specs.filter((spec) => spec.status !== "invalid").length;
-    const drafts = specs.filter((spec) => spec.lifecycle === "draft");
-    const activatable = drafts.filter((spec) => spec.status !== "invalid");
-    const filterCount = (value: StatusFilter) => value === "all" ? specs.length : value === "draft" ? drafts.length : counts[value] ?? 0;
-
-    async function activateDrafts() {
-        setActivating(true);
-        setActionError("");
-        try {
-            await activateSpecs(projectId, activatable.map((spec) => spec.id));
-            setRetryKey((key) => key + 1);
-        } catch (error) { setActionError(errorMessage(error)); }
-        finally { setActivating(false); }
-    }
+    const filterCount = (value: StatusFilter) => value === "all" ? specs.length : counts[value] ?? 0;
 
     return (
         <div className="flex min-h-full flex-col bg-surface">
@@ -214,7 +199,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 actions={canEdit &&
                     <>
                         {createActions}
-                        {activatable.length > 0 && <Button type="button" variant="outline" size="sm" disabled={activating || isRunning} onClick={() => void activateDrafts()}>{activating ? "Activating..." : `Activate ${countLabel(activatable.length, "draft")}`}</Button>}
                         <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={isRunning} />
                         <div className="flex items-center">
                             <Button type="button" size="sm" className="rounded-r-none" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>
@@ -253,8 +237,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             />
             <PageContainer width="data" innerClassName="space-y-6">
                 {syncWarning && <Alert variant="warning" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
-                {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}</AlertDescription></Alert>}
-                {drafts.length > 0 && <p className="text-control text-ink-muted">{plural(drafts.length, "draft")} can only be run manually. Activate the Specs you trust to include them in scheduled runs and CI.</p>}
 
                 <SummaryStrip counts={counts} />
 
@@ -264,7 +246,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                             {FILTERS.filter((item) => item.value === "all" || filterCount(item.value) > 0).map((item) => {
                                 const active = filter === item.value;
                                 const count = filterCount(item.value);
-                                const Icon = item.value === "all" || item.value === "draft" ? null : statusMeta(item.value).icon;
+                                const Icon = item.value === "all" ? null : statusMeta(item.value).icon;
                                 return (
                                     <Button
                                         key={item.value}

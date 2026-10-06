@@ -256,7 +256,6 @@ async function prepareSpecBatch(
         for (const id of ids) {
             const spec = await specsRepository.getSpec(id);
             if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
-            if (trigger !== "manual" && spec.lifecycle === "draft") throw new Error(`Spec "${spec.title}" is a draft. Activate it before automatic runs.`);
             if (spec.status === "invalid") {
                 throw new Error(`Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
             }
@@ -305,8 +304,8 @@ async function prepareSpecBatch(
                 specId: definition.spec.id,
                 commitSha,
                 sourceHash: definition.sourceHash,
-                automate: definition.spec.lifecycle === "active",
-                healOnFailure: definition.spec.lifecycle === "active" && healOnFailure,
+                automate: true,
+                healOnFailure,
                 baseUrl,
                 environment,
             });

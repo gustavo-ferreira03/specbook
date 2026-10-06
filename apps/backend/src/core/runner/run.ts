@@ -98,8 +98,8 @@ async function executeSpecLocked(specId: string, options: RunOptions): Promise<E
     const scrub = await projectSecretScrubber(spec.projectId);
 
     const run = await runsRepository.createRun({
-        specId: spec.id, commitSha, sourceHash, automate: spec.lifecycle === "active" && options.automate,
-        healOnFailure: spec.lifecycle === "active" && options.healOnFailure !== false, retryOf: options.retryOf, baseUrl, environment,
+        specId: spec.id, commitSha, sourceHash, automate: options.automate,
+        healOnFailure: options.healOnFailure !== false, retryOf: options.retryOf, baseUrl, environment,
     });
     try {
         await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));

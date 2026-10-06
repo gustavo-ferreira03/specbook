@@ -17,7 +17,7 @@ import { listRunBatches } from "./runner/batch";
 import { validateSpecSource } from "./runner/validate";
 
 type CoverageStatus = "covered" | "partial" | "uncovered";
-type SpecHealth = "passing" | "failing" | "flaky" | "draft" | "notRun" | "invalid" | "running";
+type SpecHealth = "passing" | "failing" | "flaky" | "notRun" | "invalid" | "running";
 export interface CoverageArea {
     kind: "area" | "role" | "rule";
     name: string;
@@ -32,7 +32,7 @@ export interface CoverageArea {
 
 const normalize = (value: string) => value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 const contains = (text: string, phrase: string) => Boolean(normalize(phrase)) && ` ${normalize(text)} `.includes(` ${normalize(phrase)} `);
-const emptyCounts = (): Record<SpecHealth, number> => ({ passing: 0, failing: 0, flaky: 0, draft: 0, notRun: 0, invalid: 0, running: 0 });
+const emptyCounts = (): Record<SpecHealth, number> => ({ passing: 0, failing: 0, flaky: 0, notRun: 0, invalid: 0, running: 0 });
 
 function routePath(value: string): string | null {
     try {
@@ -127,7 +127,7 @@ export async function projectCoverage(projectId: string, environmentName?: strin
     const health = new Map(await Promise.all(specs.map(async (spec) => {
         const run = latest.get(spec.id);
         const current = run && await matchesCurrentSpec(run, spec);
-        const state: SpecHealth = spec.lifecycle === "draft" ? "draft" : !details.get(spec.id)?.valid ? "invalid" : !current ? "notRun"
+        const state: SpecHealth = !details.get(spec.id)?.valid ? "invalid" : !current ? "notRun"
             : run.status === "running" ? "running" : run.flaky ? "flaky" : run.status === "passed" ? "passing" : "failing";
         return [spec.id, state] as const;
     })));
@@ -135,13 +135,13 @@ export async function projectCoverage(projectId: string, environmentName?: strin
     const addArea = (kind: CoverageArea["kind"], name: string, routes: string[]) => {
         const matched = specs.filter((spec) => contains(`${spec.title} ${spec.description} ${featureMap.has(spec.featureId) ? featureText(featureMap.get(spec.featureId)!, featureMap) : ""}`, name)
             || routes.some((route) => details.get(spec.id)?.routes.some((tested) => matchesRoute(route, tested))));
-        const active = matched.filter((spec) => spec.lifecycle === "active" && details.get(spec.id)?.valid);
-        const matchedRoutes = routes.filter((route) => active.some((spec) => details.get(spec.id)?.routes.some((tested) => matchesRoute(route, tested))));
-        const coverage: CoverageStatus = !matched.length ? "uncovered" : active.length && matchedRoutes.length === routes.length ? "covered" : "partial";
+        const valid = matched.filter((spec) => details.get(spec.id)?.valid);
+        const matchedRoutes = routes.filter((route) => valid.some((spec) => details.get(spec.id)?.routes.some((tested) => matchesRoute(route, tested))));
+        const coverage: CoverageStatus = !matched.length ? "uncovered" : valid.length && matchedRoutes.length === routes.length ? "covered" : "partial";
         const reason = coverage === "uncovered" ? "No matching Specs found"
-            : !active.length ? "Matching Specs are drafts or need repairing"
-            : coverage === "partial" ? `${routes.length - matchedRoutes.length} known route${routes.length - matchedRoutes.length === 1 ? " has" : "s have"} no matching active Spec`
-            : routes.length ? "Active Specs reference every known route" : "Matching active Specs exist";
+            : !valid.length ? "Matching Specs need repairing"
+            : coverage === "partial" ? `${routes.length - matchedRoutes.length} known route${routes.length - matchedRoutes.length === 1 ? " has" : "s have"} no matching Spec`
+            : routes.length ? "Specs reference every known route" : "Matching Specs exist";
         const featureIds = [...new Set([...features.filter((feature) => contains(featureText(feature, featureMap), name)).map((feature) => feature.id), ...matched.map((spec) => spec.featureId)])];
         const areaSpecs = matched.map((spec) => ({ id: spec.id, title: spec.title }));
         areas.push({ kind, name, routes, coverage, featureIds, specIds: areaSpecs.map((spec) => spec.id), specs: areaSpecs, matchedRoutes, reason });

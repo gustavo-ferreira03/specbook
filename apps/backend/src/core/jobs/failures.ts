@@ -14,7 +14,7 @@ const retryDelays = new Map<string, { attempts: number; retryAt: number }>();
 
 async function failureContent(run: Run): Promise<{ sourceHash: string; markdownHash: string } | null> {
     const spec = await specsRepository.getSpec(run.specId);
-    if (!spec || spec.lifecycle === "draft" || spec.sourceHash !== run.sourceHash) return null;
+    if (!spec || spec.sourceHash !== run.sourceHash) return null;
     const markdown = await fs.readFile(path.join(runsDir, run.id, "spec.yml"), "utf8").catch(() => null);
     if (markdown === null || markdownHashOf(markdown) !== spec.markdownHash) return null;
     return { sourceHash: run.sourceHash, markdownHash: spec.markdownHash };

@@ -7,7 +7,7 @@ import { loadProjectState, projectPresentation, type ActivityStory, type Present
 import { matchesCurrentSpec } from "./current-run";
 import { finishedAt, oldestFirst } from "./shared";
 
-export type SpecHealthStatus = "draft" | "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
+export type SpecHealthStatus = "passing" | "failing" | "flaky" | "not_checked" | "running" | "invalid";
 export interface SpecHealth {
     status: SpecHealthStatus;
     label: string;
@@ -58,13 +58,13 @@ export async function projectOverview(projectId: string) {
         return [spec.id, latest && await matchesCurrentSpec(latest, spec) ? latest : undefined] as const;
     })));
     const specHealth: Record<string, SpecHealth> = {};
-    const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, draft: 0, passing: 0, failing: 0, flaky: 0, not_checked: 0, running: 0, invalid: 0 };
+    const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, passing: 0, failing: 0, flaky: 0, not_checked: 0, running: 0, invalid: 0 };
     for (const spec of specs) {
         const current = currentRuns.get(spec.id);
-        const status: SpecHealthStatus = spec.lifecycle === "draft" ? "draft" : spec.status === "invalid" ? "invalid"
+        const status: SpecHealthStatus = spec.status === "invalid" ? "invalid"
             : current?.status === "running" ? "running" : !current ? "not_checked"
             : current.flaky ? "flaky" : current.status === "passed" ? "passing" : "failing";
-        const label = status === "draft" ? `Draft${current ? ` · first run ${current.status}` : " · not run yet"}` : status === "invalid" ? "Needs repair"
+        const label = status === "invalid" ? "Needs repair"
             : status === "running" ? "Running"
             : status === "not_checked" ? "Not run since the last change" : status === "flaky" ? "Passed on retry"
             : status === "passing" ? "Passing" : "Latest run failed";
@@ -165,10 +165,9 @@ export async function projectOverview(projectId: string) {
     }
     recentRuns.sort(newestFirst);
     const lastCheckedAt = Object.values(specHealth).flatMap((health) => health.lastCheckedAt ? [health.lastCheckedAt] : []).sort().at(-1) ?? null;
-    const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length - healthCounts.draft} active Specs passing` : "No Specs yet",
+    const verdict = [specs.length ? `${healthCounts.passing} of ${countLabel(specs.length, "Spec")} passing` : "No Specs yet",
         healthCounts.failing ? `${healthCounts.failing} failing` : "", healthCounts.flaky ? `${healthCounts.flaky} flaky` : "",
         healthCounts.invalid ? `${healthCounts.invalid} need repairing` : "",
-        healthCounts.draft ? countLabel(healthCounts.draft, "draft") : "",
         healthCounts.not_checked ? `${healthCounts.not_checked} not run yet` : "", healthCounts.running ? `${healthCounts.running} running` : ""].filter(Boolean).join(" · ");
     const activeCount = recentRuns.filter((run) => run.status === "working").length + jobs.filter((job) => job.status === "running").length;
     const nextCheckAt = agentPaused ? null : schedule?.nextRunAt ?? null;

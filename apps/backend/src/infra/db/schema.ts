@@ -8,7 +8,6 @@ export interface HumanSpec {
 }
 
 export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
-export type SpecLifecycle = "draft" | "active";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface RunEnvironment {
@@ -109,7 +108,6 @@ export const specs = sqliteTable(
         title: text("title").notNull(),
         description: text("description").notNull().default(""),
         status: text("status").$type<SpecStatus>().notNull().default("unverified"),
-        lifecycle: text("lifecycle").$type<SpecLifecycle>().notNull().default("active"),
         path: text("path").notNull(),
         sourceHash: text("source_hash").notNull(),
         markdownHash: text("markdown_hash").notNull().default(""),

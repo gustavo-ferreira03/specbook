@@ -19,7 +19,7 @@ export class StaleTriageError extends Error {}
 export async function currentFailure(projectId: string, runId?: string) {
     const run = runId ? await runsRepository.getRun(runId) : null;
     const spec = run ? await specsRepository.getSpec(run.specId) : null;
-    if (!run || !spec || spec.lifecycle === "draft" || spec.projectId !== projectId || run.flaky || !["failed", "error"].includes(run.status)) return null;
+    if (!run || !spec || spec.projectId !== projectId || run.flaky || !["failed", "error"].includes(run.status)) return null;
     if ((await runsRepository.listRuns(spec.id, { limit: 1 }))[0]?.id !== run.id || !await matchesCurrentSpec(run, spec)) return null;
     return { run, spec };
 }

@@ -33,7 +33,7 @@ After the image download and model connection:
 
 1. Choose **Try with a demo app** to create a project for SauceDemo. Its public test credentials come prefilled.
 2. Open a Spec chat and ask: “Create a Spec to verify that the sign-in page shows a username field, password field and Login button. Don't sign in.”
-3. Review the suggested Specs and choose **Add selected**. Specbook generates each selected draft, validates it and runs it once. Review its behavior and evidence, then activate the Specs you trust.
+3. Review the suggested Specs and choose **Add selected**. Specbook generates each selected Spec, validates it and runs it once. Review its behavior and evidence.
 4. Connect your own app when you're ready. Add private credentials through **Project settings → Credentials**.
 
 A Spec pairs a human-readable `spec.yml` with a validated Playwright `spec.ts`. Both live in the project's Git repository. [See the file format and Git workflow](docs/specs.md).
@@ -50,7 +50,7 @@ Use the dependency-free CI client with GitHub Actions, GitLab, Bitbucket, Circle
 
 Save Production, Staging and other named environments, each with its own URL, allowed origins and optional credential overrides. Choose an environment for a manual run or send its name from CI. A one-off preview URL must belong to that environment's allowlist.
 
-Discovery and **Find uncovered areas** return selectable batches of Specs. Drafts can run manually; schedules, CI, deployment triggers and the healer use active Specs only. Coverage compares confirmed areas, roles and rules with saved Specs, shows health by feature and tracks recent batch pass rates. These matches show where Specs exist, not complete behavioral coverage.
+Discovery and **Find uncovered areas** return selectable batches of Specs. Coverage compares confirmed areas, roles and rules with saved Specs, shows health by feature and tracks recent batch pass rates. These matches show where Specs exist, not complete behavioral coverage.
 
 API Specs use Playwright's `request` fixture alongside the same named steps and readable behavior contract. Request methods, destinations, bodies and assertions pass the restricted validator. Evidence includes the method, URL, status and redacted request/response excerpts.
 
@@ -58,7 +58,7 @@ The CI client can update one GitHub PR comment with the Markdown report using th
 
 ## Specbook and runtime-AI testing
 
-Specbook runs saved Playwright code deterministically. AI helps discover behavior, generate Specs and investigate failures; a normal Spec run does not call a model. Tests and expected behavior remain in your Git repository, proposed edits are diffs, and the runtime is self-hosted. Runtime-AI testing can adapt actions while executing; Specbook makes each executable Spec reviewable before activating it.
+Specbook runs saved Playwright code deterministically. AI helps discover behavior, generate Specs and investigate failures; a normal Spec run does not call a model. Tests and expected behavior remain in your Git repository, proposed edits are diffs, and the runtime is self-hosted. Runtime-AI testing can adapt actions while executing; Specbook keeps each executable Spec reviewable in your repository.
 
 ## Work on Specbook
 

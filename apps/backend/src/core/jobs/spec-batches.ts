@@ -84,7 +84,7 @@ export async function proposeSpecBatch(projectId: string, chatId: string, input:
         }
         const batch: SpecBatch = { candidates: clean.candidates.map((candidate) => ({ ...candidate, id: crypto.randomUUID() })), sourceChatId: chatId, ...options };
         const item = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_batch", title: clean.title,
-            body: "Choose the Specs you want. Specbook will create each selected Spec as a draft, validate it and run it once.",
+            body: "Choose the Specs you want. Specbook will create each selected Spec, validate it and run it once.",
             payload: { proposed: clean, specBatch: batch, sourceChatId: chatId, language: "en" } });
         await jobsRepository.log(job.id, "spec_batch:proposed", item.id);
         return item;
@@ -95,7 +95,7 @@ async function enqueueSelected(item: InboxItem): Promise<void> {
     const { enqueueJob } = await import("./worker");
     for (const candidate of batchOf(item).candidates.filter((candidate) => candidate.selected)) {
         await enqueueJob(item.projectId, { kind: "generate_spec", trigger: "chat",
-            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and use create_spec once. The selected Spec must remain a draft. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId);
+            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and use create_spec once. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId);
     }
 }
 
@@ -167,14 +167,14 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
         },
     });
     await updateCandidate(item.id, candidate.id, { resolvedFeatureId: feature.id });
-    return `${job.pendingMessage}\nSelected Spec reference: ${item.id}/${candidate.id}. Use featureId ${feature.id} and title ${JSON.stringify(candidate.title)} for create_spec. The selection authorizes this new draft only. Existing spec.yml contracts remain unchanged. create_spec validates the files, saves the draft and runs it once automatically; inspect its result rather than running again. If this draft already exists, use run_spec to retrieve the first result. Use inbox_report to ask for prerequisites.`;
+    return `${job.pendingMessage}\nSelected Spec reference: ${item.id}/${candidate.id}. Use featureId ${feature.id} and title ${JSON.stringify(candidate.title)} for create_spec. The selection authorizes this new Spec only. Existing spec.yml contracts remain unchanged. create_spec validates the files, saves the Spec and runs it once automatically; inspect its result rather than running again. If this Spec already exists, use run_spec to retrieve the first result. Use inbox_report to ask for prerequisites.`;
 }
 
 export async function selectedSpecResult(job: Job) {
     const { candidate } = await selectedCandidate(job);
     const spec = candidate.specId ? await specsRepository.getSpec(candidate.specId) : null;
     const run = candidate.runId ? await runsRepository.getRun(candidate.runId) : spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null;
-    return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null, lifecycle: spec?.lifecycle ?? "draft" };
+    return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null };
 }
 
 export async function createSelectedSpec(job: Job, input: unknown, options: { signal?: AbortSignal; checkPolicy?: () => Promise<void>; baseUrl?: string; environment?: RunEnvironment } = {}) {
@@ -186,8 +186,8 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
     await options.checkPolicy?.();
     let spec = await specsRepository.getSpec(candidate.specId!);
     if (!spec) {
-        ({ spec } = await createSpecInRepo({ ...proposed, projectId: job.projectId, id: candidate.specId, lifecycle: "draft" },
-            { commitMessage: `spec-batch:${item.id}:${candidate.id} create draft "${candidate.title}"`, checkPolicy: options.checkPolicy }));
+        ({ spec } = await createSpecInRepo({ ...proposed, projectId: job.projectId, id: candidate.specId },
+            { commitMessage: `spec-batch:${item.id}:${candidate.id} create "${candidate.title}"`, checkPolicy: options.checkPolicy }));
     }
     if (spec.projectId !== job.projectId) throw new Error("This selected Spec belongs to another project.");
     await jobsRepository.update(job.id, { specId: spec.id });
@@ -223,7 +223,7 @@ export async function presentSpecBatch(item: InboxItem) {
             : job?.status === "blocked" ? "needs_answer" : job?.status === "running" || run?.status === "running" ? "generating"
             : ["completed", "cancelled"].includes(job?.status ?? "") || (job?.status === "stalled" && !job.retryAt) ? "stopped" : "queued";
         const error = run?.failReason ?? candidate.error ?? job?.stopReason;
-        return { ...candidate, specId: spec?.id, runId: run?.id, lifecycle: spec?.lifecycle, state, questionId: question?.id,
+        return { ...candidate, specId: spec?.id, runId: run?.id, state, questionId: question?.id,
             finishedAt: run && run.status !== "running" ? finishedAt(run) : undefined,
             error: error ? sanitizeTechnicalDetails(await scrub(error)) : undefined };
     }));

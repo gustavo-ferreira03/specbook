@@ -450,13 +450,6 @@ export function getEnvironments(projectId: string, signal?: AbortSignal): Promis
     return api(apiPath`/projects/${projectId}/environments`, { signal });
 }
 
-export function setSpecLifecycle(specId: string, lifecycle: "draft" | "active"): Promise<{ spec: SpecDetail["spec"] }> {
-    return api(apiPath`/specs/${specId}/lifecycle`, { method: "PATCH", body: JSON.stringify({ lifecycle }) });
-}
-
-export function activateSpecs(projectId: string, specIds: string[]): Promise<{ activated: string[] }> {
-    return api(apiPath`/projects/${projectId}/specs/activate`, { method: "POST", body: JSON.stringify({ specIds }) });
-}
 
 export function getOverview(projectId: string, signal?: AbortSignal): Promise<OverviewResponse> {
     return api(apiPath`/projects/${projectId}/overview`, { signal });

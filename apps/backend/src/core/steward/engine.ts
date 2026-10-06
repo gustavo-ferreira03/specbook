@@ -250,7 +250,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
         return;
     }
     if (row.intent.kind === "run_specs") {
-        const selected = allSpecs.filter((spec) => spec.lifecycle === "active" && (!row.intent.specIds?.length || row.intent.specIds.includes(spec.id)));
+        const selected = allSpecs.filter((spec) => !row.intent.specIds?.length || row.intent.specIds.includes(spec.id));
         if (row.intent.specIds?.length && (row.intent.specIds.some((id) => !allSpecs.some((spec) => spec.id === id)) || selected.some((spec) => spec.status === "invalid"))) throw new Error("Some selected Specs are missing or invalid. Restore or update those Specs before retrying this selection.");
         const specs = selected.filter((spec) => spec.status !== "invalid");
         if (!specs.length) { await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "No runnable Specs yet." }); return; }

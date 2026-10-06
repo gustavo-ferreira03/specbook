@@ -34,8 +34,6 @@ Preview URLs do not authorize access to stored credentials. To use a saved crede
 
 By default, Specs that pass on retry and failures covered by an open bug report do not fail the pipeline. They remain visible in the Markdown summary and appear as skipped cases in JUnit. Other failures fail the gate. The batch's execution status and its quality gate result are shown separately in **Settings → CI/CD**, with links to each Spec's evidence.
 
-Draft Specs never run in CI or deployment batches and don't affect the quality gate. Activate a Draft after reviewing its manual run.
-
 ### Pull request feedback
 
 With `SPECBOOK_COMMENT_PROVIDER=github`, the client reads the PR number from `GITHUB_EVENT_PATH` and uses the job's `GITHUB_TOKEN` to create or update one comment per Specbook project. Set `SPECBOOK_PR_NUMBER` explicitly when a trusted workflow already knows the PR number. `GITHUB_REPOSITORY` and `GITHUB_API_URL` come from GitHub Actions, including GitHub Enterprise. The workflow below grants only the [pull-request permission](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions) needed to publish the summary.
@@ -265,9 +263,9 @@ Authenticate every request below with `Authorization: Bearer <CI token>`. These 
 | `GET /ci/runs/:batchId?format=junit` | JUnit XML report |
 | `GET /ci/runs/:batchId?format=markdown` | Markdown summary for your CI job to publish |
 | `GET /ci/projects/:id/client.mjs` | Downloads the dependency-free client |
-| `POST /ci/projects/:id/deploy` | Records a deployment event that runs active Specs |
+| `POST /ci/projects/:id/deploy` | Records a deployment event that runs the project's Specs |
 
-Send `{}` to run all active, runnable Specs, `{ "featureId": "<feature-id>" }` for a Feature subtree, or `{ "specIds": ["<spec-id>"] }` for a selection. The run request also accepts `environment` (a saved name, default `production`), `baseUrl`, `commitSha`, `ref`, `buildUrl`, and `qualityGate: { failOnFlaky: false, failOnKnownBugs: false }`. Invalid Specs are excluded from all/Feature batches; explicitly selecting an invalid Spec returns its validation failure. Drafts are excluded from CI selection.
+Send `{}` to run all runnable Specs, `{ "featureId": "<feature-id>" }` for a Feature subtree, or `{ "specIds": ["<spec-id>"] }` for a selection. The run request also accepts `environment` (a saved name, default `production`), `baseUrl`, `commitSha`, `ref`, `buildUrl`, and `qualityGate: { failOnFlaky: false, failOnKnownBugs: false }`. Invalid Specs are excluded from all/Feature batches; explicitly selecting an invalid Spec returns its validation failure.
 
 ```bash
 curl -fsS -X POST \

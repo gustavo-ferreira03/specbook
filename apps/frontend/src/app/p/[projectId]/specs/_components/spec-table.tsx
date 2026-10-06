@@ -101,7 +101,6 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                     >
                         {spec.title}
                     </Link>
-                    {spec.lifecycle === "draft" && <Badge variant="neutral" size="sm">Draft</Badge>}
                     {run?.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted sm:hidden">

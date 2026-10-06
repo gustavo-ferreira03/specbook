@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, runBatch, type DbQuery } from "../db/client";
-import { runs, specs, type SpecStatus, type SpecLifecycle } from "../db/schema";
+import { runs, specs, type SpecStatus } from "../db/schema";
 
 export type Spec = typeof specs.$inferSelect;
 export type DeleteSpecResult =
@@ -10,7 +10,7 @@ export type DeleteSpecResult =
     | { status: "deleted"; runIds: string[] };
 
 export type SpecPatch = Partial<
-    Pick<Spec, "lifecycle" | "title" | "description" | "path" | "sourceHash" | "markdownHash" | "status" | "invalidReason" | "featureId">
+    Pick<Spec, "title" | "description" | "path" | "sourceHash" | "markdownHash" | "status" | "invalidReason" | "featureId">
 >;
 
 class SpecsRepository {
@@ -24,7 +24,6 @@ class SpecsRepository {
         sourceHash: string;
         markdownHash: string;
         status?: SpecStatus;
-        lifecycle?: SpecLifecycle;
         invalidReason?: string | null;
     }): Promise<Spec> {
         const now = new Date().toISOString();
@@ -35,7 +34,6 @@ class SpecsRepository {
             title: input.title,
             description: input.description,
             status: input.status ?? "unverified",
-            lifecycle: input.lifecycle ?? "active",
             path: input.path,
             sourceHash: input.sourceHash,
             markdownHash: input.markdownHash,

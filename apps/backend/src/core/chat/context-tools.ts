@@ -45,7 +45,7 @@ export function createSpecBatchTool(projectId: string, chatId: string, contextRe
     return defineTool({
         name: "propose_spec_batch",
         label: "propose_spec_batch",
-        description: "Suggest a short list of Specs for the human to select. Include a specific title, one-sentence goal, feature and why each Spec matters. Do not generate files yet. Selection creates drafts, validates them and runs each once. Provide apiDocsUrl for API Specs whose documentation you observed.",
+        description: "Suggest a short list of Specs for the human to select. Include a specific title, one-sentence goal, feature and why each Spec matters. Do not generate files yet. Selection creates the selected Specs, validates them and runs each once. Provide apiDocsUrl for API Specs whose documentation you observed.",
         parameters: Type.Unsafe<z.infer<typeof specBatchProposalSchema>>(specBatchProposalSchema.toJSONSchema()),
         async execute(_id, input) {
             const item = await proposeSpecBatch(projectId, chatId, input, { contextRevisionId });
