@@ -1,3 +1,6 @@
+import type { ApiRequestEvidence } from "../evidence";
+export type { ApiRequestEvidence } from "../evidence";
+
 /**
  * Runtime half of the "specbook" test module. It runs inside the Playwright worker
  * that executes pushed or LLM-written Spec code, so it imports nothing from the
@@ -26,6 +29,7 @@ export interface SpecbookRuntime {
 
 export const RUNTIME_ENV = "SPECBOOK_RUNTIME";
 export const STEP_ATTACHMENT_PREFIX = "specbook-step-";
+export const API_STEP_ATTACHMENT_PREFIX = "specbook-api-step-";
 export const FAILED_STEP_ANNOTATION = "specbook-failed-step";
 export const SECRET_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
@@ -114,9 +118,19 @@ export interface RawPage {
     evaluate: AnyFn;
     [method: string]: any;
 }
+export interface RawApiResponse {
+    status(): number;
+    headers(): Record<string, string>;
+    body(): Promise<Uint8Array>;
+    json(): Promise<unknown>;
+    dispose(): Promise<void>;
+}
+export interface RawRequest {
+    fetch(url: string, options: Record<string, unknown>): Promise<RawApiResponse>;
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-type WrapperKind = "page" | "locator" | "keyboard";
+type WrapperKind = "page" | "locator" | "keyboard" | "apiResponse" | "request";
 const originals = new WeakMap<object, { kind: WrapperKind; original: object }>();
 
 /** The real Playwright object behind a wrapper, for expect() and fixture internals. */
@@ -207,6 +221,7 @@ export function createGuard(options: GuardOptions) {
     const { runtime } = options;
     const baseOrigin = new URL(runtime.baseURL).origin;
     const basePath = new URL(runtime.baseURL).pathname.replace(/\/+$/, "");
+    const apiOrigins = runtime.navigationOrigins ?? [baseOrigin];
 
     function allowedOriginsFor(envName: string): string[] {
         return runtime.secretOrigins.byRef[envName] ?? [];
@@ -340,5 +355,102 @@ export function createGuard(options: GuardOptions) {
         return frozen("page", methods, page);
     }
 
-    return { wrapPage, wrapLocator };
+    function wrapRequest(request: RawRequest, capture: (evidence: ApiRequestEvidence) => void): object {
+        const sensitive = /authorization|cookie|token|api[-_]key|password|secret/i;
+        const configuredSecrets = Object.keys(runtime.secretOrigins.byRef).map(options.readSecret).filter((value): value is string => Boolean(value));
+        const redact = (value: string) => {
+            for (const secret of configuredSecrets) {
+                for (const variant of new Set([secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)])) {
+                    value = value.split(variant).join("••••");
+                }
+            }
+            return value;
+        };
+        const excerpt = (value: unknown) => redact(typeof value === "string" ? value : JSON.stringify(value)).slice(0, 4000);
+        const safeHeaders = (headers: Record<string, string>) => Object.fromEntries(Object.entries(headers).slice(0, 50).map(([key, value]) => [key, sensitive.test(key) ? "••••" : redact(value).slice(0, 1000)]));
+        const safeUrl = (url: URL) => {
+            const safe = new URL(url);
+            for (const key of safe.searchParams.keys()) if (sensitive.test(key)) safe.searchParams.set(key, "••••");
+            return redact(safe.href).slice(0, 2000);
+        };
+        const checkOrigin = (url: URL, refs: Set<string>) => {
+            if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || !apiOrigins.includes(url.origin)) throw new Error("API request origin is not allowed for this run.");
+            for (const ref of refs) if (!allowedOriginsFor(ref).includes(url.origin)) throw new Error("Refusing to send a secret: the API origin is not allowed for this credential.");
+        };
+        const resolveValue = (value: unknown, refs: Set<string>, depth = 0): unknown => {
+            if (depth > 6) throw new Error("API values are nested too deeply");
+            if (isSecret(value)) {
+                const secret = secretValue(value as object);
+                refs.add(secret.envName);
+                return secret.value;
+            }
+            if (value === null || ["string", "number", "boolean"].includes(typeof value)) return value;
+            if (Array.isArray(value)) return value.map((item) => resolveValue(item, refs, depth + 1));
+            if (typeof value !== "object" || value === null || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error("API bodies must be literal JSON values or secret(...)");
+            const copy: Record<string, unknown> = {};
+            for (const [key, item] of Object.entries(value)) {
+                if (["__proto__", "constructor", "prototype"].includes(key)) throw new Error(`API key "${key}" is not allowed`);
+                copy[key] = resolveValue(item, refs, depth + 1);
+            }
+            return copy;
+        };
+        const methods: Record<string, unknown> = {};
+        for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"] as const) {
+            methods[method.toLowerCase()] = async (target: unknown, input: unknown = {}) => {
+                if (typeof target !== "string" || /[\\\u0000-\u001f]/.test(target)) throw new Error("API requests need a literal path or HTTP(S) URL");
+                let url = isSafeRelativePath(target) ? new URL(`${baseOrigin}${basePath}${target}`) : new URL(target);
+                const refs = new Set<string>();
+                const requestOptions = resolveValue(input, refs) as Record<string, unknown>;
+                if (!requestOptions || Array.isArray(requestOptions) || typeof requestOptions !== "object") throw new Error("API options must be a literal object");
+                for (const key of Object.keys(requestOptions)) if (!["headers", "data", "timeout"].includes(key)) throw new Error(`API option "${key}" is not allowed`);
+                const headers = requestOptions.headers ?? {};
+                if (!headers || typeof headers !== "object" || Array.isArray(headers) || Object.values(headers).some((value) => typeof value !== "string")) throw new Error("API headers must contain string values");
+                const timeout = requestOptions.timeout ?? 15_000;
+                if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 1 || timeout > 30_000) throw new Error("API timeout must be between 1 and 30000 milliseconds");
+                let currentMethod = method;
+                let data = requestOptions.data;
+                checkOrigin(url, refs);
+                for (let redirects = 0; redirects <= 5; redirects += 1) {
+                    checkOrigin(url, refs);
+                    const evidence: ApiRequestEvidence = {
+                        method: currentMethod, url: safeUrl(url), status: null, requestHeaders: safeHeaders(headers as Record<string, string>),
+                        ...(data === undefined ? {} : { requestBody: excerpt(data) }),
+                    };
+                    let response: RawApiResponse;
+                    try {
+                        response = await request.fetch(url.href, { method: currentMethod, headers, ...(data === undefined ? {} : { data }), timeout, maxRedirects: 0, maxRetries: 0, failOnStatusCode: false });
+                        evidence.status = response.status();
+                        evidence.responseHeaders = safeHeaders(response.headers());
+                        const body = await response.body();
+                        evidence.responseBody = body.byteLength > 64_000 ? "[Response body exceeds 64 KB]" : excerpt(new TextDecoder().decode(body));
+                    } catch (error) {
+                        evidence.error = redact(error instanceof Error ? error.message : String(error)).slice(0, 2000);
+                        capture(evidence);
+                        throw error;
+                    }
+                    capture(evidence);
+                    const location = response.headers().location;
+                    if ([301, 302, 303, 307, 308].includes(response.status()) && location) {
+                        await response.dispose();
+                        if (redirects === 5) throw new Error("API request exceeded five redirects");
+                        url = new URL(location, url);
+                        if (evidence.status === 303 || ([301, 302].includes(evidence.status!) && currentMethod === "POST")) {
+                            currentMethod = "GET";
+                            data = undefined;
+                        }
+                        continue;
+                    }
+                    return frozen("apiResponse", {
+                        status: () => response.status(),
+                        headers: () => Object.freeze({ ...response.headers() }),
+                        json: () => response.json(),
+                    }, response);
+                }
+                throw new Error("API request exceeded five redirects");
+            };
+        }
+        return frozen("request", methods, request);
+    }
+
+    return { wrapPage, wrapLocator, wrapRequest };
 }

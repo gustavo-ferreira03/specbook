@@ -13,7 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, getRunEvidence, isAbortError } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
-import type { RunEvidence } from "@/lib/types";
+import type { RunBatch, RunEvidence } from "@/lib/types";
 
 export type SpecBatchStatus = "queued" | "running" | "passed" | "failed" | "error" | "skipped" | "unknown";
 
@@ -45,7 +45,7 @@ function BatchDiagnostics({ runId }: { runId: string }) {
     return (
         <Collapsible open={open} onOpenChange={setOpen} className="mt-2">
             <CollapsibleTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" className="group/toggle h-7 px-2">Diagnostics <ChevronDown size={13} aria-hidden="true" className="transition-transform group-data-[state=open]/toggle:rotate-180 motion-reduce:transition-none" /></Button>
+                <Button type="button" variant="ghost" size="sm" className="group/toggle h-7 px-2">Evidence <ChevronDown size={13} aria-hidden="true" className="transition-transform group-data-[state=open]/toggle:rotate-180 motion-reduce:transition-none" /></Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
                 {error ? (
@@ -55,13 +55,44 @@ function BatchDiagnostics({ runId }: { runId: string }) {
                     </Alert>
                 ) : !evidence ? (
                     <Skeleton className="h-14 w-full" aria-busy="true" aria-label="Loading diagnostics" role="status" />
-                ) : evidence.diagnostics?.length || evidence.errorContext ? (
-                    <RunDiagnostics evidence={evidence} />
+                ) : evidence.diagnostics?.length || evidence.errorContext || evidence.apiSteps?.length ? (
+                    <div className="space-y-3"><ApiRunEvidence evidence={evidence} /><RunDiagnostics evidence={evidence} /></div>
                 ) : (
                     <p className="text-meta text-ink-subtle">No console or network failures were recorded.</p>
                 )}
             </CollapsibleContent>
         </Collapsible>
+    );
+}
+
+export function ApiRunEvidence({ evidence }: { evidence: RunEvidence }) {
+    if (!evidence.apiSteps?.length) return null;
+    return (
+        <section aria-label="API evidence" className="space-y-3">
+            <h4 className="text-meta font-semibold text-ink-muted">API requests by step</h4>
+            {evidence.apiSteps.map((step) => (
+                <div key={step.number} className="space-y-2">
+                    <p className="text-control font-medium text-ink">{step.number}. {step.label}</p>
+                    {step.requests.map((request, index) => (
+                        <Collapsible key={index} className="group/api overflow-hidden rounded-lg border border-line">
+                            <CollapsibleTrigger asChild>
+                                <button type="button" className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left outline-none hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
+                                    <span className="shrink-0 font-mono text-meta font-semibold text-ink-muted">{request.method}</span>
+                                    <span className="min-w-0 flex-1 break-all text-meta text-ink">{request.url}</span>
+                                    <span className="shrink-0 font-mono text-meta text-ink-muted">{request.status ?? "No response"}</span>
+                                    <ChevronDown size={13} className="mt-0.5 shrink-0 text-ink-subtle transition-transform group-data-[state=open]/api:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+                                </button>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="space-y-3 border-t border-line bg-surface-soft px-3 py-3">
+                                {request.error && <p className="text-meta break-words text-danger">{request.error}</p>}
+                                <div className="space-y-1"><h5 className="text-meta font-medium text-ink">Request</h5><pre className="max-h-48 overflow-auto font-mono text-meta whitespace-pre-wrap break-all text-ink-muted">{JSON.stringify(request.requestHeaders, null, 2)}{request.requestBody ? `\n\n${request.requestBody}` : ""}</pre></div>
+                                <div className="space-y-1"><h5 className="text-meta font-medium text-ink">Response</h5><pre className="max-h-48 overflow-auto font-mono text-meta whitespace-pre-wrap break-all text-ink-muted">{JSON.stringify(request.responseHeaders ?? {}, null, 2)}{request.responseBody ? `\n\n${request.responseBody}` : ""}</pre></div>
+                            </CollapsibleContent>
+                        </Collapsible>
+                    ))}
+                </div>
+            ))}
+        </section>
     );
 }
 
@@ -82,6 +113,7 @@ export function SpecRunDialog({
     reportUrl,
     error = "",
     warning = "",
+    environment,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -91,6 +123,7 @@ export function SpecRunDialog({
     reportUrl: string | null;
     error?: string;
     warning?: string;
+    environment?: RunBatch["environment"] | null;
 }) {
     const settled = items.filter((item) => item.status !== "queued" && item.status !== "running").length;
     const passed = items.filter((item) => item.status === "passed").length;
@@ -110,6 +143,7 @@ export function SpecRunDialog({
                             ? `Running ${items.length} ${noun} together. You can keep this open to follow along.`
                             : `${summary} across ${items.length} ${noun}.`}
                     </DialogDescription>
+                    {environment && <p className="mt-1 break-words text-meta text-ink-muted"><span className="font-medium text-ink">{environment.name}</span> · {environment.baseUrl}</p>}
                 </DialogHeader>
 
                 <div className="shrink-0 border-y border-line bg-surface-soft px-5 py-3" aria-live="polite">

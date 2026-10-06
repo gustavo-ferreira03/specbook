@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createGuard, createSecret, isSafeRelativePath, isSecret, parseRuntime, unwrap, type RawPage } from "../../src/core/runner/specbook/guard";
+import { createGuard, createSecret, isSafeRelativePath, isSecret, parseRuntime, unwrap, type RawPage, type ApiRequestEvidence, type RawRequest } from "../../src/core/runner/specbook/guard";
 import { runNodeCli, withRunSlot } from "../../src/core/runner/process";
 import { tempDir } from "../helpers/storage";
 
@@ -184,6 +184,53 @@ describe("specbook page proxy", () => {
         assert.ok(!isSafeRelativePath("http://x/"));
         assert.throws(() => parseRuntime(undefined), /only run through Specbook/);
         assert.equal(parseRuntime(JSON.stringify(runtime)).baseURL, BASE);
+    });
+});
+
+describe("specbook API proxy", () => {
+    test("checks every redirect before sending credentials and records bounded, redacted evidence", async () => {
+        const calls: { url: string; options: Record<string, unknown> }[] = [];
+        const evidence: ApiRequestEvidence[] = [];
+        const raw: RawRequest = {
+            async fetch(url, options) {
+                calls.push({ url, options });
+                const redirect = url.endsWith("/redirect");
+                return {
+                    status: () => redirect ? 307 : 200,
+                    headers: (): Record<string, string> => redirect ? { location: "https://api.example.com/echo" } : { "content-type": "application/json", "set-cookie": "session=hunter22" },
+                    body: async () => new TextEncoder().encode(JSON.stringify({ token: "hunter22", value: "x".repeat(10_000) })),
+                    json: async () => ({ ok: true }),
+                    dispose: async () => {},
+                };
+            },
+        };
+        const guard = createGuard({ runtime: { ...runtime, navigationOrigins: ["https://app.example.com", "https://api.example.com"] }, readSecret: () => "hunter22" });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const request = guard.wrapRequest(raw, (item) => evidence.push(item)) as any;
+        assert.equal(Object.getPrototypeOf(request), null);
+        assert.equal(request.fetch, undefined);
+        assert.equal(request.storageState, undefined);
+        const response = await request.post("/echo", { headers: { Authorization: createSecret("admin", "password"), "x-name": "Specbook" }, data: { token: createSecret("admin", "password") } });
+        assert.equal(calls[0].url, "https://app.example.com/shop/echo");
+        assert.equal(calls[0].options.maxRedirects, 0);
+        assert.equal(calls[0].options.maxRetries, 0);
+        assert.equal(response.status(), 200);
+        assert.deepEqual(await response.json(), { ok: true });
+        assert.equal(response.body, undefined);
+        assert.equal(response.dispose, undefined);
+        assert.equal(response.constructor, undefined);
+        assert.equal(unwrap(response, ["apiResponse"])?.constructor, Object);
+        assert.equal(evidence[0].requestHeaders.Authorization, "••••");
+        assert.equal(evidence[0].responseHeaders?.["set-cookie"], "••••");
+        assert.ok(!JSON.stringify(evidence).includes("hunter22"));
+        assert.equal(evidence[0].responseBody?.length, 4000);
+        await assert.rejects(request.get("/redirect", { headers: { Authorization: createSecret("admin", "password") } }), /API origin is not allowed for this credential/);
+        assert.equal(calls.length, 2, "credential-bearing redirect is rejected before a second fetch");
+        await assert.rejects(request.get("https://evil.example.com/"), /origin is not allowed/);
+        await assert.rejects(request.get("/echo", { ignoreHTTPSErrors: true }), /not allowed/);
+        await assert.rejects(request.get("/echo", { timeout: 0 }), /between 1 and 30000/);
+        await request.get("/redirect");
+        assert.equal(calls.at(-1)?.url, "https://api.example.com/echo", "plain redirects can reach another explicitly allowed API origin");
     });
 });
 

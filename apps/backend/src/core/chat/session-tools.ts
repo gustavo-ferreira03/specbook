@@ -4,10 +4,12 @@ import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
-import type { BrowserMcp } from "../browser/mcp";
+import { getActiveTabUrl, type BrowserMcp } from "../browser/mcp";
 import { decryptSecret, encryptSecret } from "../credentials/crypto";
 import { getProfileByName } from "../credentials/profiles";
 import { chatSessionsRepository } from "../../infra/repositories/chat-sessions";
+import { credentialsRepository, type CredentialProfileRow } from "../../infra/repositories/credentials";
+import type { RunEnvironment } from "../../infra/db/schema";
 
 const sessionProfileSchema = z.object({ profile: z.string() });
 
@@ -22,11 +24,22 @@ function text(value: string) {
 export interface SessionToolOptions {
     projectId: string;
     baseUrl: string;
+    productionBaseUrl?: string;
+    environment?: RunEnvironment;
     mcp: BrowserMcp | null;
     workDir: string | null;
 }
 
 export function createSessionTools(options: SessionToolOptions) {
+    async function profileFor(name: string): Promise<CredentialProfileRow | null> {
+        const targetId = options.environment?.credentialOverrides[name];
+        const profile = targetId ? await credentialsRepository.getProfile(targetId) : await getProfileByName(options.projectId, name);
+        return profile?.projectId === options.projectId ? profile : null;
+    }
+    function allows(profile: CredentialProfileRow, name: string, url: string): boolean {
+        const base = options.environment?.credentialOverrides[name] ? options.environment.configuredBaseUrl : options.productionBaseUrl ?? options.baseUrl;
+        return [new URL(base).origin, ...profile.allowedOrigins].includes(new URL(url).origin);
+    }
     return [
         defineTool({
             name: "save_session",
@@ -40,8 +53,10 @@ export function createSessionTools(options: SessionToolOptions) {
                 if (!options.mcp || !options.workDir) {
                     return text("save_session failed: the agent browser is not available this turn.");
                 }
-                const profile = await getProfileByName(options.projectId, params.profile);
+                const profile = await profileFor(params.profile);
                 if (!profile) return text(`save_session failed: no credential profile named "${params.profile}".`);
+                const activeUrl = await getActiveTabUrl(options.mcp, signal);
+                if (!activeUrl || !allows(profile, params.profile, activeUrl)) return text("save_session refused: the active page origin is not allowed for this credential profile.");
                 const filename = `session-save-${crypto.randomUUID()}.json`;
                 const filePath = path.join(options.workDir, filename);
                 try {
@@ -79,8 +94,9 @@ export function createSessionTools(options: SessionToolOptions) {
                 if (!options.mcp || !options.workDir) {
                     return text("resume_session failed: the agent browser is not available this turn.");
                 }
-                const profile = await getProfileByName(options.projectId, params.profile);
+                const profile = await profileFor(params.profile);
                 if (!profile) return text(`resume_session failed: no credential profile named "${params.profile}".`);
+                if (!allows(profile, params.profile, options.baseUrl)) return text("resume_session refused: the run environment origin is not allowed for this credential profile.");
                 const saved = await chatSessionsRepository.getByProfile(options.projectId, profile.id);
                 if (!saved) {
                     return text(`resume_session failed: no saved session for "${params.profile}". Log in and call save_session first.`);

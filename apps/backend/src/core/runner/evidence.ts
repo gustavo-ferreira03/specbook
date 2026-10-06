@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import type { RunStatus } from "../../infra/db/schema";
 import type { SpecFileResult } from "./report";
-import { STEP_ATTACHMENT_PREFIX } from "./specbook/guard";
+import { API_STEP_ATTACHMENT_PREFIX, STEP_ATTACHMENT_PREFIX } from "./specbook/guard";
 
 export interface EvidenceStep {
     number: number;
@@ -21,6 +21,19 @@ const runDiagnosticSchema = z.object({
 
 export type RunDiagnostic = z.infer<typeof runDiagnosticSchema>;
 
+const apiRequestEvidenceSchema = z.object({
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    url: z.string().max(2000),
+    status: z.number().int().min(100).max(599).nullable(),
+    requestHeaders: z.record(z.string(), z.string().max(1000)),
+    requestBody: z.string().max(4000).optional(),
+    responseHeaders: z.record(z.string(), z.string().max(1000)).optional(),
+    responseBody: z.string().max(4000).optional(),
+    error: z.string().max(2000).optional(),
+});
+export type ApiStepEvidence = { number: number; label: string; requests: z.infer<typeof apiRequestEvidenceSchema>[] };
+export type ApiRequestEvidence = z.infer<typeof apiRequestEvidenceSchema>;
+
 /** evidence.json, read by GET /runs/:id/evidence. */
 export interface EvidenceManifest {
     steps: EvidenceStep[];
@@ -29,6 +42,7 @@ export interface EvidenceManifest {
     failedStep: string | null;
     diagnostics?: RunDiagnostic[];
     errorContext?: string;
+    apiSteps?: ApiStepEvidence[];
 }
 
 async function readText(source: string, maxBytes: number): Promise<string | null> {
@@ -87,7 +101,18 @@ export async function writeRunEvidence(
     }
     const manifest: EvidenceManifest = { steps, video, failedStep: status === "passed" ? null : result?.failedStep ?? null };
     for (const attachment of result?.attachments ?? []) {
-        if (attachment.name === "specbook-diagnostics" && attachment.contentType === "application/json") {
+        const apiMatch = new RegExp(`^${API_STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`).exec(attachment.name);
+        if (apiMatch && attachment.contentType === "application/json") {
+            const text = await readText(attachment.path, 1_000_000);
+            if (!text) continue;
+            try {
+                const parsed = z.array(apiRequestEvidenceSchema).max(30).safeParse(JSON.parse(scrub(text)));
+                const number = Number(apiMatch[1]);
+                if (parsed.success && number >= 1 && number <= stepTitles.length && !manifest.apiSteps?.some((step) => step.number === number)) {
+                    (manifest.apiSteps ??= []).push({ number, label: stepTitles[number - 1], requests: parsed.data });
+                }
+            } catch {}
+        } else if (attachment.name === "specbook-diagnostics" && attachment.contentType === "application/json") {
             const text = await readText(attachment.path, 1_000_000);
             if (!text) continue;
             try {
@@ -100,6 +125,7 @@ export async function writeRunEvidence(
             if (text) manifest.errorContext = [manifest.errorContext, scrub(text)].filter(Boolean).join("\n\n").slice(0, 32_000);
         }
     }
+    manifest.apiSteps?.sort((left, right) => left.number - right.number);
     await fs.writeFile(path.join(outputDir, "evidence.json"), JSON.stringify(manifest), "utf8");
     return manifest;
 }

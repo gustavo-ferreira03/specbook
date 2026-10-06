@@ -11,6 +11,57 @@ const { bridgeBrowserTools } = await import("../../src/core/browser/mcp");
 const { createCredentialTools } = await import("../../src/core/chat/credential-tools");
 const { getPendingCredentialRequest } = await import("../../src/core/chat/credential-requests");
 
+describe("environment credential profiles", () => {
+    test("requires explicit overrides before a staging browser or request can use Production credentials", async () => {
+        const { runMigrations } = await import("../../src/infra/db/migrate");
+        const { projectsRepository } = await import("../../src/infra/repositories/projects");
+        const { createProfile, resolveSecretEnv } = await import("../../src/core/credentials/profiles");
+        const { resolveSecretOriginPolicy } = await import("../../src/core/runner/secrets");
+        const { createSessionTools } = await import("../../src/core/chat/session-tools");
+        await runMigrations();
+        const project = await projectsRepository.createProject("Credential policy", "https://production.example.com");
+        const production = await createProfile(project.id, { name: "account", fields: [{ key: "password", value: "production-password" }] });
+        const staging = await createProfile(project.id, { name: "staging-account", fields: [{ key: "password", value: "staging-password" }] });
+        const environment = { id: "staging", name: "Staging", configuredBaseUrl: "https://staging.example.com", baseUrl: "https://staging.example.com", allowedOrigins: ["https://api.staging.example.com"], credentialOverrides: {} as Record<string, string> };
+        let activeUrl = environment.baseUrl;
+        const typed: string[] = [];
+        const mcp = { client: { async callTool(input: { name: string; arguments: { text?: string } }) {
+            if (input.name === "browser_tabs") return { content: [{ type: "text", text: `- Page URL: ${activeUrl}` }] };
+            typed.push(input.arguments.text!);
+            return { content: [{ type: "text", text: "Credential filled" }] };
+        } } } as unknown as BrowserMcp;
+        const options = { projectId: project.id, chatId: "policy", baseUrl: project.baseUrl, environment, mcp, workDir: "/tmp", scrub: async (value: string) => createSecretScrubber(["production-password", "staging-password"])(value), notify: () => {} };
+        const fill = (input: typeof options) => createCredentialTools(input).find((tool) => tool.name === "fill_secret")!;
+        const params = { profile: "account", field: "password", element: "Password", target: "e2" };
+        const blocked = await fill(options).execute("call", params, undefined, undefined, {} as never);
+        assert.match(JSON.stringify(blocked), /fill_secret refused/);
+        assert.deepEqual(typed, []);
+        const ref = "SPECBOOK_SECRET_ACCOUNT_PASSWORD";
+        assert.deepEqual((await resolveSecretOriginPolicy(project.id, [ref], environment)).byRef[ref], ["https://production.example.com"]);
+        const overridden = { ...environment, credentialOverrides: { account: staging.id } };
+        await fill({ ...options, environment: overridden }).execute("call", params, undefined, undefined, {} as never);
+        assert.deepEqual(typed, ["staging-password"]);
+        assert.deepEqual((await resolveSecretEnv(project.id, [ref], overridden.credentialOverrides)).env, { [ref]: "staging-password" });
+        assert.deepEqual((await resolveSecretOriginPolicy(project.id, [ref], overridden)).byRef[ref], ["https://staging.example.com"]);
+        activeUrl = project.baseUrl;
+        assert.match(JSON.stringify(await fill({ ...options, environment: overridden }).execute("call", params, undefined, undefined, {} as never)), /fill_secret refused/);
+        assert.equal(typed.length, 1);
+        const preview = { ...overridden, baseUrl: "https://preview.example.com", allowedOrigins: [...environment.allowedOrigins, "https://preview.example.com"] };
+        activeUrl = preview.baseUrl;
+        assert.match(JSON.stringify(await fill({ ...options, environment: preview }).execute("call", params, undefined, undefined, {} as never)), /fill_secret refused/);
+        assert.equal(typed.length, 1, "a one-off preview origin does not gain credential access from a navigation allowlist");
+        assert.deepEqual((await resolveSecretOriginPolicy(project.id, [ref], preview)).byRef[ref], ["https://staging.example.com"]);
+        const session = createSessionTools({ projectId: project.id, baseUrl: environment.baseUrl, productionBaseUrl: project.baseUrl, environment, mcp, workDir: "/tmp" });
+        assert.match(JSON.stringify(await session.find((tool) => tool.name === "resume_session")!.execute("call", { profile: "account" }, undefined, undefined, {} as never)), /resume_session refused/);
+        assert.match(JSON.stringify(await session.find((tool) => tool.name === "save_session")!.execute("call", { profile: "account" }, undefined, undefined, {} as never)), /save_session refused/);
+        assert.equal(typed.length, 1, "saved sessions must not cross into a different environment implicitly");
+        const missing = { account: "deleted-profile" };
+        assert.deepEqual(await resolveSecretEnv(project.id, [ref], missing), { env: {}, missing: [ref] });
+        assert.equal((await resolveSecretEnv(project.id, [ref])).env[ref], "production-password");
+        assert.notEqual(production.id, staging.id);
+    });
+});
+
 describe("conversation failure messages", () => {
     test("provider and browser errors give a next step without exposing their raw response", async () => {
         const { providerFailure, browserFailureMessage, sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
