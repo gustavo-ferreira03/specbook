@@ -2,13 +2,14 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { dailyBudget } from "../../../core/steward/engine";
+import { pauseAgentJobs, resumeAgentJobs } from "../../../core/jobs/worker";
 import { projectPresentation } from "../../../core/jobs/presentation";
-import { jobsRepository } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
+import { settingsRepository } from "../../repositories/settings";
 import { stewardRepository } from "../../repositories/steward";
 
-const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose", "act"]) }).strict();
+const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose", "act"]).optional(), paused: z.boolean().optional() }).strict()
+    .refine((input) => input.autonomy !== undefined || input.paused !== undefined, "Provide an autonomy setting or pause state");
 
 export function createStewardRouter(): Hono {
     const router = new Hono();
@@ -19,15 +20,19 @@ export function createStewardRouter(): Hono {
         const id = c.req.param("id");
         await check(id);
         const row = await stewardRepository.get(id);
-        return c.json({ autonomy: row.autonomy, remaining: dailyBudget(await jobsRepository.list(id)) });
+        return c.json({ autonomy: row.autonomy, paused: row.paused, globallyPaused: await settingsRepository.getAgentPaused() });
     });
     router.put("/projects/:id/steward", zValidator("json", settingsSchema), async (c) => {
         const id = c.req.param("id");
         await check(id);
         const previous = await stewardRepository.get(id);
-        await stewardRepository.update(id, c.req.valid("json"));
-        if (previous.autonomy === "observe" && c.req.valid("json").autonomy !== "observe") await stewardRepository.resumeObserved(id);
-        return c.json({ autonomy: (await stewardRepository.get(id)).autonomy, remaining: dailyBudget(await jobsRepository.list(id)) });
+        const patch = c.req.valid("json");
+        await stewardRepository.update(id, patch);
+        if (previous.autonomy === "observe" && patch.autonomy && patch.autonomy !== "observe") await stewardRepository.resumeObserved(id);
+        if (patch.paused === true) await pauseAgentJobs(id);
+        else if (patch.paused === false) await resumeAgentJobs(id);
+        const row = await stewardRepository.get(id);
+        return c.json({ autonomy: row.autonomy, paused: row.paused, globallyPaused: await settingsRepository.getAgentPaused() });
     });
     router.get("/projects/:id/activity", async (c) => {
         const id = c.req.param("id");

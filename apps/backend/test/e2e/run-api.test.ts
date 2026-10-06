@@ -21,8 +21,8 @@ const { createProfile } = await import("../../src/core/credentials/profiles");
 const { jobsRepository } = await import("../../src/infra/repositories/jobs");
 const { stewardRepository } = await import("../../src/infra/repositories/steward");
 const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
-const { allocationFor } = await import("../../src/core/jobs/usage");
-const { dailyBudget, enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
+const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+const { enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
 
 async function chromiumAvailable(): Promise<boolean> {
     try {
@@ -176,7 +176,7 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
     test("verifies in the failed preview environment, preserves the contract, and applies on approval", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { specsRepository } = await import("../../src/infra/repositories/specs");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { proposeMutation, applyProposal } = await import("../../src/core/jobs/proposals");
         const { verifyProposal } = await import("../../src/core/jobs/verification");
         const { reindexProject } = await import("../../src/core/repo/indexer");
@@ -191,7 +191,7 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
         const originalRun = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(project.id), sourceHash: spec.sourceHash, baseUrl });
         await runsRepository.finishRun(originalRun.id, "failed", 1, "Preview locator drift");
         await projectsRepository.updateProject(project.id, { baseUrl: "http://127.0.0.1:1" });
-        const job = await jobsRepository.create({ projectId: project.id, runId: originalRun.id, chatId: "candidate-test", trigger: "manual", kind: "failure_triage", specId: spec.id, goal: "Heal", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId: project.id, runId: originalRun.id, chatId: "candidate-test", trigger: "manual", kind: "failure_triage", specId: spec.id, goal: "Heal", limits: jobLimitsSchema.parse({}) });
         const running = (await jobsRepository.claim(job.id))!;
         await jobsRepository.update(job.id, { classification: "test_drift" });
         await assert.rejects(() => proposeMutation(running, "update_spec", { specId: spec.id, humanSpec: HUMAN_SPEC, testSource: VALID_SPEC }), /implementation/);
@@ -472,9 +472,8 @@ test("Store", async ({ page, step }) => {
 
 });
 
-describe("autonomous continuation and decisions", () => {
+describe("autonomous pause and decisions", () => {
     const router = createJobsRouter();
-    const today = () => new Date().toISOString().slice(0, 10);
     const post = (url: string, body?: unknown) => router.request(url, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -482,6 +481,10 @@ describe("autonomous continuation and decisions", () => {
     before(async () => {
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
         await stopJobWorker();
+        const { createStewardRouter } = await import("../../src/infra/web/routes/steward");
+        const { createSettingsRouter } = await import("../../src/infra/web/routes/settings");
+        router.route("/", createStewardRouter());
+        router.route("/", createSettingsRouter());
     });
 
     async function projectWithWork() {
@@ -492,103 +495,281 @@ describe("autonomous continuation and decisions", () => {
 
     async function createWork(projectId: string) {
         return jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", kind: "explore",
-            goal: "Investigate checkout", budget: allocationFor("explore") });
+            goal: "Investigate checkout", limits: jobLimitsSchema.parse({}) });
     }
 
-    test("waits for a full allocation instead of launching a tiny remaining token or time budget", async () => {
-        for (const usage of [{ tokens: 210_000, wallTimeMs: 0 }, { tokens: 0, wallTimeMs: 1300_000 }]) {
-            const project = await projectWithWork();
-            const previous = await createWork(project.id);
-            await jobsRepository.recordUsage(previous.id, usage.tokens, usage.wallTimeMs);
-            await jobsRepository.update(previous.id, { status: "completed" });
-            const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Investigate checkout", reason: "Checkout has no coverage" }, crypto.randomUUID());
-            await processProjectSteward(project.id, false);
-            assert.equal((await stewardRepository.intents(project.id)).find((row) => row.id === intent.id)?.status, "pending");
-            assert.equal((await jobsRepository.list(project.id)).length, 1, "insufficient daily allowance must not create a partial investigation");
-            assert.equal((await post(`/projects/${project.id}/continue-now`)).status, 200);
-            const next = (await jobsRepository.list(project.id)).find((job) => job.id !== previous.id)!;
+    const put = (url: string, body: unknown) => router.request(url, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+
+    test("migration preserves investigations and audit while removing quota storage", async () => {
+        const { createClient } = await import("@libsql/client");
+        const { tempDir } = await import("../helpers/storage");
+        const client = createClient({ url: `file:${path.join(tempDir(), "pause-migration.db")}` });
+        try {
+            await client.executeMultiple(`
+                CREATE TABLE app_settings (id INTEGER PRIMARY KEY, llm TEXT NOT NULL, updated_at TEXT NOT NULL);
+                CREATE TABLE project_stewards (project_id TEXT PRIMARY KEY, autonomy TEXT NOT NULL, extra_usage TEXT, updated_at TEXT NOT NULL);
+                CREATE TABLE jobs (id TEXT PRIMARY KEY, budget TEXT NOT NULL, daily_usage TEXT, status TEXT NOT NULL, actions_used INTEGER NOT NULL, elapsed_ms INTEGER NOT NULL, tokens_used INTEGER NOT NULL, retry_at TEXT);
+                CREATE TABLE job_actions (id INTEGER PRIMARY KEY, job_id TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL);
+                CREATE TABLE inbox_items (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, status TEXT NOT NULL, body TEXT NOT NULL);
+            `);
+            await client.execute({ sql: "INSERT INTO app_settings VALUES (1, ?, ?)", args: [JSON.stringify({ provider: "saved", model: "selected" }), "2026-10-01T00:00:00.000Z"] });
+            await client.execute({ sql: "INSERT INTO project_stewards VALUES (?, ?, ?, ?)", args: ["project", "act", JSON.stringify({ date: "2026-10-01", tokens: 1000, wallTimeMs: 1000 }), "2026-10-01T00:00:00.000Z"] });
+            await client.execute({ sql: "INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?)", args: ["investigation", JSON.stringify({ maxTokens: 100_000, maxActions: 80, wallTimeMs: 600_000 }), JSON.stringify({ date: "2026-10-01", tokens: 100_000, wallTimeMs: 600_000 }), "budget_exceeded", 87, 650_000, 120_000, null] });
+            await client.execute("INSERT INTO job_actions VALUES (1, 'investigation', 'inspected', 'Checkout button changed')");
+            await client.execute("INSERT INTO inbox_items VALUES ('question', 'investigation', 'pending', 'Which account should sign in?')");
+            const migration = await fs.readFile(new URL("../../drizzle/0016_colossal_warpath.sql", import.meta.url), "utf8");
+            for (const statement of migration.split("--> statement-breakpoint")) await client.execute(statement.trim());
+            const migrated = (await client.execute("SELECT * FROM jobs")).rows[0]!;
+            assert.equal(migrated.status, "stalled");
+            assert.equal(migrated.actions_used, 87);
+            assert.equal(migrated.elapsed_ms, 650_000);
+            assert.equal(migrated.tokens_used, 120_000);
+            assert.deepEqual(JSON.parse(String(migrated.limits)), { maxActions: 587, wallTimeMs: 4250_000 });
+            assert.ok(migrated.retry_at);
+            assert.ok(migrated.stop_reason);
+            assert.equal(migrated.safety_retries, 0);
+            assert.equal("budget" in migrated, false);
+            assert.equal("daily_usage" in migrated, false);
+            const settings = (await client.execute("SELECT * FROM app_settings")).rows[0]!;
+            assert.equal(settings.agent_paused, 0);
+            assert.deepEqual(JSON.parse(String(settings.llm)), { provider: "saved", model: "selected" });
+            const steward = (await client.execute("SELECT * FROM project_stewards")).rows[0]!;
+            assert.equal(steward.autonomy, "act");
+            assert.equal(steward.paused, 0);
+            assert.equal("extra_usage" in steward, false);
+            assert.equal((await client.execute("SELECT detail FROM job_actions")).rows[0]?.detail, "Checkout button changed");
+            assert.equal((await client.execute("SELECT status FROM inbox_items")).rows[0]?.status, "pending");
+        } finally { client.close(); }
+    });
+
+    test("project pause persists and resumes the same work while preserving questions and usage", async () => {
+        const project = await projectWithWork();
+        const queued = await createWork(project.id);
+        await jobsRepository.recordUsage(queued.id, 25_000, 60_000);
+        await jobsRepository.update(queued.id, { actionsUsed: 37 });
+        const running = await createWork(project.id);
+        await jobsRepository.claim(running.id);
+        const blocked = await createWork(project.id);
+        await jobsRepository.update(blocked.id, { status: "blocked" });
+        const question = await jobsRepository.addItem({ projectId: project.id, jobId: blocked.id, kind: "question", title: "Which account should sign in?", body: "Add access to continue." });
+        const endpoint = `/projects/${project.id}/steward`;
+        assert.deepEqual(await (await router.request(endpoint)).json(), { autonomy: "propose", paused: false, globallyPaused: false });
+        assert.deepEqual(await (await put(endpoint, { paused: true })).json(), { autonomy: "propose", paused: true, globallyPaused: false });
+        assert.equal((await jobsRepository.get(queued.id))?.status, "paused");
+        assert.equal((await jobsRepository.get(running.id))?.status, "paused");
+        assert.equal((await jobsRepository.get(blocked.id))?.status, "blocked");
+        const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Explore checkout", reason: "Human requested exploration" }, "pause-pending");
+        await processProjectSteward(project.id, false);
+        assert.equal((await stewardRepository.intents(project.id)).find((row) => row.id === intent.id)?.status, "pending");
+        await jobsRepository.recover();
+        assert.equal((await jobsRepository.get(queued.id))?.status, "paused");
+        assert.equal((await stewardRepository.get(project.id)).paused, true);
+        await put(endpoint, { autonomy: "act" });
+        assert.equal((await stewardRepository.get(project.id)).paused, true, "autonomy changes must not implicitly resume the agent");
+        const resumed = await put(endpoint, { paused: false });
+        assert.equal(resumed.status, 200);
+        assert.deepEqual(await resumed.json(), { autonomy: "act", paused: false, globallyPaused: false });
+        const retained = (await jobsRepository.get(queued.id))!;
+        assert.equal(retained.status, "queued");
+        assert.equal(retained.tokensUsed, 25_000);
+        assert.equal(retained.elapsedMs, 60_000);
+        assert.equal(retained.actionsUsed, 37);
+        assert.deepEqual(retained.limits, queued.limits);
+        assert.equal((await jobsRepository.get(running.id))?.status, "queued");
+        assert.equal((await jobsRepository.get(blocked.id))?.status, "blocked");
+        assert.equal((await jobsRepository.item(question.id))?.status, "pending");
+        assert.equal((await jobsRepository.list(project.id)).length, 3);
+        assert.equal((await post(`/projects/${project.id}/continue-now`)).status, 404);
+    });
+
+    test("global pause overrides project resume and preserves local pauses and model settings", async () => {
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { isAgentPaused } = await import("../../src/core/jobs/pause");
+        const local = await projectWithWork();
+        const other = await projectWithWork();
+        const localJob = await createWork(local.id);
+        const otherJob = await createWork(other.id);
+        await settingsRepository.updateLlmSettings({ provider: "local-test", model: "no-provider-call" });
+        assert.deepEqual(await (await router.request("/settings/agent")).json(), { paused: false });
+        await put(`/projects/${local.id}/steward`, { paused: true });
+        assert.deepEqual(await (await put("/settings/agent", { paused: true })).json(), { paused: true });
+        assert.equal(await isAgentPaused(local.id), true);
+        assert.equal(await isAgentPaused(other.id), true);
+        assert.equal((await jobsRepository.get(otherJob.id))?.status, "paused");
+        const stillPaused = await put(`/projects/${other.id}/steward`, { paused: false });
+        assert.deepEqual(await stillPaused.json(), { autonomy: "propose", paused: false, globallyPaused: true });
+        assert.equal((await jobsRepository.get(otherJob.id))?.status, "paused");
+        await jobsRepository.recover();
+        assert.equal(await settingsRepository.getAgentPaused(), true);
+        await settingsRepository.updateLlmSettings({ provider: "local-test", model: "still-no-provider-call" });
+        assert.equal(await settingsRepository.getAgentPaused(), true, "editing the model must preserve global pause");
+        await put("/settings/agent", { paused: false });
+        assert.equal(await isAgentPaused(local.id), true);
+        assert.equal(await isAgentPaused(other.id), false);
+        assert.equal((await jobsRepository.get(localJob.id))?.status, "paused");
+        assert.equal((await jobsRepository.get(otherJob.id))?.status, "queued");
+        assert.deepEqual(await settingsRepository.getLlmSettings(), { provider: "local-test", model: "still-no-provider-call" });
+        await settingsRepository.updateLlmSettings({ provider: "", model: "" });
+    });
+
+    test("concurrent resume requests preserve one investigation and reject invalid pause inputs", async () => {
+        const project = await projectWithWork();
+        const job = await createWork(project.id);
+        const endpoint = `/projects/${project.id}/steward`;
+        assert.equal((await put(endpoint, {})).status, 400);
+        assert.equal((await put(endpoint, { paused: "true" })).status, 400);
+        assert.equal((await put(endpoint, { paused: true, extraUsage: 1000 })).status, 400);
+        assert.equal((await put("/settings/agent", {})).status, 400);
+        assert.equal((await put("/settings/agent", { paused: "false" })).status, 400);
+        assert.equal((await put("/settings/agent", { paused: true, autonomy: "observe" })).status, 400);
+        assert.equal((await put("/projects/missing/steward", { paused: true })).status, 404);
+        assert.equal((await router.request("/projects/missing/steward")).status, 404);
+        await put(endpoint, { paused: true });
+        const results = await Promise.all([put(endpoint, { paused: false }), put(endpoint, { paused: false })]);
+        assert.deepEqual(results.map((response) => response.status), [200, 200]);
+        assert.equal((await jobsRepository.get(job.id))?.status, "queued");
+        assert.equal((await stewardRepository.get(project.id)).paused, false);
+        assert.equal((await jobsRepository.list(project.id)).length, 1);
+        assert.deepEqual((await jobsRepository.get(job.id))?.limits, job.limits);
+        assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "resumed").length, 1);
+    });
+
+    test("past token and time usage never prevents a new event investigation", async () => {
+        const project = await projectWithWork();
+        const previous = await createWork(project.id);
+        await jobsRepository.recordUsage(previous.id, 2_000_000, 36_000_000);
+        await jobsRepository.update(previous.id, { status: "completed", actionsUsed: 3000 });
+        const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Investigate checkout", reason: "Human requested exploration" }, "no-usage-gate");
+        await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
+        const next = (await jobsRepository.get(intent.id))!;
+        assert.ok(next);
+        assert.equal(next.status, "queued");
+        assert.deepEqual(next.limits, { maxActions: 500, wallTimeMs: 3_600_000 });
+        assert.equal(next.tokensUsed, 0);
+        assert.equal((await jobsRepository.list(project.id)).length, 2);
+        assert.equal((await jobsRepository.get(previous.id))?.tokensUsed, 2_000_000);
+    });
+
+    test("stalled work retries with backoff twice, asks once, then uses the human answer", async () => {
+        const { stallJob, retryStalledJob, MAX_SAFETY_RETRIES } = await import("../../src/core/jobs/retry");
+        const project = await projectWithWork();
+        const job = await createWork(project.id);
+        await jobsRepository.claim(job.id);
+        await jobsRepository.recordUsage(job.id, 900_000, 3_600_000);
+        await jobsRepository.update(job.id, { actionsUsed: 500 });
+        await jobsRepository.log(job.id, "browser_click:error", "The Checkout button remains unavailable after signing in.");
+        for (let attempt = 0; attempt <= MAX_SAFETY_RETRIES; attempt++) {
+            const before = Date.now();
+            await stallJob((await jobsRepository.get(job.id))!, "No confirmed result");
+            const stalled = (await jobsRepository.get(job.id))!;
+            assert.equal(stalled.status, "stalled");
+            assert.equal(stalled.safetyRetries, attempt);
+            assert.match(stalled.stopReason ?? "", /Checkout button remains unavailable/);
+            await jobsRepository.update(job.id, { startedAt: null });
+            if (attempt === MAX_SAFETY_RETRIES) {
+                await Promise.all([retryStalledJob(stalled), retryStalledJob(stalled)]);
+                break;
+            }
+            assert.ok(Date.parse(stalled.retryAt!) >= before + 60_000 * 2 ** attempt);
+            await retryStalledJob(stalled);
+            assert.equal((await jobsRepository.get(job.id))?.status, "stalled", "a retry must respect its persisted backoff");
+            await jobsRepository.update(job.id, { retryAt: "2000-01-01T00:00:00.000Z" });
+            await Promise.all([retryStalledJob(stalled), retryStalledJob(stalled)]);
+            const next = (await jobsRepository.get(job.id))!;
             assert.equal(next.status, "queued");
-            assert.deepEqual(next.budget, allocationFor("explore"));
-            assert.deepEqual((await stewardRepository.get(project.id)).extraUsage, {
-                date: today(), tokens: Math.max(0, usage.tokens - 200_000), wallTimeMs: Math.max(0, usage.wallTimeMs - 1200_000),
-            });
+            assert.equal(next.safetyRetries, attempt + 1);
+            assert.deepEqual(next.limits, { maxActions: next.actionsUsed + 500, wallTimeMs: next.elapsedMs + 3_600_000 });
+            assert.equal(next.tokensUsed, 900_000);
+            assert.match(next.pendingMessage, /different approach/);
+            await jobsRepository.claim(job.id);
+            await jobsRepository.update(job.id, { actionsUsed: next.limits.maxActions, elapsedMs: next.limits.wallTimeMs });
+        }
+        const blocked = (await jobsRepository.get(job.id))!;
+        assert.equal(blocked.status, "blocked");
+        await retryStalledJob(blocked);
+        const questions = (await jobsRepository.inbox(project.id)).filter((item) => item.kind === "question");
+        assert.equal(questions.length, 1);
+        assert.equal(questions[0]?.payload.waitingFor, "investigation");
+        assert.match(questions[0]!.body, /Checkout button remains unavailable/);
+        const answer = await post(`/projects/${project.id}/inbox/${questions[0]!.id}/review`, { action: "answer", answer: "Sign in with the manager profile before opening checkout." });
+        assert.equal(answer.status, 200);
+        const resumed = (await jobsRepository.get(job.id))!;
+        assert.equal(resumed.status, "queued");
+        assert.equal(resumed.tokensUsed, blocked.tokensUsed);
+        assert.equal(resumed.actionsUsed, blocked.actionsUsed);
+        assert.equal(resumed.elapsedMs, blocked.elapsedMs);
+        assert.deepEqual(resumed.limits, { maxActions: blocked.actionsUsed + 500, wallTimeMs: blocked.elapsedMs + 3_600_000 });
+        assert.equal(resumed.safetyRetries, 0);
+        assert.equal(resumed.stopReason, null);
+        assert.match(resumed.pendingMessage, /manager profile/);
+        assert.equal((await jobsRepository.item(questions[0]!.id))?.status, "answered");
+
+        const interrupted = await createWork(project.id);
+        await jobsRepository.update(interrupted.id, { status: "blocked", safetyRetries: MAX_SAFETY_RETRIES,
+            stopReason: "The Checkout button remains unavailable after signing in." });
+        await processProjectSteward(project.id, false);
+        await processProjectSteward(project.id, false);
+        const recoveredQuestions = (await jobsRepository.inbox(project.id)).filter((item) => item.jobId === interrupted.id && item.kind === "question");
+        assert.equal(recoveredQuestions.length, 1, "restart between blocking and writing the question must recover it exactly once");
+        assert.equal(recoveredQuestions[0]?.payload.waitingFor, "investigation");
+    });
+
+    test("project and global pause stop tools before mutation without token-based limits", async () => {
+        const { createJobPolicy } = await import("../../src/core/jobs/policy");
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { Type } = await import("@earendil-works/pi-ai");
+        const { z } = await import("zod");
+        for (const scope of ["project", "global"]) {
+            const project = await projectWithWork();
+            const job = await createWork(project.id);
+            const running = (await jobsRepository.claim(job.id))!;
+            let mutations = 0;
+            let aborted = false;
+            const policy = createJobPolicy(running, () => { aborted = true; });
+            const tool = policy.tools([{ name: "local_test_mutation", label: "Local test", description: "Count a local mutation", parameters: Type.Unsafe(z.object({}).toJSONSchema()),
+                async execute() { mutations++; return { content: [], details: undefined }; } }])[0]!;
+            policy.tokens(5_000_000);
+            await policy.flush();
+            await tool.execute("before-pause", {}, undefined, undefined, {} as never);
+            assert.equal(mutations, 1, "token accounting is audit, not a scheduling or tool limit");
+            try {
+                if (scope === "global") await settingsRepository.setAgentPaused(true);
+                else await stewardRepository.update(project.id, { paused: true });
+                await assert.rejects(() => tool.execute("after-pause", {}, undefined, undefined, {} as never), /paused/i);
+                assert.equal(mutations, 1);
+                assert.equal(aborted, true);
+                const paused = (await jobsRepository.get(job.id))!;
+                assert.equal(paused.status, "paused");
+                assert.equal(paused.tokensUsed, 5_000_000);
+                assert.equal(paused.actionsUsed, 1);
+                assert.deepEqual(paused.limits, running.limits);
+            } finally { await settingsRepository.setAgentPaused(false); }
         }
     });
 
-    test("reserves only unfinished queued work and releases unused allowance while waiting for a person", async () => {
-        const project = await projectWithWork();
-        const blocked = await createWork(project.id);
-        await jobsRepository.recordUsage(blocked.id, 25_000, 60_000);
-        await jobsRepository.update(blocked.id, { status: "blocked" });
-        const queued = await createWork(project.id);
-        await jobsRepository.update(queued.id, { tokensUsed: 60_000, elapsedMs: 120_000,
-            dailyUsage: { date: today(), tokens: 10_000, wallTimeMs: 20_000 } });
-        const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
-        const old = await createWork(project.id);
-        await jobsRepository.update(old.id, { status: "completed", tokensUsed: 300_000, elapsedMs: 1800_000,
-            dailyUsage: { date: yesterday, tokens: 300_000, wallTimeMs: 1800_000 } });
-        assert.deepEqual(dailyBudget(await jobsRepository.list(project.id)), { tokens: 225_000, wallTimeMs: 1240_000 });
-        await jobsRepository.update(queued.id, { status: "blocked" });
-        assert.deepEqual(dailyBudget(await jobsRepository.list(project.id)), { tokens: 265_000, wallTimeMs: 1720_000 });
-    });
-
-    test("continue now retains cumulative usage and grants only one allowance for concurrent requests", async () => {
-        const project = await projectWithWork();
-        const job = await createWork(project.id);
-        await jobsRepository.recordUsage(job.id, 300_000, 1800_000);
-        await jobsRepository.update(job.id, { status: "budget_exceeded", actionsUsed: 87 });
-        const answers = await Promise.all([post(`/projects/${project.id}/continue-now`), post(`/projects/${project.id}/continue-now`)]);
-        assert.deepEqual(answers.map((response) => response.status).sort(), [200, 409]);
-        const resumed = (await jobsRepository.get(job.id))!;
-        assert.equal(resumed.status, "queued");
-        assert.equal(resumed.tokensUsed, 300_000);
-        assert.equal(resumed.elapsedMs, 1800_000);
-        assert.equal(resumed.actionsUsed, 87);
-        assert.deepEqual(resumed.budget, { maxTokens: 400_000, wallTimeMs: 2400_000, maxActions: 167 });
-        assert.deepEqual(resumed.dailyUsage, { date: today(), tokens: 300_000, wallTimeMs: 1800_000 });
-        const extraUsage = (await stewardRepository.get(project.id)).extraUsage;
-        assert.deepEqual(extraUsage, { date: today(), tokens: 100_000, wallTimeMs: 600_000 });
-        assert.deepEqual(dailyBudget(await jobsRepository.list(project.id), Date.now(), extraUsage), { tokens: 0, wallTimeMs: 0 });
-        assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "continued").length, 1);
-        await jobsRepository.recover();
-        assert.deepEqual((await jobsRepository.get(job.id))?.budget, resumed.budget);
-        assert.equal((await jobsRepository.list(project.id)).length, 1);
-    });
-
-    test("resumes unfinished work on the next day without resetting lifetime counters or spending yesterday's allowance", async () => {
-        const { db } = await import("../../src/infra/db/client");
-        const { jobs } = await import("../../src/infra/db/schema");
-        const { eq } = await import("drizzle-orm");
-        const project = await projectWithWork();
-        const job = await createWork(project.id);
-        const yesterday = new Date(Date.now() - 86400_000).toISOString();
-        await db.update(jobs).set({ status: "budget_exceeded", tokensUsed: 250_000, elapsedMs: 900_000, actionsUsed: 73,
-            updatedAt: yesterday, dailyUsage: { date: yesterday.slice(0, 10), tokens: 250_000, wallTimeMs: 900_000 } }).where(eq(jobs.id, job.id));
-        await stewardRepository.update(project.id, { extraUsage: { date: yesterday.slice(0, 10), tokens: 100_000, wallTimeMs: 600_000 } });
-        await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
-        const resumed = (await jobsRepository.get(job.id))!;
-        assert.equal(resumed.status, "queued");
-        assert.equal(resumed.tokensUsed, 250_000);
-        assert.equal(resumed.elapsedMs, 900_000);
-        assert.equal(resumed.actionsUsed, 73);
-        assert.deepEqual(resumed.budget, { maxTokens: 350_000, wallTimeMs: 1500_000, maxActions: 153 });
-        assert.deepEqual(resumed.dailyUsage, { date: today(), tokens: 0, wallTimeMs: 0 });
-        assert.deepEqual(dailyBudget([resumed], Date.now(), (await stewardRepository.get(project.id)).extraUsage), { tokens: 200_000, wallTimeMs: 1200_000 });
-        assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "continued").length, 1);
-    });
-
-    test("backend recovery charges interrupted time to daily usage exactly once", async () => {
+    test("backend recovery retains interrupted time and cumulative usage exactly once", async () => {
+        const { retryStalledJob } = await import("../../src/core/jobs/retry");
         const project = await projectWithWork();
         const job = await createWork(project.id);
         await jobsRepository.recordUsage(job.id, 1500, 5000);
         await jobsRepository.update(job.id, { status: "running", startedAt: new Date(Date.now() - 30_000).toISOString() });
+        const stalled = await createWork(project.id);
+        await jobsRepository.update(stalled.id, { status: "stalled", retryAt: "2000-01-01T00:00:00.000Z", startedAt: new Date(Date.now() - 20_000).toISOString() });
         await jobsRepository.recover();
         const recovered = (await jobsRepository.get(job.id))!;
         assert.equal(recovered.status, "queued");
         assert.equal(recovered.startedAt, null);
         assert.ok(recovered.elapsedMs >= 35_000);
-        assert.equal(recovered.dailyUsage?.wallTimeMs, recovered.elapsedMs);
-        assert.equal(recovered.dailyUsage?.tokens, 1500);
+        assert.equal(recovered.tokensUsed, 1500);
+        const interruptedStall = (await jobsRepository.get(stalled.id))!;
+        assert.equal(interruptedStall.status, "stalled");
+        assert.equal(interruptedStall.startedAt, null);
+        assert.ok(interruptedStall.elapsedMs >= 20_000);
+        await retryStalledJob(interruptedStall);
+        assert.equal((await jobsRepository.get(stalled.id))?.status, "queued");
+        assert.equal((await jobsRepository.get(stalled.id))?.safetyRetries, 1);
         await jobsRepository.recover();
         assert.equal((await jobsRepository.get(job.id))?.elapsedMs, recovered.elapsedMs);
         assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "recovered").length, 1);
@@ -659,12 +840,12 @@ describe("autonomous continuation and decisions", () => {
         await processProjectSteward(project.id, false);
         const job = (await jobsRepository.list(project.id))[0]!;
         assert.equal(job.id, intent.id);
-        await jobsRepository.update(job.id, { status: "budget_exceeded" });
+        await jobsRepository.update(job.id, { status: "stalled" });
         const item = await jobsRepository.addItem({ jobId: job.id, projectId: project.id, kind: "question", title: "Continue checking checkout?", body: "The update still does not work." });
         assert.equal((await post(`/projects/${project.id}/inbox/${item.id}/review`, { action: "ignore" })).status, 200);
         assert.equal((await jobsRepository.get(job.id))?.status, "cancelled");
         assert.equal((await jobsRepository.item(item.id))?.payload.ignoredCheck, true);
-        assert.equal((await post(`/projects/${project.id}/continue-now`)).status, 409);
+        assert.equal((await post(`/projects/${project.id}/continue-now`)).status, 404);
         const next = await enqueueIntent(project.id, input, "later-check");
         await processProjectSteward(project.id, false);
         const ignored = (await stewardRepository.intents(project.id)).find((row) => row.id === next.id)!;
@@ -681,7 +862,7 @@ describe("autonomous continuation and decisions", () => {
         const project = await projectWithWork();
         const other = await projectWithWork();
         const internal = await createChat(project.id);
-        const job = await jobsRepository.create({ projectId: project.id, chatId: internal.id, trigger: "steward", kind: "explore", goal: "Investigate checkout", budget: allocationFor("explore") });
+        const job = await jobsRepository.create({ projectId: project.id, chatId: internal.id, trigger: "steward", kind: "explore", goal: "Investigate checkout", limits: jobLimitsSchema.parse({}) });
         const item = await jobsRepository.addItem({ jobId: job.id, projectId: project.id, kind: "question", title: "Should checkout allow guests?", body: "Guest checkout is unavailable." });
         assert.deepEqual(await listChats(project.id), []);
         assert.equal((await post(`/projects/${other.id}/inbox/${item.id}/discuss`)).status, 404);

@@ -70,7 +70,7 @@ export async function collectProjectSignals(project: Project, previous: ProjectO
     if (observation.context && observation.context !== previous.context) await signal("context_changed", `context:${observation.context}`, "Project knowledge changed", "Compare the confirmed areas, roles and rules with existing coverage.");
     observation.credentials = fingerprint(credentials.map((profile) => [profile.id, profile.updatedAt]));
     if (credentials.length && previous.credentials !== observation.credentials) await signal("credentials_changed", `credentials:${observation.credentials}`, "Credentials are available", "Resume investigations that asked for access.");
-    for (const job of jobs.filter((job) => ["completed", "budget_exceeded", "cancelled"].includes(job.status))) {
+    for (const job of jobs.filter((job) => ["completed", "stalled", "cancelled"].includes(job.status))) {
         await signal("job_completed", `job:${job.id}:${job.status}`, job.goal, `Investigation ${job.status.replaceAll("_", " ")}.`, { jobId: job.id });
     }
     if (!previous.deployment || previous.deployment.baseUrl !== project.baseUrl || previous.deployment.nextCheckAt <= at) {

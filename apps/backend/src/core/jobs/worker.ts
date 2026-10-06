@@ -10,9 +10,11 @@ import { createProjectScrubber } from "../credentials/scrub";
 import { createJobSchema } from "./schemas";
 import { createJobPolicy } from "./policy";
 import { isInfrastructureFailure } from "./presentation-errors";
-import { retryInfrastructure } from "./retry";
+import { retryInfrastructure, stallJob } from "./retry";
+import { isAgentPaused } from "./pause";
+import { projectsRepository } from "../../infra/repositories/projects";
 
-const active = new Set<string>();
+const active = new Map<string, Promise<void>>();
 let polling = false;
 let stopped = false;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -34,9 +36,10 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
     }
     const chat = await createChat(projectId);
     const job = await jobsRepository.create({ ...parsed, id, pendingMessage, projectId, chatId: chat.id });
+    if (await isAgentPaused(projectId)) await jobsRepository.transition(job.id, "queued", "paused");
     await jobsRepository.log(job.id, "queued", parsed.trigger);
     void drainJobs();
-    return job;
+    return (await jobsRepository.get(job.id))!;
 }
 
 async function executeJob(job: Job): Promise<void> {
@@ -46,14 +49,19 @@ async function executeJob(job: Job): Promise<void> {
         void abortChatTurn(job.chatId).catch(() => undefined);
         void closeChatBrowser(job.chatId).catch(() => undefined);
     };
-    const remaining = job.budget.wallTimeMs - job.elapsedMs;
+    const remaining = job.limits.wallTimeMs - job.elapsedMs;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
-        if (remaining <= 0 || job.tokensUsed >= job.budget.maxTokens || job.actionsUsed >= job.budget.maxActions) {
-            await jobsRepository.update(job.id, { status: "budget_exceeded" });
+        if (await isAgentPaused(job.projectId)) {
+            await jobsRepository.transition(job.id, "running", "paused");
+            return;
+        }
+        if (remaining <= 0 || job.actionsUsed >= job.limits.maxActions) {
+            if (job.systemError) await retryInfrastructure(job, job.systemError);
+            else await stallJob(job, "The investigation did not reach a confirmed result.");
         } else {
             deadline = setTimeout(() => {
-                void jobsRepository.transition(job.id, "running", "budget_exceeded").then((updated) => { if (updated) abort(); }).catch((error) => logger.error("job deadline failed", { error }));
+                void stallJob(job, "The investigation did not reach a confirmed result.").then(abort).catch((error) => logger.error("job deadline failed", { error }));
             }, remaining);
             await jobsRepository.log(job.id, "started");
             if ((await jobsRepository.get(job.id))?.status !== "running") return;
@@ -68,15 +76,12 @@ async function executeJob(job: Job): Promise<void> {
                 await retryInfrastructure(job, last || "The agent service could not complete its response.");
             } else {
                 await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Investigation finished", body: await scrub(last), payload: { language: "en" } });
-                await jobsRepository.update(job.id, { status: "completed", systemError: null, retryAt: null });
+                await jobsRepository.update(job.id, { status: "completed", systemError: null, stopReason: null, retryAt: null });
             }
-        } else if (current?.status === "budget_exceeded") {
-            await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Paused until more usage is available",
-                body: "Specbook saved its progress. It can continue tomorrow, or you can allow another round today.", payload: { language: "en" } });
         }
     } catch (error) {
         const current = await jobsRepository.get(job.id);
-        if (stopped || current?.status === "cancelled" || current?.status === "budget_exceeded") return;
+        if (stopped || current?.status !== "running") return;
         await jobsRepository.log(job.id, "error", await scrub(String(error)));
         await retryInfrastructure(job, String(error));
     } finally {
@@ -97,24 +102,59 @@ export async function drainJobs(): Promise<void> {
         for (const row of await jobsRepository.queued()) {
             if (active.size >= limit || stopped) break;
             if (active.has(row.id)) continue;
+            if (await isAgentPaused(row.projectId)) { await jobsRepository.transition(row.id, "queued", "paused"); continue; }
             if (row.retryAt && Date.parse(row.retryAt) > Date.now()) continue;
             const siblings = await jobsRepository.list(row.projectId);
             if (siblings.some((job) => job.status === "running" || active.has(job.id))) continue;
             const job = await jobsRepository.claim(row.id);
             if (!job) continue;
-            active.add(job.id);
-            void executeJob(job).catch((error) => logger.error("job failed", { jobId: job.id, error }))
+            if (await isAgentPaused(job.projectId)) { await jobsRepository.transition(job.id, "running", "paused", { startedAt: null }); continue; }
+            const execution = executeJob(job).catch((error) => logger.error("job failed", { jobId: job.id, error }))
                 .finally(() => { active.delete(job.id); void drainJobs(); });
+            active.set(job.id, execution);
         }
     } finally {
         polling = false;
     }
 }
 
+export async function pauseAgentJobs(projectId?: string): Promise<void> {
+    const projects = projectId ? [{ id: projectId }] : await projectsRepository.listProjects();
+    const stopping: Promise<unknown>[] = [];
+    for (const project of projects) for (const job of await jobsRepository.list(project.id)) {
+        if (["queued", "running"].includes(job.status)) {
+            const changed = await jobsRepository.transition(job.id, job.status, "paused", {
+                pendingMessage: "The human paused this investigation. When resumed, read the previous messages, suggestions and current browser state before continuing the original goal. Do not repeat completed actions or change the expected behavior.",
+            });
+            if (changed) await jobsRepository.log(job.id, "paused", "The human paused the agent.");
+        }
+        if (active.has(job.id)) {
+            stopping.push(Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]).then(() => active.get(job.id)));
+        }
+    }
+    await Promise.allSettled(stopping);
+}
+
+export async function resumeAgentJobs(projectId?: string): Promise<void> {
+    const projects = projectId ? [{ id: projectId }] : await projectsRepository.listProjects();
+    for (const project of projects) {
+        if (await isAgentPaused(project.id)) continue;
+        for (const job of await jobsRepository.list(project.id)) {
+            if (job.status === "paused" && await jobsRepository.transition(job.id, "paused", "queued")) await jobsRepository.log(job.id, "resumed", "The human resumed the agent.");
+        }
+    }
+    const { processProjectSteward } = await import("../steward/engine");
+    for (const project of projects) if (!await isAgentPaused(project.id)) await processProjectSteward(project.id, false);
+    void drainJobs();
+}
+
 export async function startJobWorker(): Promise<void> {
     await jobsRepository.recover();
     // Internal service failures belong to automatic recovery, including earlier unanswered reports.
     for (const project of await (await import("../../infra/repositories/projects")).projectsRepository.listProjects()) {
+        if (!await isAgentPaused(project.id)) for (const job of await jobsRepository.list(project.id)) {
+            if (job.status === "paused") await jobsRepository.transition(job.id, "paused", "queued");
+        }
         for (const item of await jobsRepository.inbox(project.id)) {
             if (item.kind !== "question" || item.status !== "pending" || !isInfrastructureFailure(`${item.title}\n${item.body}`)) continue;
             const job = await jobsRepository.get(item.jobId);
@@ -132,7 +172,7 @@ export async function startJobWorker(): Promise<void> {
 export async function stopJobWorker(): Promise<void> {
     stopped = true;
     clearInterval(timer);
-    for (const id of active) {
+    for (const id of active.keys()) {
         const job = await jobsRepository.get(id);
         if (job) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
     }

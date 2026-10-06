@@ -62,7 +62,7 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
     const [decisionLimit, setDecisionLimit] = useState(5);
     const [problemLimit, setProblemLimit] = useState(5);
     const [historyLimit, setHistoryLimit] = useState(10);
-    const [continuing, setContinuing] = useState(false);
+    const [savingPause, setSavingPause] = useState(false);
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
     const openedAnchor = useRef("");
     const returnFocus = useRef<HTMLElement | null>(null);
@@ -120,20 +120,22 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
         window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
     }
 
-    async function continueNow() {
-        setContinuing(true);
+    async function togglePause() {
+        if (!data) return;
+        const paused = !data.summary.paused;
+        setSavingPause(true);
         setFeedback(null);
         try {
-            await api(apiPath`/projects/${projectId}/continue-now`, { method: "POST" });
+            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ paused }) });
             await load();
-            setFeedback({ type: "success", text: "Specbook can continue its checks today." });
+            setFeedback({ type: "success", text: paused ? "Specbook is paused for this project. Current work will stop safely." : "Specbook has resumed this project." });
+            if (selected?.type === "paused" && !paused) close();
         } catch {
-            setFeedback({ type: "error", text: "Specbook could not continue yet. Try again in a moment." });
-        } finally { setContinuing(false); }
+            setFeedback({ type: "error", text: "The pause setting could not be saved. Try again in a moment." });
+        } finally { setSavingPause(false); }
     }
 
-    const pausedReasons = { daily_limit: "daily usage limit reached", observation: "automatic checks are off", access: "access needed", service: "Specbook is recovering" };
-    const pausedTitle = data?.paused.length === 1 ? data.paused[0].label : `${pausedCount} checks paused — ${data?.paused.map((group) => pausedReasons[group.reason]).join("; ")}`;
+    const pausedTitle = data?.paused[0]?.label ?? "";
     const historyDays = new Map<string, ActivityStory[]>();
     for (const entry of data?.history.slice(0, historyLimit) ?? []) {
         const day = dayLabel(entry.updatedAt);
@@ -144,7 +146,9 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
     const panelTitle = item?.presentation.title ?? story?.title ?? (selected?.type === "paused" ? "Paused checks" : selected?.type === "queued" ? "Queued checks" : selected?.type === "working" ? "Checks in progress" : "Details");
 
     return <div className="flex min-h-full flex-col bg-surface">
-        <PageHeader title={data ? `Overview — ${data.summary.projectName}` : "Overview"} width="data" />
+        <PageHeader title={data ? `Overview — ${data.summary.projectName}` : "Overview"} width="data"
+            description={data ? data.summary.globallyPaused ? "Specbook is paused across all projects." : data.summary.paused ? "Specbook is paused for this project." : `Specbook is ${data.summary.activeCount > 0 ? "working on" : "watching"} ${data.summary.projectName}.` : undefined}
+            actions={data && (data.summary.globallyPaused ? <Button asChild variant="outline"><Link href={`/p/${projectId}/settings?tab=automation#agent-pause-heading`}><Play size={14} /> Resume in settings</Link></Button> : <Button variant="outline" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : data.summary.paused ? <Play size={14} /> : <Pause size={14} />}{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</Button>)} />
         <PageContainer width="data" innerClassName="space-y-7">
             {loadError && data && <Alert variant="danger" role="alert" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{loadError}</AlertDescription><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw size={13} /> Try again</Button></Alert>}
             {loadError && !data ? <EmptyState role="alert" tone="danger" icon={AlertCircle} title="Overview could not load" description={loadError} action={<Button onClick={() => void load()}><RefreshCw size={14} /> Try again</Button>} /> : !data ? <div className="space-y-6" role="status" aria-busy="true" aria-label="Loading Overview"><Skeleton className="h-14 w-full" />{[0, 1, 2].map((row) => <Skeleton key={row} className="h-11 w-full" />)}</div> : <>
@@ -156,7 +160,7 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
                 {data.needsYou.length > 0 && <OverviewSection id="needs-you" title="Needs you" count={data.needsYou.length}><ul className="divide-y divide-line border-y border-line">{data.needsYou.slice(0, decisionLimit).map((item) => <OverviewRow key={item.id} icon={<CircleHelp size={16} className="text-warning-icon" />} title={item.presentation.title} time={item.createdAt} action="Review" onClick={() => open({ type: "item", id: item.id })} />)}</ul>{data.needsYou.length > decisionLimit && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setDecisionLimit((count) => count + 5)}>Show more decisions</Button>}</OverviewSection>}
                 {(data.working.length > 0 || data.queued.length > 0) && <OverviewSection id="working" title="Working on it now"><ul className="divide-y divide-line border-y border-line">{data.working.slice(0, 2).map((story) => <OverviewRow key={story.id} icon={<LoaderCircle size={16} className="animate-spin text-running motion-reduce:animate-none" />} title={story.title} time={story.updatedAt} onClick={() => open({ type: "story", id: story.id })} />)}{data.working.length > 2 && <OverviewRow icon={<LoaderCircle size={16} className="text-running" />} title={`${data.working.length - 2} other checks in progress`} action="Show which" onClick={() => open({ type: "working" })} />}{data.queued.length > 0 && <OverviewRow icon={<Clock3 size={16} className="text-ink-subtle" />} title={`${data.queued.length} ${data.queued.length === 1 ? "check queued" : "checks queued"}`} action="Show which" onClick={() => open({ type: "queued" })} />}</ul></OverviewSection>}
                 {data.problems.length > 0 && <OverviewSection id="problems" title="Problems found" count={data.problems.length}><ul className="divide-y divide-line border-y border-line">{data.problems.slice(0, problemLimit).map((item) => <OverviewRow key={item.id} icon={<AlertCircle size={16} className="text-danger" />} title={item.presentation.title} time={item.createdAt} onClick={() => open({ type: "item", id: item.id })} />)}</ul>{data.problems.length > problemLimit && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setProblemLimit((count) => count + 5)}>Show more problems</Button>}</OverviewSection>}
-                {data.paused.length > 0 && <OverviewSection id="paused" title="Paused" count={pausedCount}><div className="flex flex-wrap items-center gap-x-3 border-y border-line"><ul className="min-w-0 flex-1"><OverviewRow icon={<Pause size={16} className="text-ink-subtle" />} title={pausedTitle} action="Show which" onClick={() => open({ type: "paused" })} /></ul>{data.summary.canContinue && <Button variant="outline" size="sm" disabled={continuing} onClick={() => void continueNow()} title="Allows one more round today" className="my-2 ml-2">{continuing ? <LoaderCircle size={13} className="animate-spin motion-reduce:animate-none" /> : <Play size={13} />}{continuing ? "Continuing…" : "Continue now"}</Button>}</div></OverviewSection>}
+                {data.paused.length > 0 && <OverviewSection id="paused" title="Paused by you" count={pausedCount}><ul className="divide-y divide-line border-y border-line"><OverviewRow icon={<Pause size={16} className="text-ink-subtle" />} title={pausedTitle} action="Show which" onClick={() => open({ type: "paused" })} /></ul></OverviewSection>}
                 {data.history.length > 0 && <OverviewSection id="history" title="History">{[...historyDays].map(([day, entries]) => <div key={day} className="mt-4 first:mt-0"><h3 className="mb-1 text-meta font-medium text-ink-subtle">{day}</h3><ul className="divide-y divide-line border-y border-line">{entries.map((story) => <OverviewRow key={story.id} icon={<HistoryOutcome outcome={story.outcome} />} title={story.title} time={story.updatedAt} clock onClick={() => open({ type: "story", id: story.id })} />)}</ul></div>)}{data.history.length > historyLimit && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setHistoryLimit((count) => count + 10)}>Show more history</Button>}</OverviewSection>}
                 {!hasActivity && data.summary.specHealth.total === 0 && <EmptyState icon={Eye} title="Your project starts here" description="Checks, problems, and questions that need your decision will appear here as Specbook learns about your app." action={<Button asChild variant="outline"><Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Tell Specbook about your app</Link></Button>} />}
             </>}
@@ -167,7 +171,7 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
                 <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
                     {item && <DecisionDetails key={item.id} projectId={projectId} item={item} story={data?.stories.find((story) => story.id === item.presentation.activityId)} onChange={load} />}
                     {story && <StoryDetails story={story} projectId={projectId} onDecision={(id) => open({ type: "item", id })} />}
-                    {selected?.type === "paused" && data?.paused.map((group) => <section key={group.reason} className="space-y-3"><h3 className="text-body font-medium text-ink">{group.label}</h3>{group.reason === "daily_limit" && data.summary.canContinue && <div className="space-y-2"><Button variant="outline" size="sm" disabled={continuing} onClick={() => void continueNow()}>{continuing ? "Continuing…" : "Continue now"}</Button><p className="text-meta text-ink-subtle">Allows one more round today.</p></div>}{group.reason === "observation" && <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/settings?tab=automation`}>Open automation settings</Link></Button>}<ul className="divide-y divide-line border-y border-line">{group.stories.map((story) => <OverviewRow key={story.id} icon={<Pause size={14} className="text-ink-subtle" />} title={story.subject.name} onClick={() => open({ type: "story", id: story.id })} />)}</ul></section>)}
+                    {selected?.type === "paused" && data?.paused.map((group) => <section key={group.reason} className="space-y-3"><h3 className="text-body font-medium text-ink">{group.label}</h3>{data.summary.globallyPaused ? <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/settings?tab=automation#agent-pause-heading`}>Resume in settings</Link></Button> : <Button variant="outline" size="sm" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? "Saving…" : "Resume this project"}</Button>}<ul className="divide-y divide-line border-y border-line">{group.stories.map((story) => <OverviewRow key={story.id} icon={<Pause size={14} className="text-ink-subtle" />} title={story.subject.name} onClick={() => open({ type: "story", id: story.id })} />)}</ul></section>)}
                     {groupStories.length > 0 && <ul className="divide-y divide-line border-y border-line">{groupStories.map((story) => <OverviewRow key={story.id} icon={selected?.type === "queued" ? <Clock3 size={14} className="text-ink-subtle" /> : <LoaderCircle size={14} className="text-running" />} title={story.title} time={story.updatedAt} onClick={() => open({ type: "story", id: story.id })} />)}</ul>}
                 </div>
             </SheetContent>

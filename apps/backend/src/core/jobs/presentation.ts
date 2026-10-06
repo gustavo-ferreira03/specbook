@@ -4,15 +4,14 @@ import { featuresRepository } from "../../infra/repositories/features";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
+import { settingsRepository } from "../../infra/repositories/settings";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { stewardRepository, type Intent, type ProjectSignal } from "../../infra/repositories/steward";
 import { createProjectScrubber } from "../credentials/scrub";
 import { runsDir } from "../paths";
 import { readSpecRawFiles } from "../repo/manual";
 import { sourceHashOf } from "../repo/writer";
-import { dailyBudget } from "../steward/engine";
 import { proposalFiles } from "./preview";
-import { allocationFor } from "./usage";
 import { isInfrastructureFailure, sanitizeTechnicalDetails } from "./presentation-errors";
 import type { ProposalVerification } from "./verification";
 
@@ -50,7 +49,7 @@ export interface ActivityStory {
     technicalDetails: string;
 }
 
-const active = (status: string) => ["running", "queued", "blocked"].includes(status);
+const active = (status: string) => ["running", "queued", "blocked", "paused"].includes(status);
 const awaiting = (item: InboxItem) => ["pending", "applying"].includes(item.status);
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const string = (value: unknown): string | undefined => typeof value === "string" ? value : undefined;
@@ -69,7 +68,6 @@ function plainReason(text: string): string {
     if (/ERR_CONNECTION|ERR_NAME|unreachable|could not be reached|HTTP 50[234]/i.test(text)) return "The application could not be reached.";
     if (/timeout|timed out|toBeVisible|toHaveText|locator/i.test(text)) return "An expected button or result was not available during the test run.";
     if (/invalid|cannot run|validation|not allowed|parse/i.test(text)) return "The current check could not run as written.";
-    if (/budget|usage limit/i.test(text)) return "The daily usage limit was reached before this check was finished.";
     return englishExcerpt(text) ?? "The check still needs attention before it can run successfully.";
 }
 
@@ -97,11 +95,13 @@ async function screenshotsFor(projectId: string, item: InboxItem, job: Job | und
 }
 
 export async function projectPresentation(projectId: string) {
-    const [project, jobs, inbox, specs, features, signals, intents, settings] = await Promise.all([
+    const [project, jobs, inbox, specs, features, signals, intents, settings, globallyPaused] = await Promise.all([
         projectsRepository.getProject(projectId), jobsRepository.list(projectId), jobsRepository.inbox(projectId), specsRepository.listSpecs(projectId),
         featuresRepository.listFeatures(projectId), stewardRepository.signals(projectId), stewardRepository.intents(projectId), stewardRepository.get(projectId),
+        settingsRepository.getAgentPaused(),
     ]);
     if (!project) throw new Error("Project not found");
+    const agentPaused = settings.paused || globallyPaused;
     const scrub = createProjectScrubber(projectId);
     const clean = async (text: string) => sanitizeTechnicalDetails(await scrub(text));
     const jobsById = new Map(jobs.map((job) => [job.id, job]));
@@ -157,7 +157,7 @@ export async function projectPresentation(projectId: string) {
         }
         const verified = verification?.status === "passed" && (!params.testSource || verification.sourceHash === sourceHashOf(String(params.testSource)));
         const unfinished = item.payload.requiresVerification === true && !verified;
-        if (unfinished && awaiting(item) && job && active(job.status)) continue;
+        if (unfinished && awaiting(item) && job && (active(job.status) || (job.status === "stalled" && job.retryAt))) continue;
         if (unfinished && awaiting(item) && inbox.some((other) => other.id !== item.id && other.createdAt > item.createdAt && awaiting(other) && subjectKey(forItem(other)) === subjectKey(subject))) continue;
         const type: InboxPresentation["type"] = unfinished && awaiting(item) ? "help" : item.kind === "spec_fix" ? "update" : item.kind === "new_spec" ? "new_check" : item.kind === "feature" ? "feature" : item.kind === "bug_report" ? "bug" : "question";
         const credentialRequest = item.payload.waitingFor === "credentials";
@@ -175,7 +175,7 @@ export async function projectPresentation(projectId: string) {
         const originalReason = originalRun && specs.some((spec) => spec.id === originalRun.specId) ? originalRun.failReason
             : specs.find((spec) => spec.id === patchSpecId)?.invalidReason;
         const updateReason = originalReason ? plainReason(await clean(originalReason)).replace(/[.!?]+$/, "") + "." : "This suggestion updates how the check runs.";
-        const summary = type === "help" ? plainReason(verification?.failReason ?? (job?.status === "budget_exceeded" ? "daily usage limit" : item.body))
+        const summary = type === "help" ? plainReason(verification?.failReason ?? job?.stopReason ?? item.body)
             : type === "update" ? behaviorChange ? "This suggestion changes the behavior described by the check. Review the expected result before saving it." : verified ? `${updateReason} The expected behavior stays the same.` : "Review this suggested update to the check before saving it to the project."
             : type === "new_check" ? "This would add a check for a behavior that is not yet covered. Review the steps and expected result before saving it."
             : type === "feature" ? "This would organize related checks under a new area of the project."
@@ -212,7 +212,6 @@ export async function projectPresentation(projectId: string) {
     }
     for (const job of jobs) if (!infrastructureJobs.has(job.id)) group(forJob(job)).jobs.push(job);
     for (const item of items) group(forItem(item)).items.push(item);
-    const remaining = dailyBudget(jobs, Date.now(), settings.extraUsage);
     let pausedCount = 0;
     const activity: ActivityStory[] = [];
     for (const [id, value] of groups) {
@@ -222,14 +221,12 @@ export async function projectPresentation(projectId: string) {
         const decisions = value.items.filter((item) => awaiting(item) && item.kind !== "bug_report");
         const questions = decisions.filter((item) => item.presentation.type === "question");
         const pendingIntent = value.intents.find((intent) => intent.status === "pending");
-        const allocation = pendingIntent ? allocationFor(pendingIntent.intent.kind) : null;
-        const dailyPause = Boolean(pendingIntent && pendingIntent.intent.kind !== "run_specs" && allocation && (remaining.tokens < allocation.maxTokens || remaining.wallTimeMs < allocation.wallTimeMs));
-        const paused = settings.autonomy !== "observe" && (latestJob?.status === "budget_exceeded" || dailyPause);
+        const paused = agentPaused && (Boolean(pendingIntent) || orderedJobs.some((job) => ["queued", "running", "blocked", "paused", "stalled"].includes(job.status)));
         if (paused) pausedCount++;
         const running = orderedJobs.some((job) => job.status === "running") || value.intents.some((intent) => intent.batchId && intent.status === "running");
-        const queued = orderedJobs.some((job) => job.status === "queued") || Boolean(pendingIntent);
+        const queued = orderedJobs.some((job) => job.status === "queued" || (job.status === "stalled" && job.retryAt)) || Boolean(pendingIntent);
         const status: ActivityStory["status"] = questions.some((item) => item.presentation.credentialRequest) ? "waiting" : decisions.length ? "needs_attention"
-            : running ? "working" : paused ? "paused" : queued ? settings.autonomy === "observe" ? "observing" : "queued" : latestJob?.status === "cancelled" ? "stopped"
+            : paused ? "paused" : running ? "working" : queued ? settings.autonomy === "observe" ? "observing" : "queued" : latestJob?.status === "cancelled" || latestJob?.status === "stalled" ? "stopped"
             : latestJob?.status === "completed" || value.items.some((item) => ["approved", "answered", "dismissed"].includes(item.status)) || value.intents.some((intent) => intent.status === "completed") ? "completed" : "observing";
         const signalsByTime = value.signals.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const noticed = signalsByTime[0];
@@ -256,10 +253,10 @@ export async function projectPresentation(projectId: string) {
         const nextStep = status === "waiting" ? "Add the requested access in Settings, then answer the question."
             : status === "needs_attention" ? "Review the suggestion, or discuss the check in chat."
             : status === "working" ? "Specbook is investigating. You can keep using the project."
-            : status === "paused" ? "Continues tomorrow when the daily usage limit resets, or choose Continue now."
-            : status === "queued" ? latestJob?.retryAt && latestJob.classification === "environment" ? "The application could not be reached. Specbook will try again shortly." : "Starts after the current check finishes."
+            : status === "paused" ? globallyPaused ? "Resume Specbook for all projects in Settings to continue." : "Resume Specbook from the Overview header to continue."
+            : status === "queued" ? latestJob?.status === "stalled" ? "Specbook will try this check again with a different approach." : latestJob?.retryAt && latestJob.classification === "environment" ? "The application could not be reached. Specbook will try again shortly." : "Starts when a worker is available."
             : status === "stopped" ? "Discuss the check in chat if you want to pick it up again."
-            : settings.autonomy === "observe" ? "Automatic work is paused in Automation settings."
+            : settings.autonomy === "observe" ? "Observation mode records changes. Choose Propose or Act in Automation settings to investigate them."
             : "Specbook will check again when the application or its checks change.";
         const noticedText: Record<string, string> = {
             invalid_spec: "The current check could not run.", spec_failure: "A test run did not complete as expected.", spec_changed: "The check was edited.",
@@ -278,7 +275,7 @@ export async function projectPresentation(projectId: string) {
         }
         if (latestItem) timeline.push({ id: latestItem.id, label: awaiting(latestItem) ? latestItem.kind === "bug_report" ? "Problem found" : "Your decision" : latestItem.status === "approved" ? "Saved" : latestItem.status === "answered" ? "Answered" : "Reviewed",
             detail: awaiting(latestItem) ? latestItem.presentation.title : latestItem.status === "approved" ? `Saved the approved change to “${subject.name}”.` : latestItem.status === "answered" ? `Received your answer about “${subject.name}”.` : `Set aside the suggestion for “${subject.name}”.`, createdAt: latestItem.updatedAt });
-        else if (paused && latestJob) timeline.push({ id: `${latestJob.id}:pause`, label: "Paused for today", detail: "The daily usage limit was reached before this check was finished.", createdAt: latestJob.updatedAt });
+        else if (paused && latestJob) timeline.push({ id: `${latestJob.id}:pause`, label: "Paused by you", detail: globallyPaused ? "Specbook is paused across all projects." : "Specbook is paused for this project.", createdAt: settings.updatedAt });
         timeline.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
         const times = [...value.signals.map((signal) => signal.createdAt), ...value.jobs.flatMap((job) => [job.createdAt, job.updatedAt]), ...value.intents.flatMap((intent) => [intent.createdAt, intent.updatedAt]), ...value.items.map((item) => item.updatedAt)].sort();
         const technicalDetails = await clean(value.jobs.map((job) => (actions.get(job.id) ?? []).map((action) => `${action.action}${action.detail ? `: ${action.detail}` : ""}`).join("\n")).filter(Boolean).join("\n\n"));
@@ -294,6 +291,7 @@ export async function projectPresentation(projectId: string) {
     const lastCheckedAt = [...jobs.map((job) => job.updatedAt), ...signals.map((signal) => signal.createdAt)].sort().at(-1) ?? null;
     const unhealthy = jobs.find((job) => infrastructureJobs.has(job.id));
     const systemHealth = unhealthy ? { message: "Specbook is recovering from a service problem. Checks will resume automatically.", detail: "Your application and its checks have not been changed. You do not need to approve a fix for this." } : undefined;
-    const statusText = `Specbook is ${activeCount > 0 ? "checking" : "watching"} ${project.name}. ${attentionCount ? `${attentionCount} ${attentionCount === 1 ? "thing needs" : "things need"} you.` : "Nothing needs your attention."}${pausedCount ? ` ${pausedCount} ${pausedCount === 1 ? "check is" : "checks are"} paused until tomorrow (daily usage limit).` : ""}`;
-    return { items, activity, summary: { projectName: project.name, statusText, attentionCount, activeCount, queuedCount, pausedCount, lastCheckedAt, canContinue: pausedCount > 0 && settings.autonomy !== "observe" && !jobs.some((job) => ["queued", "running"].includes(job.status)), systemHealth, autonomy: settings.autonomy } };
+    const statusText = agentPaused ? globallyPaused ? "Specbook is paused by you across all projects." : `Specbook is paused by you for ${project.name}.`
+        : `Specbook is ${activeCount > 0 ? "working on" : "watching"} ${project.name}.`;
+    return { items, activity, summary: { projectName: project.name, statusText, attentionCount, activeCount, queuedCount, pausedCount, lastCheckedAt, paused: settings.paused, globallyPaused, systemHealth, autonomy: settings.autonomy } };
 }

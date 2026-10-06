@@ -247,10 +247,10 @@ describe("autonomous job proposals", () => {
     test("Inbox file previews match the committed bytes for additions and behavior changes", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeMutation, applyProposal } = await import("../../src/core/jobs/proposals");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
         const projectId = await createProject("Review diffs");
-        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Propose coverage", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Propose coverage", limits: jobLimitsSchema.parse({}) });
         const router = createJobsRouter();
         const preview = async (id: string) => {
             const response = await router.request(`/projects/${projectId}/inbox`);
@@ -296,7 +296,7 @@ describe("autonomous job proposals", () => {
     test("proposals preserve the contract, reject stale edits, and replay approval once", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeMutation, applyProposal } = await import("../../src/core/jobs/proposals");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const projectId = await createProject("Job proposals");
         const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
         const { spec } = await createSpec(projectId, feature.id, "Login");
@@ -305,7 +305,7 @@ describe("autonomous job proposals", () => {
         await fs.writeFile(yamlFile, original);
         await repoGit.commitAll(projectId, "test: add comment");
         await reindexProject(projectId);
-        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Fix implementation", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Fix implementation", limits: jobLimitsSchema.parse({}) });
         const head = await repoGit.getHeadSha(projectId);
         const source = VALID_SPEC.replace('page.goto("/")', 'page.goto("/login")');
         const proposal = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source });
@@ -329,9 +329,9 @@ describe("autonomous job proposals", () => {
     test("job policy accounts before tool execution and pauses for credentials", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { createJobPolicy } = await import("../../src/core/jobs/policy");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const projectId = await createProject("Policy");
-        const row = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Inspect", budget: jobBudgetSchema.parse({ maxActions: 1 }) });
+        const row = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Inspect", limits: jobLimitsSchema.parse({ maxActions: 1 }) });
         const job = (await jobsRepository.claim(row.id))!;
         let executed = 0;
         let aborted = false;
@@ -340,11 +340,11 @@ describe("autonomous job proposals", () => {
         const tool = tools[0]!;
         await tool.execute("1", {}, undefined, undefined, {} as never);
         assert.equal(executed, 1);
-        await assert.rejects(() => tool.execute("2", {}, undefined, undefined, {} as never), /budget/);
+        await assert.rejects(() => tool.execute("2", {}, undefined, undefined, {} as never), /did not reach a confirmed result/i);
         assert.equal(executed, 1);
         assert.ok(aborted);
-        assert.equal((await jobsRepository.get(job.id))?.status, "budget_exceeded");
-        const row2 = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Credentials", budget: jobBudgetSchema.parse({}) });
+        assert.equal((await jobsRepository.get(job.id))?.status, "stalled");
+        const row2 = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Credentials", limits: jobLimitsSchema.parse({}) });
         const job2 = (await jobsRepository.claim(row2.id))!;
         let paused = false;
         const credential = createJobPolicy(job2, () => { paused = true; }).tools([{ name: "request_credential", label: "request", description: "test", parameters: Type.Object({}), async execute() { throw new Error("must be intercepted"); } }])[0]!;
@@ -361,12 +361,12 @@ describe("autonomous job proposals", () => {
     test("concurrent approvals and recovery of a committed proposal produce one commit", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeMutation } = await import("../../src/core/jobs/proposals");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
         const projectId = await createProject("Approval recovery");
         const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
         const { spec } = await createSpec(projectId, feature.id, "Login");
-        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Fix implementation", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Fix implementation", limits: jobLimitsSchema.parse({}) });
         const proposal = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/login")') });
         const router = createJobsRouter();
         const approve = () => router.request(`/projects/${projectId}/inbox/${proposal.id}/review`, {
@@ -388,9 +388,9 @@ describe("autonomous job proposals", () => {
 
     test("answering a question resumes a paused job without reviving a cancelled job", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const projectId = await createProject("Answer race");
-        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Review", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Review", limits: jobLimitsSchema.parse({}) });
         await jobsRepository.update(job.id, { status: "blocked" });
         const question = await jobsRepository.addItem({ jobId: job.id, projectId, kind: "question", title: "Access", body: "Configure access" });
         assert.ok(await jobsRepository.claimItem(question.id));
@@ -415,7 +415,7 @@ describe("project steward", () => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
-        const { enqueueIntent, processProjectSteward, dailyBudget } = await import("../../src/core/steward/engine");
+        const { enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
         await stopJobWorker();
         const projectId = await createProject("Steward decisions");
         await stewardRepository.update(projectId, { autonomy: "observe" });
@@ -435,7 +435,6 @@ describe("project steward", () => {
         const jobs = await jobsRepository.list(projectId);
         assert.equal(jobs.length, 1);
         assert.equal(jobs[0]?.id, one.id, "job identity allows dispatch recovery without duplicates");
-        assert.equal(dailyBudget(jobs).tokens, 200_000, "queued work reserves its full budget");
         const proposal = await jobsRepository.addItem({ projectId, jobId: one.id, kind: "new_spec", title: "Sign in", body: "Proposed coverage" });
         await jobsRepository.updateItem(proposal.id, { status: "rejected" });
         await jobsRepository.update(one.id, { status: "completed" });
@@ -449,9 +448,9 @@ describe("project steward", () => {
     test("trusted automatic fixes compare syntax, not selector-like text inside input values", async () => {
         const { isLocatorOnlyFix } = await import("../../src/core/steward/approval");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const projectId = await createProject("Trusted fixes");
-        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Review", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Review", limits: jobLimitsSchema.parse({}) });
         const source = VALID_SPEC.replace('page.getByRole("heading")', 'page.locator("body")');
         const before = source.replace('page.locator("body")', 'page.locator("main")');
         const item = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_fix", title: "Fix", body: "Fix", payload: {
@@ -496,7 +495,7 @@ describe("project steward", () => {
         }
     });
 
-    test("run preparation blockers create one budgeted investigation and retry only after it finishes", async () => {
+    test("run preparation blockers create one investigation and retry only after it finishes", async () => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
@@ -521,7 +520,7 @@ describe("project steward", () => {
         await processProjectSteward(projectId, false);
         const job = (await jobsRepository.get(investigation.id))!;
         assert.equal(job.status, "queued");
-        assert.equal(job.budget.maxTokens, 100_000);
+        assert.equal(job.limits.maxActions, 500);
         await jobsRepository.update(job.id, { status: "blocked" });
         const question = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Credentials needed", body: "Configure the shopper profile", payload: { waitingFor: "credentials" } });
         await processProjectSteward(projectId, false);
@@ -560,11 +559,11 @@ describe("project steward", () => {
         const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
         await stopJobWorker();
         const projectId = await createProject("Regression proposal");
-        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Investigate", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Investigate", limits: jobLimitsSchema.parse({}) });
         const bug = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "bug_report", title: "Checkout drops the discount", body: "Open checkout with a coupon; the total ignores it." });
         const question = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Access", body: "Which account?" });
         const head = await repoGit.getHeadSha(projectId);
@@ -587,10 +586,10 @@ describe("project steward", () => {
 
     test("does not recreate an exact proposal the human already rejected", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { proposeMutation } = await import("../../src/core/jobs/proposals");
         const projectId = await createProject("Rejected proposal");
-        const createJob = () => jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Propose coverage", budget: jobBudgetSchema.parse({}) });
+        const createJob = () => jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Propose coverage", limits: jobLimitsSchema.parse({}) });
         const job = await createJob();
         const params = { title: "Checkout", description: "Coupons and payment" };
         const proposal = await proposeMutation(job, "create_feature", params);
@@ -608,25 +607,25 @@ describe("plain-language autonomous presentation", () => {
     test("unfinished updates stay out of Inbox, stopped attempts offer help, and stale updates disappear", async () => {
         const { projectPresentation } = await import("../../src/core/jobs/presentation");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { proposeMutation } = await import("../../src/core/jobs/proposals");
         const projectId = await createProject("Understandable updates");
         const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
         const { spec } = await createSpec(projectId, feature.id, "View results");
-        const job = await jobsRepository.create({ projectId, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair the check", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair the check", limits: jobLimitsSchema.parse({}) });
         await jobsRepository.update(job.id, { status: "running" });
         const source = VALID_SPEC.replace('page.goto("/")', 'page.goto("/results")');
         const item = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source });
         const error = 'TimeoutError: expected result did not appear\n    at Object.click (/home/gus/specbook/src/core/runner/guard.ts:279:36)\n> 279 | await locator.click();\n      | ^\nArtifact: /tmp/specbook/storage/runs/private/error.txt';
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, verification: { status: "failed", failReason: error, screenshots: [] } } });
         assert.equal((await projectPresentation(projectId)).items.length, 0);
-        await jobsRepository.update(job.id, { status: "budget_exceeded" });
+        await jobsRepository.update(job.id, { status: "stalled" });
         const paused = await projectPresentation(projectId);
         assert.equal(paused.items.length, 1);
         assert.equal(paused.items[0]?.presentation.type, "help");
         assert.match(paused.items[0]?.presentation.title ?? "", /Look at it together\?/);
-        assert.equal(paused.summary.pausedCount, 1);
-        assert.equal(paused.summary.canContinue, true);
+        assert.equal(paused.summary.pausedCount, 0, "an unfinished attempt is not a user-requested pause");
+        assert.equal(paused.summary.paused, false);
         assert.doesNotMatch(JSON.stringify(paused), /\/home\/gus|\/tmp\/specbook|src\/core\/runner|Object\.click|279 \|/);
         await writer.updateSpecWithLock(spec.id, { testSource: source });
         assert.equal((await projectPresentation(projectId)).items.length, 0, "an outdated failed suggestion is not a new decision");
@@ -634,22 +633,22 @@ describe("plain-language autonomous presentation", () => {
         await stewardRepository.update(projectId, { autonomy: "observe" });
         const observing = await projectPresentation(projectId);
         assert.equal(observing.summary.pausedCount, 0);
-        assert.equal(observing.summary.canContinue, false);
+        assert.equal(observing.summary.paused, false);
         assert.match(observing.summary.statusText, /is watching/);
         assert.doesNotMatch(observing.summary.statusText, /tomorrow/);
-        assert.equal(observing.activity[0]?.status, "observing");
-        assert.match(observing.activity[0]?.nextStep ?? "", /Automation settings/);
+        assert.equal(observing.activity[0]?.status, "stopped");
+        assert.match(observing.activity[0]?.nextStep ?? "", /Discuss the check/);
         await jobsRepository.update(job.id, { status: "running" });
         const working = await projectPresentation(projectId);
         assert.equal(working.activity[0]?.status, "working");
-        assert.match(working.summary.statusText, /is checking/);
+        assert.match(working.summary.statusText, /is working on/);
     });
 
     test("groups repeated observations and investigations around one check and pairs the same screenshot step", async () => {
         const { projectPresentation } = await import("../../src/core/jobs/presentation");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { proposeMutation } = await import("../../src/core/jobs/proposals");
         const { sourceHashOf } = await import("../../src/core/repo/writer");
         const { runsDir } = await import("../../src/core/paths");
@@ -660,7 +659,7 @@ describe("plain-language autonomous presentation", () => {
         await runsRepository.finishRun(run.id, "failed", 1, "Missing results");
         await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
         await fs.writeFile(path.join(runsDir, run.id, "evidence.json"), JSON.stringify({ failedStep: "Abrir a página", steps: [{ label: "Abrir a página", file: "evidence/step-01.png" }] }));
-        const job = await jobsRepository.create({ projectId, runId: run.id, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair", budget: jobBudgetSchema.parse({}) });
+        const job = await jobsRepository.create({ projectId, runId: run.id, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair", limits: jobLimitsSchema.parse({}) });
         const source = VALID_SPEC.replace('page.goto("/")', 'page.goto("/results")');
         const item = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source });
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, verification: { id: crypto.randomUUID(), status: "passed", sourceHash: sourceHashOf(source), screenshots: ["evidence/step-01.png", "evidence/step-02.png"] } } });
@@ -691,10 +690,10 @@ describe("plain-language autonomous presentation", () => {
         const { projectPresentation } = await import("../../src/core/jobs/presentation");
         const { sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const projectId = await createProject("Service recovery");
         for (const display of [118, 119]) {
-            const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Inspect", budget: jobBudgetSchema.parse({}) });
+            const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Inspect", limits: jobLimitsSchema.parse({}) });
             await jobsRepository.update(job.id, { status: "blocked" });
             await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Job needs help", body: `O navegador não iniciou devido ao conflito do servidor X (display ${display}).` });
         }
@@ -718,11 +717,13 @@ describe("plain-language autonomous presentation", () => {
     test("overview separates ordered decisions from bugs, aggregates pauses, and shares exact per-check health", async () => {
         const { projectOverview } = await import("../../src/core/jobs/overview");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const { db } = await import("../../src/infra/db/client");
         const { inboxItems } = await import("../../src/infra/db/schema");
         const { eq } = await import("drizzle-orm");
         const projectId = await createProject("Organized overview");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        await stewardRepository.update(projectId, { paused: true });
         const feature = await writer.createFeatureInRepo(projectId, null, "Survey", "");
         const checks = await Promise.all(["Passing", "Failing", "Flaky", "Paused one", "Paused two", "Unchecked", "Invalid"].map(async (title) => (await createSpec(projectId, feature.id, title)).spec));
         const [passing, failing, flaky, pausedOne, pausedTwo, unchecked, invalid] = checks;
@@ -734,13 +735,13 @@ describe("plain-language autonomous presentation", () => {
             if (spec.id === flaky!.id) await runsRepository.markFlaky(run.id, run.id);
         }
         await specsRepository.updateSpecStatus(invalid!.id, "invalid", "spec.ts is missing");
-        const previous = await jobsRepository.create({ projectId, specId: pausedOne!.id, kind: "explore", chatId: crypto.randomUUID(), trigger: "steward", goal: "Explore surveys", budget: jobBudgetSchema.parse({}) });
+        const previous = await jobsRepository.create({ projectId, specId: pausedOne!.id, kind: "explore", chatId: crypto.randomUUID(), trigger: "steward", goal: "Explore surveys", limits: jobLimitsSchema.parse({}) });
         await jobsRepository.update(previous.id, { status: "completed" });
         for (const spec of [pausedOne!, pausedTwo!]) {
-            const job = await jobsRepository.create({ projectId, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Update check", budget: jobBudgetSchema.parse({}) });
-            await jobsRepository.update(job.id, { status: "budget_exceeded" });
+            const job = await jobsRepository.create({ projectId, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Update check", limits: jobLimitsSchema.parse({}) });
+            await jobsRepository.update(job.id, { status: "stalled" });
         }
-        const questionJob = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Clarify survey access", budget: jobBudgetSchema.parse({}) });
+        const questionJob = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Clarify survey access", limits: jobLimitsSchema.parse({}) });
         await jobsRepository.update(questionJob.id, { status: "blocked" });
         const newer = await jobsRepository.addItem({ projectId, jobId: questionJob.id, kind: "question", title: "Should guests see survey results?", body: "Which results should be visible to guests?" });
         const older = await jobsRepository.addItem({ projectId, jobId: questionJob.id, kind: "question", title: "Should drafts appear in the survey list?", body: "Should the survey list include drafts?" });
@@ -752,7 +753,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.problems.length, 1);
         assert.equal(view.summary.problemCount, 1);
         assert.equal(view.paused.length, 1);
-        assert.equal(view.paused[0]?.reason, "daily_limit");
+        assert.equal(view.paused[0]?.reason, "user");
         assert.equal(view.paused[0]?.count, 2);
         assert.deepEqual(new Set(view.paused[0]?.specIds), new Set([pausedOne!.id, pausedTwo!.id]));
         assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 2, flaky: 1, paused: 2, not_checked: 1, running: 0 });
@@ -762,7 +763,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.history.some((story) => story.id === `job:${previous.id}`), true, "later paused work does not erase an earlier finished episode");
         assert.equal(view.stories.some((story) => story.inboxIds.includes(older.id)), true, "pending decisions retain a detail timeline");
         assert.equal(view.history.some((story) => story.inboxIds.includes(older.id)), false);
-        assert.match(view.summary.nextCheck, /resumes tomorrow/);
+        assert.match(view.summary.nextCheck, /Resume Specbook/);
     });
 
     test("overview keeps a batch live through retry and links the final grouped result to run evidence", async () => {

@@ -9,6 +9,7 @@ import { projectSecretScrubber } from "../credentials/scrub";
 import { getRunBatch, startSpecBatch, type RunBatch } from "../runner/batch";
 import { areSpecsLocked } from "../specs/lifecycle";
 import { stewardRepository } from "../../infra/repositories/steward";
+import { isAgentPaused } from "./pause";
 
 interface CronField {
     values: Set<number>;
@@ -155,7 +156,7 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
                 await schedulesRepository.update(projectId, { lastBatchStatus: "error", lastError: "The scheduled batch is no longer available" });
             }
         }
-        if (!automation.cron || !automation.nextRunAt || Date.parse(automation.nextRunAt) > at.getTime()) return;
+        if (!automation.cron || !automation.nextRunAt || Date.parse(automation.nextRunAt) > at.getTime() || await isAgentPaused(projectId)) return;
         const available = await specsRepository.listSpecs(projectId);
         const selected = automation.specIds.length ? available.filter((spec) => automation.specIds.includes(spec.id)) : available;
         const runnable = selected.filter((spec) => spec.status !== "invalid");
@@ -171,7 +172,7 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
             await startSpecBatch(projectId, ids, "Scheduled run", {
                 healFailures: automation.healFailures,
                 onPrepared: async (batch) => {
-                    if (stopped) throw new Error("Scheduling stopped before execution");
+                    if (stopped || await isAgentPaused(projectId)) throw new Error("Scheduling stopped before execution");
                     await recordBatch(automation, batch);
                 },
             });

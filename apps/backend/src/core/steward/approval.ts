@@ -2,6 +2,7 @@ import { parse } from "@babel/parser";
 import { jobsRepository, type InboxItem } from "../../infra/repositories/jobs";
 import { applyProposal } from "../jobs/proposals";
 import { fixProposalSchema } from "../jobs/schemas";
+import { isAgentPaused } from "../jobs/pause";
 
 /** Only selector literals may differ. No new calls, behavior, input values or assertions. */
 export function isLocatorOnlyFix(item: InboxItem): boolean {
@@ -33,11 +34,13 @@ export async function applyTrustedFixes(projectId: string): Promise<void> {
     const trusted = items.filter((item) => item.status === "approved" && isLocatorOnlyFix(item));
     if (trusted.length < 3 || items.some((item) => item.status === "rejected" && isLocatorOnlyFix(item))) return;
     for (const item of items.filter((item) => item.status === "pending" && isLocatorOnlyFix(item))) {
+        if (await isAgentPaused(projectId)) return;
         const verification = item.payload.verification as { status?: string } | undefined;
         const job = await jobsRepository.get(item.jobId);
         if (verification?.status !== "passed" || job?.status !== "completed" || job.classification !== "test_drift") continue;
         if (!await jobsRepository.claimItem(item.id)) continue;
         try {
+            if (await isAgentPaused(projectId)) { await jobsRepository.updateItem(item.id, { status: "pending" }); return; }
             const commitSha = await applyProposal(item);
             await jobsRepository.updateItem(item.id, { status: "approved", commitSha });
             await jobsRepository.log(item.jobId, "auto_approved", "Act policy: verified selector-only change after three human-approved locator fixes.");

@@ -16,7 +16,6 @@ import { jobsRepository } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
 import { createChat, startChatTurn } from "../../../core/chat/session";
-import { continueProject } from "../../../core/jobs/continuation";
 import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors";
 
 export function createJobsRouter(): Hono {
@@ -24,12 +23,6 @@ export function createJobsRouter(): Hono {
     router.get("/projects/:id/overview", async (c) => {
         if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
         return c.json(await projectOverview(c.req.param("id")));
-    });
-    router.post("/projects/:id/continue-now", async (c) => {
-        if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
-        try { await continueProject(c.req.param("id")); }
-        catch (error) { throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) }); }
-        return c.json({ ok: true });
     });
     router.use("/projects/:id/jobs/*", async (c, next) => {
         if (!await projectsRepository.getProject(c.req.param("id")!)) throw new HTTPException(404, { message: "Project not found" });
@@ -47,7 +40,7 @@ export function createJobsRouter(): Hono {
     router.post("/projects/:id/jobs/:jobId/cancel", async (c) => {
         const job = await jobsRepository.get(c.req.param("jobId"));
         if (!job || job.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Job not found" });
-        if (!["queued", "running", "blocked"].includes(job.status)) throw new HTTPException(409, { message: "Job already stopped" });
+        if (!["queued", "running", "blocked", "paused", "stalled"].includes(job.status)) throw new HTTPException(409, { message: "Job already stopped" });
         await jobsRepository.update(job.id, { status: "cancelled" });
         if (isChatBusy(job.chatId)) await Promise.all([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
         await jobsRepository.log(job.id, "cancelled", "Cancelled by human");
@@ -121,13 +114,13 @@ ${item.body}`.slice(0, 6000),
                     body: "The suggested update was declined. The existing check and expected behavior are unchanged.",
                     payload: { sourceItemId: item.id, specId: params?.specId ?? job?.specId, runId: job?.runId, language: "en" } });
                 await jobsRepository.updateItem(item.id, { status: "rejected" });
-                if (job && ["running", "queued", "blocked", "budget_exceeded"].includes(job.status)) {
+                if (job && ["running", "queued", "blocked", "paused", "stalled"].includes(job.status)) {
                     await jobsRepository.update(job.id, { status: "cancelled", classification: "application_bug" });
                     if (isChatBusy(job.chatId)) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
                 }
             } else if (action === "ignore") {
                 await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, ignoredCheck: true } });
-                if (job && ["running", "budget_exceeded", "blocked", "queued"].includes(job.status)) {
+                if (job && ["running", "stalled", "paused", "blocked", "queued"].includes(job.status)) {
                     await jobsRepository.update(job.id, { status: "cancelled" });
                     if (isChatBusy(job.chatId)) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
                 }

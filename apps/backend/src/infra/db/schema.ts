@@ -182,6 +182,7 @@ export const chatSessions = sqliteTable(
 export const appSettings = sqliteTable("app_settings", {
     id: integer("id").primaryKey(),
     llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),
+    agentPaused: integer("agent_paused", { mode: "boolean" }).notNull().default(false),
     updatedAt: text("updated_at").notNull(),
 });
 
@@ -196,11 +197,12 @@ export const jobs = sqliteTable("jobs", {
     classification: text("classification").$type<"test_drift" | "application_bug" | "environment">(),
     goal: text("goal").notNull(),
     status: text("status").$type<import("../../core/jobs/schemas").JobStatus>().notNull(),
-    budget: text("budget", { mode: "json" }).$type<import("../../core/jobs/schemas").JobBudget>().notNull(),
+    limits: text("limits", { mode: "json" }).$type<import("../../core/jobs/schemas").JobLimits>().notNull(),
     tokensUsed: integer("tokens_used").notNull().default(0),
     actionsUsed: integer("actions_used").notNull().default(0),
     elapsedMs: integer("elapsed_ms").notNull().default(0),
-    dailyUsage: text("daily_usage", { mode: "json" }).$type<{ date: string; tokens: number; wallTimeMs: number }>(),
+    stopReason: text("stop_reason"),
+    safetyRetries: integer("safety_retries").notNull().default(0),
     retryAt: text("retry_at"),
     systemError: text("system_error"),
     infrastructureRetries: integer("infrastructure_retries").notNull().default(0),
@@ -263,9 +265,9 @@ export const webhookNotifications = sqliteTable("webhook_notifications", {
 export const projectStewards = sqliteTable("project_stewards", {
     projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
     autonomy: text("autonomy").$type<"observe" | "propose" | "act">().notNull().default("propose"),
+    paused: integer("paused", { mode: "boolean" }).notNull().default(false),
     observation: text("observation", { mode: "json" }).$type<import("../../core/steward/signals").ProjectObservation>().notNull().default({}),
     lastPlannerAt: text("last_planner_at"),
-    extraUsage: text("extra_usage", { mode: "json" }).$type<{ date: string; tokens: number; wallTimeMs: number }>(),
     updatedAt: text("updated_at").notNull(),
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Clock3, RefreshCw, X } from "lucide-react";
+import { Check, ChevronDown, Clock3, Pause, Play, RefreshCw, X } from "lucide-react";
 import { RelativeTime } from "@/components/RelativeTime";
 import { StatusPill } from "@/components/StatusPill";
 import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
@@ -52,6 +52,10 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
     const [specsError, setSpecsError] = useState("");
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
     const [retryKey, setRetryKey] = useState(0);
+    const [globallyPaused, setGloballyPaused] = useState<boolean | null>(null);
+    const [pauseError, setPauseError] = useState("");
+    const [savingPause, setSavingPause] = useState(false);
+    const [pauseFeedback, setPauseFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
     function applySettings(value: AutomationSettings) {
         setSettings(value);
@@ -82,6 +86,10 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         getProjectTree(projectId, controller.signal)
             .then((result) => setSpecs(result.specs))
             .catch((error) => { if (!isAbortError(error)) setSpecsError(errorMessage(error)); });
+        setPauseError("");
+        api<{ paused: boolean }>("/settings/agent", { signal: controller.signal })
+            .then((result) => setGloballyPaused(result.paused))
+            .catch((error) => { if (!isAbortError(error)) setPauseError("The agent pause setting could not load. Try again."); });
         return () => controller.abort();
     }, [projectId, retryKey]);
 
@@ -120,8 +128,25 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         }
     }
 
+    async function toggleGlobalPause() {
+        if (globallyPaused === null) return;
+        setSavingPause(true);
+        setPauseFeedback(null);
+        try {
+            const result = await api<{ paused: boolean }>("/settings/agent", { method: "PUT", body: JSON.stringify({ paused: !globallyPaused }) });
+            setGloballyPaused(result.paused);
+            setPauseFeedback({ type: "success", text: result.paused ? "Specbook is paused across all projects. Current work will stop safely." : "Specbook has resumed. Projects paused individually stay paused." });
+        } catch {
+            setPauseFeedback({ type: "error", text: "The pause setting could not be saved. Try again in a moment." });
+        } finally { setSavingPause(false); }
+    }
+
     return (
         <div className="space-y-10">
+            <SettingsSection id="agent-pause-heading" title="Agent across all projects" description="Shared by every project on this server. Project pauses remain separate.">
+                {pauseError ? <SettingsBlock><Alert variant="danger" role="alert"><AlertDescription>{pauseError}</AlertDescription></Alert><Button variant="outline" size="sm" className="mt-3" onClick={() => setRetryKey((key) => key + 1)}><RefreshCw size={14} /> Try again</Button></SettingsBlock> : globallyPaused === null ? <SettingsBlock aria-busy="true"><Skeleton className="h-9 w-full" /></SettingsBlock> : <SettingsRow label={globallyPaused ? "Paused by you" : "Running continuously"} description="Pausing stops new work and lets current work stop safely." align="center"><Button type="button" variant="outline" disabled={savingPause} onClick={() => void toggleGlobalPause()}>{globallyPaused ? <Play size={14} /> : <Pause size={14} />}{savingPause ? "Saving…" : globallyPaused ? "Resume all projects" : "Pause all projects"}</Button></SettingsRow>}
+                {pauseFeedback && <SettingsFooter feedback={<InlineFeedback feedback={pauseFeedback} />} />}
+            </SettingsSection>
             <SettingsSection id="automation-settings-heading" title="Automation" description="Schedule runs, investigate failures, and receive status changes. All settings are optional.">
                 {loading ? (
                     <div aria-label="Loading automation settings" aria-busy="true" role="status">
@@ -143,7 +168,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                                     <SelectItem value="act">Apply trusted locator fixes</SelectItem>
                                 </SelectContent>
                             </Select>
-                            <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes always need your approval. Trusted fixes must pass verification and follow at least three approved locator fixes. Daily investigation budget: 300,000 tokens and 30 minutes, including reserved work.</p>
+                            <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes always need your approval. Trusted fixes must pass a test run and follow at least three approved locator fixes.</p>
                         </SettingsRow>
                         <SettingsRow label="Schedule" htmlFor="automation-cron" description="Optional, in UTC.">
                             <Input id="automation-cron" value={cron} onChange={(event) => { setCron(event.target.value); setFeedback(null); }} placeholder="0 9 * * 1-5" disabled={saving} className="font-mono" autoComplete="off" aria-describedby="automation-cron-help" />

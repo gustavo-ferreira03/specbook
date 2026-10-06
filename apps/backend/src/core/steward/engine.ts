@@ -9,7 +9,9 @@ import { stewardRepository, type Intent, type ProjectSignal } from "../../infra/
 import { logger } from "../../infra/logger";
 import { createProjectScrubber } from "../credentials/scrub";
 import { enqueueJob } from "../jobs/worker";
-import { allocationFor, dailyUsageFor } from "../jobs/usage";
+import { jobLimitsSchema } from "../jobs/schemas";
+import { isAgentPaused } from "../jobs/pause";
+import { retryStalledJob } from "../jobs/retry";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { collectProjectSignals, fingerprint } from "./signals";
 import { stewardIntentSchema, type StewardIntent } from "./schemas";
@@ -51,6 +53,7 @@ export async function recordFailureSignal(projectId: string, runId: string, spec
 }
 
 async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<void> {
+    if (await isAgentPaused(signal.projectId)) return;
     if (observe) { await stewardRepository.acknowledge(signal.id, "observed"); return; }
     const specIds = Array.isArray(signal.payload.specIds) ? signal.payload.specIds as string[] : undefined;
     const runId = typeof signal.payload.runId === "string" ? signal.payload.runId : undefined;
@@ -60,6 +63,7 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
     };
     if (signal.kind === "credentials_changed") {
         for (const item of await jobsRepository.inbox(signal.projectId)) {
+            if (await isAgentPaused(signal.projectId)) return;
             if (item.kind !== "question" || item.status !== "pending" || item.payload.waitingFor !== "credentials") continue;
             const job = await jobsRepository.get(item.jobId);
             if (job?.status !== "blocked" || !await jobsRepository.claimItem(item.id)) continue;
@@ -75,20 +79,8 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
     await stewardRepository.acknowledge(signal.id, "handled");
 }
 
-export function dailyBudget(jobs: Awaited<ReturnType<typeof jobsRepository.list>>, at = Date.now(), extraUsage?: { date: string; tokens: number; wallTimeMs: number } | null) {
-    const date = new Date(at).toISOString().slice(0, 10);
-    let tokens = 0;
-    let wallTimeMs = 0;
-    for (const job of jobs) {
-        const reserved = ["queued", "running"].includes(job.status);
-        const usage = dailyUsageFor(job, date);
-        tokens += usage.tokens + (reserved ? Math.max(0, job.budget.maxTokens - job.tokensUsed) : 0);
-        wallTimeMs += usage.wallTimeMs + (reserved ? Math.max(0, job.budget.wallTimeMs - job.elapsedMs) : 0);
-    }
-    return { tokens: Math.max(0, 300_000 + (extraUsage?.date === date ? extraUsage.tokens : 0) - tokens), wallTimeMs: Math.max(0, 1800_000 + (extraUsage?.date === date ? extraUsage.wallTimeMs : 0) - wallTimeMs) };
-}
-
 async function dispatchIntent(row: Intent): Promise<void> {
+    if (await isAgentPaused(row.projectId)) return;
     const projectJobs = await jobsRepository.list(row.projectId);
     const existing = await jobsRepository.get(row.id);
     if (existing) { await stewardRepository.updateIntent(row.id, { status: "running", jobId: existing.id }); return; }
@@ -98,7 +90,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const inbox = await jobsRepository.inbox(row.projectId);
     const previous = siblings.filter((other) => other.id !== row.id && other.fingerprint === row.fingerprint && (other.jobId || other.batchId));
     const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && (item.status === "rejected" || item.payload.ignoredCheck === true)));
-    if (rejected || previous.some((other) => projectJobs.some((job) => job.id === other.jobId && ["queued", "running", "blocked"].includes(job.status))) || previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000)) {
+    if (rejected || previous.some((other) => projectJobs.some((job) => job.id === other.jobId && ["queued", "running", "paused", "blocked", "stalled"].includes(job.status))) || previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000)) {
         await stewardRepository.updateIntent(row.id, { status: "ignored", reason: rejected ? "A human rejected this proposal for the current Spec/context version." : "Equivalent work is already active or was handled recently." });
         return;
     }
@@ -106,8 +98,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
         const specs = (await specsRepository.listSpecs(row.projectId)).filter((spec) => spec.status !== "invalid" && (!row.intent.specIds?.length || row.intent.specIds.includes(spec.id)));
         if (!specs.length) { await stewardRepository.updateIntent(row.id, { status: "ignored", reason: "No runnable Specs yet." }); return; }
         if (areSpecsLocked(specs.map((spec) => spec.id)) || await runsRepository.hasRunningRuns(specs.map((spec) => spec.id))) return;
-        // A bounded number of batches prevents a rapidly changing deploy fingerprint from flooding the runner.
-        if (siblings.filter((item) => item.batchId && Date.now() - Date.parse(item.createdAt) < day).length >= 12) return;
+        if (await isAgentPaused(row.projectId)) return;
         await startSpecBatch(row.projectId, specs.map((spec) => spec.id), row.intent.reason, {
             baseUrl: row.intent.baseUrl,
             onPrepared: async (batch) => { await stewardRepository.updateIntent(row.id, { status: "running", batchId: batch.id }); },
@@ -115,9 +106,6 @@ async function dispatchIntent(row: Intent): Promise<void> {
         return;
     }
     const kind = row.intent.kind === "triage" ? "failure_triage" : row.intent.kind;
-    const remaining = dailyBudget(projectJobs, Date.now(), (await stewardRepository.get(row.projectId)).extraUsage);
-    const allocation = allocationFor(kind);
-    if (remaining.tokens < allocation.maxTokens || remaining.wallTimeMs < allocation.wallTimeMs) return;
     const context = await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
     const specs = await specsRepository.listSpecs(row.projectId);
     const decisions = inbox.filter((item) => ["approved", "rejected", "dismissed"].includes(item.status)).slice(0, 12).map((item) => ({ title: item.title, status: item.status }));
@@ -126,7 +114,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
         : `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${kind === "regenerate" ? "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval." : kind === "explore" ? "Investigate the stated problem, inspect available access, and ask through the Inbox when a prerequisite needs human help. Keep this investigation focused on its goal." : "Compare confirmed areas, roles and rules to the existing Specs before proposing additional coverage. Investigate in the browser and ask when blocked."}\nRecent human decisions: ${JSON.stringify(decisions)}`;
     const job = await enqueueJob(row.projectId, { kind, goal: goal.slice(0, 12000), trigger: row.intent.kind === "triage" ? "spec_failure" : "steward",
         specId: row.intent.specIds?.[0], runId: row.intent.runId,
-        budget: allocation,
+        limits: jobLimitsSchema.parse({}),
     }, row.id);
     await stewardRepository.updateIntent(row.id, { status: "running", jobId: job.id });
 }
@@ -136,17 +124,11 @@ export async function processProjectSteward(projectId: string, collect = true): 
         const project = await projectsRepository.getProject(projectId);
         if (!project) return;
         const settings = await stewardRepository.get(projectId);
+        if (await isAgentPaused(projectId)) return;
         const projectJobs = await jobsRepository.list(projectId);
+        for (const blocked of projectJobs.filter((job) => job.status === "blocked" && job.safetyRetries > 0)) await retryStalledJob(blocked);
         if (settings.autonomy !== "observe" && !projectJobs.some((job) => ["queued", "running"].includes(job.status))) {
-            const paused = projectJobs.find((job) => job.status === "budget_exceeded" && job.updatedAt.slice(0, 10) < new Date().toISOString().slice(0, 10));
-            if (paused) {
-                const remaining = dailyBudget(projectJobs, Date.now(), settings.extraUsage);
-                const allocation = allocationFor(paused.kind);
-                if (remaining.tokens >= allocation.maxTokens && remaining.wallTimeMs >= allocation.wallTimeMs) {
-                    const { resumeLimitedJob } = await import("../jobs/continuation");
-                    await resumeLimitedJob(paused);
-                }
-            }
+            for (const stalled of projectJobs.filter((job) => job.status === "stalled")) await retryStalledJob(stalled);
         }
         if (collect) await stewardRepository.update(projectId, { observation: await collectProjectSignals(project, settings.observation) });
         for (const signal of await stewardRepository.pendingSignals(projectId)) await handleSignal(signal, settings.autonomy === "observe");
@@ -154,7 +136,7 @@ export async function processProjectSteward(projectId: string, collect = true): 
         for (const intent of intents.filter((intent) => intent.status === "running")) {
             const job = intent.jobId ? await jobsRepository.get(intent.jobId) : null;
             const batch = intent.batchId ? await getRunBatch(intent.batchId) : null;
-            if (job && ["completed", "cancelled", "budget_exceeded"].includes(job.status)) {
+            if (job && ["completed", "cancelled"].includes(job.status)) {
                 if (intent.key.startsWith("run-blocker:")) {
                     const original = intents.find((item) => item.id === intent.key.slice("run-blocker:".length));
                     if (original?.intent.kind === "run_specs") {
@@ -165,7 +147,7 @@ export async function processProjectSteward(projectId: string, collect = true): 
                 await stewardRepository.updateIntent(intent.id, { status: job.status === "completed" ? "completed" : "failed" });
             } else if (batch && batch.status !== "running") await stewardRepository.updateIntent(intent.id, { status: batch.status === "passed" ? "completed" : "failed" });
         }
-        if (settings.autonomy === "observe") return;
+        if (settings.autonomy === "observe" || await isAgentPaused(projectId)) return;
         if (settings.autonomy === "act") await applyTrustedFixes(projectId);
         if (!settings.lastPlannerAt || Date.now() - Date.parse(settings.lastPlannerAt) >= day) {
             await enqueueIntent(projectId, { kind: "planner", goal: "Review project coverage and choose useful next investigations.", reason: "Daily review of coverage and recent human decisions.", priority: 10 }, `planner:${new Date().toISOString().slice(0, 10)}`);
@@ -173,7 +155,7 @@ export async function processProjectSteward(projectId: string, collect = true): 
         }
         const pending = (await stewardRepository.intents(projectId)).filter((intent) => intent.status === "pending");
         for (const intent of pending) {
-            if (stopped) break;
+            if (stopped || await isAgentPaused(projectId)) break;
             try { await dispatchIntent(intent); }
             catch (error) {
                 const scrub = createProjectScrubber(projectId);

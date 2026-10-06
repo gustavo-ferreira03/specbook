@@ -1,15 +1,15 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { inboxItems, jobActions, jobs } from "../db/schema";
-import { dailyUsageFor } from "../../core/jobs/usage";
+import { jobLimitsSchema } from "../../core/jobs/schemas";
 
 export type Job = typeof jobs.$inferSelect;
 export type InboxItem = typeof inboxItems.$inferSelect;
 const now = () => new Date().toISOString();
 
 export const jobsRepository = {
-    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "budget"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage">>): Promise<Job> {
+    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "limits"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage">>): Promise<Job> {
         const [job] = await db.insert(jobs).values({ ...input, id: input.id ?? crypto.randomUUID(), status: "queued", pendingMessage: input.pendingMessage ?? input.goal, createdAt: now(), updatedAt: now() }).returning();
         return job!;
     },
@@ -25,8 +25,8 @@ export const jobsRepository = {
     async queued() {
         return db.select().from(jobs).where(eq(jobs.status, "queued")).orderBy(asc(jobs.createdAt));
     },
-    async transition(id: string, from: Job["status"], status: Job["status"]) {
-        return (await db.update(jobs).set({ status, updatedAt: now() })
+    async transition(id: string, from: Job["status"], status: Job["status"], patch: Partial<Omit<Job, "id" | "projectId" | "chatId" | "status" | "updatedAt">> = {}) {
+        return (await db.update(jobs).set({ ...patch, status, updatedAt: now() })
             .where(and(eq(jobs.id, id), eq(jobs.status, from))).returning())[0] ?? null;
     },
     async forRun(runId: string) {
@@ -38,11 +38,8 @@ export const jobsRepository = {
     async recordUsage(id: string, tokens: number, wallTimeMs = 0) {
         const job = await this.get(id);
         if (!job) return;
-        const date = now().slice(0, 10);
-        const previous = dailyUsageFor(job, date);
         await this.update(id, {
             tokensUsed: job.tokensUsed + tokens, elapsedMs: job.elapsedMs + wallTimeMs,
-            dailyUsage: { date, tokens: previous.tokens + tokens, wallTimeMs: previous.wallTimeMs + wallTimeMs },
         });
     },
     async claim(id: string) {
@@ -74,9 +71,14 @@ export const jobsRepository = {
         await db.update(inboxItems).set({ ...patch, updatedAt: now() }).where(eq(inboxItems.id, id));
     },
     async answer(item: InboxItem, answer: string) {
+        const job = await this.get(item.jobId);
+        if (!job) throw new Error("The investigation no longer exists");
+        const allowance = jobLimitsSchema.parse({});
+        const limits = { maxActions: job.actionsUsed + allowance.maxActions, wallTimeMs: job.elapsedMs + allowance.wallTimeMs };
         // changes() ties the Inbox update to the blocked-to-queued transition in this transaction.
         const [resumed] = await db.batch([
-            db.update(jobs).set({ status: "queued", updatedAt: now(), pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` })
+            db.update(jobs).set({ status: "queued", limits, safetyRetries: 0, stopReason: null, retryAt: null,
+                updatedAt: now(), pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` })
                 .where(and(eq(jobs.id, item.jobId), eq(jobs.status, "blocked"), inArray(jobs.id,
                     db.select({ jobId: inboxItems.jobId }).from(inboxItems).where(and(eq(inboxItems.id, item.id), eq(inboxItems.status, "applying"))),
                 ))).returning({ id: jobs.id }),
@@ -86,9 +88,9 @@ export const jobsRepository = {
         if (!resumed.length) throw new Error("The job is no longer paused; its answer was not applied");
     },
     async recover() {
-        for (const job of await db.select().from(jobs).where(eq(jobs.status, "running"))) {
+        for (const job of await db.select().from(jobs).where(isNotNull(jobs.startedAt))) {
             await this.recordUsage(job.id, 0, Math.max(0, Date.now() - Date.parse(job.startedAt ?? now())));
-            await this.update(job.id, { status: "queued", startedAt: null });
+            await this.update(job.id, { status: job.status === "running" ? "queued" : job.status, startedAt: null });
             await this.log(job.id, "recovered", "Backend restarted. Reconcile existing Inbox proposals before continuing; do not repeat browser mutations.");
         }
         // An approval may have committed before the process stopped. Require a
@@ -97,6 +99,6 @@ export const jobsRepository = {
     },
     async cancelProject(projectId: string) {
         await db.update(jobs).set({ status: "cancelled", updatedAt: now() })
-            .where(and(eq(jobs.projectId, projectId), inArray(jobs.status, ["queued", "blocked"])));
+            .where(and(eq(jobs.projectId, projectId), inArray(jobs.status, ["queued", "paused", "blocked", "stalled"])));
     },
 };

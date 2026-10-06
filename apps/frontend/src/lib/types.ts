@@ -298,7 +298,9 @@ export interface AgentSummary {
     queuedCount: number;
     pausedCount: number;
     lastCheckedAt: string | null;
-    canContinue: boolean;
+    paused: boolean;
+    globallyPaused: boolean;
+    effectivePause: boolean;
     autonomy: string;
     systemHealth?: { message: string; detail?: string };
 }
@@ -345,7 +347,7 @@ export interface SpecHealth {
 }
 
 export interface OverviewPausedGroup {
-    reason: "daily_limit" | "observation" | "access" | "service";
+    reason: "user";
     label: string;
     count: number;
     stories: ActivityStory[];

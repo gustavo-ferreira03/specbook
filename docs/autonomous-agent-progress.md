@@ -40,7 +40,7 @@ Persistent observations, signals and intentions cover failed/invalid/stale/chang
 
 A daily planner uses a compact project digest and Zod-derived `propose_intents`; chat and jobs can request background work through the same intention queue. Independent coverage goals remain distinct. Equivalent work has a six-hour cooldown, blocked work prevents equivalent dispatch, and rejected proposals are remembered. Exact rejected proposals cannot be silently recreated.
 
-The steward reserves at most 300,000 tokens and 30 active minutes per project per UTC day, serializes jobs within a project, and limits autonomous batches to twelve per day. A run that cannot start creates a budgeted prerequisite investigation; after resolution it can retry the original selection and URL without an unlimited loop. New credentials resume explicitly tagged credential questions.
+The steward serializes investigations within a project. There is no daily quota, token reservation or per-day batch cap. A run that cannot start creates a prerequisite investigation; after resolution it can retry the original selection and URL without an unlimited loop. New credentials resume explicitly tagged credential questions.
 
 Observe records signals without dispatching new work. Propose submits changes for review. Act may apply a verified selector-only fix after three approved examples and no rejected examples; AST comparison excludes assertions, input data and contract changes.
 
@@ -105,7 +105,7 @@ Token usage is recorded after each model response, so a response can cross the t
 
 Gus prioritized Inbox/Activity clarity over further CI work. The existing CI implementation is left in place while these screens are revised. Activity will group work into stories with a next step; Inbox will contain actionable questions, screenshots and consequences, with diffs/logs under Technical details.
 
-Vocabulary for user-facing copy: hide job; steward → Specbook; budget → daily usage limit; verification → test run; commit → save; spec fix → update to a check; proposal → suggestion. UI and generated summaries use English, preserving quoted project/Spec names. Spec remains the existing product term and is explained as a saved check of app behavior. Server paths and Specbook stack frames must never appear in the main text.
+Vocabulary for user-facing copy: hide job and internal safety ceilings; steward → Specbook; verification → test run; commit → save; spec fix → update to a check; proposal → suggestion. “Paused” means the user paused Specbook, locally or globally. UI and generated summaries use English, preserving quoted project/Spec names. Spec remains the existing product term and is explained as a saved check of app behavior. Server paths and Specbook stack frames must never appear in the main text.
 
 Xvfb diagnosis: orphaned browser processes from earlier backend exits occupied every fixed display from :99 through :119. Display ownership only existed in the current process's map. The fix selects high candidate displays, checks existing sockets/locks, lets Xvfb claim its native lock atomically and waits for displayfd readiness. VNC binds an available port independently. Child supervisors close only their own processes when the backend's pipe closes, including abrupt termination; shutdown is awaited and no foreign lock is removed.
 
@@ -127,4 +127,26 @@ Both app typechecks and five focused presentation/Overview tests passed. Live ch
 
 ## Addendum 5: continuous autonomy with explicit pause
 
-Gus rejected the daily allowance and all cost controls. Remove daily accounting, advance reservations, extraUsage, Continue now and tomorrow-based pauses. Keep only a generous internal safeguard against runaway work. Add persistent pause/resume per project and globally, separate from observe/propose/act; stop running work cleanly and preserve its place for resumption. This is the active next change and will have its own commit.
+Gus rejected the daily allowance and all cost controls. Daily accounting, advance reservations, extraUsage, Continue now and tomorrow-based pauses have been removed, including their database fields and APIs. Migration 0016 preserves existing counters and audit history while giving unfinished investigations a new internal attempt. Pause/resume is persistent per project and globally, separate from observe/propose/act. Running agent turns stop cleanly; resumption preserves cumulative progress and reconciles browser effects. Automatic scheduled starts and failure retries wait during a pause; explicit manual/CI runs remain available.
+
+The only execution ceiling is internal: 500 actions and one active hour per attempt. There is no token ceiling. Up to two subsequent attempts use backoff and a prompt requiring a different approach. Continued inability to finish becomes a specific question with the recorded failure, not a quota notification. Infrastructure failures remain automatic service retries. The Overview and Automation settings expose only user pause controls.
+
+Validation: both app typechecks, backend build and the full suite passed, including persistent local/global pause, simultaneous requests, safe tool cancellation, cumulative recovery, retry backoff and migration preservation. The live backend watcher was temporarily suspended during the next reduction so the superseded planner cannot launch work between migrations; it must be resumed for final UI verification.
+
+## Addendum 6: event-driven autonomy (current product decision)
+
+This supersedes continuous autonomy and the five-section Overview. Without a new event or a direct user request, the agent is idle. Deterministic rules connect deployments, schedules, CI requests, Spec changes, failures and newly supplied credentials to execution or investigation. The periodic LLM planner is removed. Coverage analysis and exploration require a button or chat request. Pause/resume and the removal of daily quotas still apply.
+
+Overview is reduced to Needs you, Failing and Recent runs. It retains readable questions, evidence, file diffs, chronological detail panels and shared Spec health. The header contains the health verdict, last check and pause control. There is no planner feed or paused-work section.
+
+### Decision rationale for the TCC
+
+Gus selected event-driven autonomy to concentrate the product on test maintenance, pipeline verification and readable behavior contracts. These are product hypotheses about adoption, not findings from a market study. A deployment or failing run provides a concrete reason to invoke the agent and a traceable outcome to evaluate. Self-hosting and explicit triggers preserve control over when the user's LLM account is used; they do not establish a monetary cost guarantee.
+
+The owner's review of Agora Leads reported ten Inbox items, including questions that did not support a useful decision and failures caused by Specbook's own browser infrastructure. This is a qualitative observation from the development instance. It motivates reducing unsolicited work and separating application failures from tool failures, but it does not measure false-positive rates across other applications. Continuous exploration remains available as an explicit investigation; it is not initiated by a periodic planner.
+
+Octomind's company announcement stated that it had not obtained sufficient market validation and planned to turn off its product at the end of May 2026. This is relevant background, not evidence that autonomous exploration caused the closure or that human review guarantees adoption. See [Octomind's company announcement](https://www.linkedin.com/company/octominddev), consulted on 2026-10-06. Broader claims about vendors' commercial success require separate evidence.
+
+The evaluation should use injected faults with independently assigned labels: test drift, application bug and environment failure. Report classification accuracy and the number of unclassified or interrupted investigations. Record whether a verified correction was merely proposed, approved by a person or applied under the established trust policy; a passing candidate alone is not a resolved production check. Measure approval and rejection among decided suggestions, reporting pending suggestions separately.
+
+For chat-created versus hand-written Specs, use matched application flows and record authoring time, validator acceptance and repeat-run stability. Manual authoring times and injected-fault labels must be supplied by the experiment protocol, not inferred from an agent's own classification. Existing chat-turn metrics remain available; the implementation will extend exportable evaluation records with investigation, classification, verification and decision events. No experiment results are claimed here.

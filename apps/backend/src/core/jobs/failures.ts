@@ -7,6 +7,7 @@ import { runsDir } from "../paths";
 import { markdownHashOf } from "../repo/writer";
 import { executeSpec, StaleRunError } from "../runner/run";
 import { recordFailureSignal } from "../steward/engine";
+import { isAgentPaused } from "./pause";
 
 let processing = false;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -41,6 +42,8 @@ export async function processRunFailures(): Promise<void> {
                 }
                 let retry = await runsRepository.retryFor(run.id);
                 if (!retry) {
+                    const spec = await specsRepository.getSpec(run.specId);
+                    if (!spec || await isAgentPaused(spec.projectId)) continue;
                     try {
                         retry = await executeSpec(run.specId, {
                             automate: true, healOnFailure: false, retryOf: run.id, expected, baseUrl: run.baseUrl ?? undefined,

@@ -17,6 +17,7 @@ import { withRunSlot } from "../runner/process";
 import { analyzeSpecSource, stepTitlesError } from "../runner/validate";
 import { resolveSecretOriginPolicy } from "../runner/secrets";
 import { fixProposalSchema } from "./schemas";
+import { isAgentPaused } from "./pause";
 
 export interface ProposalVerification {
     id: string;
@@ -66,9 +67,9 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     const outcome = await withRunSlot(async () => {
         signal?.throwIfAborted();
         const current = await jobsRepository.get(job.id);
-        if (!current || current.status !== "running") throw new Error("Job is no longer running");
-        const remaining = current.budget.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
-        if (remaining <= 0) throw new Error("Job wall time exhausted");
+        if (!current || current.status !== "running" || await isAgentPaused(job.projectId)) throw new Error("Job is no longer running");
+        const remaining = current.limits.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
+        if (remaining <= 0) throw new Error("The investigation has not reached a confirmed result");
         return runPlaywrightSuite({ directory, baseUrl,
             specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, outputDir: directory }],
             timeoutMs: Math.min(120_000, remaining), secretEnv, secretOrigins, scrub, signal });

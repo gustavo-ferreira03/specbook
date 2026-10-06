@@ -6,6 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { llmCredentials, modelRegistryPromise, modelRuntimePromise } from "../../../core/llm/runtime";
 import { settingsRepository } from "../../repositories/settings";
+import { pauseAgentJobs, resumeAgentJobs } from "../../../core/jobs/worker";
 
 type OAuthProvider = "anthropic" | "openai-codex" | "github-copilot";
 type OAuthStatus = "pending" | "done" | "error";
@@ -48,6 +49,7 @@ const llmPatchSchema = z
     .strict();
 const apiKeySchema = z.object({ apiKey: z.string().trim().min(1) }).strict();
 const oauthInputSchema = z.object({ sessionId: z.string().uuid(), input: z.string() }).strict();
+const agentSettingsSchema = z.object({ paused: z.boolean() }).strict();
 
 function providerIds(modelRegistry: Awaited<typeof modelRegistryPromise>): Set<string> {
     return new Set([...modelRegistry.getAll().map((model) => model.provider), ...OAUTH_PROVIDERS]);
@@ -211,6 +213,16 @@ function listProviders(modelRegistry: Awaited<typeof modelRegistryPromise>): Pro
 
 export function createSettingsRouter(): Hono {
     const router = new Hono();
+
+    router.get("/settings/agent", async (c) => c.json({ paused: await settingsRepository.getAgentPaused() }));
+    router.put("/settings/agent", async (c) => {
+        const body = agentSettingsSchema.safeParse(await c.req.json().catch(() => null));
+        if (!body.success) throw new HTTPException(400, { message: "Provide a valid pause state" });
+        const paused = await settingsRepository.setAgentPaused(body.data.paused);
+        if (paused) await pauseAgentJobs();
+        else await resumeAgentJobs();
+        return c.json({ paused });
+    });
 
     router.get("/settings/llm/status", async (c) => {
         const modelRegistry = await modelRegistryPromise;

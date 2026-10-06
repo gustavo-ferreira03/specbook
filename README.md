@@ -73,7 +73,7 @@ Specbook observes failed runs, invalid or changed Specs, deployments, confirmed 
 
 A failed Spec runs once more before the healer investigates. Passing on retry marks it as flaky and keeps both attempts in its history. Persistent failures lead to a verified implementation patch, a bug report with evidence, or a question about the environment. Exploration can collect console and network failures, check safe links, and inspect accessibility with axe. Bug reports can be promoted to regression Spec proposals.
 
-Each project has a daily allowance of 300,000 tokens and 30 active minutes per UTC day, with one active investigation per project. Paused work appears in one row; **Continue now** allows another round today. Equivalent work has a six-hour cooldown; blocked work and rejected suggestions prevent repeated investigations. Schedules, webhooks, and steering fields are optional.
+Pause or resume Specbook for a project from **Overview**, or for all projects from **Settings → Automation**. Pause is separate from Observe, Propose and Act. It stops new automatic work, lets agent turns stop cleanly and preserves their progress. There is no daily quota or token reservation. Internal safeguards stop investigations that fail to reach a result; retries use a different approach with backoff. Equivalent work and rejected suggestions are deduplicated. Schedules, webhooks, and steering fields are optional.
 
 ## CI/CD
 

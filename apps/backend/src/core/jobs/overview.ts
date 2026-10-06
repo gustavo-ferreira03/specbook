@@ -16,7 +16,7 @@ export interface SpecHealth {
     lastCheckedAt: string | null;
 }
 export interface PausedGroup {
-    reason: "daily_limit" | "observation" | "access" | "service";
+    reason: "user";
     label: string;
     count: number;
     stories: ActivityStory[];
@@ -41,36 +41,28 @@ export async function projectOverview(projectId: string) {
     const needsYou = view.items.filter((item) => pending(item) && item.kind !== "bug_report").sort(oldestFirst);
     const problems = view.items.filter((item) => pending(item) && item.kind === "bug_report").sort(oldestFirst);
     const paused: PausedGroup[] = [];
-    const pause = (reason: PausedGroup["reason"], stories: ActivityStory[]) => {
+    const pause = (stories: ActivityStory[]) => {
         if (!stories.length) return;
         const specIds = [...new Set(stories.flatMap((story) => story.specId ? [story.specId] : []))];
         const count = stories.length;
         const checks = countLabel(count, stories.every((story) => story.specId) ? "check" : "review");
-        const label = reason === "daily_limit" ? `${checks} paused until tomorrow — daily usage limit reached`
-            : reason === "observation" ? `${checks} paused — automatic work is off in Automation settings`
-            : reason === "access" ? `${checks} waiting for application access` : `${checks} waiting for Specbook to recover`;
-        paused.push({ reason, label, count, stories: stories.sort(oldestFirst), specIds });
+        const label = `${checks} paused by you`;
+        paused.push({ reason: "user", label, count, stories: stories.sort(oldestFirst), specIds });
     };
-    if (settings.autonomy !== "observe") pause("daily_limit", view.activity.filter((story) => story.status === "paused" || (
-        jobs.find((job) => job.id === story.jobIds[0])?.status === "budget_exceeded" && story.status !== "working"
-    )));
-    if (settings.autonomy === "observe") pause("observation", view.activity.filter((story) => story.status === "observing" && (
-        story.jobIds.some((id) => jobs.some((job) => job.id === id && ["queued", "blocked", "budget_exceeded"].includes(job.status)))
-        || intents.some((intent) => intent.status === "pending" && intent.intent.specIds?.includes(story.specId ?? ""))
-    )));
+    if (view.summary.paused || view.summary.globallyPaused) pause(view.activity.filter((story) => story.status === "paused" ||
+        story.jobIds.some((id) => jobs.some((job) => job.id === id && ["queued", "paused", "stalled"].includes(job.status)))));
     const pausedSpecIds = new Set(paused.flatMap((group) => group.specIds));
-    const waitingSpecIds = new Set(needsYou.filter((item) => item.presentation.credentialRequest).flatMap((item) => item.presentation.specId ? [item.presentation.specId] : []));
     const specHealth: Record<string, SpecHealth> = {};
     const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, passing: 0, failing: 0, flaky: 0, paused: 0, not_checked: 0, running: 0 };
     for (const spec of specs) {
         const latest = runLists.get(spec.id)?.[0];
         const current = latest?.sourceHash === spec.sourceHash ? latest : undefined;
         const status: SpecHealthStatus = current?.status === "running" ? "running"
-            : pausedSpecIds.has(spec.id) || waitingSpecIds.has(spec.id) ? "paused"
+            : pausedSpecIds.has(spec.id) ? "paused"
             : spec.status === "invalid" ? "failing"
             : !current || spec.status === "unverified" ? "not_checked"
             : current.flaky ? "flaky" : current.status === "passed" ? "passing" : "failing";
-        const label = status === "running" ? "Check running" : status === "paused" ? waitingSpecIds.has(spec.id) ? "Waiting for access" : "Check paused"
+        const label = status === "running" ? "Check running" : status === "paused" ? "Paused by you"
             : status === "not_checked" ? "Current version not checked yet" : status === "flaky" ? "Passed on retry"
             : status === "passing" ? "Passing" : spec.status === "invalid" ? "Check needs an update" : "Latest check failed";
         specHealth[spec.id] = { status, label, runId: current?.id, lastCheckedAt: latest && latest.status !== "running" ? finishedAt(latest) : null };
@@ -158,10 +150,11 @@ export async function projectOverview(projectId: string) {
     const lastCheckedAt = [...runLists.values()].flat().filter((run) => run.status !== "running").map(finishedAt).sort().at(-1) ?? null;
     const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length} checks passing` : "No checks yet",
         problems.length ? `${countLabel(problems.length, "problem")} found` : "", needsYou.length ? `${needsYou.length} ${needsYou.length === 1 ? "needs" : "need"} you` : ""].filter(Boolean).join(" · ");
-    const nextCheckAt = schedule?.nextRunAt ?? null;
-    const nextCheck = settings.autonomy === "observe" ? "Automatic work is paused in Automation settings."
+    const agentPaused = view.summary.paused || view.summary.globallyPaused;
+    const nextCheckAt = agentPaused ? null : schedule?.nextRunAt ?? null;
+    const nextCheck = agentPaused ? "Resume Specbook to continue."
+        : settings.autonomy === "observe" ? "Observation mode records changes without starting investigations."
         : working.length ? `${countLabel(working.length, "check")} in progress.`
-        : !queued.length && paused.some((group) => group.reason === "daily_limit") ? "Automatic investigation resumes tomorrow when the daily usage limit resets."
         : nextCheckAt ? "Next scheduled check"
         : "Checks run when the application or its checks change.";
     return { summary: { ...view.summary, verdict, nextCheck, nextCheckAt, problemCount: problems.length, attentionCount: needsYou.length,
