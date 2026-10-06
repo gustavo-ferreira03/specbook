@@ -33,12 +33,12 @@
         "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@babel/types": "7.29.8",
-        "@types/node": "^26.1.2",
+        "@babel/types": "8.0.6",
+        "@types/node": "^26.6.4",
         "@types/ws": "^8.18.1",
-        "drizzle-kit": "^0.31.10",
-        "esbuild": "^0.28.1",
-        "tsx": "^4.7.1",
+        "drizzle-kit": "^0.31.11",
+        "esbuild": "^0.28.2",
+        "tsx": "^4.23.15",
         "typescript": "7.0.2"
     }
 }
