@@ -49,10 +49,10 @@ export async function projectOverview(projectId: string) {
         const status: SpecHealthStatus = spec.status === "invalid" ? "invalid"
             : current?.status === "running" ? "running" : !current ? "not_checked"
             : current.flaky ? "flaky" : current.status === "passed" ? "passing" : "failing";
-        const label = status === "invalid" ? "Check needs repairing"
-            : status === "running" ? "Check running"
-            : status === "not_checked" ? "Current version not checked yet" : status === "flaky" ? "Passed on retry"
-            : status === "passing" ? "Passing" : "Latest check failed";
+        const label = status === "invalid" ? "Needs repair"
+            : status === "running" ? "Running"
+            : status === "not_checked" ? "Not run since the last change" : status === "flaky" ? "Passed on retry"
+            : status === "passing" ? "Passing" : "Latest run failed";
         specHealth[spec.id] = { status, label, runId: current?.id, lastCheckedAt: current && current.status !== "running" ? finishedAt(current) : null };
         healthCounts[status]++;
     }
@@ -71,7 +71,7 @@ export async function projectOverview(projectId: string) {
             || Boolean(spec?.status === "invalid" && job?.kind === "regenerate" && job.specId === spec.id && !runId);
     };
     const needsYou = view.items.filter((item) => pending(item) && (item.kind !== "bug_report" || !failingIds.has(item.presentation.specId ?? "") || !currentFinding(item)))
-        .map((item) => item.kind === "bug_report" ? { ...item, presentation: { ...item.presentation, title: `Add a regression check for “${specs.find((spec) => spec.id === item.presentation.specId)?.title ?? item.presentation.title}”?` } } : item).sort(oldestFirst);
+        .map((item) => item.kind === "bug_report" ? { ...item, presentation: { ...item.presentation, title: `Add a regression Spec for “${specs.find((spec) => spec.id === item.presentation.specId)?.title ?? item.presentation.title}”?` } } : item).sort(oldestFirst);
     const agentPaused = view.summary.paused || view.summary.globallyPaused;
     const failing = specs.filter((spec) => failingIds.has(spec.id)).map((spec) => {
         const related = view.items.filter((item) => item.presentation.specId === spec.id
@@ -85,7 +85,7 @@ export async function projectOverview(projectId: string) {
             : decisions.some((item) => item.kind === "bug_report") || job?.classification === "application_bug" ? "App bug reported"
             : agentPaused ? "Paused by you" : job?.status === "running" ? "Investigating…"
             : job?.status === "queued" || (job?.status === "stalled" && job.retryAt) ? "Waiting to investigate"
-            : "Latest check failed";
+            : "Latest run failed";
         return { specId: spec.id, title: spec.title, triageStatus, runId: specHealth[spec.id]?.runId,
             updatedAt: specHealth[spec.id]!.lastCheckedAt ?? currentRuns.get(spec.id)!.startedAt, storyId: story?.id,
             inboxIds: (decisions.length ? decisions : related.filter((item) => item.kind === "bug_report")).map((item) => item.id) };
@@ -108,16 +108,16 @@ export async function projectOverview(projectId: string) {
         const failed = outcomes.filter((outcome) => outcome === "failed").length;
         const intent = intents.find((intent) => intent.batchId === batch.id);
         const trigger = batch.trigger ?? (batch.ci ? "ci" : batch.label === "Scheduled run" ? "schedule" : runTriggerForIntent(intent, intents, signals));
-        const prefix = trigger === "deploy" ? "After the deployment" : trigger === "ci" ? "CI check" : trigger === "schedule" ? "Scheduled check" : trigger === "spec_change" ? "After check changes" : "Check run";
+        const prefix = trigger === "deploy" ? "After the deployment" : trigger === "ci" ? "CI run" : trigger === "schedule" ? "Scheduled run" : trigger === "spec_change" ? "After Spec changes" : "Run";
         const result = failed === 0 && flaky === 0 ? "all passed" : [passed ? `${passed} passed` : "", flaky ? `${flaky} passed on retry` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(", ");
-        const title = running ? `${prefix}: running ${countLabel(batch.specs.length, "check")}` : `${prefix}: ${countLabel(batch.specs.length, "check")} ran, ${result}`;
+        const title = running ? `${prefix}: running ${countLabel(batch.specs.length, "Spec")}` : `${prefix}: ${countLabel(batch.specs.length, "Spec")} ran, ${result}`;
         const updatedAt = [new Date(Date.parse(batch.startedAt) + (batch.durationMs ?? 0)).toISOString(),
             ...results.flatMap(({ run, retry }) => run ? [finishedAt(retry ?? run)] : [])].sort().at(-1)!;
         const details = results.map(({ entry, run }) => `${entry.title}: ${run?.flaky ? "passed on retry" : run?.status ?? entry.status}${run?.failReason ? `\n${run.failReason}` : ""}`).join("\n\n");
         const story: RecentRun = {
             id: `batch:${batch.id}`, subject: { type: trigger === "deploy" ? "deployment" : "project", id: batch.id, name: batch.label }, trigger, occurrences: 1,
             counts: { total: results.length, passed, failed, flaky, running: runningCount },
-            title, summary: "", status: running ? "working" : "completed", outcome: running ? undefined : failed ? "failed" : flaky ? "flaky" : "passed", nextStep: running ? "Results will appear here when the checks finish." : failed ? "Open a failed check to inspect its evidence." : "",
+            title, summary: "", status: running ? "working" : "completed", outcome: running ? undefined : failed ? "failed" : flaky ? "flaky" : "passed", nextStep: running ? "Results will appear here when the Specs finish." : failed ? "Open a failed Spec to inspect its evidence." : "",
             createdAt: batch.startedAt, updatedAt, timeline: results.map(({ entry, run, retry }) => ({ id: entry.runId, label: entry.title, specId: entry.specId, runId: retry?.id ?? entry.runId,
                 detail: run?.flaky ? "Passed on retry." : run?.automationPending ? retry?.status === "running" ? "Running again after a failure." : "Waiting for the failure retry." : `${run?.status ?? entry.status}.`,
                 createdAt: run ? finishedAt(retry ?? run) : updatedAt })).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
@@ -136,7 +136,7 @@ export async function projectOverview(projectId: string) {
             trigger: "manual", occurrences: 1, counts: { total: 1, passed: !running && !run.flaky && run.status === "passed" ? 1 : 0, failed: !running && !run.flaky && run.status !== "passed" ? 1 : 0, flaky: !running && run.flaky ? 1 : 0, running: running ? 1 : 0 },
             title: running ? `Checking “${spec.title}”${run.status === "running" ? "" : " again after a failure"}`
                 : `“${spec.title}” ${run.flaky ? "passed on retry" : run.status === "passed" ? "passed" : "failed its test run"}`,
-            summary: "", status: running ? "working" : "completed", outcome: running ? undefined : run.flaky ? "flaky" : run.status === "passed" ? "passed" : "failed", nextStep: running ? "The result will appear here when the check finishes." : run.status === "passed" || run.flaky ? "" : "Open the check to inspect its evidence.",
+            summary: "", status: running ? "working" : "completed", outcome: running ? undefined : run.flaky ? "flaky" : run.status === "passed" ? "passed" : "failed", nextStep: running ? "The result will appear here when the run finishes." : run.status === "passed" || run.flaky ? "" : "Open the Spec to inspect its evidence.",
             createdAt: run.startedAt, updatedAt: finishedAt(retry ?? run), timeline: [{ id: `run:${run.id}`, label: spec.title, detail: run.flaky ? "Passed on retry." : `${run.status}.`, createdAt: finishedAt(retry ?? run), specId: spec.id, runId: retry?.id ?? run.id }], jobIds: [], inboxIds: [], technicalDetails: await clean(run.failReason ?? ""),
         };
         const key = JSON.stringify([spec.id, run.sourceHash, run.commitSha, run.baseUrl, story.outcome, run.failReason, run.startedAt.slice(0, 10)]);
@@ -156,18 +156,18 @@ export async function projectOverview(projectId: string) {
     }
     recentRuns.sort(newestFirst);
     const lastCheckedAt = Object.values(specHealth).flatMap((health) => health.lastCheckedAt ? [health.lastCheckedAt] : []).sort().at(-1) ?? null;
-    const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length} checks passing` : "No checks yet",
+    const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length} Specs passing` : "No Specs yet",
         healthCounts.failing ? `${healthCounts.failing} failing` : "", healthCounts.flaky ? `${healthCounts.flaky} flaky` : "",
         healthCounts.invalid ? `${healthCounts.invalid} need repairing` : "",
         healthCounts.not_checked ? `${healthCounts.not_checked} not run yet` : "", healthCounts.running ? `${healthCounts.running} running` : ""].filter(Boolean).join(" · ");
     const activeCount = recentRuns.filter((run) => run.status === "working").length + jobs.filter((job) => job.status === "running").length;
     const nextCheckAt = agentPaused ? null : schedule?.nextRunAt ?? null;
     const nextCheck = agentPaused ? "Resume Specbook to continue."
-        : activeCount ? `${countLabel(activeCount, "check")} in progress.`
-        : healthCounts.invalid === specs.length && specs.length > 0 ? "Repair the incomplete checks in chat before running them."
+        : activeCount ? `${countLabel(activeCount, "Spec")} in progress.`
+        : healthCounts.invalid === specs.length && specs.length > 0 ? "Repair the incomplete Specs in chat before running them."
         : settings.autonomy === "observe" ? "Observation mode records changes. Request a coverage review or explore the app when needed."
-        : nextCheckAt ? "Next scheduled check"
-        : "Waiting for a deployment, check change or your request.";
+        : nextCheckAt ? ""
+        : "Waiting for a deployment, a Spec change or your request.";
     return { summary: { projectName: view.summary.projectName, statusText: view.summary.statusText, paused: view.summary.paused, globallyPaused: view.summary.globallyPaused,
         autonomy: settings.autonomy, systemHealth: view.summary.systemHealth, verdict, nextCheck, nextCheckAt, attentionCount: needsYou.length, activeCount, lastCheckedAt, specHealth: healthCounts },
         specHealth, needsYou, failing, recentRuns: recentRuns.slice(0, 100), items: view.items.map((item) => needsYou.find((decision) => decision.id === item.id) ?? item), stories: view.activity };

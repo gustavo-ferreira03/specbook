@@ -48,7 +48,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
 
     const crumbs = [{ label: "Chats", href: `/p/${projectId}/chats` }];
 
-    if (!canEdit) return <EmptyState title="Chats are read-only" description="Ask an editor to start a conversation or change a check." />;
+    if (!canEdit) return <EmptyState title="Chats are read-only" description="Ask an editor to start a conversation or change a Spec." />;
     if (error) {
         return (
             <div className="flex min-h-full flex-col bg-surface">

@@ -348,7 +348,7 @@ export function ProjectContextEditor({
 
             <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
                 <Button type="button" onClick={() => void saveDraft()} disabled={saving}>
-                    <Save size={14} /> {saving ? "Saving..." : "Save changes"}
+                    <Save size={14} /> {saving ? "Saving…" : "Save changes"}
                 </Button>
                 <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>
                     Cancel

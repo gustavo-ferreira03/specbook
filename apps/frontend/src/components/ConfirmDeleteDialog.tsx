@@ -18,7 +18,7 @@ export function ConfirmDeleteDialog({
     title,
     description,
     confirmLabel,
-    busyLabel = "Deleting...",
+    busyLabel = "Deleting…",
     busy,
     error,
     returnFocusRef,

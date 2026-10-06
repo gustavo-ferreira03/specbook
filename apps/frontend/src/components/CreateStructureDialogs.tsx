@@ -72,7 +72,7 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
             <Dialog open={open} onOpenChange={changeOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
-                        <DialogTitle>New Feature</DialogTitle>
+                        <DialogTitle>New feature</DialogTitle>
                         <DialogDescription>Group related Specs under an area of the product, such as Checkout or Search.</DialogDescription>
                     </DialogHeader>
                     <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void create(); }}>
@@ -98,7 +98,7 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
                         {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
                         <DialogFooter className="pt-2">
                             <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={busy}>Cancel</Button>
-                            <Button type="submit" disabled={busy || !title.trim()}>{busy ? "Creating..." : "Create Feature"}</Button>
+                            <Button type="submit" disabled={busy || !title.trim()}>{busy ? "Creating…" : "Create feature"}</Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>
@@ -169,7 +169,7 @@ export function NewSpecDialog({ projectId, features }: { projectId: string; feat
                         {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
                         <DialogFooter className="pt-2">
                             <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={busy}>Cancel</Button>
-                            <Button type="submit" disabled={busy || !title.trim() || !featureId}>{busy ? "Creating..." : "Create Spec"}</Button>
+                            <Button type="submit" disabled={busy || !title.trim() || !featureId}>{busy ? "Creating…" : "Create Spec"}</Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>

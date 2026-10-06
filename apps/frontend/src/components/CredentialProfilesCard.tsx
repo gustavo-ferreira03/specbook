@@ -309,7 +309,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                         {formError && <InlineFeedback feedback={{ type: "error", text: formError }} />}
                         <DialogFooter className="border-t border-line pt-4">
                             <Button type="button" variant="outline" onClick={() => setOpenId(null)} disabled={saving}>Cancel</Button>
-                            <Button type="submit" disabled={saving}>{saving ? "Saving..." : openId === "new" ? "Create profile" : "Save changes"}</Button>
+                            <Button type="submit" disabled={saving}>{saving ? "Saving…" : openId === "new" ? "Create profile" : "Save changes"}</Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>

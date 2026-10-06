@@ -63,11 +63,11 @@ function plainExcerpt(text: string): string | null {
 
 function plainReason(text: string): string {
     if (/origin is not allowed|allowed origins/i.test(text)) return "The saved sign-in details are not allowed on this application address.";
-    if (/credential|password|sign.?in|log.?in|session expired|credencia/i.test(text)) return "The check needs access to the application before it can continue.";
+    if (/credential|password|sign.?in|log.?in|session expired|credencia/i.test(text)) return "The Spec needs access to the application before it can continue.";
     if (/ERR_CONNECTION|ERR_NAME|unreachable|could not be reached|HTTP 50[234]/i.test(text)) return "The application could not be reached.";
     if (/timeout|timed out|toBeVisible|toHaveText|locator/i.test(text)) return "An expected button or result was not available during the test run.";
-    if (/invalid|cannot run|validation|not allowed|parse/i.test(text)) return "The current check could not run as written.";
-    return plainExcerpt(text) ?? "The check still needs attention before it can run successfully.";
+    if (/invalid|cannot run|validation|not allowed|parse/i.test(text)) return "The current Spec could not run as written.";
+    return plainExcerpt(text) ?? "The Spec still needs attention before it can run successfully.";
 }
 
 async function screenshotsFor(projectId: string, item: InboxItem, job: Job | undefined, specs: Spec[]): Promise<InboxPresentation["screenshots"]> {
@@ -81,7 +81,7 @@ async function screenshotsFor(projectId: string, item: InboxItem, job: Job | und
             const step = manifest.steps?.find((entry) => entry.label === manifest.failedStep) ?? manifest.steps?.at(-1);
             if (step && /^evidence\/step-\d{2,3}\.png$/.test(step.file)) {
                 beforeFile = step.file;
-                screenshots.before = { url: `/runs/${runId}/artifacts/${step.file}`, label: "When the check failed" };
+                screenshots.before = { url: `/runs/${runId}/artifacts/${step.file}`, label: "When the Spec failed" };
             }
         }
     }
@@ -160,12 +160,12 @@ export async function projectPresentation(projectId: string) {
         if (unfinished && awaiting(item) && inbox.some((other) => other.id !== item.id && other.createdAt > item.createdAt && awaiting(other) && subjectKey(forItem(other)) === subjectKey(subject))) continue;
         const type: InboxPresentation["type"] = unfinished && awaiting(item) ? "help" : item.kind === "spec_fix" ? "update" : item.kind === "new_spec" ? "new_check" : item.kind === "feature" ? "feature" : item.kind === "bug_report" ? "bug" : "question";
         const credentialRequest = item.payload.waitingFor === "credentials";
-        const name = subject.type === "project" ? string(params.title) ?? "this check" : subject.name;
+        const name = subject.type === "project" ? string(params.title) ?? "this Spec" : subject.name;
         const behaviorChange = item.kind === "spec_fix" && (params.humanSpec !== undefined || params.title !== undefined || params.description !== undefined);
         const safeTitle = plainExcerpt(item.title)?.replace(/^(?:Bug report|Possible bug):\s*/i, "");
         const title = type === "help" ? `I couldn’t update “${name}” by myself. Look at it together?`
-            : type === "update" ? behaviorChange ? `Change what “${name}” checks?` : `Update the check for “${name}”?`
-            : type === "new_check" ? `Add a check for “${string(params.title) ?? name}”?`
+            : type === "update" ? behaviorChange ? `Change what “${name}” verifies?` : `Update the Spec “${name}”?`
+            : type === "new_check" ? `Add a Spec for “${string(params.title) ?? name}”?`
             : type === "feature" ? `Add “${string(params.title) ?? name}” to this project?`
             : type === "bug" ? safeTitle?.replace(/[.!?]+$/, "") ?? `A problem was reported in “${name}”`
             : credentialRequest ? `Can you provide access for “${name}”?` : safeTitle && safeTitle.endsWith("?") ? safeTitle : `Can you clarify what should happen in “${name}”?`;
@@ -173,22 +173,22 @@ export async function projectPresentation(projectId: string) {
         const originalRun = type === "update" && verified && originalRunId ? await runsRepository.getRun(originalRunId) : null;
         const originalReason = originalRun && specs.some((spec) => spec.id === originalRun.specId) ? originalRun.failReason
             : specs.find((spec) => spec.id === patchSpecId)?.invalidReason;
-        const updateReason = originalReason ? plainReason(await clean(originalReason)).replace(/[.!?]+$/, "") + "." : "This suggestion updates how the check runs.";
+        const updateReason = originalReason ? plainReason(await clean(originalReason)).replace(/[.!?]+$/, "") + "." : "This suggestion updates how the Spec runs.";
         const summary = type === "help" ? plainReason(verification?.failReason ?? job?.stopReason ?? item.body)
-            : type === "update" ? behaviorChange ? "This suggestion changes the behavior described by the check. Review the expected result before saving it." : verified ? `${updateReason} The expected behavior stays the same.` : "Review this suggested update to the check before saving it to the project."
-            : type === "new_check" ? "This would add a check for a behavior that is not yet covered. Review the steps and expected result before saving it."
-            : type === "feature" ? "This would organize related checks under a new area of the project."
-            : type === "bug" ? plainExcerpt(item.body.split(/\n\s*\n/)[0] ?? "") ?? "The application did not behave as expected. The existing check has been left unchanged."
+            : type === "update" ? behaviorChange ? "This suggestion changes the behavior described by the Spec. Review the expected result before saving it." : verified ? `${updateReason} The expected behavior stays the same.` : "Review this suggested update to the Spec before saving it to the project."
+            : type === "new_check" ? "This would add a Spec for a behavior that is not yet covered. Review the steps and expected result before saving it."
+            : type === "feature" ? "This would organize related Specs under a new feature of the project."
+            : type === "bug" ? plainExcerpt(item.body.split(/\n\s*\n/)[0] ?? "") ?? "The application did not behave as expected. The existing Spec has been left unchanged."
             : credentialRequest ? "Add the requested sign-in details in Settings, then let Specbook know. Do not put passwords in your reply."
-            : plainExcerpt(item.body) ?? "Specbook needs your explanation of the expected behavior before it can continue. Discuss the check in chat to clarify it.";
+            : plainExcerpt(item.body) ?? "Specbook needs your explanation of the expected behavior before it can continue. Discuss the Spec in chat to clarify it.";
         const browserWork = actions.get(item.jobId)?.some((action) => /(?:browser_|scan_page).*:completed$/.test(action.action));
         const workDone = verification ? verification.status === "passed" ? "Tried the suggested update in a test run; it passed." : "Tried an update, but the test run did not pass."
             : type === "question" ? "Paused here so your answer can guide the next step." : browserWork ? "Inspected the application and recorded the available evidence." : "Prepared this suggestion for your review.";
-        const consequence = type === "update" ? "Saves the updated check to this project; you can undo it from history."
-            : type === "new_check" ? "Adds the check to this project; future runs can verify this behavior."
+        const consequence = type === "update" ? "Saves the updated Spec to this project; you can undo it from history."
+            : type === "new_check" ? "Adds the Spec to this project; future runs can verify this behavior."
             : type === "feature" ? "Adds an area to organize this project’s checks."
-            : type === "bug" ? "Requests a regression check for review. The current check stays unchanged."
-            : type === "help" ? "Discuss it in chat, or set this suggestion aside without changing the check." : "Your answer lets Specbook continue this check.";
+            : type === "bug" ? "Requests a regression Spec for review. The current Spec stays unchanged."
+            : type === "help" ? "Discuss it in chat, or set this suggestion aside without changing the Spec." : "Your answer lets Specbook continue with this Spec.";
         const files = await proposalFiles(item).catch(() => []);
         const technicalDetails = await clean(`${item.body}${verification?.failReason ? `\n\nTest run: ${verification.failReason}` : ""}`);
         const presentation: InboxPresentation = { type, title, summary, workDone, consequence, credentialRequest,
@@ -237,27 +237,27 @@ export async function projectPresentation(projectId: string) {
             ? plainReason(await clean(failureRun.failReason)) : undefined;
         const invalidReason = currentSpec?.invalidReason ?? noticed?.body ?? "";
         const invalidTitle = /missing.*spec\.ts|spec\.ts.*missing|no.*spec\.ts/i.test(invalidReason)
-            ? `The “${subject.name}” check has no executable test`
-            : `The “${subject.name}” check needs an update before it can run`;
+            ? `The Spec “${subject.name}” has no executable source`
+            : `The Spec “${subject.name}” needs an update before it can run`;
         const title = subject.type === "spec" ? status === "completed" ? `“${subject.name}” was checked`
             : noticed?.kind === "spec_failure" ? `“${subject.name}”: ${failureReason ? failureReason.charAt(0).toLowerCase() + failureReason.slice(1).replace(/[.!?]+$/, "") : "the latest test run failed"}`
             : noticed?.kind === "invalid_spec" || currentSpec?.status === "invalid" ? invalidTitle
             : noticed?.kind === "spec_changed" ? `“${subject.name}” changed` : `Reviewing “${subject.name}”`
             : subject.type === "deployment" ? status === "completed" ? "Checked the application after an update" : "Checking the application after an update"
-            : subject.type === "feature" ? `Looking for missing checks in “${subject.name}”`
-            : latestJob?.kind === "coverage" ? `Looking for missing checks in ${project.name}`
+            : subject.type === "feature" ? `Looking for missing Specs in “${subject.name}”`
+            : latestJob?.kind === "coverage" ? `Looking for missing Specs in ${project.name}`
             : latestJob?.kind === "explore" ? `Exploring ${project.name} for application problems`
-            : `Reviewing changes to ${project.name}’s checks`;
+            : `Reviewing changes to ${project.name}’s Specs`;
         const nextStep = status === "waiting" ? "Add the requested access in Settings, then answer the question."
-            : status === "needs_attention" ? "Review the suggestion, or discuss the check in chat."
+            : status === "needs_attention" ? "Review the suggestion, or discuss the Spec in chat."
             : status === "working" ? "Specbook is investigating. You can keep using the project."
             : status === "paused" ? globallyPaused ? "Resume Specbook for all projects in Settings to continue." : "Resume Specbook from the Overview header to continue."
-            : status === "queued" ? latestJob?.status === "stalled" ? "Specbook will try this check again with a different approach." : latestJob?.retryAt && latestJob.classification === "environment" ? "The application could not be reached. Specbook will try again shortly." : "Starts when a worker is available."
-            : status === "stopped" ? "Discuss the check in chat if you want to pick it up again."
+            : status === "queued" ? latestJob?.status === "stalled" ? "Specbook will try this Spec again with a different approach." : latestJob?.retryAt && latestJob.classification === "environment" ? "The application could not be reached. Specbook will try again shortly." : "Starts when a worker is available."
+            : status === "stopped" ? "Discuss the Spec in chat if you want to pick it up again."
             : settings.autonomy === "observe" ? "Observation mode records changes. Choose Propose or Act in Automation settings to investigate them."
-            : "Specbook will check again when the application or its checks change.";
+            : "Specbook will check again when the application or its Specs change.";
         const noticedText: Record<string, string> = {
-            invalid_spec: "The current check could not run.", spec_failure: "A test run did not complete as expected.", spec_changed: "The check was edited.",
+            invalid_spec: "The current Spec could not run.", spec_failure: "A test run did not complete as expected.", spec_changed: "The Spec was edited.",
             deployment: "A new deployment was reported.", deployment_changed: "An application update was detected.",
         };
         const summary = decisions[0]?.presentation.summary ?? failureReason ?? (noticed ? noticedText[noticed.kind] : undefined) ?? "";
@@ -287,7 +287,7 @@ export async function projectPresentation(projectId: string) {
     const queuedCount = activity.filter((story) => story.status === "queued").length;
     const lastCheckedAt = [...jobs.map((job) => job.updatedAt), ...signals.map((signal) => signal.createdAt)].sort().at(-1) ?? null;
     const unhealthy = jobs.find((job) => infrastructureJobs.has(job.id));
-    const systemHealth = unhealthy ? { message: "Specbook is recovering from a service problem. Checks will resume automatically.", detail: "Your application and its checks have not been changed. You do not need to approve a fix for this." } : undefined;
+    const systemHealth = unhealthy ? { message: "Specbook is recovering from a service problem. Runs will resume automatically.", detail: "Your application and its Specs have not been changed. You do not need to approve a fix for this." } : undefined;
     const statusText = agentPaused ? globallyPaused ? "Specbook is paused by you across all projects." : `Specbook is paused by you for ${project.name}.`
         : `Specbook is ${activeCount > 0 ? "working on" : "watching"} ${project.name}.`;
     return { items, activity, summary: { projectName: project.name, statusText, attentionCount, activeCount, queuedCount, pausedCount, lastCheckedAt, paused: settings.paused, globallyPaused, systemHealth, autonomy: settings.autonomy } };

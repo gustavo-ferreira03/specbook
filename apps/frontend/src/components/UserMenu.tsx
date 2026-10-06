@@ -35,7 +35,7 @@ export function UserMenu() {
                 <DropdownMenuLabel><p className="truncate font-medium">{user.name}</p><p className="mt-0.5 truncate text-meta font-normal text-ink-muted">{user.email}</p><p className="mt-0.5 text-meta font-normal capitalize text-ink-muted">{user.role}</p></DropdownMenuLabel>
                 {isAdmin && <><DropdownMenuSeparator /><DropdownMenuItem asChild><Link href="/settings"><Settings size={14} /> Instance settings</Link></DropdownMenuItem></>}
                 {ssoEnabled && <DropdownMenuItem disabled={busy} onSelect={() => void connectSso()}><Link2 size={14} /> Connect single sign-on</DropdownMenuItem>}
-                <DropdownMenuSeparator /><DropdownMenuItem onSelect={(event) => { event.preventDefault(); void signOut(); }} disabled={busy}><LogOut size={14} /> {busy ? "Signing out..." : "Sign out"}</DropdownMenuItem>
+                <DropdownMenuSeparator /><DropdownMenuItem onSelect={(event) => { event.preventDefault(); void signOut(); }} disabled={busy}><LogOut size={14} /> {busy ? "Signing out…" : "Sign out"}</DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
         {error && <p role="alert" className="mt-1 text-meta text-danger">{error}</p>}

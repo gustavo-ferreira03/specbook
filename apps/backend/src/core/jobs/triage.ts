@@ -26,8 +26,8 @@ export async function currentFailure(projectId: string, runId?: string) {
 
 export async function cancelStaleTriage(job: Job): Promise<boolean> {
     if (job.kind !== "failure_triage" || await currentFailure(job.projectId, job.runId ?? undefined)) return false;
-    if (await jobsRepository.transition(job.id, job.status, "cancelled", { stopReason: "A newer check or Spec change superseded this failure.", retryAt: null })) {
-        await jobsRepository.log(job.id, "superseded", "The failed run is no longer the current result for this check.");
+    if (await jobsRepository.transition(job.id, job.status, "cancelled", { stopReason: "A newer run or Spec change superseded this failure.", retryAt: null })) {
+        await jobsRepository.log(job.id, "superseded", "The failed run is no longer the current result for this Spec.");
     }
     return true;
 }

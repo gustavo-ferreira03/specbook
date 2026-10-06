@@ -28,7 +28,7 @@ export function SystemStatus() {
     useEffect(() => { void load(); }, [load]);
 
     return <SettingsSection id="system-status-heading" title="System status" description="Checks the services needed to save work and run the browser."
-        actions={<Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw size={14} className={loading ? "animate-spin motion-reduce:animate-none" : undefined} /> {loading ? "Checking..." : "Check again"}</Button>}>
+        actions={<Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw size={14} className={loading ? "animate-spin motion-reduce:animate-none" : undefined} /> {loading ? "Checking…" : "Check again"}</Button>}>
         {error && <SettingsBlock><InlineFeedback feedback={{ type: "error", text: error }} /></SettingsBlock>}
         {!status && loading && <SettingsBlock><div className="space-y-4" role="status" aria-label="Checking system status"><Skeleton className="h-5 w-48" /><Skeleton className="h-5 w-64" /><Skeleton className="h-5 w-40" /></div></SettingsBlock>}
         {status && <>

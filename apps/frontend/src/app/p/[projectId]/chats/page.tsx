@@ -54,7 +54,6 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader
                 title="Chats"
-                description="Describe behavior, clarify intent, and turn the result into a Spec."
                 actions={chats && chats.length > 0 ? newChatButton : undefined}
                 width="chat"
             />
@@ -87,7 +86,7 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
                         description="Describe a behavior while the agent operates a live browser, and save the result as a Spec."
                         action={canEdit &&
                             <Button asChild>
-                                <Link href={newChatHref}><MessageSquareText size={14} /> Start chat</Link>
+                                <Link href={newChatHref}><MessageSquareText size={14} /> New chat</Link>
                             </Button>
                         }
                     />

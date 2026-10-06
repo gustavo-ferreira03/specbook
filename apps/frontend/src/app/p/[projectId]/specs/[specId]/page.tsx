@@ -154,7 +154,7 @@ function VerificationBanner({
     } else if (spec.status === "invalid") {
         status = "invalid";
         headline = "This Spec can't run";
-        detail = "Its saved steps or executable check need attention. Ask the agent to repair it, then verify the result.";
+        detail = "Its saved steps or executable source need attention. Ask the agent to repair it, then verify the result.";
         body = (
             <>
                 <InvalidReason reason={spec.invalidReason ?? "The spec.yml or spec.ts file could not be validated."} testSource={specDetail.content?.testSource ?? null} />
@@ -168,7 +168,7 @@ function VerificationBanner({
     } else if (!latestRun) {
         status = "unverified";
         headline = "Not verified yet";
-        detail = "Run this Spec to check the behavior against the app.";
+        detail = "Run this Spec to verify the behavior against the app.";
     } else if (spec.status === "unverified") {
         status = "unverified";
         headline = "Not verified since the last change";
@@ -176,7 +176,7 @@ function VerificationBanner({
     } else {
         status = latestRun.status;
         const passed = latestRun.status === "passed";
-        headline = passed ? "Last verification passed" : latestRun.status === "error" ? "Last verification could not complete" : "Last verification failed";
+        headline = passed ? "Last run passed" : latestRun.status === "error" ? "Last run could not complete" : "Last run failed";
         const steps = latestEvidence?.data?.steps ?? [];
         const failedStep = passed ? null : latestEvidence?.data?.failedStep ?? null;
         const lastStep = !passed && !failedStep && steps.length > 0 ? steps[steps.length - 1] : null;
@@ -194,7 +194,7 @@ function VerificationBanner({
     const meta = statusMeta(status);
     const Icon = meta.icon;
     return (
-        <section aria-label="Verification status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className="flex gap-3.5 rounded-xl border border-line bg-surface p-4">
+        <section aria-label="Run status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className="flex gap-3.5 rounded-xl border border-line bg-surface p-4">
             <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full", meta.soft, meta.text)}>
                 <Icon size={17} strokeWidth={2.25} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
             </span>
@@ -375,7 +375,6 @@ function RunEntry({
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
                         {run.durationMs !== null && <><Dot /><span className="tabular">{formatDuration(run.durationMs)}</span></>}
                         {run.commitSha && <><Dot /><span className="font-mono" title="Commit">{run.commitSha.slice(0, 7)}</span></>}
-                        {latest && <><Dot /><span className="font-medium text-ink">Latest</span></>}
                     </span>
                     <span className="ml-auto flex items-center gap-1">
                         {reportUrl && (
@@ -661,9 +660,8 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 title={spec.title}
                 breadcrumbs={crumbs}
                 width="reading"
-                titleAdornment={<><StatusPill status={spec.status} />{latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}</>}
+                titleAdornment={latestRun?.flaky ? <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge> : undefined}
                 description={spec.description || undefined}
-                meta={<span>Updated <RelativeTime value={spec.updatedAt} /></span>}
                 actions={
                     <>
                         <SpecHistoryDialog specId={specId} />
@@ -671,7 +669,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                             <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
                         </Button>
                         <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid"}>
-                            <Play size={12} fill="currentColor" /> {running ? "Running..." : "Run Spec"}
+                            <Play size={12} fill="currentColor" /> {running ? "Running…" : "Run"}
                         </Button></>}
                     </>
                 }
@@ -697,7 +695,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 </div>
 
                 <section aria-labelledby="specification-heading">
-                    <SectionHeader id="specification-heading" title={editing ? "Edit Specification" : "Specification"} className="mb-4" />
+                    <SectionHeader id="specification-heading" title={editing ? "Edit specification" : "Specification"} className="mb-4" />
                     {editing && content ? (
                         <form className="space-y-6" onSubmit={(event) => { event.preventDefault(); void saveFiles(); }}>
                             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-line bg-surface-soft px-3.5 py-2.5">
@@ -770,7 +768,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                 <p className="text-meta text-ink-subtle">Saving commits the changes to the repository.</p>
                                 <div className="flex flex-col-reverse gap-2 sm:flex-row">
                                     <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={saving}>Cancel</Button>
-                                    <Button type="submit" disabled={saving || (Boolean(content.humanSpec) && !titleDraft.trim())}>{saving ? "Saving..." : "Save changes"}</Button>
+                                    <Button type="submit" disabled={saving || (Boolean(content.humanSpec) && !titleDraft.trim())}>{saving ? "Saving…" : "Save changes"}</Button>
                                 </div>
                             </div>
                         </form>
@@ -790,7 +788,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 <section aria-labelledby="verification-heading">
                     <SectionHeader
                         id="verification-heading"
-                        title="Verification history"
+                        title="Run history"
                         count={runs.length || undefined}
                         description={runs.length >= RUN_HISTORY_LIMIT ? `Showing the latest ${RUN_HISTORY_LIMIT} runs.` : undefined}
                         className="mb-4"
