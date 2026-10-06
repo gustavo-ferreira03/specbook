@@ -7,7 +7,6 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     AlertCircle,
-    ChevronDown,
     ChevronRight,
     Compass,
     ExternalLink,
@@ -140,37 +139,12 @@ function DiscoveryStartForm({
     );
 }
 
+/** This page exists to show the context, so it is always shown in full. */
 function ConfirmedContextSummary({ context }: { context: ProjectContext }) {
-    const [open, setOpen] = useState(false);
-    const facts = [
-        context.areas.length > 0 && `${context.areas.length} ${context.areas.length === 1 ? "area" : "areas"}`,
-        context.terminology.length > 0 && `${context.terminology.length} ${context.terminology.length === 1 ? "term" : "terms"}`,
-        context.roles.length > 0 && `${context.roles.length} ${context.roles.length === 1 ? "role" : "roles"}`,
-        context.businessRules.length > 0 && `${context.businessRules.length} business ${context.businessRules.length === 1 ? "rule" : "rules"}`,
-        context.unknowns.length > 0 && `${context.unknowns.length} ${context.unknowns.length === 1 ? "unknown" : "unknowns"}`,
-    ].filter(Boolean) as string[];
     return (
-        <Collapsible open={open} onOpenChange={setOpen}>
-            {!open && (
-                <div className="px-4 py-4 sm:px-5">
-                    <p className="line-clamp-3 max-w-[70ch] text-body text-ink-muted">{context.summary}</p>
-                    {facts.length > 0 && <p className="mt-2 text-meta text-ink-subtle">{facts.join(" · ")}</p>}
-                </div>
-            )}
-            <CollapsibleContent>
-                <div className="px-4 py-4 sm:px-5">
-                    <ContextReadout context={context} />
-                </div>
-            </CollapsibleContent>
-            <div className="border-t border-line px-2 py-1.5 sm:px-3">
-                <CollapsibleTrigger asChild>
-                    <Button type="button" variant="ghost" size="sm" className="text-ink-muted">
-                        <ChevronDown size={14} aria-hidden className={`transition-transform duration-150 motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
-                        {open ? "Show less" : "Show full context"}
-                    </Button>
-                </CollapsibleTrigger>
-            </div>
-        </Collapsible>
+        <div className="px-4 py-4 sm:px-5">
+            <ContextReadout context={context} />
+        </div>
     );
 }
 
@@ -276,7 +250,7 @@ function ContextPanel({
 
             {draft && !draftHasProposal && (
                 <section aria-labelledby="overview-context-heading">
-                    <SectionHeader id="overview-context-heading" title="Project context" className="mb-3" />
+                    <SectionHeader id="overview-context-heading" title="Discovery in progress" className="mb-3" />
                     <div className="rounded-xl border border-line p-4 sm:p-5">
                         <div className="flex items-center gap-2 text-control font-medium text-ink">
                             <LoaderCircle size={14} className="animate-spin text-ink-muted motion-reduce:animate-none" aria-hidden="true" />
@@ -349,7 +323,7 @@ function ContextPanel({
                 <section aria-labelledby="overview-confirmed-heading">
                     <SectionHeader
                         id="overview-confirmed-heading"
-                        title={draft ? "Currently confirmed context" : "Project context"}
+                        title={draft ? "Currently confirmed context" : "Confirmed context"}
                         description={draft
                             ? "Stays active until the draft above replaces it."
                             : <>{confirmed.confirmedAt ? <RelativeTime value={confirmed.confirmedAt} prefix="Confirmed" /> : "Confirmed"} · supplied to every new chat</>}
