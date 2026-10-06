@@ -41,3 +41,19 @@ Question tools abort the active turn after persisting their question. Spec execu
 A real migration rehearsal against a temporary SauceDemo project passed before Gus cancelled that feature. Its temporary project was deleted via the API; no migration UI or code is retained. Proposal verification remains for the healer.
 
 Live healer verification: a temporary SauceDemo Spec with a deliberately outdated username locator failed, automatically started a job, received browser investigation plus screenshot/ARIA evidence, was classified as test drift, and produced a passing isolated candidate (8 actions). Approval through the Inbox UI committed the source-only patch. Desktop and 390px Inbox/Jobs checks passed without horizontal overflow. All contract bytes remain unchanged.
+
+## Gus's addenda: revised direction
+
+Jobs are internal execution records. The project steward observes failures, invalid Specs, deployments, confirmed context, Git changes, credentials and chat requests, then persists prioritized intents. It must enforce daily budgets, deduplication, cooldowns and remembered human decisions. The default autonomy is propose; observe and act are optional. Activity replaces the Jobs page; there is no job creation form. Inbox contains proposals, questions and bug reports that need a human. The steward must work without required setup fields.
+
+Remove the GitHub repository mirror in its own commit, including API, UI, credentials, background sync and database columns. Keep the built-in Git Smart HTTP remote and GitHub Copilot OAuth. Historical Drizzle migrations remain so existing databases can migrate forward without deleting user data.
+
+After the steward, replace the original CI trigger with scoped CI tokens, run/deploy APIs, bounded waiting, JUnit and Markdown results, preview URLs, build metadata, quality-gate options and a dependency-free client. Settings and README will include GitHub Actions, GitLab, Bitbucket, CircleCI and Jenkins snippets. Deploy webhooks also feed the steward.
+
+## Resume checkpoint
+
+Optional schedules and webhook delivery were already prepared before the addenda: persisted UTC cron, selected Specs, missed-run coalescing, overlap prevention, an encrypted notification outbox with bounded retry, and an Automation settings tab using existing components. Commit this completed foundation before removing mirror columns, because its generated migration precedes the removal migration. Live schedule verification is pending.
+
+The Activity/Inbox navigation changes are still uncommitted and need the steward activity endpoint. The unfinished steward tool draft is saved at `/tmp/specbook-steward-resume/tools.ts` while its engine is implemented; it is not wired into chat yet. Next: remove the mirror, complete steward and Activity, implement retry/flakiness, then CI/CD and the remaining coverage/exploration work. No manual-job UI should return.
+
+Schedule checkpoint validation: `pnpm typecheck` and all 194 tests pass. After restarting the backend, a real scheduled SauceDemo batch started at the next UTC minute and passed. The Automation tab loaded the persisted settings in the running frontend without console errors. Webhook retry is being checked against a temporary receiver.

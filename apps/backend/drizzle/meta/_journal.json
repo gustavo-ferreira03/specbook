@@ -71,6 +71,13 @@
       "when": 1791270501713,
       "tag": "0009_broad_scrambler",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791270992809,
+      "tag": "0010_simple_blockbuster",
+      "breakpoints": true
     }
   ]
 }

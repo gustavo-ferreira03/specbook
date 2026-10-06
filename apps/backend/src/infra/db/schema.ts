@@ -228,3 +228,30 @@ export const jobActions = sqliteTable("job_actions", {
     detail: text("detail").notNull(),
     createdAt: text("created_at").notNull(),
 }, (table) => [index("job_actions_job").on(table.jobId)]);
+
+export const projectAutomations = sqliteTable("project_automations", {
+    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+    cron: text("cron"),
+    specIds: text("spec_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    healFailures: integer("heal_failures", { mode: "boolean" }).notNull().default(true),
+    webhookUrl: text("webhook_url"),
+    nextRunAt: text("next_run_at"),
+    lastBatchId: text("last_batch_id"),
+    lastBatchStatus: text("last_batch_status").$type<RunStatus>(),
+    lastError: text("last_error"),
+    updatedAt: text("updated_at").notNull(),
+});
+
+export const webhookNotifications = sqliteTable("webhook_notifications", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    batchId: text("batch_id").notNull(),
+    status: text("status").$type<RunStatus>().notNull(),
+    webhookUrl: text("webhook_url").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: text("next_attempt_at"),
+    deliveredAt: text("delivered_at"),
+    lastError: text("last_error"),
+    createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("webhook_batch_status_unique").on(table.batchId, table.status), index("webhook_retry_idx").on(table.nextAttemptAt)]);

@@ -307,7 +307,7 @@ async function prepareSpecBatch(
     return { batch, prepared, secrets };
 }
 
-export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { healFailures?: boolean } = {}): Promise<RunBatch> {
+export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { healFailures?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {
     const project = await projectsRepository.getProject(projectId);
     if (!project) throw new Error("Project not found");
     const ids = [...new Set(specIds)];
@@ -318,6 +318,19 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     let secrets: BatchSecrets;
     try {
         ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, project.baseUrl, options.healFailures !== false));
+        try {
+            await options.onPrepared?.(batch);
+        } catch (error) {
+            for (const entry of prepared) {
+                await finishPreparedSpec(batch.id, entry, { status: "error", durationMs: 0, failReason: "Batch could not start" }, secrets.scrub);
+                await runsRepository.acknowledgeAutomation(entry.run.id);
+            }
+            batch.status = "error";
+            batch.failReason = "Batch could not start";
+            batch.durationMs = 0;
+            await writeBatch(batch);
+            throw error;
+        }
     } catch (error) {
         await releaseSpecLocks();
         throw error;

@@ -1,7 +1,9 @@
 import "dotenv/config";
 import { startFailureMonitor, stopFailureMonitor } from "./core/jobs/failures";
+import { startScheduleMonitor, stopScheduleMonitor } from "./core/jobs/schedules";
 import { startJobWorker, stopJobWorker } from "./core/jobs/worker";
 import { createJobsRouter } from "./infra/web/routes/jobs";
+import { createSchedulesRouter } from "./infra/web/routes/schedules";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -86,6 +88,7 @@ app.onError((err, c) => {
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/", createProjectsRouter());
 app.route("/", createJobsRouter());
+app.route("/", createSchedulesRouter());
 app.route("/", createSpecsRouter());
 app.route("/", createRunsRouter());
 app.route("/", createChatsRouter());
@@ -108,6 +111,7 @@ await reindexAllProjects();
 startSyncLoop();
 await startJobWorker();
 startFailureMonitor();
+startScheduleMonitor();
 // ---------------------------------------------------------------------------
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     logger.info("backend listening", { hostname, port });
@@ -157,6 +161,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     for (const client of wss.clients) client.terminate();
     wss.close();
     stopFailureMonitor();
+    stopScheduleMonitor();
     await stopJobWorker();
     stopActiveRunProcesses();
     await closeAllChatBrowsers().catch((error: unknown) => logger.error("closing browsers failed", { error }));

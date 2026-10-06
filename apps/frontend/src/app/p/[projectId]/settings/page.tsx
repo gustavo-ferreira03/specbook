@@ -28,6 +28,7 @@ import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
 import { GitHubConnection } from "@/components/GitHubConnection";
 import { GitRemoteAccess } from "@/components/GitRemoteAccess";
 import { ProjectSettingsCard } from "@/components/ProjectSettingsCard";
+import { AutomationSettingsCard } from "@/components/AutomationSettingsCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,7 +98,7 @@ function modelCountLabel(count: number) {
     return `${count} ${count === 1 ? "model" : "models"}`;
 }
 
-const SETTINGS_TABS = ["general", "model", "git", "context", "credentials"] as const;
+const SETTINGS_TABS = ["general", "model", "git", "context", "credentials", "automation"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 const TAB_LABELS: [SettingsTab, string][] = [
@@ -106,6 +107,7 @@ const TAB_LABELS: [SettingsTab, string][] = [
     ["git", "Git"],
     ["context", "Context"],
     ["credentials", "Credentials"],
+    ["automation", "Automation"],
 ];
 
 function parseSettingsTab(value: string | null): SettingsTab {
@@ -556,6 +558,10 @@ function SettingsContent() {
 
                         <TabsContent value="credentials" className="flex-none">
                             <CredentialProfilesCard projectId={projectId} />
+                        </TabsContent>
+
+                        <TabsContent value="automation" className="flex-none">
+                            <AutomationSettingsCard projectId={projectId} />
                         </TabsContent>
                     </PageContainer>
                 </Tabs>

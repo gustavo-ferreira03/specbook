@@ -143,3 +143,153 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
         assert.equal(await fs.readFile(path.join(directory, "spec.ts"), "utf8"), VALID_SPEC.replace('page.goto("/")', 'page.goto("/home")'));
     });
 });
+
+describe("scheduled runs", () => {
+    test("evaluates numeric cron expressions in UTC and rejects invalid or impossible dates", async () => {
+        const { nextCronAt, automationSettingsSchema } = await import("../../src/core/jobs/schedules");
+        assert.equal(nextCronAt("*/15 9-17 * * 1-5", new Date("2026-10-06T17:59:00Z")), "2026-10-07T09:00:00.000Z");
+        assert.equal(nextCronAt("30 4 1,15 * 5", new Date("2026-10-01T04:30:00Z")), "2026-10-02T04:30:00.000Z");
+        assert.equal(nextCronAt("0 0 29 2 *", new Date("2025-01-01T00:00:00Z")), "2028-02-29T00:00:00.000Z");
+        assert.equal(nextCronAt("0 0 * * 7", new Date("2026-10-06T00:00:00Z")), "2026-10-11T00:00:00.000Z");
+        assert.equal(nextCronAt("*/35 * * * *", new Date("2026-10-06T00:35:00Z")), "2026-10-06T01:00:00.000Z");
+        for (const cron of ["60 * * * *", "* * *", "*/0 * * * *", "0 0 30 2 *", "0 0 * * 8"]) {
+            assert.throws(() => nextCronAt(cron), /Cron|cron/, cron);
+        }
+        assert.ok(automationSettingsSchema.safeParse({}).success, "every setting is optional");
+        for (const webhookUrl of ["not-a-url", "file:///tmp/private", "https://name:password@example.com/hook"]) {
+            assert.equal(automationSettingsSchema.safeParse({ webhookUrl }).success, false);
+        }
+    });
+
+    test("keeps webhook credentials encrypted and accepts partial optional settings", async () => {
+        const { createSchedulesRouter } = await import("../../src/infra/web/routes/schedules");
+        const { db } = await import("../../src/infra/db/client");
+        const { projectAutomations } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const project = await projectsRepository.createProject("Schedules", baseUrl);
+        const router = createSchedulesRouter();
+        const endpoint = `/projects/${project.id}/automation`;
+        const update = (body: unknown) => router.request(endpoint, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal((await router.request("/projects/missing/automation")).status, 404);
+        const initial = await (await router.request(endpoint)).json();
+        assert.equal(initial.automation.cron, null);
+        assert.equal(initial.automation.healFailures, true);
+        assert.deepEqual(initial.automation.specIds, []);
+        assert.equal((await update({})).status, 200);
+        assert.equal((await update({ cron: "no cron" })).status, 400);
+        assert.equal((await update({ specIds: ["00000000-0000-4000-8000-000000000001"] })).status, 400);
+        const webhookUrl = "https://example.com/hooks/private-token";
+        const saved = await (await update({ cron: "0 12 * * *", webhookUrl, healFailures: false })).json();
+        assert.ok(Array.isArray(saved.notifications), "saving returns the same response shape as loading");
+        assert.equal(saved.automation.webhookConfigured, true);
+        assert.equal(saved.automation.webhookHost, "example.com");
+        assert.ok(saved.automation.nextRunAt);
+        assert.ok(!JSON.stringify(saved).includes("private-token"));
+        const [stored] = await db.select().from(projectAutomations).where(eq(projectAutomations.projectId, project.id));
+        assert.ok(stored?.webhookUrl?.startsWith("v1:"));
+        assert.ok(!stored?.webhookUrl?.includes("private-token"));
+        const disabled = await (await update({ cron: null })).json();
+        assert.equal(disabled.automation.nextRunAt, null);
+        assert.equal(disabled.automation.webhookConfigured, true, "omitting the URL preserves it");
+        assert.equal(disabled.automation.healFailures, false);
+        const removed = await (await update({ webhookUrl: null })).json();
+        assert.equal(removed.automation.webhookConfigured, false);
+    });
+
+    test("coalesces missed ticks, avoids overlap and persists webhook retries and recovered status", { skip: !available, timeout: 120_000 }, async () => {
+        const { schedulesRepository } = await import("../../src/infra/repositories/schedules");
+        const { specsRepository } = await import("../../src/infra/repositories/specs");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { updateAutomation, processSchedules, deliverWebhookNotifications } = await import("../../src/core/jobs/schedules");
+        const { getRunBatch, getRunBatchDirectory, markInterruptedBatches } = await import("../../src/core/runner/batch");
+        const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+        const { db } = await import("../../src/infra/db/client");
+        const { webhookNotifications } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const messages: Record<string, unknown>[] = [];
+        let calls = 0;
+        let alwaysReject = false;
+        const webhook = http.createServer(async (request, response) => {
+            let body = "";
+            for await (const chunk of request) body += chunk;
+            messages.push(JSON.parse(body));
+            response.statusCode = ++calls === 1 || alwaysReject ? 503 : 200;
+            response.end();
+        });
+        await new Promise<void>((resolve) => webhook.listen(0, "127.0.0.1", resolve));
+        try {
+            const project = await projectsRepository.createProject("Scheduled store", baseUrl);
+            await repoGit.ensureProjectRepo(project.id, { create: true });
+            const feature = await writer.createFeatureInRepo(project.id, null, "Scheduled", "");
+            const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+            await specsRepository.createSpecRecord({ projectId: project.id, featureId: feature.id, title: "Invalid", description: "", path: "specs/invalid", sourceHash: "", markdownHash: "", status: "invalid" });
+            await updateAutomation(project.id, {
+                cron: "* * * * *", healFailures: false,
+                webhookUrl: `http://127.0.0.1:${(webhook.address() as AddressInfo).port}/private-token`,
+            });
+            const at = new Date();
+            await schedulesRepository.update(project.id, { nextRunAt: new Date(at.getTime() - 300_000).toISOString() });
+            await processSchedules(at);
+            const scheduled = (await schedulesRepository.get(project.id))!;
+            assert.ok(scheduled.lastBatchId);
+            assert.ok(Date.parse(scheduled.nextRunAt!) > at.getTime(), "missed occurrences become one batch");
+            const batch = (await getRunBatch(scheduled.lastBatchId!))!;
+            assert.equal(batch.specs.length, 1, "all means runnable Specs only");
+            assert.equal(batch.specs[0]?.specId, spec.id);
+            assert.equal((await runsRepository.getRun(batch.specs[0]!.runId))?.automationPending, false);
+            await schedulesRepository.update(project.id, { nextRunAt: new Date(at.getTime() - 1000).toISOString() });
+            await processSchedules(new Date(at.getTime() + 1));
+            assert.equal((await schedulesRepository.get(project.id))?.lastBatchId, batch.id, "active batch is retained");
+            const [retry] = await schedulesRepository.notifications(project.id);
+            assert.equal(retry?.attempts, 1);
+            assert.equal(retry?.lastError, "Webhook returned HTTP 503");
+            assert.ok(retry?.nextAttemptAt);
+            const [rawNotification] = await db.select().from(webhookNotifications).where(eq(webhookNotifications.id, retry!.id));
+            assert.ok(rawNotification?.webhookUrl.startsWith("v1:"));
+            assert.ok(!JSON.stringify(rawNotification?.payload).includes("private-token"));
+            await deliverWebhookNotifications(new Date(at.getTime() + 11_000));
+            const [delivered] = await schedulesRepository.notifications(project.id);
+            assert.equal(delivered?.attempts, 2);
+            assert.ok(delivered?.deliveredAt);
+            assert.equal(messages[0]?.eventId, messages[1]?.eventId, "retry uses a stable event id");
+            assert.ok(typeof messages[0]?.text === "string", "payload works with Slack incoming webhooks");
+            for (let attempt = 0; attempt < 100 && (await getRunBatch(batch.id))?.status === "running"; attempt++) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            assert.equal((await getRunBatch(batch.id))?.status, "passed");
+            await updateAutomation(project.id, { cron: null });
+            await processSchedules(new Date(at.getTime() + 12_000));
+            assert.equal((await schedulesRepository.get(project.id))?.lastBatchStatus, "passed");
+            assert.equal(messages.filter((message) => message.status === "passed").length, 1);
+            await processSchedules(new Date(at.getTime() + 13_000));
+            assert.equal(messages.filter((message) => message.status === "passed").length, 1, "polling does not duplicate events");
+
+            // Boot marks interrupted batches first; the scheduler then observes the persisted terminal status.
+            const interrupted = { ...(await getRunBatch(batch.id))!, id: crypto.randomUUID(), status: "running" };
+            const directory = getRunBatchDirectory(interrupted.id);
+            await fs.mkdir(directory, { recursive: true });
+            await fs.writeFile(path.join(directory, "batch.json"), JSON.stringify(interrupted));
+            await schedulesRepository.update(project.id, { lastBatchId: interrupted.id, lastBatchStatus: "running" });
+            await markInterruptedBatches();
+            await processSchedules(new Date(at.getTime() + 14_000));
+            assert.equal((await schedulesRepository.get(project.id))?.lastBatchStatus, "error");
+            assert.equal(messages.filter((message) => message.status === "error").length, 1);
+
+            alwaysReject = true;
+            const failedDeliveryId = crypto.randomUUID();
+            await schedulesRepository.recordBatch(project.id, failedDeliveryId, "failed", {
+                webhookUrl: (await schedulesRepository.get(project.id))!.webhookUrl!, payload: { text: "Bounded retry" },
+            });
+            for (let attempt = 0; attempt < 6; attempt++) {
+                await deliverWebhookNotifications(new Date(at.getTime() + (attempt + 1) * 600_001));
+            }
+            const exhausted = (await schedulesRepository.notifications(project.id)).find((item) => item.batchId === failedDeliveryId);
+            assert.equal(exhausted?.attempts, 5);
+            assert.equal(exhausted?.nextAttemptAt, null);
+            assert.equal(exhausted?.lastError, "Webhook returned HTTP 503");
+        } finally {
+            webhook.closeAllConnections();
+            await new Promise<void>((resolve) => webhook.close(() => resolve()));
+        }
+    });
+});
