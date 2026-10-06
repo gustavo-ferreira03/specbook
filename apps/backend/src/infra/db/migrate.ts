@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { db } from "./client";
+import { db, initializeDatabase } from "./client";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,5 +20,6 @@ function migrationsFolder(): string {
 }
 
 export async function runMigrations(): Promise<void> {
+    await initializeDatabase();
     await migrate(db, { migrationsFolder: migrationsFolder() });
 }
