@@ -1,65 +1,71 @@
 name: Prepare release
 
 on:
-    push:
+    workflow_run:
+        workflows: [CI]
+        types: [completed]
         branches: [main]
-        paths:
-            - apps/**
-            - Dockerfile
-            - entrypoint.sh
-            - package.json
-            - pnpm-lock.yaml
-            - pnpm-workspace.yaml
-            - version.txt
-            - CHANGELOG.md
     workflow_dispatch:
 
 permissions:
-    contents: write
-    issues: write
-    packages: write
-    pull-requests: write
+    contents: read
+
+concurrency:
+    group: release-please
+    cancel-in-progress: false
 
 jobs:
     release-please:
-        runs-on: ubuntu-latest
+        if: >-
+            (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+            (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
+            github.event.workflow_run.head_repository.full_name == github.repository)
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: write
+            actions: read
+            issues: write
+            pull-requests: write
+        outputs:
+            created: ${{ steps.release.outputs.release_created }}
+            revision: ${{ steps.release.outputs.sha }}
+            version: ${{ steps.release.outputs.tag_name }}
         steps:
+            - name: Require successful CI on the current main commit
+              id: source
+              env:
+                  EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
+                  REPOSITORY: ${{ github.repository }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  revision="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+                  if [[ "$revision" != "$EXPECTED_REVISION" ]]; then
+                      echo 'A newer main commit will prepare the release.'
+                      echo 'current=false' >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+                  gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$revision&event=push&status=success" \
+                      --jq '.workflow_runs | any(.head_branch == "main")' | grep -qx true
+                  echo 'current=true' >> "$GITHUB_OUTPUT"
             - id: release
-              uses: googleapis/release-please-action@v5
+              if: ${{ steps.source.outputs.current == 'true' }}
+              uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
               with:
-                  release-type: simple
-                  # Opening the release PR needs either the repository setting
-                  # "Allow GitHub Actions to create and approve pull requests"
-                  # or a fine-grained PAT in RELEASE_PLEASE_TOKEN (contents and
-                  # pull requests: write). A PAT also lets the release event
-                  # trigger other workflows, which GITHUB_TOKEN cannot.
+                  config-file: release-please-config.json
+                  manifest-file: .release-please-manifest.json
+                  # A PAT lets release PR CI run automatically; GITHUB_TOKEN
+                  # requires the repository PR setting and workflow approval.
                   token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
-
-            - uses: actions/checkout@v7
-              if: ${{ steps.release.outputs.release_created }}
-
-            - uses: docker/setup-buildx-action@v4
-              if: ${{ steps.release.outputs.release_created }}
-
-            - uses: docker/login-action@v4
-              if: ${{ steps.release.outputs.release_created }}
-              with:
-                  registry: ghcr.io
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
-
-            - uses: docker/build-push-action@v7
-              if: ${{ steps.release.outputs.release_created }}
-              with:
-                  context: .
-                  push: true
-                  tags: |
-                      ghcr.io/${{ github.repository_owner }}/specbook:latest
-                      ghcr.io/${{ github.repository_owner }}/specbook:${{ steps.release.outputs.tag_name }}
-                      ghcr.io/${{ github.repository_owner }}/specbook:${{ steps.release.outputs.version }}
-                  labels: |
-                      org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-                      org.opencontainers.image.revision=${{ github.sha }}
-                      org.opencontainers.image.version=${{ steps.release.outputs.tag_name }}
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
+    image:
+        needs: release-please
+        if: ${{ needs.release-please.outputs.created == 'true' }}
+        permissions:
+            contents: read
+            actions: read
+            packages: write
+            id-token: write
+        uses: ./.github/workflows/container.yml
+        with:
+            revision: ${{ needs.release-please.outputs.revision }}
+            channel: release
+            version: ${{ needs.release-please.outputs.version }}

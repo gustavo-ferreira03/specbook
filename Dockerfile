@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+ARG BUILDKIT_SBOM_SCAN_STAGE=build
 
 # ---- base: runtime system packages shared by every stage --------------------
 FROM node:26-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS base
@@ -18,6 +19,8 @@ RUN apt-get update \
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+ARG TARGETARCH
+
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/backend/package.json ./apps/backend/
@@ -27,7 +30,7 @@ RUN corepack install
 # ---- build: full dependency tree, compiles both apps ------------------------
 FROM base AS build
 
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
+RUN --mount=type=cache,id=pnpm-store-${TARGETARCH},target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile --store-dir /pnpm/store
 
 COPY . .
@@ -40,7 +43,7 @@ FROM base AS runtime
 
 # The store lives in a cache mount, so pnpm copies packages into node_modules
 # and the image carries no second copy of them.
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
+RUN --mount=type=cache,id=pnpm-store-${TARGETARCH},target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile --prod --store-dir /pnpm/store
 
 # Playwright MCP (the agent's headed browser) and Playwright Test (Spec runs,
@@ -59,6 +62,7 @@ COPY --from=build /app/apps/backend/drizzle ./apps/backend/drizzle
 COPY --from=build /app/apps/frontend/.next ./apps/frontend/.next
 COPY --from=build /app/apps/frontend/public ./apps/frontend/public
 COPY --from=build /app/apps/frontend/next.config.ts ./apps/frontend/next.config.ts
+COPY LICENSE /app/LICENSE
 COPY --chmod=755 entrypoint.sh /app/entrypoint.sh
 RUN rm -rf /app/apps/frontend/.next/cache \
     && mkdir -p /app/apps/backend/storage \

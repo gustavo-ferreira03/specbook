@@ -7,7 +7,7 @@ docs
 .venv
 **/.venv
 **/node_modules
-**/.next
+**/.next*
 **/dist
 **/*.tsbuildinfo
 apps/backend/storage
@@ -18,3 +18,4 @@ apps/backend/storage
 **/*.log
 Dockerfile
 docker-compose.yml
+site

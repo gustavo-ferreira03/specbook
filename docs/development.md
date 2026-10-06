@@ -1,6 +1,6 @@
 # Development
 
-Local development targets Linux because visible agent browsers use Xvfb and x11vnc. The repository currently uses Node.js 26 and pnpm 10.30.1, pinned through `package.json`; Git is also required. Install Xvfb and x11vnc with your system package manager before starting the backend.
+Local development targets Linux because visible agent browsers use Xvfb and x11vnc. CI uses Node.js 26; `package.json` pins pnpm 10.30.1. Git, tar and `flock` (from util-linux) are also required. Install Xvfb and x11vnc with your system package manager before starting the backend.
 
 ```sh
 pnpm install --frozen-lockfile

@@ -1,0 +1,197 @@
+name: Build and verify container
+
+on:
+    workflow_call:
+        inputs:
+            revision:
+                required: true
+                type: string
+            channel:
+                required: true
+                type: string
+            version:
+                default: ''
+                type: string
+
+permissions:
+    contents: read
+
+concurrency:
+    group: container-${{ inputs.channel }}
+    cancel-in-progress: ${{ inputs.channel == 'preview' }}
+
+jobs:
+    source:
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            actions: read
+        outputs:
+            image: ${{ steps.source.outputs.image }}
+            revision: ${{ steps.source.outputs.revision }}
+        steps:
+            - id: source
+              env:
+                  REVISION: ${{ inputs.revision }}
+                  CHANNEL: ${{ inputs.channel }}
+                  VERSION: ${{ inputs.version }}
+                  REPOSITORY: ${{ github.repository }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]]
+                  [[ "$CHANNEL" == preview || "$CHANNEL" == release ]]
+                  if [[ "$CHANNEL" == release ]]; then [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; fi
+                  gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$REVISION&event=push&status=success" \
+                      --jq '.workflow_runs | any(.head_branch == "main")' | grep -qx true
+                  echo "image=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+                  echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+
+    build:
+        needs: source
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - arch: amd64
+                      runner: ubuntu-24.04
+                    - arch: arm64
+                      runner: ubuntu-24.04-arm
+        runs-on: ${{ matrix.runner }}
+        timeout-minutes: 60
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: ${{ needs.source.outputs.revision }}
+                  persist-credentials: false
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+            - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+            # Upload only by digest. Install tags are set after both platforms pass.
+            - id: build
+              uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+              with:
+                  context: .
+                  platforms: linux/${{ matrix.arch }}
+                  outputs: type=image,name=${{ needs.source.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+                  sbom: true
+                  provenance: mode=max
+                  labels: |
+                      org.opencontainers.image.title=Specbook
+                      org.opencontainers.image.licenses=MIT
+                      org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+                      org.opencontainers.image.revision=${{ needs.source.outputs.revision }}
+                      org.opencontainers.image.version=${{ inputs.version || needs.source.outputs.revision }}
+                  cache-from: type=gha,scope=container-${{ matrix.arch }}
+                  cache-to: type=gha,mode=max,scope=container-${{ matrix.arch }}
+            - name: Scan vulnerabilities
+              uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+              env:
+                  TRIVY_PLATFORM: linux/${{ matrix.arch }}
+              with:
+                  version: v0.75.0
+                  image-ref: ${{ needs.source.outputs.image }}@${{ steps.build.outputs.digest }}
+                  scanners: vuln
+                  severity: HIGH,CRITICAL
+                  ignore-unfixed: false
+                  exit-code: '1'
+                  format: json
+                  output: trivy-${{ matrix.arch }}.json
+            - name: Save scan result
+              if: ${{ always() && steps.build.outcome == 'success' }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              with:
+                  name: trivy-${{ matrix.arch }}
+                  path: trivy-${{ matrix.arch }}.json
+                  if-no-files-found: warn
+                  retention-days: 30
+            - name: Verify a fresh install and both browsers
+              env:
+                  IMAGE: ${{ needs.source.outputs.image }}@${{ steps.build.outputs.digest }}
+              run: bash scripts/verify-image.sh "$IMAGE"
+            - name: Save verified digest
+              env:
+                  DIGEST: ${{ steps.build.outputs.digest }}
+              run: |
+                  mkdir -p "$RUNNER_TEMP/digests"
+                  [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+                  touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              with:
+                  name: digest-${{ matrix.arch }}
+                  path: ${{ runner.temp }}/digests/*
+                  if-no-files-found: error
+                  retention-days: 30
+
+    publish:
+        needs: [source, build]
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
+        permissions:
+            contents: read
+            packages: write
+            id-token: write
+        steps:
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+            - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+            - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+              with:
+                  pattern: digest-*
+                  path: ${{ runner.temp }}/digests
+                  merge-multiple: true
+            - uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+            - name: Assemble and sign the verified image
+              id: image
+              env:
+                  IMAGE: ${{ needs.source.outputs.image }}
+              run: |
+                  sources=()
+                  for file in "$RUNNER_TEMP"/digests/*; do
+                      digest="$(basename "$file")"
+                      [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+                      sources+=("$IMAGE@sha256:$digest")
+                  done
+                  [[ "${#sources[@]}" == 2 ]]
+                  docker buildx imagetools create --tag "$IMAGE:candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+                      --metadata-file "$RUNNER_TEMP/image.json" "${sources[@]}"
+                  digest="$(jq -r '."containerimage.descriptor".digest' "$RUNNER_TEMP/image.json")"
+                  [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+                  docker buildx imagetools inspect "$IMAGE@$digest" --format '{{ json .SBOM }}' > "$RUNNER_TEMP/sbom.json"
+                  docker buildx imagetools inspect "$IMAGE@$digest" --format '{{ json .Provenance }}' > "$RUNNER_TEMP/provenance.json"
+                  jq -e '.["linux/amd64"].SPDX.packages | length > 0' "$RUNNER_TEMP/sbom.json" >/dev/null
+                  jq -e '.["linux/arm64"].SPDX.packages | length > 0' "$RUNNER_TEMP/sbom.json" >/dev/null
+                  jq -e '.["linux/amd64"].SLSA != null and .["linux/arm64"].SLSA != null' "$RUNNER_TEMP/provenance.json" >/dev/null
+                  cosign sign --yes "$IMAGE@$digest"
+                  echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            - name: Promote install tags after scanning and signing
+              env:
+                  IMAGE: ${{ needs.source.outputs.image }}
+                  DIGEST: ${{ steps.image.outputs.digest }}
+                  REVISION: ${{ needs.source.outputs.revision }}
+                  CHANNEL: ${{ inputs.channel }}
+                  VERSION: ${{ inputs.version }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  REPOSITORY: ${{ github.repository }}
+              run: |
+                  tags=()
+                  if [[ "$CHANNEL" == release ]]; then
+                      tags+=(--tag "$IMAGE:$VERSION" --tag "$IMAGE:${VERSION#v}")
+                      latest="$(gh api "repos/$REPOSITORY/releases/latest" --jq .tag_name)"
+                      if [[ "$latest" == "$VERSION" ]]; then tags+=(--tag "$IMAGE:latest"); fi
+                  else
+                      tags+=(--tag "$IMAGE:sha-${REVISION:0:7}")
+                      head="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+                      if [[ "$head" == "$REVISION" ]]; then tags+=(--tag "$IMAGE:main"); fi
+                  fi
+                  docker buildx imagetools create "${tags[@]}" "$IMAGE@$DIGEST"
+                  echo "Published verified image: \`$IMAGE@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+                  docker buildx imagetools inspect "$IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
