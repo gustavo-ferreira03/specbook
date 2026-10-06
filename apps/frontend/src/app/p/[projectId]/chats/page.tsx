@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { AlertCircle, ChevronRight, MessageSquareText, Plus, RefreshCw } from "lucide-react";
@@ -13,6 +15,7 @@ import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { Chat } from "@/lib/types";
 
 export default function ChatsHome({ params }: { params: Promise<{ projectId: string }> }) {
+    const { canEdit } = useAuth();
     const { projectId } = use(params);
     const [chats, setChats] = useState<Chat[] | null>(null);
     const [error, setError] = useState("");
@@ -41,7 +44,7 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
         };
     }, [projectId, refreshKey]);
 
-    const newChatButton = (
+    const newChatButton = canEdit && (
         <Button asChild>
             <Link href={newChatHref}><Plus size={14} /> New chat</Link>
         </Button>
@@ -82,7 +85,7 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
                         icon={MessageSquareText}
                         title="No chats yet"
                         description="Describe a behavior while the agent operates a live browser, and save the result as a Spec."
-                        action={
+                        action={canEdit &&
                             <Button asChild>
                                 <Link href={newChatHref}><MessageSquareText size={14} /> Start chat</Link>
                             </Button>

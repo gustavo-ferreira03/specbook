@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_INIT_SCRIPT } from "@/lib/theme-script";
+import { AuthProvider } from "@/components/AuthProvider";
 import { SetupGate } from "@/components/SetupGate";
 import "./globals.css";
 
@@ -26,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <head>
                 <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
             </head>
-            <body><TooltipProvider><SetupGate>{children}</SetupGate></TooltipProvider></body>
+            <body><TooltipProvider><AuthProvider><SetupGate>{children}</SetupGate></AuthProvider></TooltipProvider></body>
         </html>
     );
 }

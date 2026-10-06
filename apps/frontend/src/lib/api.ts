@@ -58,6 +58,13 @@ export function apiPath(strings: TemplateStringsArray, ...values: (string | numb
     return strings.reduce((path, part, index) => path + part + (index < values.length ? encodeURIComponent(String(values[index])) : ""), "");
 }
 
+export function safeReturnPath(value: string | null): string {
+    if (!value?.startsWith("/") || value.startsWith("//") || /[\\\r\n]/.test(value)) return "/";
+    const url = new URL(value, "https://specbook.local");
+    if (url.origin !== "https://specbook.local" || ["/login", "/setup", "/join"].includes(url.pathname)) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const method = (init?.method ?? "GET").toUpperCase();
     const headers = new Headers(init?.headers);
@@ -72,6 +79,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0, "network_error");
     }
     if (!response.ok) {
+        if (response.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/") && !path.startsWith("/setup/") && !["/login", "/setup", "/join"].includes(window.location.pathname)) {
+            const next = safeReturnPath(`${window.location.pathname}${window.location.search}${window.location.hash}`);
+            window.location.replace(`/login?next=${encodeURIComponent(next)}`);
+        }
         const text = await response.text().catch(() => "");
         let message = text;
         let code: string | undefined;

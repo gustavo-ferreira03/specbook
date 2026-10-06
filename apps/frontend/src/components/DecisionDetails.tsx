@@ -9,6 +9,7 @@ import { StoryTimeline } from "@/components/StoryDetails";
 import { TechnicalDetails } from "@/components/TechnicalDetails";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -76,6 +77,7 @@ function ItemTechnicalDetails({ item }: { item: PresentedInboxItem }) {
 }
 
 export function DecisionDetails({ projectId, item, story, onChange }: { projectId: string; item: PresentedInboxItem; story?: ActivityStory; onChange: () => Promise<void> }) {
+    const { canEdit } = useAuth();
     const router = useRouter();
     const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
     const [busy, setBusy] = useState<{ id: string; action: InboxAction } | null>(null);
@@ -105,6 +107,7 @@ export function DecisionDetails({ projectId, item, story, onChange }: { projectI
     }
 
     function actions(item: PresentedInboxItem) {
+        if (!canEdit) return <p className="text-body text-ink-muted">An editor can answer or review this decision.</p>;
         const { type, credentialRequest } = item.presentation;
         const active = busy?.id === item.id;
         const label = (action: InboxAction, ready: string, working: string) => active && busy.action === action ? working : ready;
@@ -126,7 +129,7 @@ export function DecisionDetails({ projectId, item, story, onChange }: { projectI
         {item.answer && <p className="whitespace-pre-wrap break-words text-body text-ink-muted"><span className="font-medium">Your answer: </span>{item.answer}</p>}
         {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError.message}</AlertDescription></Alert>}
         {pending && <div className="space-y-3">
-            {view.type === "question" && !view.credentialRequest && <div className="space-y-2"><Label htmlFor={`answer-${item.id}`} className="text-body">Your answer</Label><Textarea id={`answer-${item.id}`} className="text-body" value={answers[item.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [item.id]: event.target.value }))} disabled={busy !== null} aria-describedby={`answer-help-${item.id}`} /><p id={`answer-help-${item.id}`} className="text-meta text-ink-subtle">Keep passwords in <Link className="underline underline-offset-2 hover:text-ink" href={`/p/${projectId}/settings?tab=credentials`}>Settings → Credentials</Link>.</p></div>}
+            {canEdit && view.type === "question" && !view.credentialRequest && <div className="space-y-2"><Label htmlFor={`answer-${item.id}`} className="text-body">Your answer</Label><Textarea id={`answer-${item.id}`} className="text-body" value={answers[item.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [item.id]: event.target.value }))} disabled={busy !== null} aria-describedby={`answer-help-${item.id}`} /><p id={`answer-help-${item.id}`} className="text-meta text-ink-subtle">Keep passwords in <Link className="underline underline-offset-2 hover:text-ink" href={`/p/${projectId}/settings?tab=credentials`}>Settings → Credentials</Link>.</p></div>}
             <div className="flex flex-wrap gap-2">{actions(item)}</div>
             <p className="text-meta text-ink-subtle">{view.consequence}</p>
         </div>}

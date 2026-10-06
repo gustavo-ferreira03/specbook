@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { FilePlus2, FolderPlus } from "lucide-react";
@@ -30,6 +31,7 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
     features: Feature[];
     onCreated: () => void;
 }) {
+    const { canEdit } = useAuth();
     const [open, setOpen] = useState(false);
     const [title, setTitle] = useState("");
     const [parentId, setParentId] = useState(ROOT_VALUE);
@@ -61,6 +63,7 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
         }
     }
 
+    if (!canEdit) return null;
     return (
         <>
             <Button type="button" variant="outline" size="sm" onClick={() => changeOpen(true)}>
@@ -106,6 +109,7 @@ export function NewFeatureDialog({ projectId, features, onCreated }: {
 
 export function NewSpecDialog({ projectId, features }: { projectId: string; features: Feature[] }) {
     const router = useRouter();
+    const { canEdit } = useAuth();
     const [open, setOpen] = useState(false);
     const [title, setTitle] = useState("");
     const [featureId, setFeatureId] = useState("");
@@ -132,6 +136,7 @@ export function NewSpecDialog({ projectId, features }: { projectId: string; feat
         }
     }
 
+    if (!canEdit) return null;
     return (
         <>
             <Button type="button" variant="outline" size="sm" onClick={() => changeOpen(true)} disabled={features.length === 0} title={features.length === 0 ? "Create a feature first" : undefined}>

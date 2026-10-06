@@ -67,8 +67,8 @@ export function SettingsBlock({ children, className }: { children: React.ReactNo
 export function SettingsFooter({ children, feedback, className }: { children?: React.ReactNode; feedback?: React.ReactNode; className?: string }) {
     return (
         <div className={cn("flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line bg-surface-soft px-4 py-3 sm:px-5", className)}>
-            <div className="min-w-0 flex-1">{feedback}</div>
-            {children && <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>}
+            <div className="min-w-0 basis-full empty:hidden sm:basis-0 sm:flex-1 sm:empty:block">{feedback}</div>
+            {children && <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{children}</div>}
         </div>
     );
 }

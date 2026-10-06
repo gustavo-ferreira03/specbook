@@ -1,5 +1,8 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, Clock3, Pause, Play, RefreshCw, X } from "lucide-react";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -37,6 +40,8 @@ interface AutomationResponse {
 }
 
 export function AutomationSettingsCard({ projectId }: { projectId: string }) {
+    const { isAdmin } = useAuth();
+    const [allowAutoApproveFixes, setAllowAutoApproveFixes] = useState(false);
     const [autonomy, setAutonomy] = useState("propose");
     const [savedAutonomy, setSavedAutonomy] = useState("propose");
     const [autoApproveFixes, setAutoApproveFixes] = useState(false);
@@ -94,11 +99,16 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
             .then((result) => setSpecs(result.specs))
             .catch((error) => { if (!isAbortError(error)) setSpecsError(errorMessage(error)); });
         setPauseError("");
-        api<{ paused: boolean }>("/settings/agent", { signal: controller.signal })
-            .then((result) => setGloballyPaused(result.paused))
-            .catch((error) => { if (!isAbortError(error)) setPauseError("The agent pause setting could not load. Try again."); });
+        if (isAdmin) {
+            api<{ paused: boolean }>("/settings/agent", { signal: controller.signal })
+                .then((result) => setGloballyPaused(result.paused))
+                .catch((error) => { if (!isAbortError(error)) setPauseError("The agent pause setting could not load. Try again."); });
+            api<{ allowAutoApproveFixes: boolean }>("/settings/security", { signal: controller.signal })
+                .then((result) => setAllowAutoApproveFixes(result.allowAutoApproveFixes))
+                .catch(() => setAllowAutoApproveFixes(false));
+        }
         return () => controller.abort();
-    }, [projectId, retryKey]);
+    }, [projectId, retryKey, isAdmin]);
 
     const dirty = settings !== null && (
         autonomy !== savedAutonomy
@@ -116,7 +126,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setSaving(true);
         setFeedback(null);
         try {
-            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ autonomy, autoApproveFixes }) });
+            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ autonomy, ...(isAdmin && autoApproveFixes !== savedAutoApproveFixes ? { autoApproveFixes } : {}) }) });
             setSavedAutonomy(autonomy);
             setSavedAutoApproveFixes(autoApproveFixes);
             const result = await api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, {
@@ -154,10 +164,10 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
 
     return (
         <div className="space-y-10">
-            <SettingsSection id="agent-pause-heading" title="Agent across all projects" description="Shared by every project on this server. Project pauses remain separate.">
+            {isAdmin && <SettingsSection id="agent-pause-heading" title="Agent across all projects" description="Shared by every project on this server. Project pauses remain separate.">
                 {pauseError ? <SettingsBlock><Alert variant="danger" role="alert"><AlertDescription>{pauseError}</AlertDescription></Alert><Button variant="outline" size="sm" className="mt-3" onClick={() => setRetryKey((key) => key + 1)}><RefreshCw size={14} /> Try again</Button></SettingsBlock> : globallyPaused === null ? <SettingsBlock aria-busy="true"><Skeleton className="h-9 w-full" /></SettingsBlock> : <SettingsRow label={globallyPaused ? "Paused by you" : "Ready for events"} description="Pausing stops new work and lets current work stop safely." align="center"><Button type="button" variant="outline" disabled={savingPause} onClick={() => void toggleGlobalPause()}>{globallyPaused ? <Play size={14} /> : <Pause size={14} />}{savingPause ? "Saving…" : globallyPaused ? "Resume all projects" : "Pause all projects"}</Button></SettingsRow>}
                 {pauseFeedback && <SettingsFooter feedback={<InlineFeedback feedback={pauseFeedback} />} />}
-            </SettingsSection>
+            </SettingsSection>}
             <SettingsSection id="automation-settings-heading" title="Automation" description="Schedule runs, investigate failures, and receive status changes. All settings are optional.">
                 {loading ? (
                     <div aria-label="Loading automation settings" aria-busy="true" role="status">
@@ -181,13 +191,14 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                             </Select>
                             <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes and assertion changes always need your approval.</p>
                         </SettingsRow>
-                        <SettingsRow label="Automatic fixes" htmlFor="automation-auto-approve" description="Off by default. Available in the optional automatic fixes mode above.">
-                            <Select value={autoApproveFixes ? "enabled" : "disabled"} onValueChange={(value) => { setAutoApproveFixes(value === "enabled"); setFeedback(null); }} disabled={saving || autonomy !== "act"}>
+                        {isAdmin && <SettingsRow label="Automatic fixes" htmlFor="automation-auto-approve" description="Off by default. Available in the optional automatic fixes mode above.">
+                            <Select value={autoApproveFixes ? "enabled" : "disabled"} onValueChange={(value) => { setAutoApproveFixes(value === "enabled"); setFeedback(null); }} disabled={saving || autonomy !== "act" || !allowAutoApproveFixes}>
                                 <SelectTrigger id="automation-auto-approve" aria-describedby="automation-auto-approve-help"><SelectValue /></SelectTrigger>
                                 <SelectContent><SelectItem value="disabled">Review every fix</SelectItem><SelectItem value="enabled">Allow verified locator fixes</SelectItem></SelectContent>
                             </Select>
                             <p id="automation-auto-approve-help" className="mt-1.5 text-meta text-ink-subtle">Only action locators may change. Fixes must pass verification and follow three approved locator fixes with no rejected fixes.</p>
-                        </SettingsRow>
+                            {!allowAutoApproveFixes && <p className="mt-1.5 text-meta text-ink-muted">Automatic fixes are disabled for this instance. <Link href="/settings?tab=security" className="underline underline-offset-2">Review agent safety settings</Link>.</p>}
+                        </SettingsRow>}
                         <SettingsRow label="Schedule" htmlFor="automation-cron" description="Optional, in UTC.">
                             <Input id="automation-cron" value={cron} onChange={(event) => { setCron(event.target.value); setFeedback(null); }} placeholder="0 9 * * 1-5" disabled={saving} className="font-mono" autoComplete="off" aria-describedby="automation-cron-help" />
                             <p id="automation-cron-help" className="mt-1.5 text-meta text-ink-subtle">Five cron fields: minute, hour, day, month, weekday. This example runs at 09:00 UTC on weekdays. Leave blank to turn scheduled runs off.</p>

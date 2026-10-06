@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
@@ -139,6 +141,7 @@ function VerificationBanner({
     latestEvidence: LoadedRunEvidence | undefined;
     running: boolean;
 }) {
+    const { canEdit } = useAuth();
     let status: string;
     let headline: string;
     let detail: React.ReactNode = null;
@@ -155,11 +158,11 @@ function VerificationBanner({
         body = (
             <>
                 <InvalidReason reason={spec.invalidReason ?? "The spec.yml or spec.ts file could not be validated."} testSource={specDetail.content?.testSource ?? null} />
-                <div className="mt-3 flex flex-wrap gap-2">
+                {canEdit && <div className="mt-3 flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="outline">
                         <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}&intent=repair`}><PencilLine size={13} /> Repair in chat</Link>
                     </Button>
-                </div>
+                </div>}
             </>
         );
     } else if (!latestRun) {
@@ -418,6 +421,7 @@ function Field({ id, label, hint, children }: { id: string; label: string; hint?
 }
 
 export default function SpecPage({ params }: { params: Promise<{ projectId: string; specId: string }> }) {
+    const { canEdit } = useAuth();
     const { projectId, specId } = use(params);
     const router = useRouter();
     const [detail, setDetail] = useState<SpecDetail | null>(null);
@@ -663,12 +667,12 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 actions={
                     <>
                         <SpecHistoryDialog specId={specId} />
-                        <Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
+                        {canEdit && <><Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
                             <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
                         </Button>
                         <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid"}>
                             <Play size={12} fill="currentColor" /> {running ? "Running..." : "Run Spec"}
-                        </Button>
+                        </Button></>}
                     </>
                 }
             />

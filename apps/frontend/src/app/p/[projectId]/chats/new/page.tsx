@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense, use, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { api, apiPath, errorMessage } from "@/lib/api";
 
 function NewChatContent({ projectId }: { projectId: string }) {
+    const { canEdit } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
@@ -20,6 +22,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
     const requestRef = useRef<{ key: string; promise: Promise<{ chat: { id: string } }> } | null>(null);
 
     useEffect(() => {
+        if (!canEdit) return;
         const key = `${projectId}:${attempt}`;
         if (requestRef.current?.key !== key) {
             requestRef.current = {
@@ -41,10 +44,11 @@ function NewChatContent({ projectId }: { projectId: string }) {
         return () => {
             active = false;
         };
-    }, [attempt, intent, projectId, router, specId]);
+    }, [attempt, intent, projectId, router, specId, canEdit]);
 
     const crumbs = [{ label: "Chats", href: `/p/${projectId}/chats` }];
 
+    if (!canEdit) return <EmptyState title="Chats are read-only" description="Ask an editor to start a conversation or change a check." />;
     if (error) {
         return (
             <div className="flex min-h-full flex-col bg-surface">

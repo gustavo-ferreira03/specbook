@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/components/AuthProvider";
+
 import { Suspense, type ReactNode, memo, use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -250,6 +252,7 @@ function MessageActions({
     onEdit: () => void;
     onRetry: () => void;
 }) {
+    const { canEdit } = useAuth();
     // Revealed on hover and when focus enters the message; always visible on touch screens.
     return (
         <div
@@ -262,12 +265,12 @@ function MessageActions({
             <ActionButton label={copied ? "Message copied" : "Copy message"} onClick={onCopy} disabled={false}>
                 {copied ? <Check size={14} /> : <Copy size={14} />}
             </ActionButton>
-            {userMessage && (
+            {canEdit && userMessage && (
                 <ActionButton label="Edit message" onClick={onEdit} disabled={disabled}>
                     <Pencil size={14} />
                 </ActionButton>
             )}
-            {retryable && (
+            {canEdit && retryable && (
                 <ActionButton label={userMessage ? "Retry message" : "Retry response"} onClick={onRetry} disabled={disabled}>
                     <RotateCcw size={14} />
                 </ActionButton>
@@ -413,6 +416,7 @@ const MessageList = memo(function MessageList({
 });
 
 function ChatContent({ projectId, chatId }: { projectId: string; chatId: string }) {
+    const { canEdit, isAdmin } = useAuth();
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
     const repair = searchParams.get("intent") === "repair";
@@ -847,7 +851,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     }
 
     const lastMessage = state.messages[state.messages.length - 1];
-    const browserBeside = wide && Boolean(state.vncSessionId);
+    const browserBeside = canEdit && wide && Boolean(state.vncSessionId);
     const browserOrigin = originOf(revisionInfo?.brief.startUrl) || projectOrigin;
 
     const statusIndicator = (
@@ -908,7 +912,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                     <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
                         <div className="px-4 pt-6 pb-10 md:px-8 md:pt-8">
                             <div className="mx-auto w-full max-w-chat">
-                                {awaitingDiscoveryStart && revisionInfo && (
+                                {canEdit && awaitingDiscoveryStart && revisionInfo && (
                                     <section className="pt-2 pb-8 md:pt-6" aria-labelledby="discovery-intro">
                                         <span className="flex size-10 items-center justify-center rounded-full bg-surface-hover text-ink-muted" aria-hidden="true"><Compass size={18} /></span>
                                         <h2 id="discovery-intro" className="mt-4 text-title text-ink text-balance">Ready to explore this application</h2>
@@ -924,14 +928,14 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                             <Button type="button" onClick={() => void beginDiscovery()} disabled={beginning || modelMissing}>
                                                 <Compass size={14} /> {beginning ? "Starting..." : "Begin discovery"}
                                             </Button>
-                                            {modelMissing && (
+                                            {modelMissing && isAdmin && (
                                                 <Link href={modelSettingsHref} className="rounded-sm text-control text-ink-muted underline decoration-line-hover underline-offset-[3px] hover:text-ink">Set up a model first</Link>
                                             )}
                                         </div>
                                     </section>
                                 )}
 
-                                {!discovery && state.messages.length === 0 && !state.busy && (
+                                {canEdit && !discovery && state.messages.length === 0 && !state.busy && (
                                     <section className="pt-2 pb-8 md:pt-6" aria-labelledby="chat-intro">
                                         <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface" aria-hidden="true">
                                             <LogoMark className="size-5 dark:invert" />
@@ -1004,11 +1008,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                     </div>
                                 )}
 
-                                {state.vncSessionId && !browserBeside && (
+                                {canEdit && state.vncSessionId && !browserBeside && (
                                     <LiveBrowser sessionId={state.vncSessionId} origin={browserOrigin} variant="inline" />
                                 )}
 
-                                {state.credentialRequest && (
+                                {canEdit && state.credentialRequest && (
                                     <CredentialRequestCard
                                         chatId={chatId}
                                         request={state.credentialRequest}
@@ -1021,7 +1025,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                         </div>
                     </ScrollArea>
 
-                    <div className="relative shrink-0 bg-surface px-3 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-5">
+                    {canEdit ? <div className="relative shrink-0 bg-surface px-3 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-5">
                         <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-surface to-transparent" />
                         <div className="mx-auto w-full max-w-chat">
                             {discoveryTerminal && revisionInfo && (
@@ -1055,11 +1059,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-surface-soft px-4 py-2.5">
                                         <p className="flex min-w-0 flex-1 items-center gap-2 text-control text-ink-muted">
                                             <span className="size-1.5 shrink-0 rounded-full bg-warning-chart" aria-hidden="true" />
-                                            <span>No model is set up yet.<span className="hidden sm:inline"> Choose a provider to chat with the agent.</span></span>
+                                            <span>No model is set up yet.<span className="hidden sm:inline"> {isAdmin ? "Choose a provider to chat with the agent." : "Ask an administrator to connect a provider."}</span></span>
                                         </p>
-                                        <Button asChild variant="outline" size="sm">
+                                        {isAdmin && <Button asChild variant="outline" size="sm">
                                             <Link href={modelSettingsHref}><Settings2 size={13} /> Set up model</Link>
-                                        </Button>
+                                        </Button>}
                                     </div>
                                 )}
                                 <Label className="block">
@@ -1130,7 +1134,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                 </div>
                             </form>
                         </div>
-                    </div>
+                    </div> : <p className="border-t border-line px-4 py-3 text-control text-ink-muted">This conversation is read-only for your account.</p>}
                 </div>
 
                 {browserBeside && state.vncSessionId && (

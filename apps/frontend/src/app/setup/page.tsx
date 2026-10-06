@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, ArrowRight, Check, LoaderCircle, RefreshCw } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
 import { EmptyState } from "@/components/EmptyState";
 import { InstanceHeader } from "@/components/InstanceHeader";
 import { ModelSettings } from "@/components/ModelSettings";
@@ -19,6 +20,7 @@ type SetupStep = "admin" | "model" | "project";
 
 export default function SetupPage() {
     const router = useRouter();
+    const { refresh } = useAuth();
     const [status, setStatus] = useState<SetupStatus | null>(null);
     const [step, setStep] = useState<SetupStep>("model");
     const [error, setError] = useState("");
@@ -36,11 +38,16 @@ export default function SetupPage() {
         setLoadError("");
         try {
             const result = await api<SetupStatus>("/setup/status");
+            if (result.authenticated === false && !result.needsAdmin) { router.replace("/login"); return; }
+            if (result.authenticated) {
+                const currentUser = await refresh();
+                if (currentUser && currentUser.role !== "admin") { router.replace("/"); return; }
+            }
             if (result.completed) { router.replace("/"); return; }
             setStatus(result);
             setStep(result.needsAdmin ? "admin" : "model");
         } catch (reason) { setLoadError(errorMessage(reason)); }
-    }, [router]);
+    }, [router, refresh]);
 
     useEffect(() => { void load(); }, [load]);
 
@@ -51,6 +58,7 @@ export default function SetupPage() {
         try {
             await api("/setup/admin", { method: "POST", body: JSON.stringify({ name: adminName.trim(), email: email.trim(), password }) });
             setPassword("");
+            await refresh();
             await load();
         } catch (reason) { setError(errorMessage(reason)); }
         finally { setBusy(false); }
@@ -116,7 +124,7 @@ export default function SetupPage() {
                     <form onSubmit={createAdmin}>
                         <SettingsRow label="Name" htmlFor="admin-name"><Input id="admin-name" value={adminName} onChange={(event) => setAdminName(event.target.value)} required autoComplete="name" disabled={busy} /></SettingsRow>
                         <SettingsRow label="Email" htmlFor="admin-email"><Input id="admin-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" disabled={busy} /></SettingsRow>
-                        <SettingsRow label="Password" htmlFor="admin-password" description="Use at least 12 characters."><Input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} required autoComplete="new-password" disabled={busy} /></SettingsRow>
+                        <SettingsRow label="Password" htmlFor="admin-password" description="Use at least 12 characters."><Input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} maxLength={128} required autoComplete="new-password" disabled={busy} /></SettingsRow>
                         <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Creating account..." : "Create admin and continue"}<ArrowRight size={14} /></Button></SettingsFooter>
                     </form>
                 </SettingsSection>}

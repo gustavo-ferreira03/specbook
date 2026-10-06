@@ -35,6 +35,8 @@ import {
     listProjectChats,
     listProjects,
 } from "@/lib/api";
+import { useAuth } from "@/components/AuthProvider";
+import { UserMenu } from "@/components/UserMenu";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { Chat, Feature, OverviewResponse, Project, RunBatch, SpecSummary } from "@/lib/types";
 import { useVisiblePolling } from "@/lib/usePolling";
@@ -103,6 +105,7 @@ function RowAction({ label, tooltip, onClick, disabled, danger, children }: { la
 }
 
 export function Sidebar({ projectId }: { projectId: string }) {
+    const { canEdit, isAdmin } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
     const [projects, setProjects] = useState<Project[]>([]);
@@ -360,7 +363,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
 
     // Row actions are revealed on hover and whenever focus is inside the row, so they stay
     // reachable by keyboard; on touch screens (no hover) they are always visible.
-    const rowActionsClass =
+    const rowActionsClass = !canEdit ? "hidden" :
         "flex shrink-0 items-center gap-0.5 pr-1 [@media(hover:hover)]:invisible [@media(hover:hover)]:absolute [@media(hover:hover)]:inset-y-0 [@media(hover:hover)]:right-0 [@media(hover:hover)]:bg-linear-to-l [@media(hover:hover)]:from-(--row-bg) [@media(hover:hover)]:from-65% [@media(hover:hover)]:to-transparent [@media(hover:hover)]:pl-7 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-focus-within:visible";
     const rowClass = (selected: boolean) =>
         `group relative flex min-h-10 w-full min-w-0 items-center rounded-md transition-colors duration-150 md:min-h-8 ${
@@ -457,7 +460,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const runtimeCopy = {
         checking: ["Checking model", "Connecting to services"],
         online: ["Model ready", "Agent and runner online"],
-        setup: ["Model setup needed", "Choose a provider"],
+        setup: ["Model setup needed", isAdmin ? "Choose a provider" : "Ask an administrator"],
         offline: ["Runtime unavailable", "Backend is not responding"],
     }[runtime];
     const runtimeDot = runtime === "online" ? "bg-success" : runtime === "setup" ? "bg-warning-chart" : runtime === "offline" ? "bg-danger" : "status-pulse bg-ink-subtle";
@@ -499,7 +502,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     {label}
                     {count !== null && loaded && <span className="tabular font-normal text-ink-disabled">{count}</span>}
                 </h2>
-                {action}
+                {canEdit && action}
             </div>
         );
     }
@@ -547,7 +550,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                 ))}
                             </DropdownMenuRadioGroup>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem asChild>
+                            <DropdownMenuItem asChild disabled={!canEdit} className={canEdit ? undefined : "hidden"}>
                                 <Link href="/?new=1"><Plus size={14} /> Create project</Link>
                             </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -615,7 +618,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                         icon={MessageSquare}
                                         title="No chats yet"
                                         description="Describe a behavior to start."
-                                        action={<Button asChild size="sm" variant="outline"><Link href={`/p/${projectId}/chats/new`}><Plus size={14} /> New chat</Link></Button>}
+                                        action={canEdit && <Button asChild size="sm" variant="outline"><Link href={`/p/${projectId}/chats/new`}><Plus size={14} /> New chat</Link></Button>}
                                     />
                                 )}
                             </div>
@@ -658,7 +661,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </Link>
                     {(currentOverview?.summary.paused || currentOverview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{currentOverview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
                     <Link
-                        href="/settings?tab=model"
+                        href={isAdmin ? "/settings?tab=model" : `/p/${projectId}/overview`}
                         className="flex min-h-10 items-center gap-2.5 rounded-md px-2 py-1.5 outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring"
                     >
                         <span className={`size-2 shrink-0 rounded-full ${runtimeDot}`} aria-hidden="true" />
@@ -667,14 +670,15 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <span className="block truncate text-meta text-ink-subtle">{runtimeCopy[1]}</span>
                         </span>
                     </Link>
+                    <UserMenu />
                     <div className="flex items-center justify-between gap-2">
-                        <Link
+                        {canEdit && <Link
                             href={settingsHref}
                             aria-current={onSettings ? "page" : undefined}
                             className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:h-8 ${onSettings ? "bg-surface-selected font-medium text-ink" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
                         >
                             <Settings size={15} /> Project settings
-                        </Link>
+                        </Link>}
                         <ThemeToggle />
                     </div>
                 </div>
@@ -695,9 +699,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         <LogoMark className="size-7 dark:invert" />
                         <span className="truncate text-control font-semibold text-ink">{projectName}</span>
                     </Link>
-                    <Button asChild variant="ghost" size="icon-lg" aria-label="Open settings">
+                    {canEdit && <Button asChild variant="ghost" size="icon-lg" aria-label="Open settings">
                         <Link href={settingsHref}><Settings size={18} /></Link>
-                    </Button>
+                    </Button>}
                 </header>
                 <SheetContent side="left" showCloseButton={false} className="w-[min(288px,88vw)] p-0 md:hidden">
                     <SheetDescription className="sr-only">Project navigation</SheetDescription>
