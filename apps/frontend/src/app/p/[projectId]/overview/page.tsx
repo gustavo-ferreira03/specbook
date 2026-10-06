@@ -224,7 +224,7 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
             actions={data && canEdit && <>
                 <BusyButton busy={requestingTask === "explore"} icon={ScanSearch} disabled={requestingTask !== null} onClick={() => void requestTask("explore")}>Explore app</BusyButton>
                 {data.summary.globallyPaused
-                    ? isAdmin && <Button asChild variant="ghost" size="sm"><Link href="/settings?tab=security#agent-pause-heading"><Play size={14} /> Resume in settings</Link></Button>
+                    ? isAdmin && <Button asChild variant="ghost" size="sm"><Link href="/settings?tab=agent#agent-pause-heading"><Play size={14} /> Resume in settings</Link></Button>
                     : <BusyButton busy={savingPause} icon={data.summary.paused ? Play : Pause} variant="ghost" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</BusyButton>}
             </>} />
         <PageContainer width="data" innerClassName="space-y-7">
