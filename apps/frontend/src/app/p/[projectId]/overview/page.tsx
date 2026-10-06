@@ -18,6 +18,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiPath, isAbortError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import { useVisiblePolling } from "@/lib/usePolling";
 import type { OverviewResponse, RecentRun } from "@/lib/types";
 
 type Selection = { type: "item" | "story" | "failure"; id: string };
@@ -78,9 +79,10 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
     useEffect(() => {
         const controller = new AbortController();
         void load(controller.signal);
-        const timer = setInterval(() => void load(controller.signal), 5000);
-        return () => { controller.abort(); clearInterval(timer); };
+        return () => controller.abort();
     }, [load]);
+
+    useVisiblePolling(() => void load(), 5000);
 
     const stories = data ? [...data.stories, ...data.recentRuns] : [];
     const item = selected?.type === "item" ? data?.items.find((item) => item.id === selected.id) : undefined;
