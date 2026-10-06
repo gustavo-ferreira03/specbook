@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { automationSettingsSchema, publicAutomation, updateAutomation } from "../../../core/jobs/schedules";
+import { NetworkTargetError } from "../../../core/network/targets";
 import { projectsRepository } from "../../repositories/projects";
 import { schedulesRepository } from "../../repositories/schedules";
 
@@ -24,7 +25,7 @@ export function createSchedulesRouter(): Hono {
                 notifications: await schedulesRepository.notifications(id),
             });
         } catch (error) {
-            if (error instanceof Error && error.message === "Every selected Spec must belong to this project") {
+            if (error instanceof NetworkTargetError || error instanceof Error && error.message === "Every selected Spec must belong to this project") {
                 throw new HTTPException(400, { message: error.message });
             }
             throw error;

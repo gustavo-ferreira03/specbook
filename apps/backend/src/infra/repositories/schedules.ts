@@ -6,7 +6,7 @@ import { projectAutomations, webhookNotifications } from "../db/schema";
 
 export type ProjectAutomation = typeof projectAutomations.$inferSelect;
 export type WebhookNotification = typeof webhookNotifications.$inferSelect;
-type Settings = Pick<ProjectAutomation, "cron" | "specIds" | "healFailures" | "webhookUrl" | "nextRunAt">;
+type Settings = Pick<ProjectAutomation, "cron" | "specIds" | "healFailures" | "webhookUrl" | "allowPrivateWebhook" | "nextRunAt">;
 
 export const MAX_WEBHOOK_ATTEMPTS = 5;
 const RETRY_DELAYS = [10_000, 30_000, 120_000, 600_000];

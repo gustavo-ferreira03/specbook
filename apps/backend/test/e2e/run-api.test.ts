@@ -269,15 +269,18 @@ describe("scheduled runs", () => {
         const initial = await (await router.request(endpoint)).json();
         assert.equal(initial.automation.cron, null);
         assert.equal(initial.automation.healFailures, true);
+        assert.equal(initial.automation.allowPrivateWebhook, false);
         assert.deepEqual(initial.automation.specIds, []);
         assert.equal((await update({})).status, 200);
         assert.equal((await update({ cron: "no cron" })).status, 400);
         assert.equal((await update({ specIds: ["00000000-0000-4000-8000-000000000001"] })).status, 400);
-        const webhookUrl = "https://example.com/hooks/private-token";
-        const saved = await (await update({ cron: "0 12 * * *", webhookUrl, healFailures: false })).json();
+        assert.equal((await update({ webhookUrl: baseUrl })).status, 400, "local webhooks require explicit permission even for a local project");
+        assert.equal((await update({ webhookUrl: baseUrl, allowPrivateWebhook: true })).status, 200);
+        const webhookUrl = "https://8.8.8.8/hooks/private-token";
+        const saved = await (await update({ cron: "0 12 * * *", webhookUrl, healFailures: false, allowPrivateWebhook: false })).json();
         assert.ok(Array.isArray(saved.notifications), "saving returns the same response shape as loading");
         assert.equal(saved.automation.webhookConfigured, true);
-        assert.equal(saved.automation.webhookHost, "example.com");
+        assert.equal(saved.automation.webhookHost, "8.8.8.8");
         assert.ok(saved.automation.nextRunAt);
         assert.ok(!JSON.stringify(saved).includes("private-token"));
         const [stored] = await db.select().from(projectAutomations).where(eq(projectAutomations.projectId, project.id));
@@ -289,6 +292,27 @@ describe("scheduled runs", () => {
         assert.equal(disabled.automation.healFailures, false);
         const removed = await (await update({ webhookUrl: null })).json();
         assert.equal(removed.automation.webhookConfigured, false);
+    });
+
+    test("pins webhook DNS, rejects rebinding and never follows redirects", async () => {
+        const { postWebhook } = await import("../../src/core/network/webhook");
+        const requests: string[] = [];
+        const webhook = http.createServer((request, response) => {
+            requests.push(request.url!);
+            response.writeHead(302, { location: "/internal" });
+            response.end();
+        });
+        await new Promise<void>((resolve) => webhook.listen(0, "127.0.0.1", resolve));
+        const url = `http://webhook.invalid:${(webhook.address() as AddressInfo).port}/events`;
+        let resolutions = 0;
+        const resolver = async () => { resolutions++; return [{ address: "127.0.0.1", family: 4 }]; };
+        try {
+            await assert.rejects(() => postWebhook(url, { text: "status" }, { allowPrivate: false, signal: AbortSignal.timeout(1000), resolver }), /not allowed/);
+            assert.deepEqual(requests, []);
+            assert.equal(await postWebhook(url, { text: "status" }, { allowPrivate: true, signal: AbortSignal.timeout(1000), resolver }), 302);
+            assert.deepEqual(requests, ["/events"], "redirect does not expose the payload to another endpoint");
+            assert.equal(resolutions, 2, "each send resolves once; HTTP transport uses the checked address");
+        } finally { webhook.closeAllConnections(); await new Promise<void>((resolve) => webhook.close(() => resolve())); }
     });
 
     test("scheduled prerequisites ask once and resume the saved selection in observation mode", { skip: !available, timeout: 120_000 }, async () => {
@@ -308,7 +332,7 @@ describe("scheduled runs", () => {
         const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Scheduled sign-in", description: "", humanSpec: HUMAN_SPEC, testSource: source });
         const { spec: unselected } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Unselected", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
         const head = await repoGit.getHeadSha(project.id);
-        await updateAutomation(project.id, { cron: "* * * * *", specIds: [spec.id], healFailures: false, webhookUrl: "https://example.com/schedule-events" });
+        await updateAutomation(project.id, { cron: "* * * * *", specIds: [spec.id], healFailures: false, webhookUrl: new URL("/schedule-events", baseUrl).href, allowPrivateWebhook: true });
         const at = new Date();
         const dueAt = new Date(at.getTime() - 300_000).toISOString();
         try {
@@ -367,9 +391,7 @@ describe("scheduled runs", () => {
             assert.deepEqual(batch?.specs.map((entry) => entry.specId), [spec.id]);
             assert.deepEqual(await runsRepository.listRuns(unselected.id), []);
             await updateAutomation(project.id, { cron: null });
-            const originalFetch = globalThis.fetch;
-            globalThis.fetch = async () => new Response(null, { status: 200 });
-            try { await processSchedules(); } finally { globalThis.fetch = originalFetch; }
+            await processSchedules();
             assert.equal((await schedulesRepository.get(project.id))?.lastBatchStatus, "passed");
             assert.equal((await schedulesRepository.get(project.id))?.lastError, null);
             assert.deepEqual((await schedulesRepository.notifications(project.id)).map((row) => row.status).sort(), ["passed", "running"]);
@@ -408,7 +430,7 @@ describe("scheduled runs", () => {
             const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
             await specsRepository.createSpecRecord({ projectId: project.id, featureId: feature.id, title: "Invalid", description: "", path: "specs/invalid", sourceHash: "", markdownHash: "", status: "invalid" });
             await updateAutomation(project.id, {
-                cron: "* * * * *", healFailures: false,
+                cron: "* * * * *", healFailures: false, allowPrivateWebhook: true,
                 webhookUrl: `http://127.0.0.1:${(webhook.address() as AddressInfo).port}/private-token`,
             });
             const at = new Date();

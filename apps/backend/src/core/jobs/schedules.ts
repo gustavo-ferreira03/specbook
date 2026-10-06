@@ -4,6 +4,8 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
 import { schedulesRepository, type ProjectAutomation } from "../../infra/repositories/schedules";
 import { specsRepository } from "../../infra/repositories/specs";
+import { NetworkTargetError, resolveTarget } from "../network/targets";
+import { postWebhook } from "../network/webhook";
 import { decryptSecret } from "../credentials/crypto";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { getRunBatch, startSpecBatch, type RunBatch } from "../runner/batch";
@@ -78,6 +80,7 @@ export const automationSettingsSchema = z.object({
     specIds: z.array(z.string().uuid()).max(1000).optional(),
     healFailures: z.boolean().optional(),
     webhookUrl: webhookSchema.nullable().optional(),
+    allowPrivateWebhook: z.boolean().optional(),
 }).strict();
 
 const locks = new Map<string, Promise<unknown>>();
@@ -98,6 +101,7 @@ async function withAutomationLock<T>(projectId: string, work: () => Promise<T>):
 export function publicAutomation(projectId: string, row: ProjectAutomation | null) {
     return {
         projectId, cron: row?.cron ?? null, specIds: row?.specIds ?? [], healFailures: row?.healFailures ?? true,
+        allowPrivateWebhook: row?.allowPrivateWebhook ?? false,
         webhookConfigured: !!row?.webhookUrl, webhookHost: row?.webhookUrl ? new URL(row.webhookUrl).host : null,
         nextRunAt: row?.nextRunAt ?? null, lastBatchId: row?.lastBatchId ?? null,
         lastBatchStatus: row?.lastBatchStatus ?? null, lastError: row?.lastError ?? null, updatedAt: row?.updatedAt ?? null,
@@ -114,10 +118,13 @@ export async function updateAutomation(projectId: string, input: unknown) {
         }
         const previous = await schedulesRepository.get(projectId);
         const cron = patch.cron === undefined ? previous?.cron ?? null : patch.cron;
+        const webhookUrl = patch.webhookUrl === undefined ? previous?.webhookUrl ?? null : patch.webhookUrl;
+        const allowPrivateWebhook = patch.allowPrivateWebhook ?? previous?.allowPrivateWebhook ?? false;
+        if (webhookUrl && (patch.webhookUrl !== undefined || patch.allowPrivateWebhook !== undefined)) await resolveTarget(webhookUrl, allowPrivateWebhook);
         const row = await schedulesRepository.save(projectId, {
             cron, specIds: patch.specIds ? [...new Set(patch.specIds)] : previous?.specIds ?? [],
             healFailures: patch.healFailures ?? previous?.healFailures ?? true,
-            webhookUrl: patch.webhookUrl === undefined ? previous?.webhookUrl ?? null : patch.webhookUrl,
+            webhookUrl, allowPrivateWebhook,
             nextRunAt: cron ? cron !== previous?.cron || !previous?.nextRunAt ? nextCronAt(cron) : previous.nextRunAt : null,
         });
         if (patch.webhookUrl !== undefined && patch.webhookUrl !== previous?.webhookUrl) await schedulesRepository.cancelPendingNotifications(projectId);
@@ -203,14 +210,13 @@ export async function deliverWebhookNotifications(at = new Date()): Promise<void
         const timeout = setTimeout(() => controller.abort(), 5000);
         let error: string | null = null;
         try {
-            const response = await fetch(decryptSecret(claimed.webhookUrl), {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(claimed.payload), redirect: "error", signal: controller.signal,
+            const automation = await schedulesRepository.get(claimed.projectId);
+            const status = await postWebhook(decryptSecret(claimed.webhookUrl), claimed.payload, {
+                allowPrivate: automation?.allowPrivateWebhook ?? false, signal: controller.signal,
             });
-            await response.body?.cancel();
-            if (!response.ok) error = `Webhook returned HTTP ${response.status}`;
-        } catch {
-            error = "Webhook request failed or timed out";
+            if (status < 200 || status >= 300) error = `Webhook returned HTTP ${status}`;
+        } catch (caught) {
+            error = caught instanceof NetworkTargetError ? caught.message : "Webhook request failed or timed out";
         } finally {
             clearTimeout(timeout);
             deliveries.delete(controller);

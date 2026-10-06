@@ -1,0 +1,1 @@
+ALTER TABLE `project_automations` ADD `allow_private_webhook` integer DEFAULT false NOT NULL;

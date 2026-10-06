@@ -243,6 +243,7 @@ export const projectAutomations = sqliteTable("project_automations", {
     specIds: text("spec_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
     healFailures: integer("heal_failures", { mode: "boolean" }).notNull().default(true),
     webhookUrl: text("webhook_url"),
+    allowPrivateWebhook: integer("allow_private_webhook", { mode: "boolean" }).notNull().default(false),
     nextRunAt: text("next_run_at"),
     lastBatchId: text("last_batch_id"),
     lastBatchStatus: text("last_batch_status").$type<RunStatus>(),

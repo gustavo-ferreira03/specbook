@@ -22,6 +22,7 @@ interface AutomationSettings {
     specIds: string[];
     healFailures: boolean;
     webhookConfigured: boolean;
+    allowPrivateWebhook: boolean;
     webhookHost: string | null;
     nextRunAt: string | null;
     lastBatchId: string | null;
@@ -44,6 +45,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
     const [cron, setCron] = useState("");
     const [specIds, setSpecIds] = useState<string[]>([]);
     const [healFailures, setHealFailures] = useState(true);
+    const [allowPrivateWebhook, setAllowPrivateWebhook] = useState(false);
     const [webhookUrl, setWebhookUrl] = useState("");
     const [removeWebhook, setRemoveWebhook] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -62,6 +64,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setCron(value.cron ?? "");
         setSpecIds(value.specIds);
         setHealFailures(value.healFailures);
+        setAllowPrivateWebhook(value.allowPrivateWebhook);
         setWebhookUrl("");
         setRemoveWebhook(false);
     }
@@ -98,6 +101,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         || cron.trim() !== (settings.cron ?? "")
         || JSON.stringify([...specIds].sort()) !== JSON.stringify([...settings.specIds].sort())
         || healFailures !== settings.healFailures
+        || allowPrivateWebhook !== settings.allowPrivateWebhook
         || Boolean(webhookUrl.trim())
         || removeWebhook
     );
@@ -115,6 +119,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                     cron: cron.trim() || null,
                     specIds,
                     healFailures,
+                    allowPrivateWebhook,
                     ...(removeWebhook ? { webhookUrl: null } : webhookUrl.trim() ? { webhookUrl: webhookUrl.trim() } : {}),
                 }),
             });
@@ -199,6 +204,12 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                             <Input id="automation-webhook" type="password" inputMode="url" autoComplete="new-password" value={webhookUrl} onChange={(event) => { setWebhookUrl(event.target.value); setRemoveWebhook(false); setFeedback(null); }} placeholder="https://hooks.example.com/…" disabled={saving || removeWebhook} aria-describedby="automation-webhook-help" />
                             <p id="automation-webhook-help" className="mt-1.5 text-meta text-ink-subtle">{removeWebhook ? "The webhook will be removed when you save." : settings.webhookConfigured ? `Connected to ${settings.webhookHost ?? "your webhook"}. Leave blank to keep it, or enter a new HTTPS URL.` : "Enter an HTTPS URL to receive notifications."}</p>
                             {settings.webhookConfigured && <Button type="button" variant="ghost" size="sm" className="mt-2" disabled={saving} onClick={() => { setRemoveWebhook((value) => !value); setWebhookUrl(""); setFeedback(null); }}>{removeWebhook ? "Keep webhook" : "Remove webhook"}</Button>}
+                        </SettingsRow>
+                        <SettingsRow label="Webhook network access" htmlFor="automation-webhook-network" description="Private destinations include internal services and this server's loopback addresses.">
+                            <Select value={allowPrivateWebhook ? "private" : "public"} onValueChange={(value) => { setAllowPrivateWebhook(value === "private"); setFeedback(null); }} disabled={saving}>
+                                <SelectTrigger id="automation-webhook-network"><SelectValue /></SelectTrigger>
+                                <SelectContent><SelectItem value="public">Public destinations only</SelectItem><SelectItem value="private">Allow private destinations</SelectItem></SelectContent>
+                            </Select>
                         </SettingsRow>
                         {settings.lastError && <SettingsBlock><Alert variant="warning" role="status"><AlertTitle>Last automation attempt</AlertTitle><AlertDescription>{settings.lastError}</AlertDescription></Alert></SettingsBlock>}
                         <SettingsFooter feedback={feedback ? <InlineFeedback feedback={feedback} /> : dirty ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}>
