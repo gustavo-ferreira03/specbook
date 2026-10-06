@@ -1,6 +1,6 @@
 # Competitive release progress
 
-Branch: `feat/compete`, based on `main` (`20e836c`), with the later main polish merged before integration. All six features are verified and ready for the local merge into main; no push or tags.
+Completed on `feat/compete`, based on `main` (`20e836c`), with the later main polish merged before integration. All six features were verified and merged locally into main in `9cd2988`. No push or tags.
 
 ## Scope
 
