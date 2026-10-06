@@ -64,6 +64,9 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
             title = `Proposed Feature: ${proposed.title}`;
             params = proposed;
         }
+        const rejected = (await jobsRepository.inbox(job.projectId)).find((item) =>
+            item.status === "rejected" && item.kind === kind && JSON.stringify(item.payload.params) === JSON.stringify(params));
+        if (rejected) throw new Error("The human rejected this proposal. Respect that decision; ask a question if new evidence changes the recommendation.");
         const payload = { baseHead, params, before, requiresVerification: ["failure_triage", "regenerate"].includes(job.kind) };
         const existing = (await jobsRepository.inbox(job.projectId)).find((item) =>
             item.jobId === job.id && item.status === "pending" && item.payload.baseHead === baseHead && JSON.stringify(item.payload.params) === JSON.stringify(params));

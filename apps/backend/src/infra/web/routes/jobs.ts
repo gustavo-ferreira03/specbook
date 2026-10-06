@@ -1,4 +1,5 @@
 import { closeChatBrowser } from "../../../core/browser/sessions";
+import { enqueueIntent } from "../../../core/steward/engine";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { proposalDirectory, type ProposalVerification } from "../../../core/jobs/verification";
@@ -50,6 +51,20 @@ export function createJobsRouter(): Hono {
         const target = path.join(directory, file);
         if (await fs.realpath(target) !== target) throw new HTTPException(400, { message: "Invalid artifact path" });
         return c.body(new Uint8Array(await fs.readFile(target)), 200, { "Content-Type": "image/png", "Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff" });
+    });
+    router.post("/projects/:id/inbox/:itemId/promote", async (c) => {
+        const item = await jobsRepository.item(c.req.param("itemId"));
+        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
+        if (item.kind !== "bug_report") throw new HTTPException(400, { message: "Only bug reports can be promoted to regression coverage" });
+        const intent = await enqueueIntent(item.projectId, {
+            kind: "coverage", priority: 90,
+            reason: `Regression coverage for ${item.title}`.slice(0, 2000),
+            goal: `The human requested a regression Spec for this bug. Inspect existing coverage, reproduce the issue and propose a new Spec or a behavior change in Inbox. Do not silently edit spec.yml.
+${item.title}
+${item.body}`.slice(0, 6000),
+        }, `regression:${item.id}`);
+        await jobsRepository.updateItem(item.id, { payload: { ...item.payload, regressionIntentId: intent.id } });
+        return c.json({ intentId: intent.id }, 202);
     });
     router.post("/projects/:id/inbox/:itemId/review", zValidator("json", reviewSchema), async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));

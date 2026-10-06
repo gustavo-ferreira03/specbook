@@ -12,7 +12,7 @@ export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([
     "browser_tabs",
 ]);
 
-const DESTRUCTIVE_CLICK_PATTERN =
+export const DESTRUCTIVE_CLICK_PATTERN =
     /\b(add|create|delete|edit|remove|erase|destroy|save|confirm|pay|payment|purchase|buy|checkout|refund|unsubscribe|cancel|logout|log out|sign out|publish|submit|send|place order|adicionar|criar|editar|salvar|confirmar|excluir|apagar|remover|deletar|pagar|pagamento|comprar|estornar|reembolso|cancelar|sair|desconectar|encerrar|publicar|enviar|submeter|finalizar)\b/i;
 
 function isWithinDiscoveryOrigin(url: string, origin: string): boolean {

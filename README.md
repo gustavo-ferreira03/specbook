@@ -1,6 +1,6 @@
 # <img src="apps/frontend/public/specbook-chat-icon.svg" width="32" height="32" align="absmiddle" alt=""> Specbook
 
-Specbook turns a conversation about a web application into a readable, executable Spec. You describe a flow in chat, watch the agent inspect the application in a visible browser, then review the YAML and Playwright Test files it writes.
+Specbook checks web applications through readable, executable Specs. Describe a flow in chat or let the project agent investigate failures, application changes, and missing coverage. Review its findings and proposed changes in the Inbox.
 
 Every project gets its own Git repository. Specs, Features, and confirmed project context remain ordinary files that a team can inspect and edit; SQLite only indexes them for the application.
 
@@ -59,6 +59,21 @@ git clone https://your-specbook-host/git/<project-id>.git
 ```
 
 The repository accepts the `main` branch only. Generated files and edits made in Specbook are committed before the remote is advertised, and pushes are reindexed into the project after they complete. Rotating or revoking the token immediately prevents new Git requests; existing connections must authenticate again.
+
+## Autonomous QA
+
+The project steward observes failed runs, invalid or changed Specs, deployments, confirmed project context, new credentials, and requests from chat. It chooses work within a budget and records its progress in **Activity**. Jobs persist across backend restarts and use the same agent and browser tools as chat.
+
+**Inbox** holds proposed Specs and fixes, bug reports, and questions. Approving a proposal commits it to the project's repository. Answering a question resumes the investigation; enter secrets in **Settings → Credentials**. The agent treats `spec.yml` as the behavior contract: changes to its steps or expected result always require human review.
+
+**Settings → Automation** provides optional controls:
+
+- **Propose** is the default: investigate and submit changes for review. **Observe** records signals without starting new work. **Act** may apply a verified selector-only fix after three approved examples, provided none were rejected.
+- A five-field UTC cron schedule runs all Specs or a selected set. An optional webhook receives scheduled batch status changes; failure investigation can be disabled for scheduled runs.
+
+A failed Spec runs once more before the healer investigates. Passing on retry marks it as flaky and keeps both attempts in its history. Persistent failures lead to a verified implementation patch, a bug report with evidence, or a question about the environment. Exploration can collect console and network failures, check safe links, and inspect accessibility with axe. Bug reports can be promoted to regression Spec proposals.
+
+Each project reserves up to 300,000 tokens and 30 active minutes per UTC day, with one active job per project. Equivalent work has a six-hour cooldown; blocked work and rejected proposals prevent repeated investigations. Schedules, webhooks, and steering fields are optional.
 
 ## CI/CD
 

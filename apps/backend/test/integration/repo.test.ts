@@ -496,10 +496,63 @@ describe("project steward", () => {
         assert.equal(intents.find((item) => item.key === `run-blocker:${resumed.id}`)?.status, "ignored");
     });
 
+    test("keeps independent coverage requests and promoted bug reports distinct", async () => {
+        const { enqueueIntent } = await import("../../src/core/steward/engine");
+        const projectId = await createProject("Independent coverage");
+        const base = { kind: "coverage", reason: "Missing coverage", goal: "Cover login" };
+        const login = await enqueueIntent(projectId, base, "chat:login");
+        const duplicate = await enqueueIntent(projectId, { ...base, goal: " Cover   LOGIN " }, "chat:repeat");
+        const checkout = await enqueueIntent(projectId, { ...base, goal: "Cover checkout" }, "chat:checkout");
+        const regression = await enqueueIntent(projectId, base, "regression:bug-one");
+        assert.equal(login.fingerprint, duplicate.fingerprint);
+        assert.notEqual(login.fingerprint, checkout.fingerprint);
+        assert.notEqual(login.fingerprint, regression.fingerprint);
+    });
 
+    test("promoting a bug report creates one regression intent without changing the repository", async () => {
+        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        await stopJobWorker();
+        const projectId = await createProject("Regression proposal");
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Investigate", budget: jobBudgetSchema.parse({}) });
+        const bug = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "bug_report", title: "Checkout drops the discount", body: "Open checkout with a coupon; the total ignores it." });
+        const question = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Access", body: "Which account?" });
+        const head = await repoGit.getHeadSha(projectId);
+        const router = new Hono().route("/", createJobsRouter());
+        const promote = (project: string, item: string) => router.request(`/projects/${project}/inbox/${item}/promote`, { method: "POST" });
+        const response = await promote(projectId, bug.id);
+        assert.equal(response.status, 202);
+        const { intentId } = await response.json() as { intentId: string };
+        assert.deepEqual(await (await promote(projectId, bug.id)).json(), { intentId });
+        assert.equal((await promote(crypto.randomUUID(), bug.id)).status, 404);
+        assert.equal((await promote(projectId, question.id)).status, 400);
+        const intents = await stewardRepository.intents(projectId);
+        assert.equal(intents.length, 1);
+        assert.equal(intents[0]?.intent.kind, "coverage");
+        assert.match(intents[0]?.intent.goal ?? "", /total ignores it/);
+        assert.equal((await jobsRepository.item(bug.id))?.payload.regressionIntentId, intentId);
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+        assert.ok((await repoGit.getProjectGit(projectId).status()).isClean());
+    });
 
-
-
-
+    test("does not recreate an exact proposal the human already rejected", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const projectId = await createProject("Rejected proposal");
+        const createJob = () => jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Propose coverage", budget: jobBudgetSchema.parse({}) });
+        const job = await createJob();
+        const params = { title: "Checkout", description: "Coupons and payment" };
+        const proposal = await proposeMutation(job, "create_feature", params);
+        await jobsRepository.updateItem(proposal.id, { status: "rejected" });
+        const next = await createJob();
+        await assert.rejects(() => proposeMutation(next, "create_feature", { description: params.description, title: params.title }), /human rejected/);
+        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
+        const different = await proposeMutation(next, "create_feature", { title: "Login", description: "Access and account sessions" });
+        assert.equal(different.status, "pending");
+    });
 
 });

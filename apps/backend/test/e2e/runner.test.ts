@@ -42,15 +42,32 @@ function origin(server: http.Server): string {
 const available = await chromiumAvailable();
 let app: http.Server;
 let evil: http.Server;
+const explorationRequests: string[] = [];
+const externalRequests: string[] = [];
 
 before(async () => {
-    evil = await listen((_request, response) => {
+    evil = await listen((request, response) => {
+        externalRequests.push(request.url ?? "");
         response.setHeader("content-type", "text/html");
         response.end('<h1>Phishing</h1><label>Password <input type="password"></label>');
     });
     app = await listen((request, response) => {
         response.setHeader("content-type", "text/html");
-        if (request.url?.startsWith("/http-error")) {
+        explorationRequests.push(`${request.method} ${request.url}`);
+        if (request.url === "/explore") {
+            response.end(`<html><head><title>Exploration</title></head><body><h1>Explore</h1>
+<img src="/bad-image"><a href="/http-error?token=${SECRET}">Unavailable page</a>
+<a href="/delete-account">Account link</a><a href="/%64elete-account">Encoded action</a>
+<a href="${origin(evil)}/offsite">External page</a><a href="/redirect-out">Moved page</a>
+<a href="/head-unsupported">Old handler</a><input><button></button>
+<script>console.error("Broken widget ${SECRET}");fetch("/http-error?password=${SECRET}");</script></body></html>`);
+        } else if (request.url === "/redirect-out") {
+            response.writeHead(302, { location: `${origin(evil)}/redirect-target` });
+            response.end();
+        } else if (request.url === "/head-unsupported") {
+            response.statusCode = request.method === "HEAD" ? 405 : 200;
+            response.end();
+        } else if (request.url?.startsWith("/http-error")) {
             response.statusCode = 503;
             response.end("Temporarily unavailable");
         } else if (request.url?.startsWith("/network-error")) {
@@ -230,5 +247,46 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         const passingEvidence = JSON.parse(await fs.readFile(path.join(passingDirectory, "evidence.json"), "utf8"));
         assert.ok(passingEvidence.diagnostics.some((entry: { message: string }) => entry.message === "Console failure ••••"));
         assert.equal(passingEvidence.errorContext, undefined);
+    });
+});
+
+
+describe("exploratory page scan", { skip: !available }, () => {
+    test("collects actual MCP diagnostics, accessibility and safe links without leaking credentials", { timeout: 60_000 }, async () => {
+        const { createRequire } = await import("node:module");
+        const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+        const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+        const { chromium } = await import("@playwright/test");
+        const { scanPage } = await import("../../src/core/chat/exploration-tools");
+        const { minimalChildEnv } = await import("../../src/core/runner/process");
+        const require = createRequire(import.meta.url);
+        const directory = tempDir("specbook-exploration-");
+        const configPath = path.join(directory, "mcp.json");
+        await fs.writeFile(configPath, JSON.stringify({ browser: { browserName: "chromium", launchOptions: { headless: true, executablePath: chromium.executablePath(), args: ["--no-sandbox"] } } }));
+        const cli = path.join(path.dirname(require.resolve("@playwright/mcp/package.json")), "cli.js");
+        const client = new Client({ name: "specbook-scan-test", version: "1.0" });
+        const transport = new StdioClientTransport({ command: process.execPath, args: [cli, "--config", configPath], cwd: directory, env: minimalChildEnv({ XDG_CACHE_HOME: directory }), stderr: "ignore" });
+        await client.connect(transport);
+        try {
+            const mcp = { client, tools: [], ensureBrowser: async () => {}, navigate: async (url: string) => { await client.callTool({ name: "browser_navigate", arguments: { url } }); }, close: () => client.close() };
+            await mcp.navigate(`${origin(app)}/explore`);
+            let evidence = "";
+            const scanned = JSON.parse(await scanPage({ baseUrl: origin(app), mcp, scrub: async (value) => createSecretScrubber([SECRET])(value), recordEvidence: async (value) => { evidence = value; return "/activity#scan"; } }));
+            assert.equal(scanned.evidenceUrl, "/activity#scan");
+            assert.ok(!evidence.includes(SECRET));
+            assert.ok(scanned.evidence.scan.accessibility.violations.some((violation: { id: string }) => violation.id === "image-alt" || violation.id === "button-name"));
+            assert.ok(scanned.evidence.consoleErrors.some((line: string) => line.includes("Broken widget")));
+            assert.ok(scanned.evidence.networkFailures.some((line: string) => line.includes("503")));
+            const links = scanned.evidence.scan.links as { url: string; status?: number; result: string }[];
+            assert.ok(links.some((link) => link.status === 503 && link.result === "broken"));
+            assert.ok(links.some((link) => link.result === "redirect_not_followed"));
+            assert.ok(links.some((link) => link.result === "head_unsupported"));
+            assert.ok(!explorationRequests.some((request) => request.includes("delete-account") || request.includes("%64elete-account")));
+            assert.ok(links.every((link) => new URL(link.url).origin === origin(app)));
+            assert.ok(!externalRequests.includes("/offsite") && !externalRequests.includes("/redirect-target"), "external links and redirects are not fetched");
+            assert.equal(JSON.parse(evidence).scan.url, `${origin(app)}/explore`);
+            await mcp.navigate(origin(evil));
+            await assert.rejects(() => scanPage({ baseUrl: origin(app), mcp, scrub: async (value) => value }), /project origin/);
+        } finally { await client.close(); }
     });
 });

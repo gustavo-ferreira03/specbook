@@ -78,7 +78,7 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
     const [items, setItems] = useState<InboxItem[] | null>(null);
     const [loadError, setLoadError] = useState("");
     const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
-    const [busy, setBusy] = useState<{ id: string; action: ReviewAction } | null>(null);
+    const [busy, setBusy] = useState<{ id: string; action: ReviewAction | "promote" } | null>(null);
     const [answers, setAnswers] = useState<Record<string, string>>({});
     const [showReviewed, setShowReviewed] = useState(false);
 
@@ -113,6 +113,17 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
         } finally {
             setBusy(null);
         }
+    }
+
+    async function promote(item: InboxItem) {
+        setBusy({ id: item.id, action: "promote" });
+        setActionError(null);
+        try {
+            await api(apiPath`/projects/${projectId}/inbox/${item.id}/promote`, { method: "POST" });
+            await load();
+        } catch (error) {
+            setActionError({ id: item.id, message: errorMessage(error) });
+        } finally { setBusy(null); }
     }
 
     const reviewable = items?.filter((item) => item.kind !== "note") ?? [];
@@ -177,6 +188,13 @@ export default function InboxPage({ params }: { params: Promise<{ projectId: str
                                                 <Link className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={`/p/${projectId}/activity#${item.jobId}`}>View activity</Link>
                                             </div>
                                             <p className="mt-3 max-w-reading whitespace-pre-wrap break-words text-body text-ink">{item.body}</p>
+                                            {item.kind === "bug_report" && (
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    {item.payload.regressionIntentId ? <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/activity`}>Follow regression proposal</Link></Button>
+                                                        : <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void promote(item)}>{reviewing && busy.action === "promote" ? "Requesting proposal…" : "Promote to regression Spec"}</Button>}
+                                                    {item.payload.specId && <Button asChild variant="ghost" size="sm"><Link href={`/p/${projectId}/specs/${item.payload.specId}${item.payload.runId ? `#run-${item.payload.runId}` : ""}`}>View evidence</Link></Button>}
+                                                </div>
+                                            )}
                                             {item.payload.params && <ProposedChanges item={item} />}
                                             {verification && (
                                                 <div className="mt-4 space-y-2">

@@ -15,6 +15,7 @@ import { modelRegistryPromise, modelRuntimePromise } from "../llm/runtime";
 import { storageRoot } from "../paths";
 import { createProjectScrubber } from "../credentials/scrub";
 import { chatsRepository } from "../../infra/repositories/chats";
+import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
@@ -33,6 +34,7 @@ import {
 } from "./chat-registry";
 import { createContextTools } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
+import { createExplorationTools } from "./exploration-tools";
 import { createBackgroundTaskTool } from "../steward/tools";
 import { createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy } from "./discovery-policy";
 import { TurnMetricsRecorder, type TurnTrigger } from "./metrics";
@@ -270,12 +272,24 @@ async function runReservedChatTurn(
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
         });
+        const explorationTools = createExplorationTools({
+            baseUrl: project.baseUrl,
+            mcp: chatBrowser?.mcp ?? null,
+            scrub,
+            recordEvidence: async (json) => {
+                const job = await jobsRepository.forChat(id);
+                if (!job) return;
+                await jobsRepository.log(job.id, "page_scan", json);
+                return `/p/${row.projectId}/activity#${job.id}`;
+            },
+        });
         const customTools = discoveryRevision
             ? [
                   ...browserTools,
                   ...createContextTools(discoveryRevision.id, row.projectId),
                   ...credentialTools,
                   ...sessionTools,
+                  ...explorationTools,
               ]
             : [
                   ...browserTools,
@@ -283,6 +297,7 @@ async function runReservedChatTurn(
                   ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`)] : []),
                   ...credentialTools,
                   ...sessionTools,
+                  ...explorationTools,
               ];
         const confirmedContext = discoveryRevision
             ? null

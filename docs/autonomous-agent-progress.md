@@ -93,3 +93,11 @@ Steward collection now uses deterministic observation generations to deduplicate
 Validation: 209 tests and both app typechecks passed before the final review. Six CI-specific tests pass, including atomic busy rejection and client reconnection. Live checks covered token creation/rotation/revocation, real Chromium on a preview URL, the client and report exports, deploy signals, and the settings UI at desktop/390px. Provider-specific deploy adapters are optional and are not included; all providers can use the generic endpoint.
 
 Next: finish exploration/coverage verification and replace proposal field dumps with file diffs as requested by Gus. Then consolidate this log and delete only the temporary verification projects via the API.
+
+## Coverage and exploration (implemented)
+
+Coverage jobs compare confirmed areas, roles and rules with existing Specs. Independent coverage requests retain distinct intent fingerprints, and an exact rejected proposal cannot be silently recreated. Bug reports have a "Promote to regression Spec" action that creates one persisted coverage intent; the repository remains untouched until proposal approval.
+
+The agent now has a Zod-derived scan_page tool. It runs fixed, trusted axe code on the current project page and captures bounded console/network errors and same-origin link checks. Link checks use HEAD with short timeouts, skip destructive names/URLs (including encoded variants), and do not follow redirects. Page diagnostics redact stored secrets and query values, persist in job audit entries, and link from bug reports to Activity. Cancellation propagates through the scanner and prevents saving incomplete evidence.
+
+Validation: the existing runner suite passes with real Chromium and Playwright MCP, including HTTP errors, accessibility violations, destructive/off-origin links, redirects and secret redaction. Integration tests cover promotion idempotency/project isolation, unchanged repositories, independent coverage requests and rejected proposals. Final full-suite validation is running alongside the diff review change.
