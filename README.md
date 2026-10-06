@@ -2,7 +2,7 @@
 
 Write down how your web app should behave, then verify that it still does. Specbook turns a conversation into readable Specs and executable TypeScript tests, runs them after deployments, and investigates failures in a real browser.
 
-Review the evidence and proposed diffs in **Overview**. The agent can repair a test implementation; changes to the expected behavior always need your approval.
+Work requested in chat stays in that conversation: select suggested Specs, review proposed diffs, answer questions and inspect run evidence there. **Overview** collects project-wide events and decisions. The agent can repair a test implementation; changes to the expected behavior always need your approval.
 
 [Watch the demo](https://gustavo-ferreira03.github.io/specbook/) · [Start a pilot](https://github.com/gustavo-ferreira03/specbook/discussions/new?category=general) · [Documentation](docs/README.md)
 
@@ -33,8 +33,8 @@ After the image download and model connection:
 
 1. Choose **Try with a demo app** to create a project for SauceDemo. Its public test credentials come prefilled.
 2. Open a Spec chat and ask: “Create a Spec to verify that the sign-in page shows a username field, password field and Login button. Don't sign in.”
-3. Review the suggested Specs and choose **Add selected**. Specbook generates each selected Spec, validates it and runs it once. Review its behavior and evidence.
-4. Connect your own app when you're ready. Add private credentials through **Project settings → Credentials**.
+3. Review the suggested Specs in the chat and choose **Add selected Specs**. Specbook generates each selected Spec, validates it and runs it once. Review its behavior, evidence and follow-up questions in the same conversation.
+4. Connect your own app when you're ready. Use the secure credentials form in the chat or **Project settings → Credentials** for private access. Credential values stay out of messages and the model.
 
 A Spec pairs a human-readable `spec.yml` with a validated Playwright `spec.ts`. Both live in the project's Git repository. [See the file format and Git workflow](docs/specs.md).
 

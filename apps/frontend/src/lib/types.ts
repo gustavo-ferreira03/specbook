@@ -324,7 +324,7 @@ export interface InboxItem {
     status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
     title: string;
     body: string;
-    payload: { specBatch?: { sourceChatId: string; contextRevisionId?: string; contextReviewRequired?: boolean; candidates: SpecCandidate[] }; files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; checkTitles?: string[]; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
+    payload: { specBatch?: { sourceChatId: string; contextRevisionId?: string; contextStatus?: ProjectContextStatus; contextReviewRequired?: boolean; candidates: SpecCandidate[] }; files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; checkTitles?: string[]; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
     answer: string | null;
     commitSha: string | null;
     createdAt: string;

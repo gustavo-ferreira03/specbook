@@ -14,7 +14,7 @@ import { createJobSchema, reviewSchema, selectSpecBatchSchema } from "../../../c
 import { presentSpecBatch, selectSpecBatch } from "../../../core/jobs/spec-batches";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
 import { ACTIVE_JOB_STATUSES } from "../../../core/jobs/shared";
-import { jobsRepository, type Job } from "../../repositories/jobs";
+import { jobsRepository, type InboxItem, type Job } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
 import { createChat, startChatTurn } from "../../../core/chat/session";
@@ -30,6 +30,16 @@ async function projectItem(projectId: string, itemId: string, message = "Inbox i
     const item = await jobsRepository.item(itemId);
     if (!item || item.projectId !== projectId) throw new HTTPException(404, { message });
     return item;
+}
+
+async function sourceChatForItem(item: InboxItem): Promise<string | undefined> {
+    const job = await jobsRepository.get(item.jobId);
+    for (const id of [item.payload.discussionChatId, item.payload.sourceChatId, job?.sourceChatId]) {
+        if (typeof id !== "string") continue;
+        const chat = await chatsRepository.getChatRow(id);
+        if (chat?.projectId === item.projectId) return chat.id;
+    }
+    return undefined;
 }
 
 async function cancelJob(job: Job, classification?: Job["classification"]): Promise<boolean> {
@@ -82,7 +92,7 @@ export function createJobsRouter(): Hono {
             goal: `The human requested a regression Spec for this bug. Inspect existing coverage, reproduce the issue and propose a new Spec or a behavior change in Inbox. Do not silently edit spec.yml.
 ${item.title}
 ${item.body}`.slice(0, 6000),
-        }, `regression:${item.id}`, "user");
+        }, `regression:${item.id}`, "user", { sourceChatId: await sourceChatForItem(item) });
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, regressionIntentId: intent.id } });
         return c.json({ intentId: intent.id }, 202);
     });
@@ -97,8 +107,8 @@ ${item.body}`.slice(0, 6000),
     });
     router.post("/projects/:id/inbox/:itemId/discuss", access("editor"), async (c) => {
         const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
-        const existing = typeof item.payload.discussionChatId === "string" ? await chatsRepository.getChatRow(item.payload.discussionChatId) : null;
-        if (existing?.projectId === item.projectId) return c.json({ chatId: existing.id });
+        const existing = await sourceChatForItem(item);
+        if (existing) return c.json({ chatId: existing });
         const chat = await createChat(item.projectId);
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, discussionChatId: chat.id } });
         startChatTurn(chat.id, `Help me understand this suggestion and decide what to do. Explain it in plain English. Do not change files unless I ask you to.\n${item.title}\n${sanitizeTechnicalDetails(item.body)}\nSuggestion reference: ${item.id}.`);

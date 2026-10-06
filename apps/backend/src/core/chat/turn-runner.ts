@@ -37,7 +37,7 @@ import {
     tryReserveChatTurn,
     type ActiveChatSession,
 } from "./chat-registry";
-import { createContextTools, createSpecBatchTool, createApiDocumentationTool } from "./context-tools";
+import { createContextTools, createSpecBatchTool, createApiDocumentationTool, createChatResultsTool } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
 import { createExplorationTools } from "./exploration-tools";
 import { createBackgroundTaskTool } from "../steward/tools";
@@ -226,13 +226,6 @@ async function runReservedChatTurn(
             : null;
         const discoveryRevision = contextRevision?.status === "draft" ? contextRevision : null;
 
-        if (row.contextRevisionId && !discoveryRevision) {
-            metrics.fail("rejected", "discovery_closed");
-            ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(sessionManager, "This discovery is closed and cannot accept more messages.");
-            return;
-        }
-
         let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
         let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null = null;
         const scrub = createProjectScrubber(row.projectId);
@@ -302,9 +295,8 @@ async function runReservedChatTurn(
             scrub,
             recordEvidence: async (json) => {
                 const job = await jobsRepository.forChat(id);
-                if (!job) return;
-                await jobsRepository.log(job.id, "page_scan", json);
-                return `/p/${row.projectId}/overview#${job.id}`;
+                if (job) await jobsRepository.log(job.id, "page_scan", json);
+                return `/p/${row.projectId}/chats/${job?.sourceChatId ?? id}`;
             },
         });
         const customTools = discoveryRevision
@@ -320,8 +312,9 @@ async function runReservedChatTurn(
                   ...browserTools,
                   ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl, environment: turnPolicy?.environment }),
                   createSpecBatchTool(row.projectId, id),
+                  createChatResultsTool(row.projectId, id),
                   createApiDocumentationTool(row.projectId, turnPolicy?.environment),
-                  ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`)] : []),
+                  ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`, id)] : []),
                   ...credentialTools,
                   ...sessionTools,
                   ...explorationTools,

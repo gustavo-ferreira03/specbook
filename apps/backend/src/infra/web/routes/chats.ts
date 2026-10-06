@@ -7,6 +7,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { getChatBrowser } from "../../../core/browser/sessions";
 import { getPendingCredentialRequest } from "../../../core/chat/credential-requests";
+import { chatResults } from "../../../core/chat/results";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import {
     abortChatTurn,
@@ -64,7 +65,7 @@ export function createChatsRouter(): Hono {
             queue: getChatQueueState(id),
             vncSessionId: browser?.vnc.id ?? null,
             projectId: row.projectId,
-            mode: chatsRepository.chatMode(row),
+            mode: revision?.status === "draft" ? "discovery" : "standard",
             contextRevision: revision
                 ? {
                       id: revision.id,
@@ -107,6 +108,12 @@ export function createChatsRouter(): Hono {
         c.header("Cache-Control", "no-cache, no-transform");
         c.header("X-Accel-Buffering", "no");
         return c.res;
+    });
+
+    router.get("/chats/:id/results", access("viewer"), async (c) => {
+        const results = await chatResults(c.req.param("id"));
+        if (!results) throw new HTTPException(404, { message: "Chat not found" });
+        return c.json(results);
     });
 
     router.delete("/chats/:id", access("editor"), async (c) => {
@@ -188,10 +195,6 @@ async function assertChatWritable(id: string, options: { allowBusy?: boolean } =
     const row = await chatsRepository.getChatRow(id);
     if (!row) throw new HTTPException(404, { message: "Chat not found" });
     if (await jobsRepository.forChat(id)) throw new HTTPException(409, { message: "Use the project Inbox to answer this job" });
-    if (row.contextRevisionId) {
-        const revision = await projectContextsRepository.getProjectContextRevision(row.contextRevisionId);
-        if (revision?.status !== "draft") throw new HTTPException(409, { message: "This discovery is closed" });
-    }
     if (isChatDeleting(id)) throw new HTTPException(409, { message: "Chat is being deleted" });
     if (!options.allowBusy && isChatBusy(id)) throw new HTTPException(409, { message: "The agent is still replying" });
 }

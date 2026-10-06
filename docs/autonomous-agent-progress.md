@@ -209,3 +209,15 @@ Correction commits:
 - `9f4556b`: correct Overview health, decisions and repeated-run presentation.
 
 The separate documentation commit preserves 0.1.0 and documents these breaking changes under Unreleased. Phase 0 has no remaining implementation work. Merge and push remain outside this request. Pre-existing changes in `.gitignore` and `apps/frontend/next-env.d.ts` were not included.
+
+
+## 2026-10-06: keep requested work in its originating chat
+
+Gus set a product-wide usability rule: a request made in chat must have its results and decisions available in that conversation. Overview remains the project-wide view for event-driven work; it is never a required detour to finish a chat request.
+
+- Persisted source-chat references on investigations and intents, inherited by selected Spec generation, prerequisite questions and resumed requests. Results and SSE updates are scoped to the originating chat and survive restarts.
+- Chat supports batch selection, context editing/confirmation, proposed file diffs and approval/rejection, bug reports and regression promotion, answers, generated Specs and run evidence. Results stay beside their originating messages. Confirming context turns discovery into a normal conversation without forcing a new chat.
+- Credentials, environments, model configuration and explicit project/global pause controls are available through existing components inside the chat. Secrets still bypass messages and the model; no policy or behavior-contract approval was relaxed.
+- Failed runs requested in chat retain evidence without starting an extra healer. Prompts and tool responses now refer to controls in the current conversation rather than redirecting to Overview.
+- The agent can read the complete proposed change when discussing a suggestion. Retried conversations omit unselected suggestions from abandoned branches while retaining selected work and its questions. Discarded discovery findings explain how to request new suggestions in the same chat.
+- Verification: `pnpm typecheck`, backend build and all 296 existing tests passed. Live browser checks covered context editing/confirmation, selecting one Spec from a batch, child and parent questions, diff approval, secure credential forms, regression requests, generated Specs and actual run screenshots, including historical results outside the recent-run page. Reload preserved the workflow; the 390px layout and dialogs had no horizontal overflow. Checks used a temporary project deleted through the API. No push or tags.

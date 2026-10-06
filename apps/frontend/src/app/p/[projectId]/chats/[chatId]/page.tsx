@@ -8,6 +8,9 @@ import { useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowUp, Check, Compass, Copy, ExternalLink, LoaderCircle, MessageSquareText, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, WifiOff, X } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ChatResultGroup } from "@/components/ChatResultGroup";
+import { ChatSettingsDialog } from "@/components/ChatSettingsDialog";
+import { ChatSpecPreview } from "@/components/ChatSpecPreview";
 import { CredentialRequestCard } from "@/components/CredentialRequestCard";
 import { EmptyState } from "@/components/EmptyState";
 import { LogoMark } from "@/components/LogoMark";
@@ -34,7 +37,9 @@ import {
     sendChatMessage,
 } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { type ChatResults, useChatResults } from "@/lib/chatResults";
 import { countLabel } from "@/lib/format";
+import { onInvalidate } from "@/lib/invalidation";
 import type { ChatMessage, ChatState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { LiveBrowser, originOf, useWideLayout } from "./live-browser";
@@ -383,6 +388,7 @@ const MessageList = memo(function MessageList({
     copiedMessageId,
     actionsDisabled,
     handlers,
+    results,
 }: {
     messages: ChatMessage[];
     steps: ToolStep[];
@@ -393,6 +399,7 @@ const MessageList = memo(function MessageList({
     copiedMessageId: string;
     actionsDisabled: boolean;
     handlers: MessageHandlers;
+    results: Map<string | null, ReactNode>;
 }) {
     const groups = new Map<string | null, ToolStep[]>();
     const messageIds = new Set(messages.map((message) => message.id));
@@ -409,6 +416,7 @@ const MessageList = memo(function MessageList({
     return (
         <div className="flex flex-col" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">
             <TurnActivity steps={groups.get(null) ?? []} busy={busy} />
+            {results.get(null)}
             {messages.map((message, index) => {
                 const editing = editingMessageId === message.id;
                 return (
@@ -424,6 +432,7 @@ const MessageList = memo(function MessageList({
                             handlers={handlers}
                         />
                         <TurnActivity steps={groups.get(message.id) ?? []} busy={busy} />
+                        {results.get(message.id)}
                     </div>
                 );
             })}
@@ -434,6 +443,7 @@ const MessageList = memo(function MessageList({
 
 function ChatContent({ projectId, chatId }: { projectId: string; chatId: string }) {
     const { canEdit, isAdmin } = useAuth();
+    const chatResults = useChatResults(chatId, projectId);
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
     const repair = searchParams.get("intent") === "repair";
@@ -459,6 +469,8 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const [steps, setSteps] = useState<ToolStep[]>([]);
     const [modelReady, setModelReady] = useState<boolean | null>(null);
     const [projectOrigin, setProjectOrigin] = useState("");
+    const [settingsTab, setSettingsTab] = useState<"credentials" | "environments" | "model" | "automation" | null>(null);
+    const [preview, setPreview] = useState<{ specId: string; runId?: string } | null>(null);
     const wide = useWideLayout();
     const streamAnchorRef = useRef<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -506,6 +518,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 loaded = true;
                 if (!result.busy) streamStore.reset();
                 setState((current) => (current && sameChatState(current, result) ? current : result));
+                void chatResults.reload();
                 if (!result.busy) {
                     setActiveTool("");
                     setAgentStatus("");
@@ -643,7 +656,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             events?.close();
             streamStore.reset();
         };
-    }, [chatId, retryKey, streamStore]);
+    }, [chatId, retryKey, streamStore, chatResults.reload]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -661,6 +674,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         };
     }, [projectId]);
 
+    useEffect(() => onInvalidate((event) => {
+        if (event.resource && event.resource !== "settings") return;
+        getLlmRuntimeStatus().then((status) => setModelReady(status.ready)).catch(() => undefined);
+    }), []);
+
     const scrollToBottomIfPinned = useCallback(() => {
         const container = scrollRef.current?.querySelector<HTMLElement>("[data-slot=scroll-area-viewport]");
         if (container && stickToBottomRef.current) container.scrollTop = container.scrollHeight;
@@ -669,7 +687,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     useEffect(() => {
         const container = scrollRef.current?.querySelector<HTMLElement>("[data-slot=scroll-area-viewport]");
         if (container && stickToBottomRef.current) container.scrollTop = container.scrollHeight;
-    }, [state?.busy, state?.messages.length, state?.vncSessionId, steps.length]);
+    }, [state?.busy, state?.messages.length, state?.vncSessionId, steps.length, chatResults.data]);
 
     useEffect(() => {
         if (!state) return;
@@ -682,11 +700,10 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         return () => container.removeEventListener("scroll", handleScroll);
     }, [state?.messages.length]);
 
-    const discovery = state?.mode === "discovery";
+    const discovery = state?.mode === "discovery" && state.contextRevision?.status === "draft";
     const revisionInfo = state?.contextRevision ?? null;
-    const discoveryTerminal = discovery && revisionInfo ? revisionInfo.status !== "draft" : false;
     const awaitingDiscoveryStart =
-        discovery && state !== null && state.messages.length === 0 && !state.busy && !discoveryTerminal;
+        discovery && state !== null && state.messages.length === 0 && !state.busy;
 
     async function beginDiscovery() {
         if (beginning) return;
@@ -816,10 +833,76 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         return [...merged.values()];
     }, [state?.toolSteps, steps]);
 
+    const reloadResults = useStableCallback(async () => {
+        await chatResults.reload();
+        const current = await getChat(chatId);
+        setState((previous) => previous && sameChatState(previous, current) ? previous : current);
+    });
+    const discussResult = useStableCallback(async (message: string) => {
+        if (sending || !state) throw new Error("Wait for the current message to be sent.");
+        setSending(true);
+        try {
+            if (state.busy) {
+                await queueChatFollowUp(chatId, message);
+                setState((current) => current ? { ...current, queue: { ...current.queue, followUp: current.queue.followUp + 1 } } : current);
+            } else {
+                await sendChatMessage(chatId, message);
+                setState((current) => current ? { ...current, busy: true } : current);
+            }
+            stickToBottomRef.current = true;
+        } finally { setSending(false); }
+    });
+    const viewSpec = useCallback((specId: string, runId?: string) => setPreview({ specId, runId }), []);
+    const scrollToResult = useCallback((id: string) => {
+        const element = document.getElementById(id);
+        if (!element) return;
+        stickToBottomRef.current = false;
+        element.scrollIntoView({ block: "center" });
+        const target = element.querySelector<HTMLElement>("textarea, button, input");
+        target?.focus({ preventScroll: true });
+    }, []);
+    const reviewContext = useCallback(() => scrollToResult("chat-context-review"), [scrollToResult]);
+    const answerQuestion = useCallback((id: string) => scrollToResult(`chat-result-${id}`), [scrollToResult]);
+    const manageAutomation = useCallback(() => setSettingsTab("automation"), []);
+    const resultGroups = useMemo(() => {
+        const nodes = new Map<string | null, ReactNode>();
+        const data = chatResults.data;
+        if (!data || !state) return nodes;
+        const messages = new Set(state.messages.map((message) => message.id));
+        const fallback = state.messages.at(-1)?.id ?? null;
+        const groups = new Map<string | null, ChatResults>();
+        function group(anchor?: string | null) {
+            const key = anchor === null || anchor !== undefined && messages.has(anchor) ? anchor : fallback;
+            let value = groups.get(key);
+            if (!value) {
+                value = { items: [], tasks: [], notes: [], runs: [], specs: [], credentialRequests: [], contextRevision: null };
+                groups.set(key, value);
+            }
+            return value;
+        }
+        for (const item of data.items) group(item.afterMessageId).items.push(item);
+        for (const task of data.tasks) group(task.afterMessageId).tasks.push(task);
+        for (const note of data.notes) group(note.afterMessageId).notes.push(note);
+        for (const run of data.runs) group(run.afterMessageId).runs.push(run);
+        for (const spec of data.specs) group(spec.afterMessageId).specs.push(spec);
+        for (const request of data.credentialRequests) if (request.chatId !== chatId) group(request.afterMessageId).credentialRequests.push(request);
+        if (data.contextRevision) {
+            const anchor = visibleSteps.findLast((step) => step.toolName === "propose_project_context")?.afterMessageId;
+            group(anchor).contextRevision = data.contextRevision;
+        }
+        for (const [anchor, value] of groups) nodes.set(anchor, <article key={`results-${anchor}`} className="mt-3 flex items-start gap-3" aria-label="Specbook results">
+            <AgentAvatar />
+            <div className="min-w-0 flex-1">
+                <p className="mb-1 flex h-7 items-center text-control font-semibold text-ink">Specbook</p>
+                <ChatResultGroup projectId={projectId} data={value} busy={state.busy} onChange={reloadResults} onDiscuss={discussResult} onViewSpec={viewSpec} onReviewContext={reviewContext} onAnswerQuestion={answerQuestion} onManageAutomation={manageAutomation} />
+            </div>
+        </article>);
+        return nodes;
+    }, [answerQuestion, chatId, chatResults.data, discussResult, manageAutomation, projectId, reloadResults, reviewContext, state, viewSpec, visibleSteps]);
+
     const modelMissing = modelReady === false;
-    const composerDisabled = discoveryTerminal || modelMissing;
+    const composerDisabled = modelMissing;
     const chatsHref = `/p/${projectId}/chats`;
-    const modelSettingsHref = "/settings?tab=model";
 
     useEffect(() => {
         // Autosize, including text set programmatically (suggestions, the Spec prefill, a failed send).
@@ -890,6 +973,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 breadcrumbs={[{ label: discovery ? "Project discovery" : "Chats", href: discovery ? `/p/${projectId}` : chatsHref }]}
                 width={browserBeside ? "full" : "chat"}
                 className="pt-3 pb-3 md:pt-5 md:pb-4"
+                actions={canEdit && <Button variant="ghost" size="sm" onClick={() => setSettingsTab("credentials")}><Settings2 size={14} />Chat settings</Button>}
             />
 
             {discovery && revisionInfo && (
@@ -898,11 +982,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                         <span className="flex items-center gap-1.5 font-medium text-ink"><Compass size={14} className="text-ink-subtle" aria-hidden="true" /> Discovery goal</span>
                         <span className="min-w-0 flex-1 truncate text-ink-muted" title={revisionInfo.brief.goal}>{revisionInfo.brief.goal}</span>
                         {revisionInfo.hasProposal && revisionInfo.status === "draft" ? (
-                            <Button asChild variant="outline" size="sm" className="shrink-0">
-                                <Link href={`/p/${projectId}`}>Review project context</Link>
-                            </Button>
-                        ) : !revisionInfo.hasProposal ? (
-                            <Link href={`/p/${projectId}`} className="shrink-0 rounded-sm text-ink-muted underline decoration-line-hover underline-offset-[3px] hover:text-ink">Project context</Link>
+                            <Button variant="outline" size="sm" className="shrink-0" onClick={reviewContext}>Review project context</Button>
                         ) : null}
                     </div>
                 </div>
@@ -949,7 +1029,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                                 <Compass size={14} /> {beginning ? "Starting…" : "Begin discovery"}
                                             </Button>
                                             {modelMissing && isAdmin && (
-                                                <Link href={modelSettingsHref} className="rounded-sm text-control text-ink-muted underline decoration-line-hover underline-offset-[3px] hover:text-ink">Set up a model first</Link>
+                                                <Button variant="link" onClick={() => setSettingsTab("model")}>Set up a model first</Button>
                                             )}
                                         </div>
                                     </section>
@@ -1000,11 +1080,14 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                     editingText={editingText}
                                     actionMessageId={actionMessageId}
                                     copiedMessageId={copiedMessageId}
-                                    actionsDisabled={Boolean(state.busy || actionMessageId || discoveryTerminal || modelMissing)}
+                                    actionsDisabled={Boolean(state.busy || actionMessageId || modelMissing)}
                                     handlers={messageHandlers}
+                                    results={resultGroups}
                                 />
 
                                 <StreamingBubble store={streamStore} busy={state.busy} onGrow={scrollToBottomIfPinned} />
+
+                                {chatResults.error && <Alert variant="danger" className="mt-3 md:ml-10" role="alert"><AlertDescription>Results could not update: {chatResults.error}</AlertDescription><Button variant="outline" size="sm" onClick={() => void chatResults.reload()}>Retry results</Button></Alert>}
 
                                 {state.busy && (
                                     <div
@@ -1048,14 +1131,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                     {canEdit ? <div className="relative shrink-0 bg-surface px-3 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-5">
                         <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-surface to-transparent" />
                         <div className="mx-auto w-full max-w-chat">
-                            {discoveryTerminal && revisionInfo && (
-                                <Alert className="mb-2" role="status">
-                                    <AlertDescription>
-                                        This discovery is closed: its context was {revisionInfo.status}.{" "}
-                                        <Link href={`/p/${projectId}`}>Open the project overview</Link> to see the current context.
-                                    </AlertDescription>
-                                </Alert>
-                            )}
                             {sendError && (
                                 <Alert variant="destructive" className="mb-2 flex items-start gap-2" role="alert">
                                     <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -1081,8 +1156,8 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                             <span className="size-1.5 shrink-0 rounded-full bg-warning-chart" aria-hidden="true" />
                                             <span>No model is set up yet.<span className="hidden sm:inline"> {isAdmin ? "Choose a provider to chat with the agent." : "Ask an administrator to connect a provider."}</span></span>
                                         </p>
-                                        {isAdmin && <Button asChild variant="outline" size="sm">
-                                            <Link href={modelSettingsHref}><Settings2 size={13} /> Set up model</Link>
+                                        {isAdmin && <Button type="button" variant="outline" size="sm" onClick={() => setSettingsTab("model")}>
+                                            <Settings2 size={13} /> Set up model
                                         </Button>}
                                     </div>
                                 )}
@@ -1103,9 +1178,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                         placeholder={
                                             modelMissing
                                                 ? "Describe a behavior to verify…"
-                                                : discoveryTerminal
-                                                  ? "This discovery is closed"
-                                                  : state.busy
+                                                : state.busy
                                                     ? "Add a follow-up for the agent…"
                                                     : discovery
                                                       ? "Guide the discovery or ask about what was found…"
@@ -1163,6 +1236,12 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                     </aside>
                 )}
             </div>
+            {preview && <ChatSpecPreview key={`${preview.specId}:${preview.runId ?? "latest"}`} {...preview} onClose={() => setPreview(null)} />}
+            {settingsTab && <ChatSettingsDialog projectId={projectId} tab={settingsTab} onClose={() => {
+                setSettingsTab(null);
+                getLlmRuntimeStatus().then((status) => setModelReady(status.ready)).catch(() => undefined);
+                getProject(projectId).then(({ project }) => setProjectOrigin(originOf(project.baseUrl))).catch(() => undefined);
+            }} />}
         </div>
     );
 }

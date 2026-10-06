@@ -206,7 +206,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     return text(`Spec ${params.specId} not found in this project.`);
                 }
                 try {
-                    const run = await executeSpec(spec.id, { persistFailures: false, baseUrl: options.baseUrl, environment: options.environment, signal });
+                    const run = await executeSpec(spec.id, { baseUrl: options.baseUrl, environment: options.environment, signal });
                     metrics?.runSpecOutcome({
                         specId: spec.id,
                         runId: run.id,
@@ -224,7 +224,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                                 ? truncate(await scrub(run.failReason), RUN_SPEC_FAIL_REASON_LIMIT)
                                 : null,
                             failedStep: failedStep ? truncate(await scrub(failedStep), 200) : null,
-                            persisted: run.status === "passed",
+                            persisted: true,
                         }),
                     );
                 } catch (error) {

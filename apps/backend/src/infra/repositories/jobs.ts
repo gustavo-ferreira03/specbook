@@ -5,11 +5,16 @@ import { inboxItems, jobActions, jobs } from "../db/schema";
 import { jobLimitsSchema } from "../../core/jobs/schemas";
 import { recordAgentMetric } from "../../core/jobs/metrics";
 import { currentActor, recordAudit } from "../../core/accounts/audit";
+import { publishChatUpdate } from "../../core/chat/chat-registry";
 
 export type Job = typeof jobs.$inferSelect;
 export type InboxItem = typeof inboxItems.$inferSelect;
 type JobPatch = Partial<Omit<Job, "id" | "projectId" | "chatId" | "status" | "updatedAt">>;
 const now = () => new Date().toISOString();
+
+function notifyChat(job: Job): void {
+    if (job.sourceChatId) publishChatUpdate(job.sourceChatId);
+}
 
 function requeuePatch(job: Job, patch: JobPatch & { pendingMessage: string }, activeMs = 0): JobPatch {
     const allowance = jobLimitsSchema.parse({});
@@ -18,9 +23,10 @@ function requeuePatch(job: Job, patch: JobPatch & { pendingMessage: string }, ac
 }
 
 export const jobsRepository = {
-    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "limits"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage" | "stopReason">> & { status?: "queued" | "blocked" }): Promise<Job> {
+    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "limits"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage" | "stopReason" | "sourceChatId">> & { status?: "queued" | "blocked" }): Promise<Job> {
         const [job] = await db.insert(jobs).values({ ...input, id: input.id ?? crypto.randomUUID(), status: input.status ?? "queued", pendingMessage: input.pendingMessage ?? input.goal, createdAt: now(), updatedAt: now() }).returning();
         await recordAgentMetric(job!, "created");
+        notifyChat(job!);
         return job!;
     },
     async get(id: string) {
@@ -43,7 +49,7 @@ export const jobsRepository = {
     async transition(id: string, from: Job["status"], status: Job["status"], patch: JobPatch = {}) {
         const [job] = await db.update(jobs).set({ ...patch, status, updatedAt: now() })
             .where(and(eq(jobs.id, id), eq(jobs.status, from))).returning();
-        if (job) await recordAgentMetric(job, "status_changed");
+        if (job) { await recordAgentMetric(job, "status_changed"); notifyChat(job); }
         return job ?? null;
     },
     async requeue(job: Job, from: Job["status"], patch: JobPatch & { pendingMessage: string }, options: { to?: "queued" | "paused"; activeMs?: number } = {}) {
@@ -57,6 +63,7 @@ export const jobsRepository = {
         if (job && (patch.status !== undefined || patch.classification !== undefined)) {
             await recordAgentMetric(job, patch.classification !== undefined ? "classified" : "status_changed");
         }
+        if (job) notifyChat(job);
     },
     async recordUsage(id: string, tokens: number, wallTimeMs = 0) {
         await db.update(jobs).set({ tokensUsed: sql`${jobs.tokensUsed} + ${tokens}`, elapsedMs: sql`${jobs.elapsedMs} + ${wallTimeMs}`, updatedAt: now() })
@@ -73,7 +80,7 @@ export const jobsRepository = {
         const startedAt = now();
         const [job] = await db.update(jobs).set({ status: "running", startedAt, heartbeatAt: startedAt, updatedAt: startedAt })
             .where(and(eq(jobs.id, id), eq(jobs.status, "queued"))).returning();
-        if (job) await recordAgentMetric(job, "started");
+        if (job) { await recordAgentMetric(job, "started"); notifyChat(job); }
         return job ?? null;
     },
     async log(jobId: string, action: string, detail = "") {
@@ -96,9 +103,12 @@ export const jobsRepository = {
         return grouped;
     },
     async addItem(input: Pick<InboxItem, "jobId" | "projectId" | "kind" | "title" | "body"> & { payload?: Record<string, unknown> }) {
-        const [item] = await db.insert(inboxItems).values({ ...input, payload: input.payload ?? {}, id: crypto.randomUUID(), status: "pending", createdAt: now(), updatedAt: now() }).returning();
-        const job = item?.kind !== "note" ? await this.get(input.jobId) : null;
-        if (job) await recordAgentMetric(job, "item_created", { itemId: item!.id, itemKind: item!.kind });
+        const job = await this.get(input.jobId);
+        const payload = { ...input.payload, ...(job?.sourceChatId ? { sourceChatId: job.sourceChatId } : {}) };
+        const [item] = await db.insert(inboxItems).values({ ...input, payload, id: crypto.randomUUID(), status: "pending", createdAt: now(), updatedAt: now() }).returning();
+        if (job && item!.kind !== "note") await recordAgentMetric(job, "item_created", { itemId: item!.id, itemKind: item!.kind });
+        if (job) notifyChat(job);
+        if (typeof payload.sourceChatId === "string") publishChatUpdate(payload.sourceChatId);
         return item!;
     },
     async inbox(projectId: string) {
@@ -112,7 +122,12 @@ export const jobsRepository = {
             .where(and(eq(inboxItems.id, id), eq(inboxItems.status, "pending"))).returning())[0] ?? null;
     },
     async updateItem(id: string, patch: Partial<Pick<InboxItem, "status" | "answer" | "commitSha" | "payload">>) {
-        await db.update(inboxItems).set({ ...patch, updatedAt: now() }).where(eq(inboxItems.id, id));
+        const [item] = await db.update(inboxItems).set({ ...patch, updatedAt: now() }).where(eq(inboxItems.id, id)).returning();
+        if (item) {
+            const job = await this.get(item.jobId);
+            if (job) notifyChat(job);
+            for (const chatId of [item.payload.sourceChatId, item.payload.discussionChatId]) if (typeof chatId === "string") publishChatUpdate(chatId);
+        }
     },
     async answer(item: InboxItem, answer: string) {
         const job = await this.get(item.jobId);
@@ -130,7 +145,7 @@ export const jobsRepository = {
         ]);
         if (!resumed.length) throw new Error("The job is no longer paused; its answer was not applied");
         const updated = await this.get(job.id);
-        if (updated) await recordAgentMetric(updated, "status_changed");
+        if (updated) { await recordAgentMetric(updated, "status_changed"); notifyChat(updated); }
     },
     async recover() {
         // A shutdown clears startedAt in finishExecution but leaves the status "running", so those jobs are

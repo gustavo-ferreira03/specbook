@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { projectSignals, projectStewards, stewardIntents } from "../db/schema";
+import { publishChatUpdate } from "../../core/chat/chat-registry";
 
 export type Steward = typeof projectStewards.$inferSelect;
 export type ProjectSignal = typeof projectSignals.$inferSelect;
@@ -33,14 +34,17 @@ export const stewardRepository = {
     async acknowledge(id: string, status: ProjectSignal["status"]) {
         await db.update(projectSignals).set({ status }).where(eq(projectSignals.id, id));
     },
-    async addIntent(input: Pick<Intent, "projectId" | "key" | "fingerprint" | "intent" | "priority" | "reason"> & Partial<Pick<Intent, "source">>) {
+    async addIntent(input: Pick<Intent, "projectId" | "key" | "fingerprint" | "intent" | "priority" | "reason"> & Partial<Pick<Intent, "source" | "sourceChatId">>) {
         await db.insert(stewardIntents).values({ ...input, id: crypto.randomUUID(), createdAt: now(), updatedAt: now() }).onConflictDoNothing();
-        return (await db.select().from(stewardIntents).where(and(eq(stewardIntents.projectId, input.projectId), eq(stewardIntents.key, input.key))))[0]!;
+        const row = (await db.select().from(stewardIntents).where(and(eq(stewardIntents.projectId, input.projectId), eq(stewardIntents.key, input.key))))[0]!;
+        if (row.sourceChatId) publishChatUpdate(row.sourceChatId);
+        return row;
     },
     async intents(projectId: string) {
         return db.select().from(stewardIntents).where(eq(stewardIntents.projectId, projectId)).orderBy(desc(stewardIntents.priority), desc(stewardIntents.createdAt));
     },
     async updateIntent(id: string, patch: Partial<Pick<Intent, "status" | "jobId" | "batchId" | "reason">>) {
-        await db.update(stewardIntents).set({ ...patch, updatedAt: now() }).where(eq(stewardIntents.id, id));
+        const [row] = await db.update(stewardIntents).set({ ...patch, updatedAt: now() }).where(eq(stewardIntents.id, id)).returning();
+        if (row?.sourceChatId) publishChatUpdate(row.sourceChatId);
     },
 };

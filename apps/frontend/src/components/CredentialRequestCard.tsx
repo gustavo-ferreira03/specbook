@@ -7,15 +7,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, resolveChatCredentialRequest } from "@/lib/api";
 import type { ChatCredentialRequest } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export function CredentialRequestCard({
     chatId,
     request,
     onResolved,
+    nested = false,
 }: {
     chatId: string;
     request: ChatCredentialRequest;
     onResolved: () => void;
+    nested?: boolean;
 }) {
     const [values, setValues] = useState<Record<string, string>>({});
     const [error, setError] = useState("");
@@ -46,7 +49,7 @@ export function CredentialRequestCard({
     }
 
     return (
-        <article className="mt-5 overflow-hidden rounded-xl border border-line-strong bg-surface shadow-xs md:ml-10" aria-label="Credential request">
+        <article className={cn("mt-5 overflow-hidden rounded-xl border border-line-strong bg-surface shadow-xs", !nested && "md:ml-10")} aria-label="Credential request">
             <div className="flex items-start gap-3 border-b border-line bg-surface-soft px-4 py-3">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-hover text-ink-muted" aria-hidden="true">
                     <KeyRound size={15} />

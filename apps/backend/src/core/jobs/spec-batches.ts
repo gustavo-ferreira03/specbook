@@ -71,21 +71,23 @@ export async function proposeSpecBatch(projectId: string, chatId: string, input:
     }
     const scrub = createProjectScrubber(projectId);
     const clean = specBatchProposalSchema.parse(JSON.parse(await scrub(JSON.stringify(proposed))));
+    const existingJob = await jobsRepository.forChat(chatId);
+    const sourceChatId = existingJob?.sourceChatId ?? chatId;
     return withBatchLock(`chat:${chatId}`, async () => {
         const existing = (await jobsRepository.inbox(projectId)).find((item) => item.kind === "spec_batch" && item.status === "pending"
-            && item.payload.sourceChatId === chatId && JSON.stringify(item.payload.proposed) === JSON.stringify(clean));
+            && item.payload.sourceChatId === sourceChatId && JSON.stringify(item.payload.proposed) === JSON.stringify(clean));
         if (existing) return existing;
-        let job = await jobsRepository.forChat(chatId);
+        let job = existingJob;
         if (job && job.projectId !== projectId) throw new Error("This conversation belongs to another project.");
         if (!job) {
             const internalChat = await createChat(projectId);
-            job = await jobsRepository.create({ projectId, chatId: internalChat.id, trigger: "chat", kind: "review", goal: "Choose Specs to add from this conversation.", limits: jobLimitsSchema.parse({}), status: "blocked" });
+            job = await jobsRepository.create({ projectId, chatId: internalChat.id, sourceChatId: chatId, trigger: "chat", kind: "review", goal: "Choose Specs to add from this conversation.", limits: jobLimitsSchema.parse({}), status: "blocked" });
             await jobsRepository.transition(job.id, "blocked", "completed");
         }
-        const batch: SpecBatch = { candidates: clean.candidates.map((candidate) => ({ ...candidate, id: crypto.randomUUID() })), sourceChatId: chatId, ...options };
+        const batch: SpecBatch = { candidates: clean.candidates.map((candidate) => ({ ...candidate, id: crypto.randomUUID() })), sourceChatId, ...options };
         const item = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_batch", title: clean.title,
             body: "Choose the Specs you want. Specbook will create each selected Spec, validate it and run it once.",
-            payload: { proposed: clean, specBatch: batch, sourceChatId: chatId, language: "en" } });
+            payload: { proposed: clean, specBatch: batch, sourceChatId, language: "en" } });
         await jobsRepository.log(job.id, "spec_batch:proposed", item.id);
         return item;
     });
@@ -95,7 +97,7 @@ async function enqueueSelected(item: InboxItem): Promise<void> {
     const { enqueueJob } = await import("./worker");
     for (const candidate of batchOf(item).candidates.filter((candidate) => candidate.selected)) {
         await enqueueJob(item.projectId, { kind: "generate_spec", trigger: "chat",
-            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and use create_spec once. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId);
+            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and use create_spec once. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId, { sourceChatId: batchOf(item).sourceChatId });
     }
 }
 
@@ -228,5 +230,5 @@ export async function presentSpecBatch(item: InboxItem) {
             error: error ? sanitizeTechnicalDetails(await scrub(error)) : undefined };
     }));
     const context = batch.contextRevisionId ? await projectContextsRepository.getProjectContextRevision(batch.contextRevisionId) : null;
-    return { ...batch, candidates, contextReviewRequired: Boolean(batch.contextRevisionId && context?.status !== "confirmed") };
+    return { ...batch, candidates, contextStatus: context?.status, contextReviewRequired: Boolean(batch.contextRevisionId && context?.status !== "confirmed") };
 }

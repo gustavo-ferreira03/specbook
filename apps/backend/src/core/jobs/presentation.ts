@@ -145,14 +145,22 @@ export async function loadProjectState(projectId: string): Promise<ProjectState>
     return { jobs, specs, intents, signals, settings, clean: (text) => sanitizeTechnicalDetails(scrub(text)) };
 }
 
-export async function projectPresentation(projectId: string, state?: ProjectState) {
+export async function projectPresentation(projectId: string, state?: ProjectState, options: { inbox?: InboxItem[] } = {}) {
     const [project, inbox, features, globallyPaused, { jobs, specs, intents, signals, settings, clean }] = await Promise.all([
-        projectsRepository.getProject(projectId), jobsRepository.inbox(projectId), featuresRepository.listFeatures(projectId),
+        projectsRepository.getProject(projectId), options.inbox ?? jobsRepository.inbox(projectId), featuresRepository.listFeatures(projectId),
         settingsRepository.getAgentPaused(), state ?? loadProjectState(projectId),
     ]);
     if (!project) throw new Error("Project not found");
     const agentPaused = settings.paused || globallyPaused;
     const jobsById = new Map(jobs.map((job) => [job.id, job]));
+    const selectedSpecTitles = new Map<string, string>();
+    for (const item of inbox.filter((item) => item.kind === "spec_batch")) {
+        const candidates = record(item.payload.specBatch).candidates;
+        for (const candidate of Array.isArray(candidates) ? candidates : []) {
+            const { jobId, title } = record(candidate);
+            if (typeof jobId === "string" && typeof title === "string") selectedSpecTitles.set(jobId, title);
+        }
+    }
     const specsById = new Map(specs.map((spec) => [spec.id, spec]));
     const featuresById = new Map(features.map((feature) => [feature.id, feature]));
     const signalsByKey = new Map(signals.map((signal) => [`signal:${signal.id}`, signal]));
@@ -222,7 +230,7 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
         const batch = item.kind === "spec_batch" ? await presentSpecBatch(item) : undefined;
         const type = unfinished && awaiting(item) ? "help" : ITEM_TYPES[item.kind] ?? "question";
         const credentialRequest = item.payload.waitingFor === "credentials";
-        const name = subject.type === "project" ? string(params.title) ?? "this Spec" : subject.name;
+        const name = subject.type === "project" ? string(params.title) ?? selectedSpecTitles.get(item.jobId) ?? "this Spec" : subject.name;
         const safeTitle = plainExcerpt(item.title)?.replace(/^(?:Bug report|Possible bug):\s*/i, "");
         let title: string;
         let summary: string;
@@ -268,7 +276,7 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
                 break;
             default:
                 title = credentialRequest ? `Can you provide access for “${name}”?` : safeTitle && safeTitle.endsWith("?") ? safeTitle : `Can you clarify what should happen in “${name}”?`;
-                summary = credentialRequest ? "Add the requested sign-in details in Settings, then let Specbook know. Do not put passwords in your reply."
+                summary = credentialRequest ? "Use Update credentials to add the requested sign-in details, then let Specbook know. Do not put passwords in your reply."
                     : plainExcerpt(item.body) ?? "Specbook needs your explanation of the expected behavior before it can continue. Discuss the Spec in chat to clarify it.";
         }
         const browserWork = actions.get(item.jobId)?.some((action) => /(?:browser_|scan_page).*:completed$/.test(action.action));

@@ -24,7 +24,7 @@ async function validateReferences(projectId: string, intent: StewardIntent): Pro
     }
 }
 
-export function createBackgroundTaskTool(projectId: string, sourceKey: string) {
+export function createBackgroundTaskTool(projectId: string, sourceKey: string, sourceChatId?: string) {
     const scrub = createProjectScrubber(projectId);
     return defineTool({
         name: "start_background_task",
@@ -37,7 +37,7 @@ export function createBackgroundTaskTool(projectId: string, sourceKey: string) {
             await validateReferences(projectId, intent);
             signal?.throwIfAborted();
             const { enqueueIntent } = await import("./engine");
-            const queued = await enqueueIntent(projectId, intent, `${sourceKey}:${toolCallId}`, "user");
+            const queued = await enqueueIntent(projectId, intent, `${sourceKey}:${toolCallId}`, "user", { sourceChatId });
             return result(await scrub(JSON.stringify(queued)));
         },
     });

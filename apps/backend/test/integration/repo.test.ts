@@ -945,6 +945,7 @@ describe("project steward", () => {
     });
 
     test("run prerequisites ask once and resume the original request without exploratory work", async () => {
+        const { createChat } = await import("../../src/core/chat/session-store");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
@@ -959,7 +960,8 @@ describe("project steward", () => {
         const source = VALID_SPEC.replace("{ page, step }", "{ page, step, secret }")
             .replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByLabel("Email").fill(secret("shopper", "email"));');
         const { spec } = await createSpec(projectId, feature.id, "Sign in", source);
-        const intent = await enqueueIntent(projectId, { kind: "run_specs", goal: "Verify the preview", reason: "The human requested a preview check", specIds: [spec.id], baseUrl: "https://preview.example.com" }, "chat:missing-access", "user");
+        const chat = await createChat(projectId);
+        const intent = await enqueueIntent(projectId, { kind: "run_specs", goal: "Verify the preview", reason: "The human requested a preview check", specIds: [spec.id], baseUrl: "https://preview.example.com" }, `chat:${chat.id}:missing-access`, "user", { sourceChatId: chat.id });
         await processProjectSteward(projectId, false);
         const waiting = (await stewardRepository.intents(projectId)).find((item) => item.id === intent.id)!;
         assert.equal(waiting.status, "running");
@@ -967,11 +969,13 @@ describe("project steward", () => {
         assert.equal(job.status, "blocked");
         assert.equal(job.kind, "review");
         assert.equal(job.tokensUsed, 0);
+        assert.equal(job.sourceChatId, chat.id);
         assert.match(job.stopReason ?? "", /credentials.*not configured/);
         const question = (await jobsRepository.inbox(projectId))[0]!;
         assert.equal(question.kind, "question");
         assert.equal(question.payload.waitingFor, "credentials");
         assert.equal(question.payload.runIntentId, intent.id);
+        assert.equal(question.payload.sourceChatId, chat.id);
         for (let i = 0; i < 3; i++) await processProjectSteward(projectId, false);
         assert.equal((await jobsRepository.inbox(projectId)).length, 1);
         assert.equal((await stewardRepository.intents(projectId)).length, 1);
@@ -982,6 +986,7 @@ describe("project steward", () => {
         const resumed = (await stewardRepository.intents(projectId)).find((item) => item.key === `resume-run:${intent.id}:${question.id}`)!;
         assert.ok(resumed);
         assert.equal(resumed.source, "user");
+        assert.equal(resumed.sourceChatId, chat.id, "access questions and retries stay in the original conversation");
         assert.equal(resumed.intent.baseUrl, "https://preview.example.com");
         assert.deepEqual(resumed.intent.specIds, [spec.id]);
         // The access signal did not actually add the profile: retry asks the exact prerequisite again, then waits.
@@ -1006,6 +1011,8 @@ describe("project steward", () => {
     });
 
     test("promoting a bug report creates one regression intent without changing the repository", async () => {
+        const { createChat } = await import("../../src/core/chat/session-store");
+        const { chatsRepository } = await import("../../src/infra/repositories/chats");
         const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
@@ -1013,11 +1020,14 @@ describe("project steward", () => {
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
         await stopJobWorker();
         const projectId = await createProject("Regression proposal");
-        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Investigate", limits: jobLimitsSchema.parse({}) });
-        const bug = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "bug_report", title: "Checkout drops the discount", body: "Open checkout with a coupon; the total ignores it." });
+        const chat = await createChat(projectId);
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), sourceChatId: chat.id, trigger: "manual", goal: "Investigate", limits: jobLimitsSchema.parse({}) });
+        const bug = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "bug_report", title: "Checkout drops the discount", body: "Open checkout with a coupon; the total ignores it.", payload: { discussionChatId: crypto.randomUUID() } });
         const question = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Access", body: "Which account?" });
         const head = await repoGit.getHeadSha(projectId);
         const router = new Hono().route("/", createJobsRouter());
+        const discussed = await router.request(`/projects/${projectId}/inbox/${bug.id}/discuss`, { method: "POST" });
+        assert.deepEqual(await discussed.json(), { chatId: chat.id }, "discussion returns the original conversation when its separate discussion was deleted");
         const promote = (project: string, item: string) => router.request(`/projects/${project}/inbox/${item}/promote`, { method: "POST" });
         const response = await promote(projectId, bug.id);
         assert.equal(response.status, 202);
@@ -1028,10 +1038,15 @@ describe("project steward", () => {
         const intents = await stewardRepository.intents(projectId);
         assert.equal(intents.length, 1);
         assert.equal(intents[0]?.intent.kind, "coverage");
+        assert.equal(intents[0]?.sourceChatId, chat.id);
         assert.match(intents[0]?.intent.goal ?? "", /total ignores it/);
         assert.equal((await jobsRepository.item(bug.id))?.payload.regressionIntentId, intentId);
         assert.equal(await repoGit.getHeadSha(projectId), head);
         assert.ok((await repoGit.getProjectGit(projectId).status()).isClean());
+        await chatsRepository.deleteChatRow(chat.id);
+        assert.equal((await jobsRepository.get(job.id))?.sourceChatId, null, "deleting a conversation retains the investigation audit");
+        const later = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "bug_report", title: "Checkout has another issue", body: "The checkout cannot continue.", payload: { sourceChatId: chat.id } });
+        assert.equal((await promote(projectId, later.id)).status, 202, "a deleted source conversation cannot block promoting the report from Overview");
     });
 
     test("does not recreate an exact proposal the human already rejected", async () => {
@@ -1942,6 +1957,7 @@ describe("selected batch suggestions", () => {
         assert.equal(progress.candidates[1]!.jobId, undefined);
         const child = await jobsRepository.get(progress.candidates[0]!.jobId!);
         assert.equal(child?.kind, "generate_spec");
+        assert.equal(child?.sourceChatId, chatId, "selected Specs keep the originating human conversation");
         assert.equal(child?.status, "paused");
         assert.equal((await specsRepository.listSpecs(projectId)).length, 0);
         const chatCount = (await chatsRepository.listChatRows(projectId)).length;
@@ -1997,5 +2013,178 @@ describe("selected batch suggestions", () => {
         assert.equal(await commitCount(projectId), count);
         assert.equal((await runsRepository.listRuns(spec.id)).length, 1);
         assert.equal((await presentSpecBatch((await jobsRepository.item(item.id))!)).candidates[0]!.state, "passed");
+    });
+});
+
+describe("results requested in chat", () => {
+    test("keeps selection, generated questions and background results in their originating conversation", async () => {
+        const { createChat, openSession, flushSessionFile, branchSessionForTurn } = await import("../../src/core/chat/session-store");
+        const { subscribeToChatUpdates } = await import("../../src/core/chat/chat-registry");
+        const { chatResults } = await import("../../src/core/chat/results");
+        const { createChatResultsTool } = await import("../../src/core/chat/context-tools");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const { createChatsRouter } = await import("../../src/infra/web/routes/chats");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { proposeSpecBatch, selectSpecBatch, presentSpecBatch, recoverSpecBatches } = await import("../../src/core/jobs/spec-batches");
+        const { enqueueIntent } = await import("../../src/core/steward/engine");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const projectId = await createProject("Chat results");
+        await stewardRepository.update(projectId, { paused: true });
+        const revision = await projectContextsRepository.createProjectContextDraft(projectId, { startUrl: "https://app.example.com", goal: "Map sign-in", safetyNotes: [] });
+        await projectContextsRepository.replaceProjectContextDraft(revision.id, { ...revision.context, summary: "Shoppers sign in before using the catalog.",
+            areas: [{ name: "Authentication", routes: ["/login"], description: "Shopper sign-in" }] });
+        const chat = await createChat(projectId, { contextRevisionId: revision.id });
+        const other = await createChat(projectId);
+        let manager = (await openSession(chat.id))!;
+        const abandonedUser = manager.appendMessage({ role: "user", content: "Suggest checkout Specs", timestamp: 100 });
+        manager.appendMessage({ role: "assistant", content: [{ type: "toolCall", id: "old-suggestion", name: "propose_spec_batch", arguments: {} }], timestamp: 200 } as never);
+        const abandoned = await proposeSpecBatch(projectId, chat.id, { candidates: [{ title: "Checkout", goal: "Show checkout", feature: "Checkout", why: "Orders need a checkout." }] });
+        manager.appendMessage({ role: "toolResult", toolCallId: "old-suggestion", toolName: "propose_spec_batch", content: [{ type: "text", text: JSON.stringify({ inboxId: abandoned.id }) }], isError: false, timestamp: 300 });
+        flushSessionFile(manager);
+        manager = (await branchSessionForTurn(chat.id, abandonedUser)).sessionManager;
+        const user = manager.appendMessage({ role: "user", content: "Suggest sign-in Specs", timestamp: 1000 });
+        const anchor = manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "Here are the suggested Specs." },
+            { type: "toolCall", id: "suggest", name: "propose_spec_batch", arguments: {} }], timestamp: 2000 } as never);
+        const item = await proposeSpecBatch(projectId, chat.id, { candidates: [{ title: "Sign-in form", goal: "Show the form", feature: "Authentication", why: "Users need to sign in." }] }, { contextRevisionId: revision.id });
+        manager.appendMessage({ role: "toolResult", toolCallId: "suggest", toolName: "propose_spec_batch", content: [{ type: "text", text: JSON.stringify({ inboxId: item.id }) }], isError: false, timestamp: 3000 });
+        const task = await enqueueIntent(projectId, { kind: "explore", goal: "Inspect sign-in errors", reason: "Sign-in investigation requested" }, `chat:${chat.id}:explore`, "user", { sourceChatId: chat.id });
+        manager.appendMessage({ role: "assistant", content: [{ type: "toolCall", id: "explore", name: "start_background_task", arguments: {} }], timestamp: 4000 } as never);
+        manager.appendMessage({ role: "toolResult", toolCallId: "explore", toolName: "start_background_task", content: [{ type: "text", text: JSON.stringify(task) }], isError: false, timestamp: 5000 });
+        flushSessionFile(manager);
+        const unrelated = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), sourceChatId: other.id, trigger: "chat", goal: "Other request", limits: jobLimitsSchema.parse({}), status: "blocked" });
+        await jobsRepository.addItem({ projectId, jobId: unrelated.id, kind: "question", title: "Unrelated question", body: "Not part of this conversation." });
+        let updates = 0;
+        const unsubscribe = subscribeToChatUpdates(chat.id, () => { updates++; });
+        try {
+            const initial = (await chatResults(chat.id))!;
+            assert.deepEqual(initial.items.map((result) => result.id), [item.id]);
+            assert.equal((await jobsRepository.item(abandoned.id))?.status, "pending", "an abandoned suggestion remains in project review history without duplicating the current chat selection");
+            assert.equal(initial.items[0]!.afterMessageId, anchor);
+            assert.equal(initial.contextRevision?.id, revision.id);
+            assert.equal(initial.tasks[0]?.id, task.id);
+            assert.equal(initial.tasks[0]?.afterMessageId, anchor);
+            assert.equal(initial.tasks[0]?.title, "Inspect sign-in errors");
+            await projectContextsRepository.confirmProjectContextRevision(revision.id);
+            const selected = await selectSpecBatch(item, [(await presentSpecBatch(item)).candidates[0]!.id]);
+            const childId = (await presentSpecBatch(selected)).candidates[0]!.jobId!;
+            assert.equal((await jobsRepository.get(childId))?.sourceChatId, chat.id);
+            await jobsRepository.transition(childId, "paused", "blocked");
+            const question = await jobsRepository.addItem({ projectId, jobId: childId, kind: "question", title: "Which sign-in role should this Spec use?", body: "Choose the role to test." });
+            await jobsRepository.addItem({ projectId, jobId: childId, kind: "note", title: "Sign-in inspected", body: "The page contains username and password fields." });
+            await jobsRepository.recover();
+            await recoverSpecBatches();
+            const recovered = (await chatResults(chat.id))!;
+            assert.equal(recovered.items.find((result) => result.id === question.id)?.afterMessageId, anchor);
+            assert.equal(recovered.notes[0]?.afterMessageId, anchor);
+            assert.equal(recovered.notes.length, 1);
+            assert.equal(recovered.tasks.find((task) => task.id === childId)?.title, "Create “Sign-in form”");
+            assert.ok(updates > 0, "background progress refreshes the source conversation");
+            assert.ok(!JSON.stringify(recovered).includes("Unrelated question"));
+            const feature = await writer.createFeatureInRepo(projectId, null, "Authentication", "Shopper sign-in");
+            const { spec } = await createSpec(projectId, feature.id, "Sign-in page");
+            const changedSource = VALID_SPEC.replace('page.goto("/")', 'page.goto("/login")');
+            const proposal = await proposeMutation((await jobsRepository.get(item.jobId))!, "update_spec", { specId: spec.id, testSource: changedSource });
+            const read = createChatResultsTool(projectId, chat.id);
+            const readText = async (tool: ReturnType<typeof createChatResultsTool>, input: { itemId?: string }) => {
+                const result = await tool.execute("read", input, undefined as never, undefined, {} as never);
+                const content = result.content[0]!;
+                assert.equal(content.type, "text");
+                return content.text;
+            };
+            const headBeforeRead = await repoGit.getHeadSha(projectId);
+            const full = JSON.parse(await readText(read, {})) as Awaited<ReturnType<typeof chatResults>>;
+            assert.equal(full?.contextRevision?.context.summary, "Shoppers sign in before using the catalog.");
+            assert.equal(full?.contextRevision?.status, "confirmed");
+            const chosen = full?.items.find((result) => result.id === item.id);
+            assert.equal((chosen?.payload.specBatch as { candidates: { selected?: boolean }[] }).candidates[0]?.selected, true);
+            const detailed = JSON.parse(await readText(read, { itemId: proposal.id })) as { id: string; payload: { files: { path: string; before: string | null; after: string }[] } };
+            assert.equal(detailed.id, proposal.id);
+            assert.equal(detailed.payload.files.find((file) => file.path === "spec.ts")?.before, VALID_SPEC);
+            assert.equal(detailed.payload.files.find((file) => file.path === "spec.ts")?.after, changedSource);
+            const contract = detailed.payload.files.find((file) => file.path === "spec.yml")!;
+            assert.equal(contract.before, contract.after);
+            assert.match(contract.after, /Página exibida/);
+            assert.equal(await repoGit.getHeadSha(projectId), headBeforeRead, "reading the complete proposal cannot apply its files");
+            assert.match(await readText(createChatResultsTool(projectId, other.id), { itemId: proposal.id }), /not available in this conversation/);
+            const before = updates;
+            await jobsRepository.update(unrelated.id, { stopReason: "Still waiting" });
+            assert.equal(updates, before, "unrelated conversations do not receive task updates");
+            const router = new Hono();
+            router.route("/", createChatsRouter());
+            const view = await (await router.request(`/chats/${chat.id}`)).json() as { mode: string; contextRevision: { status: string } };
+            assert.equal(view.mode, "standard", "confirmed discovery continues as the same ordinary chat");
+            assert.equal(view.contextRevision.status, "confirmed");
+            assert.equal((await router.request(`/chats/${crypto.randomUUID()}/results`)).status, 404);
+            const foreign = await createProject("Foreign chat source");
+            await assert.rejects(() => enqueueIntent(foreign, { kind: "explore", goal: "Explore", reason: "Requested" }, "foreign", "user", { sourceChatId: chat.id }), /source conversation must belong/);
+            assert.match(await readText(createChatResultsTool(foreign, chat.id), { itemId: proposal.id }), /conversation no longer exists in this project/);
+            const discussed = await proposeSpecBatch(projectId, other.id, { candidates: [{ title: "Catalog", goal: "Show products", feature: "Catalog", why: "Products need to be visible." }] });
+            await jobsRepository.updateItem(discussed.id, { payload: { ...discussed.payload, discussionChatId: chat.id } });
+            assert.ok((await chatResults(chat.id))!.items.some((result) => result.id === discussed.id), "a discussed batch without a direct tool artifact remains reviewable here");
+            const separateReview = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), sourceChatId: other.id, trigger: "chat", goal: "Review the sign-in implementation", limits: jobLimitsSchema.parse({}), status: "blocked" });
+            const discussedPatch = await proposeMutation(separateReview, "update_spec", { specId: spec.id, testSource: changedSource });
+            assert.match(await readText(read, { itemId: discussedPatch.id }), /not available in this conversation/);
+            await jobsRepository.updateItem(discussedPatch.id, { payload: { ...discussedPatch.payload, discussionChatId: chat.id } });
+            const discussionDetails = JSON.parse(await readText(read, { itemId: discussedPatch.id })) as typeof detailed;
+            assert.equal(discussionDetails.payload.files.find((file) => file.path === "spec.ts")?.after, changedSource, "discussion exposes the proposed implementation rather than only its title");
+            await branchSessionForTurn(chat.id, user);
+            const retried = (await chatResults(chat.id))!;
+            assert.ok(retried.items.some((result) => result.id === item.id), "selected Specs remain visible after their originating branch is abandoned");
+            assert.ok(retried.items.some((result) => result.id === question.id), "questions from selected historical generation remain answerable");
+            assert.ok(!retried.items.some((result) => result.id === abandoned.id));
+        } finally { unsubscribe(); }
+    });
+
+    test("retains a failed chat run and returns only that run with its evidence and message anchor", { timeout: 60_000 }, async () => {
+        const { createServer } = await import("node:http");
+        const { createDomainTools } = await import("../../src/core/chat/tools");
+        const { createChat, openSession, flushSessionFile, branchSessionForTurn } = await import("../../src/core/chat/session-store");
+        const { chatResults } = await import("../../src/core/chat/results");
+        const { runsDir } = await import("../../src/core/paths");
+        const server = createServer((_req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end("<h1>Sign in</h1>"); });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        try {
+            const address = server.address() as { port: number };
+            const projectId = await createProject("Failed chat run");
+            await projectsRepository.updateProject(projectId, { baseUrl: `http://127.0.0.1:${address.port}` });
+            const feature = await writer.createFeatureInRepo(projectId, null, "Sign in", "");
+            const { spec } = await createSpec(projectId, feature.id, "Sign-in heading", VALID_SPEC.replace("toBeVisible()", 'toHaveText("Unexpected heading", { timeout: 1000 })'));
+            const chat = await createChat(projectId);
+            const other = await createChat(projectId);
+            const manager = (await openSession(chat.id))!;
+            const anchor = manager.appendMessage({ role: "user", content: "Run the sign-in Spec", timestamp: Date.now() });
+            manager.appendMessage({ role: "assistant", content: [{ type: "toolCall", id: "run", name: "run_spec", arguments: { specId: spec.id } }], timestamp: Date.now() } as never);
+            const runTool = createDomainTools(projectId).find((tool) => tool.name === "run_spec")!;
+            const output = await runTool.execute("run", { specId: spec.id }, undefined as never, undefined, {} as never);
+            const content = output.content[0]!;
+            assert.equal(content.type, "text");
+            const result = JSON.parse(content.text) as { runId: string; status: string; persisted: boolean };
+            assert.equal(result.status, "failed");
+            assert.equal(result.persisted, true);
+            assert.equal((await runsRepository.getRun(result.runId))?.status, "failed");
+            assert.ok(existsSync(path.join(runsDir, result.runId, "evidence.json")), "failed chat evidence remains available");
+            manager.appendMessage({ role: "toolResult", toolCallId: "run", toolName: "run_spec", content: output.content as never, isError: false, timestamp: Date.now() });
+            flushSessionFile(manager);
+            const results = (await chatResults(chat.id))!;
+            assert.equal(results.runs.length, 1);
+            assert.equal(results.runs[0]!.id, result.runId);
+            assert.equal(results.runs[0]!.afterMessageId, anchor);
+            assert.equal(results.runs[0]!.evidenceUrl, `/runs/${result.runId}/evidence`);
+            assert.doesNotMatch(results.runs[0]!.failReason ?? "", /apps\/backend|node_modules|\n\s*at /);
+            assert.equal((await chatResults(other.id))!.runs.length, 0);
+            const next = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(projectId), sourceHash: spec.sourceHash });
+            await runsRepository.finishRun(next.id, "passed", 12, null);
+            const secondAnchor = manager.appendMessage({ role: "user", content: "Run it again", timestamp: Date.now() });
+            manager.appendMessage({ role: "assistant", content: [{ type: "toolCall", id: "run", name: "run_spec", arguments: { specId: spec.id } }], timestamp: Date.now() } as never);
+            manager.appendMessage({ role: "toolResult", toolCallId: "run", toolName: "run_spec", content: [{ type: "text", text: JSON.stringify({ runId: next.id, specId: spec.id }) }], isError: false, timestamp: Date.now() });
+            flushSessionFile(manager);
+            const repeated = (await chatResults(chat.id))!;
+            assert.equal(repeated.runs.find((run) => run.id === result.runId)?.afterMessageId, anchor);
+            assert.equal(repeated.runs.find((run) => run.id === next.id)?.afterMessageId, secondAnchor, "a reused provider tool call id keeps its own message anchor");
+            await branchSessionForTurn(chat.id, secondAnchor);
+            assert.deepEqual((await chatResults(chat.id))!.runs.map((run) => run.id), [result.runId], "abandoned tool results stay out of the active conversation");
+        } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
     });
 });

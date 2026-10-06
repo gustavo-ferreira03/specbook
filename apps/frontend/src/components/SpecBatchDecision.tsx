@@ -45,7 +45,7 @@ export function SpecBatchDecision({ projectId, item, onChange }: { projectId: st
     return <div className="space-y-4">
         {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
         {pending ? <>
-            {batch.contextReviewRequired && <Alert variant="info"><AlertDescription>Review and confirm the discovery findings before adding Specs. <Link href={`/p/${projectId}#overview-context-heading`} className="font-medium underline underline-offset-2">Review project context</Link></AlertDescription></Alert>}
+            {batch.contextReviewRequired && <Alert variant="info"><AlertDescription>{batch.contextStatus === "discarded" ? "These suggestions belong to discarded findings. Use Discuss these Specs to request fresh suggestions." : <>Review and confirm the discovery findings before adding Specs. <Link href={`/p/${projectId}#overview-context-heading`} className="font-medium underline underline-offset-2">Review project context</Link></>}</AlertDescription></Alert>}
             <fieldset disabled={!canEdit || busy !== null} className="min-w-0">
                 <legend className="sr-only">Choose Specs to create</legend>
                 {canEdit && <label className="mb-2 flex min-h-9 w-fit cursor-pointer items-center gap-2.5 text-body text-ink-muted"><input type="checkbox" checked={selected.length === batch.candidates.length} onChange={(event) => setSelected(event.target.checked ? batch.candidates.map((candidate) => candidate.id) : [])} className={cn("size-4 shrink-0 accent-primary", focusRing)} />Select all Specs</label>}

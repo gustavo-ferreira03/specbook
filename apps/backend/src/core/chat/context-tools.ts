@@ -8,6 +8,7 @@ import { specBatchProposalSchema } from "../jobs/schemas";
 import { createProjectScrubber } from "../credentials/scrub";
 import { resolveRunEnvironment } from "../environments";
 import { projectsRepository } from "../../infra/repositories/projects";
+import { chatsRepository } from "../../infra/repositories/chats";
 import { projectRunPolicy } from "../ci/targets";
 import { readApiDocumentation } from "../network/documentation";
 
@@ -49,8 +50,8 @@ export function createSpecBatchTool(projectId: string, chatId: string, contextRe
         parameters: Type.Unsafe<z.infer<typeof specBatchProposalSchema>>(specBatchProposalSchema.toJSONSchema()),
         async execute(_id, input) {
             const item = await proposeSpecBatch(projectId, chatId, input, { contextRevisionId });
-            return text(JSON.stringify({ inboxId: item.id, reviewPath: `/p/${projectId}/overview`,
-                message: contextRevisionId ? "Specs suggested. The human must confirm the discovery context and select which Specs to add in Overview." : "Specs suggested. Ask the human to select which Specs to add in Overview. No files changed." }));
+            return text(JSON.stringify({ inboxId: item.id, reviewPath: `/p/${projectId}/chats/${chatId}#chat-result-${item.id}`,
+                message: contextRevisionId ? "Specs suggested in this conversation. The human can review and confirm the discovery context here, then select which Specs to add." : "Specs suggested in this conversation. Ask the human to select which Specs to add using the selection below. No files changed." }));
         },
     });
 }
@@ -80,8 +81,30 @@ export function createApiDocumentationTool(projectId: string, environment?: RunE
     });
 }
 
+export function createChatResultsTool(projectId: string, chatId: string) {
+    const parameters = z.object({ itemId: z.string().uuid().optional() });
+    const scrub = createProjectScrubber(projectId);
+    return defineTool({
+        name: "read_chat_results",
+        label: "read_chat_results",
+        description: "Read the results and decisions available in this conversation, including background suggestions and proposed file changes. Provide itemId to discuss a specific suggestion. This tool is read-only and cannot access another conversation.",
+        parameters: Type.Unsafe<z.infer<typeof parameters>>(parameters.toJSONSchema()),
+        async execute(_id, input, signal) {
+            signal?.throwIfAborted();
+            const { itemId } = parameters.parse(input);
+            const chat = await chatsRepository.getChatRow(chatId);
+            if (!chat || chat.projectId !== projectId) return text("This conversation no longer exists in this project.");
+            const { chatResults } = await import("./results");
+            const results = await chatResults(chatId);
+            const value = itemId ? results?.items.find((item) => item.id === itemId) : results;
+            return text(value ? await scrub(JSON.stringify(value)) : "That suggestion is not available in this conversation.");
+        },
+    });
+}
+
 export function createContextTools(revisionId: string, projectId: string, chatId: string) {
     return [
+        createChatResultsTool(projectId, chatId),
         createSpecBatchTool(projectId, chatId, revisionId),
         defineTool({
             name: "get_project_context_draft",
@@ -126,8 +149,8 @@ export function createContextTools(revisionId: string, projectId: string, chatId
                     JSON.stringify({
                         revisionId: updated?.id ?? revisionId,
                         status: updated?.status ?? "draft",
-                        reviewPath: `/p/${projectId}`,
-                        message: "Draft saved. Ask the user to review and confirm it on the project overview page.",
+                        reviewPath: `/p/${projectId}/chats/${chatId}#chat-context-review`,
+                        message: "Draft saved in this conversation. Ask the user to review and confirm it using the context review here.",
                     }),
                 );
             },

@@ -14,6 +14,7 @@ import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure, stallJob } from "./retry";
 import { canRunAgentJob, isAgentPaused } from "./pause";
 import { projectsRepository } from "../../infra/repositories/projects";
+import { chatsRepository } from "../../infra/repositories/chats";
 import { withActor } from "../accounts/audit";
 
 const active = new Map<string, Promise<void>>();
@@ -22,7 +23,11 @@ let polling = false;
 let stopped = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 
-export async function enqueueJob(projectId: string, input: unknown = {}, id?: string): Promise<Job> {
+export async function enqueueJob(projectId: string, input: unknown = {}, id?: string, options: { sourceChatId?: string | null } = {}): Promise<Job> {
+    if (options.sourceChatId) {
+        const source = await chatsRepository.getChatRow(options.sourceChatId);
+        if (!source || source.projectId !== projectId) throw new Error("The source conversation must belong to this project.");
+    }
     if (id) {
         const existing = await jobsRepository.get(id);
         if (existing) return existing;
@@ -38,7 +43,7 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
         pendingMessage = input.message;
     }
     const chat = await createChat(projectId);
-    const job = await jobsRepository.create({ ...parsed, id, pendingMessage, projectId, chatId: chat.id });
+    const job = await jobsRepository.create({ ...parsed, id, pendingMessage, projectId, chatId: chat.id, sourceChatId: options.sourceChatId });
     if (await isAgentPaused(projectId)) await jobsRepository.transition(job.id, "queued", "paused");
     await jobsRepository.log(job.id, "queued", parsed.trigger);
     void drainJobs();

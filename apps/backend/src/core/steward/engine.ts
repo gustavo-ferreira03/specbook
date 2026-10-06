@@ -5,6 +5,7 @@ import { runsRepository } from "../../infra/repositories/runs";
 import { areSpecsLocked } from "../specs/lifecycle";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
+import { chatsRepository } from "../../infra/repositories/chats";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { stewardRepository, type Intent, type ProjectSignal } from "../../infra/repositories/steward";
@@ -62,8 +63,12 @@ async function intentFingerprint(projectId: string, intent: StewardIntent, sourc
         regressionKey: key.startsWith("regression:") ? key : undefined });
 }
 
-export async function enqueueIntent(projectId: string, input: unknown, key: string, source: "user" | "event" = "event"): Promise<Intent> {
+export async function enqueueIntent(projectId: string, input: unknown, key: string, source: "user" | "event" = "event", options: { sourceChatId?: string | null } = {}): Promise<Intent> {
     if (!await projectsRepository.getProject(projectId)) throw new Error("Project not found");
+    if (options.sourceChatId) {
+        const chat = await chatsRepository.getChatRow(options.sourceChatId);
+        if (!chat || chat.projectId !== projectId) throw new Error("The source conversation must belong to this project.");
+    }
     const intent = stewardIntentSchema.parse(input);
     if (source !== "user" && ["coverage", "explore"].includes(intent.kind)) throw new Error("Coverage and exploration require an explicit human request");
     const specs = await specsRepository.listSpecs(projectId);
@@ -71,7 +76,7 @@ export async function enqueueIntent(projectId: string, input: unknown, key: stri
     const scrub = createProjectScrubber(projectId);
     intent.goal = await scrub(intent.goal);
     intent.reason = await scrub(intent.reason);
-    return stewardRepository.addIntent({ projectId, key, source, intent, priority: intent.priority, reason: intent.reason,
+    return stewardRepository.addIntent({ projectId, key, source, sourceChatId: options.sourceChatId, intent, priority: intent.priority, reason: intent.reason,
         fingerprint: await intentFingerprint(projectId, intent, source, key, specs) });
 }
 
@@ -163,7 +168,7 @@ async function askForRunPrerequisite(row: Intent, reason: string): Promise<void>
     let job = await jobsRepository.get(row.id);
     if (!job) {
         const chat = await createChat(row.projectId);
-        job = await jobsRepository.create({ id: row.id, projectId: row.projectId, chatId: chat.id, kind: "review", status: "blocked", stopReason: reason,
+        job = await jobsRepository.create({ id: row.id, projectId: row.projectId, chatId: chat.id, sourceChatId: row.sourceChatId, kind: "review", status: "blocked", stopReason: reason,
             trigger: row.source === "user" ? "manual" : "steward", goal: row.intent.goal, specId: row.intent.specIds?.[0], limits: jobLimitsSchema.parse({}) });
     }
     await jobsRepository.transition(job.id, "queued", "blocked", { stopReason: reason });
@@ -275,7 +280,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const job = await enqueueJob(row.projectId, { kind, goal: goal.slice(0, 12000), trigger: row.source === "user" ? "manual" : row.intent.kind === "triage" ? "spec_failure" : "steward",
         specId: row.intent.specIds?.[0], runId: row.intent.runId,
         limits: jobLimitsSchema.parse({}),
-    }, row.id);
+    }, row.id, { sourceChatId: row.sourceChatId });
     await stewardRepository.updateIntent(row.id, { status: "running", jobId: job.id });
 }
 
@@ -301,7 +306,7 @@ export async function processProjectSteward(projectId: string, collect = true): 
             if (job && ["completed", "cancelled"].includes(job.status)) {
                 if (intent.intent.kind === "run_specs" && job.status === "completed") {
                     const answered = (await jobsRepository.inbox(projectId)).find((item) => item.jobId === job.id && item.payload.runIntentId === intent.id && item.status === "answered");
-                    if (answered) await enqueueIntent(projectId, intent.intent, `resume-run:${intent.id}:${answered.id}`, intent.source);
+                    if (answered) await enqueueIntent(projectId, intent.intent, `resume-run:${intent.id}:${answered.id}`, intent.source, { sourceChatId: intent.sourceChatId });
                 }
                 await stewardRepository.updateIntent(intent.id, { status: job.status === "completed" ? "completed" : "failed" });
             } else if (batch && batch.status !== "running") await stewardRepository.updateIntent(intent.id, { status: batch.status === "passed" ? "completed" : "failed" });

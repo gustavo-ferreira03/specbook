@@ -211,6 +211,13 @@
       "when": 1791302113861,
       "tag": "0029_remove_spec_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1791303549242,
+      "tag": "0030_curious_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }
