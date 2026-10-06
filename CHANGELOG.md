@@ -6,6 +6,6 @@ All notable changes to Specbook appear in this file. Future entries are generate
 
 ### Added
 
-- Git-backed project repositories with YAML Specs and Robot Framework execution.
+- Git-backed project repositories with YAML Specs.
 - Visible browser-assisted authoring, guided project discovery, run evidence, and manual file editing.
 - A public Docker image at `ghcr.io/gustavo-ferreira03/specbook`.

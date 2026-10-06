@@ -244,7 +244,51 @@ describe("project, feature and spec through the writer", () => {
 });
 
 describe("autonomous job proposals", () => {
-
+    test("Inbox file previews match the committed bytes for additions and behavior changes", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { proposeMutation, applyProposal } = await import("../../src/core/jobs/proposals");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
+        const projectId = await createProject("Review diffs");
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Propose coverage", budget: jobBudgetSchema.parse({}) });
+        const router = createJobsRouter();
+        const preview = async (id: string) => {
+            const response = await router.request(`/projects/${projectId}/inbox`);
+            assert.equal(response.status, 200);
+            const { items } = await response.json() as { items: { id: string; payload: { files: { path: string; before: string | null; after: string }[] } }[] };
+            return items.find((item) => item.id === id)!.payload.files;
+        };
+        const featureProposal = await proposeMutation(job, "create_feature", { title: "Checkout", description: "Coupons: discounts\nPayment" });
+        const featureFiles = await preview(featureProposal.id);
+        assert.equal(featureFiles[0]?.before, null);
+        await applyProposal(featureProposal);
+        const feature = (await featuresRepository.listFeatures(projectId))[0]!;
+        assert.equal(await fs.readFile(path.join(repoGit.getRepoDir(projectId), feature.path, "feature.yml"), "utf8"), featureFiles[0]?.after);
+        const proposal = await proposeMutation(job, "create_spec", { featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const added = await preview(proposal.id);
+        assert.equal(added.length, 2);
+        assert.ok(added.every((file) => file.before === null));
+        await applyProposal(proposal);
+        const spec = (await specsRepository.listSpecs(projectId))[0]!;
+        for (const file of added) assert.equal(await fs.readFile(path.join(repoGit.getRepoDir(projectId), spec.path, file.path), "utf8"), file.after);
+        const yamlFile = path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml");
+        const original = `# Human contract\n${await fs.readFile(yamlFile, "utf8")}`;
+        await fs.writeFile(yamlFile, original);
+        await repoGit.commitAll(projectId, "test: annotate contract");
+        await reindexProject(projectId);
+        const sourceOnly = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/checkout")') });
+        const sourceFiles = await preview(sourceOnly.id);
+        assert.equal(sourceFiles[0]?.before, original);
+        assert.equal(sourceFiles[0]?.after, original, "unchanged YAML retains comments and formatting");
+        assert.notEqual(sourceFiles[1]?.before, sourceFiles[1]?.after);
+        const behavior = await proposeMutation(job, "update_spec", { specId: spec.id, humanSpec: { ...HUMAN_SPEC, expectedResult: "Discount: applied\nTotal updated" } });
+        const changed = await preview(behavior.id);
+        assert.equal(changed[0]?.before, original);
+        assert.notEqual(changed[0]?.before, changed[0]?.after);
+        await applyProposal(behavior);
+        assert.equal(await fs.readFile(yamlFile, "utf8"), changed[0]?.after);
+        assert.deepEqual(await preview(behavior.id), changed, "review history retains the proposal snapshot");
+    });
 
     test("proposals preserve the contract, reject stale edits, and replay approval once", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");

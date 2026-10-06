@@ -1,103 +1,102 @@
 # Autonomous agent progress
 
-Branch: `feat/autonomous-agent`. Product owner: Gus. No pushes.
+Branch: `feat/autonomous-agent`. Product owner: Gus. No pushes; `main` is untouched.
 
-User corrections: preserve existing UI patterns/components. Remove all obsolete format support; the original request to migrate Robot Specs is cancelled. Current code supports spec.yml + spec.ts only. Do not delete existing storage data.
+## Product decisions
 
-## Foundation (implemented)
+- Jobs are internal. The project steward observes signals, persists intentions and dispatches work; the UI is Activity + Inbox, with no job creation form.
+- Steering, schedules and integrations are optional. Propose is the default autonomy level. Missing access leads to a question; credentials belong in Settings → Credentials.
+- `spec.yml` is the behavior contract. Autonomous repository tools create proposals; human approval is required for behavior changes. Source-only patches preserve the existing YAML bytes.
+- Gus cancelled Robot migration and requested removal of obsolete compatibility. Only `spec.yml` + `spec.ts` are supported. The GitHub repository mirror is removed; built-in Smart HTTP Git and GitHub Copilot OAuth remain.
+- Existing Specbook layout, components, typography and status tokens are reused. Proposed changes are unified file diffs, as requested in the latest correction.
 
-Jobs reuse the chat turn runner and domain/browser/credential tools. SQLite stores the queue, usage, audit entries, Inbox items, and human answers; chat session files retain the conversation. Jobs have default budgets and need no steering fields. `SPECBOOK_MAX_CONCURRENT_JOBS` defaults to `SPECBOOK_MAX_CONCURRENT_RUNS` (or 2); verification runs still use the existing run slots.
+Both addenda have been applied. Their source files were read from `/tmp/claude-1000/-home-gus-projetos-specbook/ebbefea2-f0e2-47c9-923c-2abbc941647f/scratchpad/codex-brief-addendum.md` and `codex-brief-addendum-2.md`.
 
-Job policy wraps repository tools: create/update calls propose changes, never apply them. Inbox approval calls the existing repo writer with a file-content check for existing Specs and repository-head check for new files and an Inbox commit marker. Stale proposals require a fresh proposal. Replayed approvals find their existing commit. Source-only patches preserve the original YAML bytes. Human answers resume the same session and retain cumulative budgets.
+## Implemented
 
-Actions are reserved and persisted before execution. Tokens are accounted after each model response, so one response can exceed the threshold; the next action/response is stopped. Wall time includes browser/model setup and excludes time awaiting a human. Interrupted running jobs return to the queue; they inspect the Inbox and app state before continuing. Browsing has no transactional rollback, so prompts explicitly prohibit blindly replaying mutations.
+### Jobs and Inbox
 
-UI: per-project Inbox and Jobs pages, reviewable original/proposed files, question answers, status, usage and audit logs. Job chats stay out of the human chat list and cannot be driven through chat mutation endpoints.
+Persistent jobs reuse the chat runner, sessions and tools. SQLite retains queue state, budgets, audit entries, proposals and answers. Job chats stay out of the human chat list. Tokens and active wall time accumulate across turns; tool actions are reserved before execution. Questions pause the job, answers resume it, and interrupted jobs reconcile previous output after restart.
 
-## Remaining work, in order
+Approval uses the existing repository writer with an original-file check for edits, a repository-head check for additions, and an Inbox commit marker for idempotent replay. Candidate verification runs outside the project checkout. The Inbox shows file diffs generated with the writer's YAML serializers; additions show all added lines, and untouched contracts show “No changes”. A test compares preview content with the bytes committed on approval.
 
-2. Removed obsolete Robot compatibility and plaintext-token conversion. No migration job or migration action.
-4. Optional schedules and status webhook notifications.
-5. Retry once, classify flakiness, show run history.
-6. Coverage-gap jobs.
-7. Exploratory bug hunting with discovery policy and axe.
-8. Token-authenticated CI trigger and README workflow.
-9. ARIA snapshot assertion and console/network evidence are implemented with failure triage.
+`SPECBOOK_MAX_CONCURRENT_JOBS` defaults to `SPECBOOK_MAX_CONCURRENT_RUNS` or 2. Verification uses normal run slots. Cancellation reaches MCP calls, credential/session helpers and the scanner; stopping a job also closes its browser.
+
+### Failure triage and flakiness
+
+A failed manual, batch or scheduled Spec reruns once before healing. A unique persisted retry reference prevents duplicate retries after restart. Source and contract hashes are checked before retrying or healing. Pass-on-retry marks both attempts flaky, keeps history/evidence visible, and does not trigger the healer. Healing opt-out still permits the retry.
+
+Persistent failure becomes a steward signal. The healer receives the failed step, screenshots, Playwright/ARIA context and scrubbed console/network evidence. It classifies test drift, application bug or environment. Drift permits only a minimal implementation proposal with a passing isolated rerun; bugs produce reports; environment problems lead to investigation or a question. Approval verifies the candidate source hash and execution URL.
+
+The validator and agent instructions allow `toMatchAriaSnapshot`. Runs capture bounded console, page and network failures as evidence.
+
+### Schedules and notifications
+
+Settings → Automation supports optional five-field numeric UTC cron, all or selected Specs, failure investigation, and a generic status webhook with a Slack-compatible text field. Schedules persist, coalesce missed ticks and prevent overlap. The encrypted notification outbox retries delivery and deduplicates each batch/status transition.
+
+### Project steward
+
+Persistent observations, signals and intentions cover failed/invalid/stale/changed Specs, confirmed context, empty projects, deployments, credentials and chat requests. Lightweight deployment checks compare build asset URLs, ETag/Last-Modified or a bounded response hash every five minutes, with availability backoff. Deterministic observation generations deduplicate crash replay while retaining actual A→B→A changes.
+
+A daily planner uses a compact project digest and Zod-derived `propose_intents`; chat and jobs can request background work through the same intention queue. Independent coverage goals remain distinct. Equivalent work has a six-hour cooldown, blocked work prevents equivalent dispatch, and rejected proposals are remembered. Exact rejected proposals cannot be silently recreated.
+
+The steward reserves at most 300,000 tokens and 30 active minutes per project per UTC day, serializes jobs within a project, and limits autonomous batches to twelve per day. A run that cannot start creates a budgeted prerequisite investigation; after resolution it can retry the original selection and URL without an unlimited loop. New credentials resume explicitly tagged credential questions.
+
+Observe records signals without dispatching new work. Propose submits changes for review. Act may apply a verified selector-only fix after three approved examples and no rejected examples; AST comparison excludes assertions, input data and contract changes.
+
+### Coverage and exploration
+
+Coverage jobs compare confirmed areas, roles and rules with existing Specs and Features. Findings become proposals or questions in Inbox. “Promote to regression Spec” creates one persisted coverage intention from a bug report; approval remains required for any repository mutation.
+
+`scan_page` uses a strict empty Zod input and fixed trusted code. It runs axe on the current main document, captures console/network errors and checks up to twenty safe same-origin links with HEAD. It skips destructive link names/URLs, including encoded variants, and never follows link-check redirects. HEAD-unsupported responses are not reported as broken links. Output is bounded, scrubbed and saved in the job audit log with an Activity evidence link. Agents must confirm findings and include reproduction steps before reporting them.
+
+### CI/CD and mirror removal
+
+The GitHub mirror's backend, frontend, credential storage, background sync and database columns are removed. Historical Drizzle migrations remain to upgrade existing databases safely; user repositories and data are preserved. The built-in Git remote and Copilot provider remain functional.
+
+Settings → CI/CD issues, rotates and revokes hashed project-scoped tokens, shown once and separate from Git tokens. It provides snippets for GitHub Actions, GitLab CI, Bitbucket Pipelines, CircleCI and Jenkins, plus recent CI batches with commit/ref/build metadata and evidence links.
+
+- `POST /ci/projects/:id/runs`: all, Feature or selected Specs, optional preview URL, build metadata and quality-gate options.
+- `GET /ci/runs/:batchId`: JSON status, bounded long polling, JUnit or Markdown results.
+- `GET /ci/projects/:id/client.mjs`: authenticated download of the dependency-free Node client.
+- `POST /ci/projects/:id/deploy`: generic deployment signal for the steward.
+
+Every CI endpoint is token-authenticated and exempt from browser Host/CSRF checks. The client waits, exports reports and returns a failing exit code when appropriate. It retries bounded transient GET failures but never repeats POST. Busy Specs return 409 with atomic lock reservation, preventing an unexpected later batch after the caller times out.
+
+Quality gates snapshot open Inbox bugs at batch creation. By default, previously known failures and flaky results do not fail the pipeline; both are visible in reports. New bugs do not retroactively waive a failed gate.
+
+Preview URLs persist through execution, retry, investigation and candidate verification. They do not authorize stored secrets: credential origin rules remain tied to the canonical project URL and the profile's explicit allowed origins. The README explains preview authorization and all five pipeline snippets.
 
 ## Verification
 
-`pnpm typecheck` and all 191 tests pass. Added integration coverage for stale proposals, idempotent approval, byte-preserved YAML, project isolation, action budgets, credential questions, and recovery. Restarted the backend and verified a real LLM job creates an Inbox question; answering in the UI resumed the session and cumulative token accounting stopped it at the test budget. Checked Inbox and job audit views in the running Next dev app.
+- `pnpm typecheck`: passed for both apps.
+- `pnpm test`: 212 passed, zero failures or skips.
+- `pnpm --filter backend build`: passed. No frontend production build was run into the live `.next` directory.
+- Restarted the development backend to verify changes. Live LLM/Inbox checks covered asking a question, answering and resuming, cumulative budgets, automatic steward activity, and healer investigation followed by approval of a verified SauceDemo locator fix. The YAML contract remained byte-identical.
+- A scheduled SauceDemo batch passed; running/passed webhook deliveries succeeded after retry. A real flaky fixture failed once, passed on retry, kept both history entries and created no healer job.
+- Live CI checks covered tokens, preview execution, client download/wait/reports, deployment signals, rotation/revocation and settings snippets. A real-browser credential test proved an untrusted preview receives no typing event or form submission, then passes after explicit authorization.
+- Real Chromium + Playwright MCP checks covered axe, console/network failures, safe links, redirects, origin limits and redaction. Integration checks cover promotion idempotency/project isolation, replay, rejection memory, budgets and approval concurrency.
+- Activity, Inbox, CI/CD and unified diffs were checked in the running frontend at desktop and 390px without horizontal page overflow. The real healer diff showed one removed/added locator line and unchanged YAML.
+- Temporary verification projects were deleted through the API. Git verification tokens were revoked. Existing user projects and storage were preserved.
 
-## Existing local change
+## Limits and remaining optional work
 
-`apps/frontend/next-env.d.ts` was already modified when work began; leave it out of feature commits.
+The requested core features and both addenda are implemented. Provider-specific deploy adapters for Vercel, Netlify and Render were optional and are not included; their pipelines can call the generic endpoint.
 
-## Failure triage (implemented)
+Exploration is bounded to the rendered main document and safe links; it does not claim exhaustive accessibility or application coverage. Passive deployment fingerprints are heuristic; explicit deployment webhooks provide a reliable pipeline signal.
 
-Automated manual/batch failures persist a pending dispatch flag. A monitor creates at most one triage job per run; boot resumes undelivered failures. The agent reads failed-step screenshots, ARIA/error context and bounded console/network diagnostics, investigates, and classifies drift, application bug or environment. The tool policy permits source-only fixes for drift. Candidate execution occurs outside the project checkout; approval requires a passing result for the same source and URL. Independent Spec approvals do not stale each other.
+Token usage is recorded after each model response, so a response can cross the threshold before further work stops. Browser side effects cannot be rolled back after a crash; recovered jobs are instructed to inspect state before repeating an action.
 
-Question tools abort the active turn after persisting their question. Spec execution and run-slot queues honor cancellation. Job browsers close when work stops. Tool parameters now derive from shared Zod schemas.
+## Commits and workspace
 
-A real migration rehearsal against a temporary SauceDemo project passed before Gus cancelled that feature. Its temporary project was deleted via the API; no migration UI or code is retained. Proposal verification remains for the healer.
+- `a083745 feat: add persistent autonomous jobs and project inbox`
+- `e440354 feat: triage spec failures and verify proposed fixes`
+- `a963ac1 feat: schedule spec runs and deliver status webhooks`
+- `cb67a6f refactor!: remove the GitHub repository mirror`
+- `e24cf62 feat: let the project steward drive autonomous activity`
+- `b4e61fc feat: detect flaky specs with one persistent retry`
+- `4e83624 feat: integrate CI pipelines and deployment signals`
+- `5fcb51f feat: explore coverage gaps and propose regression specs`
+- `feat: show proposed changes as file diffs` records unified proposal review and this consolidated checkpoint.
 
-Live healer verification: a temporary SauceDemo Spec with a deliberately outdated username locator failed, automatically started a job, received browser investigation plus screenshot/ARIA evidence, was classified as test drift, and produced a passing isolated candidate (8 actions). Approval through the Inbox UI committed the source-only patch. Desktop and 390px Inbox/Jobs checks passed without horizontal overflow. All contract bytes remain unchanged.
-
-## Gus's addenda: revised direction
-
-Jobs are internal execution records. The project steward observes failures, invalid Specs, deployments, confirmed context, Git changes, credentials and chat requests, then persists prioritized intents. It must enforce daily budgets, deduplication, cooldowns and remembered human decisions. The default autonomy is propose; observe and act are optional. Activity replaces the Jobs page; there is no job creation form. Inbox contains proposals, questions and bug reports that need a human. The steward must work without required setup fields.
-
-Remove the GitHub repository mirror in its own commit, including API, UI, credentials, background sync and database columns. Keep the built-in Git Smart HTTP remote and GitHub Copilot OAuth. Historical Drizzle migrations remain so existing databases can migrate forward without deleting user data.
-
-After the steward, replace the original CI trigger with scoped CI tokens, run/deploy APIs, bounded waiting, JUnit and Markdown results, preview URLs, build metadata, quality-gate options and a dependency-free client. Settings and README will include GitHub Actions, GitLab, Bitbucket, CircleCI and Jenkins snippets. Deploy webhooks also feed the steward.
-
-## Resume checkpoint
-
-Optional schedules and webhook delivery were already prepared before the addenda: persisted UTC cron, selected Specs, missed-run coalescing, overlap prevention, an encrypted notification outbox with bounded retry, and an Automation settings tab using existing components. Commit this completed foundation before removing mirror columns, because its generated migration precedes the removal migration. Live schedule verification is pending.
-
-The Activity/Inbox navigation changes are still uncommitted and need the steward activity endpoint. The unfinished steward tool draft is saved at `/tmp/specbook-steward-resume/tools.ts` while its engine is implemented; it is not wired into chat yet. Next: remove the mirror, complete steward and Activity, implement retry/flakiness, then CI/CD and the remaining coverage/exploration work. No manual-job UI should return.
-
-Schedule checkpoint validation: `pnpm typecheck` and all 194 tests pass. After restarting the backend, a real scheduled SauceDemo batch started at the next UTC minute and passed. The Automation tab loaded the persisted settings in the running frontend without console errors. Webhook retry is being checked against a temporary receiver.
-
-## GitHub mirror removal (implemented)
-
-Removed mirror routes, connection UI, remote credentials, background pulls/pushes, conflict resolution, force-publish after rebase and the mirror-only Spec status. Migration 0011 drops the four mirror columns; boot reindex derives current Spec status from files. Built-in Git Smart HTTP, scoped repository tokens, canonical bare repositories and Copilot OAuth remain. README now points to Settings → Git.
-
-Validation: `pnpm typecheck` and 189 tests pass (five mirror-only tests removed). Restarted the backend, confirmed the removed endpoint returns 404, and cloned/pushed the temporary QA repository with a scoped token, then revoked it. The optional schedule's running/passed webhook deliveries both succeeded on retry. General Git conflict/dirty-tree safeguards remain to protect externally edited repositories.
-
-## Project steward (implemented, validation in progress)
-
-Signals, intentions and observations survive restarts. Deterministic rules cover failed/invalid/stale/changed Specs, empty projects, confirmed context and new credentials. Lightweight deployment checks compare build asset URLs, ETag or a bounded response hash every five minutes, with backoff for unavailable apps. A daily planner reuses the job runner and proposes prioritized intents through Zod-derived tools. Chat and jobs can request background work without a job creation form.
-
-The steward reserves queued/running/blocked job budgets against 300,000 tokens and 30 active minutes per project per UTC day. It serializes dispatch per project, limits autonomous batches to twelve per day, deduplicates signal and intent keys, gives equivalent work a six-hour cooldown and remembers rejected proposals for the same Spec/context version. Credential signals resume credential questions. Completion signals return to Activity. Observe records future signals without dispatch; propose is the default. Act may apply verified selector-only fixes after three approved examples, with no rejected examples; AST comparison excludes changed inputs, assertions or contract fields.
-
-Activity replaces the Jobs page and exposes audit/evidence links. Automation settings reuse the existing settings rows for the optional autonomy level. Autonomous browser tools remain visible, with the discovery origin/destructive-action policy checked when invoked. Spec regeneration is implementation-only and requires isolated verification. Coverage jobs receive confirmed context and prior decisions; advanced exploratory diagnostics/axe and CI/CD remain to implement.
-
-Steward validation: all 191 tests passed before starting the next feature, including concurrent dispatch/idempotency, observe mode, reserved budgets, remembered rejection and AST safeguards. Restarted the running backend; automatic coverage/regeneration jobs entered the queue, some asked for access in Inbox, and the per-project daily planner appeared without manual creation. Activity loaded at 390px with no horizontal overflow. Old instruction-heavy job goals now render as human-facing activity titles.
-
-## Flakiness (implemented)
-
-Failures now rerun once before triage. A unique retry reference survives restart; the monitor checks the original source and YAML hashes before retrying or healing. Pass-on-retry flags both attempts as flaky and emits no healer signal. Disabling healing still allows the retry. Runs persist the actual URL so preview retries cannot accidentally run against the project's default URL.
-
-History retains both attempts, a link to the first attempt and existing warning badges for flaky Specs. Nine real-browser tests passed, including restart replay, changed contracts and URL overrides. Live verification produced one failed attempt and one passing retry, preserved the YAML bytes, showed both attempts in the UI and created no job.
-
-## CI/CD (implemented)
-
-Migration 0014 adds hashed, project-scoped CI tokens independent of Git tokens. Settings → CI/CD creates, rotates and revokes a token, supplies snippets for GitHub Actions, GitLab CI, Bitbucket Pipelines, CircleCI and Jenkins, and lists batches with commit/ref/build metadata and evidence links. No GitHub API or GitHub App integration is involved.
-
-Authenticated endpoints start all/selected/Feature Specs, wait with bounded long polling, export JSON/JUnit/Markdown, download the dependency-free Node client, and accept generic deployment signals. Quality gates snapshot existing Inbox bugs at batch creation and waive known failures and flaky results by default. Busy Specs return 409 without queuing an orphan batch. The client retries transient GET failures within its deadline and never retries POST.
-
-Preview URLs persist through batch execution, retry, healer investigation and isolated proposal verification. They do not grant credential access: stored secrets retain their canonical project/profile origins. A real-browser test verified that an untrusted preview receives no typing event or form submission, then passes after explicit origin authorization. Browser, credential and session calls now propagate cancellation to MCP; cancelling a job also closes its browser.
-
-Steward collection now uses deterministic observation generations to deduplicate crash replays while retaining real reversions. A failed run prerequisite creates a budgeted investigation and an Inbox question; completion can retry the original environment without an unlimited retry loop.
-
-Validation: 209 tests and both app typechecks passed before the final review. Six CI-specific tests pass, including atomic busy rejection and client reconnection. Live checks covered token creation/rotation/revocation, real Chromium on a preview URL, the client and report exports, deploy signals, and the settings UI at desktop/390px. Provider-specific deploy adapters are optional and are not included; all providers can use the generic endpoint.
-
-Next: finish exploration/coverage verification and replace proposal field dumps with file diffs as requested by Gus. Then consolidate this log and delete only the temporary verification projects via the API.
-
-## Coverage and exploration (implemented)
-
-Coverage jobs compare confirmed areas, roles and rules with existing Specs. Independent coverage requests retain distinct intent fingerprints, and an exact rejected proposal cannot be silently recreated. Bug reports have a "Promote to regression Spec" action that creates one persisted coverage intent; the repository remains untouched until proposal approval.
-
-The agent now has a Zod-derived scan_page tool. It runs fixed, trusted axe code on the current project page and captures bounded console/network errors and same-origin link checks. Link checks use HEAD with short timeouts, skip destructive names/URLs (including encoded variants), and do not follow redirects. Page diagnostics redact stored secrets and query values, persist in job audit entries, and link from bug reports to Activity. Cancellation propagates through the scanner and prevents saving incomplete evidence.
-
-Validation: the existing runner suite passes with real Chromium and Playwright MCP, including HTTP errors, accessibility violations, destructive/off-origin links, redirects and secret redaction. Integration tests cover promotion idempotency/project isolation, unchanged repositories, independent coverage requests and rejected proposals. Final full-suite validation is running alongside the diff review change.
+`apps/frontend/next-env.d.ts` was already modified when work began and is excluded from these commits. Nothing has been pushed.

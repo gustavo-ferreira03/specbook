@@ -298,7 +298,7 @@ export interface InboxItem {
     status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
     title: string;
     body: string;
-    payload: { regressionIntentId?: string; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown>; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
+    payload: { files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown>; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
     answer: string | null;
     commitSha: string | null;
     createdAt: string;

@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { abortChatTurn, isChatBusy } from "../../../core/chat/chat-registry";
 import { applyProposal } from "../../../core/jobs/proposals";
+import { proposalFiles } from "../../../core/jobs/preview";
 import { createJobSchema, reviewSchema } from "../../../core/jobs/schemas";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
 import { jobsRepository } from "../../repositories/jobs";
@@ -39,7 +40,10 @@ export function createJobsRouter(): Hono {
     });
     router.get("/projects/:id/inbox", async (c) => {
         if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
-        return c.json({ items: await jobsRepository.inbox(c.req.param("id")) });
+        const items = await jobsRepository.inbox(c.req.param("id"));
+        return c.json({ items: await Promise.all(items.map(async (item) => ({
+            ...item, payload: { ...item.payload, files: await proposalFiles(item) },
+        }))) });
     });
     router.get("/projects/:id/inbox/:itemId/evidence/:file{.+}", async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));

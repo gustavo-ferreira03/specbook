@@ -5,7 +5,7 @@ import { use, useCallback, useEffect, useState } from "react";
 import { Activity, AlertCircle, Check, ChevronDown, CircleDashed, FileCode2, Inbox, LoaderCircle, MessageSquareText, RefreshCw, X } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { HighlightedCode } from "@/components/RawFileEditor";
+import { FileDiff } from "@/components/FileDiff";
 import { RelativeTime } from "@/components/RelativeTime";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -50,24 +50,8 @@ function ProposedChanges({ item }: { item: InboxItem }) {
                 </button>
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-4 border-t border-line bg-surface-soft/60 p-3.5">
-                {item.payload.before?.yaml && (
-                    <div className="space-y-2">
-                        <h3 className="text-body font-medium">Current spec.yml</h3>
-                        <HighlightedCode label="Current spec.yml" language="yaml" source={item.payload.before.yaml} className="max-h-64 overflow-auto" />
-                    </div>
-                )}
-                {item.payload.before?.testSource && (
-                    <div className="space-y-2">
-                        <h3 className="text-body font-medium">Current spec.ts</h3>
-                        <HighlightedCode label="Current spec.ts" language="typescript" source={item.payload.before.testSource} className="max-h-64 overflow-auto" />
-                    </div>
-                )}
-                <div className="space-y-2">
-                    <h3 className="text-body font-medium">Proposed fields</h3>
-                    <pre tabIndex={0} aria-label="Proposed fields" className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-canvas p-3 text-meta outline-none focus-visible:ring-2 focus-visible:ring-ring/20">
-                        {Object.entries(item.payload.params ?? {}).map(([key, value]) => `${key}:\n${typeof value === "string" ? value : JSON.stringify(value, null, 2)}`).join("\n\n")}
-                    </pre>
-                </div>
+                {item.payload.files?.map((file) => <FileDiff key={file.path} file={file} />)}
+                {!item.payload.files?.length && <p className="text-body text-ink-muted">No file changes.</p>}
             </CollapsibleContent>
         </Collapsible>
     );

@@ -64,7 +64,7 @@ The repository accepts the `main` branch only. Generated files and edits made in
 
 The project steward observes failed runs, invalid or changed Specs, deployments, confirmed project context, new credentials, and requests from chat. It chooses work within a budget and records its progress in **Activity**. Jobs persist across backend restarts and use the same agent and browser tools as chat.
 
-**Inbox** holds proposed Specs and fixes, bug reports, and questions. Approving a proposal commits it to the project's repository. Answering a question resumes the investigation; enter secrets in **Settings → Credentials**. The agent treats `spec.yml` as the behavior contract: changes to its steps or expected result always require human review.
+**Inbox** holds proposed Specs and fixes, bug reports, and questions. Review proposals as file diffs with added and removed lines. Approving a proposal commits it to the project's repository. Answering a question resumes the investigation; enter secrets in **Settings → Credentials**. The agent treats `spec.yml` as the behavior contract: changes to its steps or expected result always require human review.
 
 **Settings → Automation** provides optional controls:
 
