@@ -55,10 +55,9 @@ const record = (value: unknown): Record<string, unknown> => value && typeof valu
 const string = (value: unknown): string | undefined => typeof value === "string" ? value : undefined;
 const subjectKey = (subject: Subject) => `${subject.type}:${subject.id ?? subject.name}`;
 
-function englishExcerpt(text: string): string | null {
+function plainExcerpt(text: string): string | null {
     const clean = sanitizeTechnicalDetails(text).replace(/\s+/g, " ").trim();
-    if (!clean || /\b(não|uma|preciso|navegador|aplicação|falhou|credenciais|orçamento|página|verificação|encontrado|configurar|necessário)\b/i.test(clean)
-        || /(?:Error:|Timeout|spec\.ts|spec\.yml|\bjob\b|\bsteward\b|\bbudget\b|\bverification\b|\bcommit\b|\bproposal\b|\bgetByRole\b|[{}]|\[server path\])/i.test(clean)) return null;
+    if (!clean || /(?:Error:|Timeout|spec\.ts|spec\.yml|\bjob\b|\bsteward\b|\bbudget\b|\bverification\b|\bcommit\b|\bproposal\b|\bgetByRole\b|[{}]|\[server path\])/i.test(clean)) return null;
     return clean.split(/(?<=[.!?])\s/).slice(0, 2).join(" ").slice(0, 400);
 }
 
@@ -68,7 +67,7 @@ function plainReason(text: string): string {
     if (/ERR_CONNECTION|ERR_NAME|unreachable|could not be reached|HTTP 50[234]/i.test(text)) return "The application could not be reached.";
     if (/timeout|timed out|toBeVisible|toHaveText|locator/i.test(text)) return "An expected button or result was not available during the test run.";
     if (/invalid|cannot run|validation|not allowed|parse/i.test(text)) return "The current check could not run as written.";
-    return englishExcerpt(text) ?? "The check still needs attention before it can run successfully.";
+    return plainExcerpt(text) ?? "The check still needs attention before it can run successfully.";
 }
 
 async function screenshotsFor(projectId: string, item: InboxItem, job: Job | undefined, specs: Spec[]): Promise<InboxPresentation["screenshots"]> {
@@ -163,7 +162,7 @@ export async function projectPresentation(projectId: string) {
         const credentialRequest = item.payload.waitingFor === "credentials";
         const name = subject.type === "project" ? string(params.title) ?? "this check" : subject.name;
         const behaviorChange = item.kind === "spec_fix" && (params.humanSpec !== undefined || params.title !== undefined || params.description !== undefined);
-        const safeTitle = englishExcerpt(item.title)?.replace(/^(?:Bug report|Possible bug):\s*/i, "");
+        const safeTitle = plainExcerpt(item.title)?.replace(/^(?:Bug report|Possible bug):\s*/i, "");
         const title = type === "help" ? `I couldn’t update “${name}” by myself. Look at it together?`
             : type === "update" ? behaviorChange ? `Change what “${name}” checks?` : `Update the check for “${name}”?`
             : type === "new_check" ? `Add a check for “${string(params.title) ?? name}”?`
@@ -179,9 +178,9 @@ export async function projectPresentation(projectId: string) {
             : type === "update" ? behaviorChange ? "This suggestion changes the behavior described by the check. Review the expected result before saving it." : verified ? `${updateReason} The expected behavior stays the same.` : "Review this suggested update to the check before saving it to the project."
             : type === "new_check" ? "This would add a check for a behavior that is not yet covered. Review the steps and expected result before saving it."
             : type === "feature" ? "This would organize related checks under a new area of the project."
-            : type === "bug" ? englishExcerpt(item.body.split(/\n\s*\n/)[0] ?? "") ?? "The application did not behave as expected. The existing check has been left unchanged."
+            : type === "bug" ? plainExcerpt(item.body.split(/\n\s*\n/)[0] ?? "") ?? "The application did not behave as expected. The existing check has been left unchanged."
             : credentialRequest ? "Add the requested sign-in details in Settings, then let Specbook know. Do not put passwords in your reply."
-            : englishExcerpt(item.body) ?? "Specbook needs your explanation of the expected behavior before it can continue. Discuss the check in chat to clarify it.";
+            : plainExcerpt(item.body) ?? "Specbook needs your explanation of the expected behavior before it can continue. Discuss the check in chat to clarify it.";
         const browserWork = actions.get(item.jobId)?.some((action) => /(?:browser_|scan_page).*:completed$/.test(action.action));
         const workDone = verification ? verification.status === "passed" ? "Tried the suggested update in a test run; it passed." : "Tried an update, but the test run did not pass."
             : type === "question" ? "Paused here so your answer can guide the next step." : browserWork ? "Inspected the application and recorded the available evidence." : "Prepared this suggestion for your review.";
