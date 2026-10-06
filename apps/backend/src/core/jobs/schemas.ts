@@ -6,6 +6,9 @@ export const jobBudgetSchema = z.object({
     maxActions: z.number().int().min(1).max(1000).default(80),
 });
 export const createJobSchema = z.object({
+    kind: z.enum(["review", "failure_triage"]).default("review"),
+    specId: z.string().uuid().optional(),
+    runId: z.string().uuid().optional(),
     goal: z.string().trim().min(1).max(12000).default("Review this project's Specs and propose useful improvements. Ask when blocked."),
     trigger: z.enum(["manual", "schedule", "spec_failure", "webhook"]).default("manual"),
     budget: jobBudgetSchema.default(() => jobBudgetSchema.parse({})),
@@ -39,3 +42,10 @@ export const reviewSchema = z.object({
 export type JobBudget = z.infer<typeof jobBudgetSchema>;
 export type JobStatus = "queued" | "running" | "blocked" | "completed" | "budget_exceeded" | "cancelled";
 export type InboxKind = "new_spec" | "spec_fix" | "feature" | "question" | "bug_report" | "note";
+
+export const triageSchema = z.object({
+    classification: z.enum(["test_drift", "application_bug", "environment"]),
+    reason: z.string().trim().min(1).max(8000),
+    reproduction: z.array(z.string()).min(1).max(30),
+    evidence: z.array(z.string()).min(1).max(30),
+});

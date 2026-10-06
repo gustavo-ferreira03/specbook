@@ -295,7 +295,7 @@ export function getSpecHistory(specId: string): Promise<{
 export function getSpecAtCommit(
     specId: string,
     sha: string,
-): Promise<{ yaml: string | null; testSource: string | null; legacyRobotSource: string | null }> {
+): Promise<{ yaml: string | null; testSource: string | null }> {
     return api(`/specs/${encodeURIComponent(specId)}/history/${encodeURIComponent(sha)}`);
 }
 

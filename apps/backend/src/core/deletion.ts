@@ -187,6 +187,7 @@ export async function deleteProjectData(id: string): Promise<boolean> {
     });
     repoRemote.cancelScheduledPush(id);
 
+    await fs.rm(path.join(runsDir, "proposals", id), { recursive: true, force: true });
     await removeRunDirectories(runIds).catch((error: unknown) => {
         console.error(`[specbook] removing run artifacts of project ${id} failed:`, error);
     });

@@ -141,6 +141,7 @@ export const runs = sqliteTable(
         startedAt: text("started_at").notNull(),
         durationMs: integer("duration_ms"),
         failReason: text("fail_reason"),
+        automationPending: integer("automation_pending", { mode: "boolean" }).notNull().default(false),
     },
     (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt)],
 );
@@ -189,6 +190,10 @@ export const jobs = sqliteTable("jobs", {
     projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
     chatId: text("chat_id").notNull().unique(),
     trigger: text("trigger").notNull(),
+    kind: text("kind").notNull().default("review"),
+    specId: text("spec_id"),
+    runId: text("run_id").unique(),
+    classification: text("classification").$type<"test_drift" | "application_bug" | "environment">(),
     goal: text("goal").notNull(),
     status: text("status").$type<import("../../core/jobs/schemas").JobStatus>().notNull(),
     budget: text("budget", { mode: "json" }).$type<import("../../core/jobs/schemas").JobBudget>().notNull(),

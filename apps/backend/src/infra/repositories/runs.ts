@@ -9,7 +9,7 @@ export const DEFAULT_RUN_LIST_LIMIT = 50;
 export const MAX_RUN_LIST_LIMIT = 200;
 
 class RunsRepository {
-    async createRun(input: { specId: string; commitSha: string; sourceHash: string }): Promise<Run> {
+    async createRun(input: { specId: string; commitSha: string; sourceHash: string; automate?: boolean }): Promise<Run> {
         const row: Run = {
             id: crypto.randomUUID(),
             specId: input.specId,
@@ -19,6 +19,7 @@ class RunsRepository {
             startedAt: new Date().toISOString(),
             durationMs: null,
             failReason: null,
+            automationPending: input.automate ?? false,
         };
         await db.insert(runs).values(row);
         return row;
@@ -69,6 +70,14 @@ class RunsRepository {
             .innerJoin(newest, and(eq(runs.specId, newest.specId), eq(runs.startedAt, newest.startedAt)));
         for (const { run } of rows) latest.set(run.specId, run);
         return latest;
+    }
+
+    async pendingAutomation(): Promise<Run[]> {
+        return db.select().from(runs).where(and(eq(runs.automationPending, true), inArray(runs.status, ["passed", "failed", "error"]))).limit(100);
+    }
+
+    async acknowledgeAutomation(id: string): Promise<void> {
+        await db.update(runs).set({ automationPending: false }).where(eq(runs.id, id));
     }
 
     async getRun(id: string): Promise<Run | null> {

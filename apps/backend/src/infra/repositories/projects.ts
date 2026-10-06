@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { decryptSecret, encryptSecret } from "../../core/credentials/crypto";
 import { db } from "../db/client";
 import { projects } from "../db/schema";
@@ -7,14 +7,9 @@ import { logger } from "../logger";
 
 export type Project = typeof projects.$inferSelect;
 
-/** Tokens written before encryption was introduced are stored verbatim. */
-function isEncryptedToken(stored: string): boolean {
-    return /^v1:[^:]+:[^:]+:[^:]+$/.test(stored);
-}
-
 /** The Git token is encrypted at rest; callers always see plaintext. */
 function withPlainToken(row: Project): Project {
-    if (!row.gitToken || !isEncryptedToken(row.gitToken)) return row;
+    if (!row.gitToken) return row;
     try {
         return { ...row, gitToken: decryptSecret(row.gitToken) };
     } catch (error) {
@@ -104,24 +99,6 @@ class ProjectsRepository {
     async getProject(id: string): Promise<Project | null> {
         const rows = await db.select().from(projects).where(eq(projects.id, id));
         return rows[0] ? withPlainToken(rows[0]) : null;
-    }
-
-    /** Encrypts Git tokens stored in plaintext by earlier versions. Returns how many were migrated. */
-    async encryptLegacyGitTokens(): Promise<number> {
-        const rows = await db
-            .select({ id: projects.id, gitToken: projects.gitToken })
-            .from(projects)
-            .where(isNotNull(projects.gitToken));
-        let migrated = 0;
-        for (const row of rows) {
-            if (!row.gitToken || isEncryptedToken(row.gitToken)) continue;
-            await db
-                .update(projects)
-                .set({ gitToken: encryptSecret(row.gitToken) })
-                .where(and(eq(projects.id, row.id), eq(projects.gitToken, row.gitToken)));
-            migrated += 1;
-        }
-        return migrated;
     }
 
     async deleteProject(id: string): Promise<void> {

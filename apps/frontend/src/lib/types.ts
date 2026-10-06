@@ -101,8 +101,6 @@ export interface SpecDetail {
         humanSpec: HumanSpec | null;
         testSource: string;
         yamlSource: string;
-        /** Set only while the Spec folder still has the old spec.robot and no spec.ts. */
-        legacyRobotSource: string | null;
     } | null;
     runs: Run[];
 }
@@ -195,6 +193,8 @@ export interface RunEvidence {
     video: string | null;
     /** Title of the step() that failed, when the run failed inside one. */
     failedStep: string | null;
+    diagnostics?: { kind: "console" | "pageerror" | "requestfailed" | "response"; message: string; url?: string; method?: string; status?: number }[];
+    errorContext?: string;
     reportAvailable: boolean;
     reportUrl: string | null;
 }
@@ -309,7 +309,7 @@ export interface InboxItem {
     status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
     title: string;
     body: string;
-    payload: { before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> };
+    payload: { before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown>; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
     answer: string | null;
     commitSha: string | null;
     createdAt: string;

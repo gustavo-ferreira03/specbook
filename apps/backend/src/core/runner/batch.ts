@@ -190,6 +190,7 @@ async function prepareSpecBatch(
     ids: string[],
     label: string,
     baseUrl: string,
+    automate: boolean,
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
         if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
@@ -258,6 +259,7 @@ async function prepareSpecBatch(
                 specId: definition.spec.id,
                 commitSha,
                 sourceHash: definition.sourceHash,
+                automate,
             });
             createdRuns.push(run);
             await repoGit.withRepoLock(projectId, () => repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha));
@@ -305,7 +307,7 @@ async function prepareSpecBatch(
     return { batch, prepared, secrets };
 }
 
-export async function startSpecBatch(projectId: string, specIds: string[], label: string): Promise<RunBatch> {
+export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { healFailures?: boolean } = {}): Promise<RunBatch> {
     const project = await projectsRepository.getProject(projectId);
     if (!project) throw new Error("Project not found");
     const ids = [...new Set(specIds)];
@@ -315,7 +317,7 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     let prepared: PreparedSpec[];
     let secrets: BatchSecrets;
     try {
-        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, project.baseUrl));
+        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, project.baseUrl, options.healFailures !== false));
     } catch (error) {
         await releaseSpecLocks();
         throw error;

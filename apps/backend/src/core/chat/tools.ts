@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { featureProposalSchema, newSpecProposalSchema, fixProposalSchema } from "../jobs/schemas";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { HumanSpec } from "../../infra/db/schema";
@@ -22,13 +24,6 @@ function text(value: string) {
         terminate: false,
     };
 }
-
-const humanSpecType = Type.Object({
-    preconditions: Type.Array(Type.String()),
-    steps: Type.Array(Type.String()),
-    expectedResult: Type.String(),
-    postconditions: Type.Array(Type.String()),
-});
 
 function truncate(value: string, limit: number): string {
     return value.length > limit ? `${value.slice(0, limit)}... (truncated)` : value;
@@ -68,7 +63,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             name: "list_features",
             label: "list_features",
             description: "List all features of the current project with their ids, parent ids, titles and descriptions.",
-            parameters: Type.Object({}),
+            parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute() {
                 const rows = await featuresRepository.listFeatures(projectId);
                 return text(
@@ -87,7 +82,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             name: "list_specs",
             label: "list_specs",
             description: "List all specs of the current project with id, featureId, title, description and status.",
-            parameters: Type.Object({}),
+            parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute() {
                 const rows = await specsRepository.listSpecs(projectId);
                 return text(
@@ -107,20 +102,14 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             name: "get_spec",
             label: "get_spec",
             description: "Read the current human-readable form (humanSpec) and the Playwright executable (testSource, the spec.ts file) of a Spec before changing it.",
-            parameters: Type.Object({ specId: Type.String() }),
+            parameters: Type.Unsafe<{ specId: string }>(z.object({ specId: z.string() }).toJSONSchema()),
             async execute(_id, params) {
                 const spec = await specsRepository.getSpec(params.specId);
                 if (!spec || spec.projectId !== projectId) return text(`Spec ${params.specId} not found in this project.`);
                 try {
                     const raw = await readSpecRawFiles(spec);
                     const humanSpec = raw.yaml === null ? null : parseSpecYaml(raw.yaml).humanSpec;
-                    const legacy = raw.legacyRobotSource === null
-                        ? {}
-                        : {
-                              legacyRobotSource: raw.legacyRobotSource,
-                              note: "This Spec still uses the old Robot Framework format and cannot run. Rewrite it as spec.ts (Playwright rules) and save it with update_spec({ specId, testSource }).",
-                          };
-                    return text(JSON.stringify({ spec, humanSpec, testSource: raw.testSource, ...legacy }));
+                    return text(JSON.stringify({ spec, humanSpec, testSource: raw.testSource }));
                 } catch (error) {
                     return text(JSON.stringify({ spec, error: error instanceof Error ? error.message : String(error) }));
                 }
@@ -130,11 +119,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             name: "create_feature",
             label: "create_feature",
             description: "Create a feature in the current project's Spec tree. Check list_features first and reuse existing features.",
-            parameters: Type.Object({
-                parentId: Type.Optional(Type.String()),
-                title: Type.String(),
-                description: Type.String(),
-            }),
+            parameters: Type.Unsafe<z.infer<typeof featureProposalSchema>>(featureProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 await syncBeforeMutation(projectId);
                 if (params.parentId) {
@@ -156,13 +141,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             name: "create_spec",
             label: "create_spec",
             description: "Create a human-readable Spec and its executable spec.ts (testSource), written in the restricted Playwright Test subset of your Playwright rules. spec.ts must contain one test() whose step() titles are exactly humanSpec.steps, in order.",
-            parameters: Type.Object({
-                featureId: Type.String(),
-                title: Type.String(),
-                description: Type.String(),
-                humanSpec: humanSpecType,
-                testSource: Type.String({ description: 'The complete spec.ts file, starting with import { test, expect } from "specbook";' }),
-            }),
+            parameters: Type.Unsafe<z.infer<typeof newSpecProposalSchema>>(newSpecProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 await syncBeforeMutation(projectId);
                 const feature = await featuresRepository.getFeature(params.featureId);
@@ -189,13 +168,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             name: "update_spec",
             label: "update_spec",
             description: "Update a Spec and commit the change to its git history. Call get_spec first. Omitted fields keep their current values, and the status resets to unverified. When humanSpec.steps change, send the matching testSource too: step() titles must equal humanSpec.steps.",
-            parameters: Type.Object({
-                specId: Type.String(),
-                title: Type.Optional(Type.String()),
-                description: Type.Optional(Type.String()),
-                humanSpec: Type.Optional(humanSpecType),
-                testSource: Type.Optional(Type.String({ description: "The complete new spec.ts file" })),
-            }),
+            parameters: Type.Unsafe<z.infer<typeof fixProposalSchema>>(fixProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 await syncBeforeMutation(projectId);
                 return withSpecLock(params.specId, async () => {
@@ -209,11 +182,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     const raw = await readSpecRawFiles(spec);
                     const testSource = params.testSource ?? raw.testSource;
                     if (testSource === null) {
-                        return text(
-                            raw.legacyRobotSource === null
-                                ? `Spec ${params.specId} has no spec.ts; send the complete file as testSource.`
-                                : `Spec ${params.specId} still uses the old Robot Framework format. Rewrite it as spec.ts and send it as testSource.`,
-                        );
+                        return text(`Spec ${params.specId} has no spec.ts; send the complete file as testSource.`);
                     }
                     const humanSpec = (params.humanSpec as HumanSpec | undefined) ?? (raw.yaml === null ? null : parseSpecYaml(raw.yaml).humanSpec);
                     const rejection = sourceRejection(testSource, humanSpec?.steps ?? []);
@@ -235,14 +204,14 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
             name: "run_spec",
             label: "run_spec",
             description: "Execute a Spec's spec.ts with Playwright Test (headless Chromium) and return its runId, status, duration, failure reason and failed step title (when known).",
-            parameters: Type.Object({ specId: Type.String() }),
-            async execute(_id, params) {
+            parameters: Type.Unsafe<{ specId: string }>(z.object({ specId: z.string() }).toJSONSchema()),
+            async execute(_id, params, signal) {
                 const spec = await specsRepository.getSpec(params.specId);
                 if (!spec || spec.projectId !== projectId) {
                     return text(`Spec ${params.specId} not found in this project.`);
                 }
                 try {
-                    const run = await executeSpec(spec.id, { persistFailures: false });
+                    const run = await executeSpec(spec.id, { persistFailures: false, signal });
                     metrics?.runSpecOutcome({
                         specId: spec.id,
                         runId: run.id,

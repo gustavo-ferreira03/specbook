@@ -3,7 +3,9 @@
  * point at this file (or at its bundle, dist/specbook-fixtures.mjs, in production).
  * It only runs inside the Playwright worker of a Spec run.
  */
-import { expect as baseExpect, test as base } from "@playwright/test";
+import fs from "node:fs/promises";
+import { expect as baseExpect, test as base, type ConsoleMessage, type Page, type Request, type Response } from "@playwright/test";
+import type { RunDiagnostic } from "../evidence.ts";
 import {
     createGuard,
     createSecret,
@@ -24,12 +26,56 @@ hardenFunctionConstructors();
 const runtime = parseRuntime(process.env[RUNTIME_ENV]);
 const guard = createGuard({ runtime, readSecret: (name) => process.env[name] });
 
+function diagnosticUrl(value: string): string | undefined {
+    try {
+        const url = new URL(value);
+        if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+        return `${url.origin}${url.pathname}`.slice(0, 2000);
+    } catch {
+        return undefined;
+    }
+}
+
 export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
-    page: async ({ page }, use) => {
-        await use(guard.wrapPage(page as unknown as RawPage) as never);
+    page: async ({ page }, use, testInfo) => {
+        const diagnostics: RunDiagnostic[] = [];
+        const capture = (item: RunDiagnostic) => {
+            if (diagnostics.length < 100) diagnostics.push({ ...item, message: item.message.slice(0, 2000) });
+        };
+        const onConsole = (message: ConsoleMessage) => {
+            if (message.type() === "error") capture({ kind: "console", message: message.text(), url: diagnosticUrl(message.location().url) });
+        };
+        const onPageError = (error: Error) => capture({ kind: "pageerror", message: error.message });
+        const onRequestFailed = (request: Request) => capture({
+            kind: "requestfailed", message: request.failure()?.errorText ?? "Request failed",
+            url: diagnosticUrl(request.url()), method: request.method(),
+        });
+        const onResponse = (response: Response) => {
+            if (response.status() >= 400) capture({
+                kind: "response", message: response.statusText(), status: response.status(),
+                url: diagnosticUrl(response.url()), method: response.request().method(),
+            });
+        };
+        page.on("console", onConsole);
+        page.on("pageerror", onPageError);
+        page.on("requestfailed", onRequestFailed);
+        page.on("response", onResponse);
+        try {
+            await use(guard.wrapPage(page as unknown as RawPage) as never);
+        } finally {
+            page.off("console", onConsole);
+            page.off("pageerror", onPageError);
+            page.off("requestfailed", onRequestFailed);
+            page.off("response", onResponse);
+            if (diagnostics.length > 0) {
+                const file = testInfo.outputPath("specbook-diagnostics.json");
+                await fs.writeFile(file, JSON.stringify(diagnostics), "utf8");
+                await testInfo.attach("specbook-diagnostics", { path: file, contentType: "application/json" });
+            }
+        }
     },
     step: async ({ page }, use, testInfo) => {
-        const real = unwrap<RawPage>(page, ["page"]);
+        const real = unwrap<Page>(page, ["page"]);
         if (!real) throw new Error("Specbook page is not available");
         let count = 0;
         let active = false;
@@ -46,6 +92,12 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn }>({
                 });
             } catch (error) {
                 testInfo.annotations.push({ type: FAILED_STEP_ANNOTATION, description: title });
+                try {
+                    const snapshot = await real.locator("body").ariaSnapshot({ timeout: 2000 });
+                    const file = testInfo.outputPath("specbook-error-context.txt");
+                    await fs.writeFile(file, snapshot.slice(0, 32_000), "utf8");
+                    await testInfo.attach("specbook-error-context", { path: file, contentType: "text/plain" });
+                } catch {}
                 throw error;
             } finally {
                 active = false;

@@ -128,29 +128,17 @@ describe("project, feature and spec through the writer", () => {
         assert.match(source, /^import \{ test, expect \} from "specbook";/);
     });
 
-    test("a Spec with only the old spec.robot is indexed as invalid and can be regenerated", async () => {
+    test("a Spec without spec.ts is invalid and can be repaired", async () => {
         const projectId = await createProject();
-        const feature = await writer.createFeatureInRepo(projectId, null, "Legado", "");
-        const { spec } = await createSpec(projectId, feature.id, "Antigo");
-        const root = repoGit.getRepoDir(projectId);
-        const git = repoGit.getProjectGit(projectId);
-        await fs.rm(path.join(root, spec.path, "spec.ts"));
-        await fs.writeFile(path.join(root, spec.path, "spec.robot"), "*** Test Cases ***\nCaso\n    Log    x\n");
-        await git.add(["-A"]);
-        await git.commit("an old Robot Framework spec");
-
+        const feature = await writer.createFeatureInRepo(projectId, null, "Checkout", "");
+        const { spec } = await createSpec(projectId, feature.id, "Missing implementation");
+        await fs.rm(path.join(repoGit.getRepoDir(projectId), spec.path, "spec.ts"));
+        await repoGit.commitAll(projectId, "test: remove executable");
         await reindexProject(projectId);
-        const legacy = await specsRepository.getSpec(spec.id);
-        assert.equal(legacy?.status, "invalid");
-        assert.equal(legacy?.invalidReason, "This Spec uses the old Robot Framework format; regenerate it in a chat");
-        const detail = (await (await api("GET", `/specs/${spec.id}`)).json()) as { content: { testSource: string; legacyRobotSource: string | null } };
-        assert.equal(detail.content.testSource, "");
-        assert.match(detail.content.legacyRobotSource ?? "", /Test Cases/);
-
-        const { spec: regenerated } = await writer.updateSpecInRepo(legacy!, { testSource: VALID_SPEC });
-        assert.equal(regenerated.status, "unverified");
-        assert.ok(!existsSync(path.join(root, spec.path, "spec.robot")), "spec.ts replaces the Robot file");
-        assert.ok((await git.status()).isClean());
+        const invalid = await specsRepository.getSpec(spec.id);
+        assert.equal(invalid?.invalidReason, "Missing spec.ts file in the spec directory");
+        const { spec: repaired } = await writer.updateSpecInRepo(invalid!, { testSource: VALID_SPEC });
+        assert.equal(repaired.status, "unverified");
     });
 
     test("renaming a feature moves its specs and keeps ids, runs and status", async () => {
@@ -331,8 +319,8 @@ describe("autonomous job proposals", () => {
         assert.equal(await applyProposal(proposal), commit);
         assert.equal(await repoGit.getHeadSha(projectId), commit);
         const stale = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC });
-        await writer.createFeatureInRepo(projectId, null, "Another", "");
-        await assert.rejects(() => applyProposal(stale), /repository changed/);
+        await writer.updateSpecWithLock(spec.id, { testSource: source.replace("/login", "/other") });
+        await assert.rejects(() => applyProposal(stale), /Spec changed/);
         const other = await createProject("Other project");
         const otherFeature = await writer.createFeatureInRepo(other, null, "Other", "");
         const { spec: otherSpec } = await createSpec(other, otherFeature.id, "Other");
@@ -359,13 +347,66 @@ describe("autonomous job proposals", () => {
         assert.equal((await jobsRepository.get(job.id))?.status, "budget_exceeded");
         const row2 = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Credentials", budget: jobBudgetSchema.parse({}) });
         const job2 = (await jobsRepository.claim(row2.id))!;
-        const credential = createJobPolicy(job2, () => {}).tools([{ name: "request_credential", label: "request", description: "test", parameters: Type.Object({}), async execute() { throw new Error("must be intercepted"); } }])[0]!;
+        let paused = false;
+        const credential = createJobPolicy(job2, () => { paused = true; }).tools([{ name: "request_credential", label: "request", description: "test", parameters: Type.Object({}), async execute() { throw new Error("must be intercepted"); } }])[0]!;
         await credential.execute("1", {}, undefined, undefined, {} as never);
+        assert.ok(paused, "a question aborts the turn even when other tool calls were batched");
         assert.equal((await jobsRepository.get(job2.id))?.status, "blocked");
         assert.equal((await jobsRepository.inbox(projectId))[0]?.kind, "question");
         await assert.rejects(() => credential.execute("2", {}, undefined, undefined, {} as never), /paused/);
         await jobsRepository.update(job2.id, { status: "running", startedAt: new Date().toISOString() });
         await jobsRepository.recover();
         assert.equal((await jobsRepository.get(job2.id))?.status, "queued");
+    });
+
+    test("concurrent approvals and recovery of a committed proposal produce one commit", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
+        const projectId = await createProject("Approval recovery");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
+        const { spec } = await createSpec(projectId, feature.id, "Login");
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Fix implementation", budget: jobBudgetSchema.parse({}) });
+        const proposal = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/login")') });
+        const router = createJobsRouter();
+        const approve = () => router.request(`/projects/${projectId}/inbox/${proposal.id}/review`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "approve" }),
+        });
+        const before = await commitCount(projectId);
+        const responses = await Promise.all([approve(), approve()]);
+        assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+        const approved = await jobsRepository.item(proposal.id);
+        assert.equal(approved?.status, "approved");
+        assert.ok(approved?.commitSha);
+        assert.equal(await commitCount(projectId), before + 1);
+        await jobsRepository.updateItem(proposal.id, { status: "applying", commitSha: null });
+        await jobsRepository.recover();
+        assert.equal((await approve()).status, 200);
+        assert.equal((await jobsRepository.item(proposal.id))?.commitSha, approved.commitSha);
+        assert.equal(await commitCount(projectId), before + 1);
+    });
+
+    test("answering a question resumes a paused job without reviving a cancelled job", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const projectId = await createProject("Answer race");
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Review", budget: jobBudgetSchema.parse({}) });
+        await jobsRepository.update(job.id, { status: "blocked" });
+        const question = await jobsRepository.addItem({ jobId: job.id, projectId, kind: "question", title: "Access", body: "Configure access" });
+        assert.ok(await jobsRepository.claimItem(question.id));
+        await jobsRepository.answer(question, "Configured");
+        assert.equal((await jobsRepository.get(job.id))?.status, "queued");
+        assert.equal((await jobsRepository.item(question.id))?.status, "answered");
+        assert.equal((await jobsRepository.item(question.id))?.answer, "Configured");
+
+        await jobsRepository.update(job.id, { status: "blocked" });
+        const next = await jobsRepository.addItem({ jobId: job.id, projectId, kind: "question", title: "Session", body: "Restore session" });
+        assert.ok(await jobsRepository.claimItem(next.id));
+        await jobsRepository.update(job.id, { status: "cancelled" });
+        await assert.rejects(() => jobsRepository.answer(next, "Restored"), /no longer paused/);
+        assert.equal((await jobsRepository.get(job.id))?.status, "cancelled");
+        assert.equal((await jobsRepository.item(next.id))?.status, "applying");
+        assert.equal((await jobsRepository.item(next.id))?.answer, null);
     });
 });

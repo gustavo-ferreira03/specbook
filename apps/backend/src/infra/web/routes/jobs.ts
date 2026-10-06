@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { proposalDirectory, type ProposalVerification } from "../../../core/jobs/verification";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -35,6 +38,17 @@ export function createJobsRouter(): Hono {
     router.get("/projects/:id/inbox", async (c) => {
         if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ items: await jobsRepository.inbox(c.req.param("id")) });
+    });
+    router.get("/projects/:id/inbox/:itemId/evidence/:file{.+}", async (c) => {
+        const item = await jobsRepository.item(c.req.param("itemId"));
+        if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
+        const verification = item.payload.verification as ProposalVerification | undefined;
+        const file = c.req.param("file");
+        if (!verification || !verification.screenshots.includes(file) || !/^evidence\/step-\d{2,3}\.png$/.test(file)) throw new HTTPException(404, { message: "Evidence not found" });
+        const directory = proposalDirectory(item, verification.id);
+        const target = path.join(directory, file);
+        if (await fs.realpath(target) !== target) throw new HTTPException(400, { message: "Invalid artifact path" });
+        return c.body(new Uint8Array(await fs.readFile(target)), 200, { "Content-Type": "image/png", "Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff" });
     });
     router.post("/projects/:id/inbox/:itemId/review", zValidator("json", reviewSchema), async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));

@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, GitMerge, Images, Info, PencilLine, Play, RefreshCw, Sparkles, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, GitMerge, Images, Info, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
-import { HighlightedCode, RawFileEditor } from "@/components/RawFileEditor";
+import { RawFileEditor } from "@/components/RawFileEditor";
 import { RelativeTime } from "@/components/RelativeTime";
+import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
 import { StatusPill } from "@/components/StatusPill";
@@ -38,17 +39,6 @@ interface LoadedRunEvidence {
     error: string;
     /** True when the run's spec.ts read saved credentials, so no HTML report was kept. */
     usedSecrets?: boolean;
-}
-
-/** Exact invalidReason the backend reports for a Spec still in the old automation format. */
-const LEGACY_FORMAT_REASON = "This Spec uses the old Robot Framework format; regenerate it in a chat";
-
-function isLegacySpec(detail: SpecDetail): boolean {
-    return Boolean(detail.content?.legacyRobotSource) || detail.spec.invalidReason === LEGACY_FORMAT_REASON;
-}
-
-function regenerateChatHref(projectId: string, specId: string) {
-    return `/p/${projectId}/chats/new?specId=${encodeURIComponent(specId)}&intent=regenerate`;
 }
 
 /** Splits "Line L, column C: message" (spec.ts validation) into its location and message. */
@@ -169,17 +159,6 @@ function VerificationBanner({
             <div className="mt-3 flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="outline" disabled={resolving} onClick={() => onResolve("local")}>Keep local</Button>
                 <Button type="button" size="sm" variant="outline" disabled={resolving} onClick={() => onResolve("remote")}>Keep remote</Button>
-            </div>
-        );
-    } else if (spec.status === "invalid" && isLegacySpec(specDetail)) {
-        status = "invalid";
-        headline = "This Spec needs to be regenerated";
-        detail = "It was written in an older automation format that Specbook no longer runs. Its steps and expected result are unchanged; a chat can write new automation for them.";
-        body = (
-            <div className="mt-3 flex flex-wrap gap-2">
-                <Button asChild size="sm">
-                    <Link href={regenerateChatHref(projectId, spec.id)}><Sparkles size={13} /> Regenerate in chat</Link>
-                </Button>
             </div>
         );
     } else if (spec.status === "invalid") {
@@ -336,7 +315,7 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
     if (!loaded) return <Skeleton className="h-24 w-full rounded-lg" aria-label="Loading evidence" />;
     if (loaded.error) return <Alert variant="danger" role="alert"><AlertDescription>Could not load evidence: {loaded.error}</AlertDescription></Alert>;
     if (!evidence) return null;
-    const empty = evidence.steps.length === 0 && !evidence.video && !(run.status === "passed" && evidence.expectedResult);
+    const empty = evidence.steps.length === 0 && !evidence.video && !evidence.diagnostics?.length && !evidence.errorContext && !(run.status === "passed" && evidence.expectedResult);
     return (
         <div className="space-y-4">
             {run.status === "passed" && evidence.expectedResult && (
@@ -352,6 +331,7 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
                 </section>
             )}
             <EvidenceGallery runId={run.id} evidence={evidence} onSelect={(step) => onSelect({ runId: run.id, step })} />
+            <RunDiagnostics evidence={evidence} />
             {empty && <p className="text-control text-ink-subtle">No evidence was recorded for this run.</p>}
             {!evidence.reportUrl && loaded.usedSecrets && (
                 <p className="flex items-start gap-2 text-meta text-ink-subtle">
@@ -427,28 +407,6 @@ function RunEntry({
                 </CollapsibleContent>
             </Collapsible>
         </li>
-    );
-}
-
-/* ------------------------------------------------------------------ legacy automation */
-
-function LegacySourceSection({ source, open, onOpenChange }: { source: string; open: boolean; onOpenChange: (open: boolean) => void }) {
-    return (
-        <Collapsible open={open} onOpenChange={onOpenChange} className="group/source overflow-hidden rounded-xl border border-line">
-            <CollapsibleTrigger asChild>
-                <button type="button" className="flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none transition-colors hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-ink-muted"><FileCode2 size={15} aria-hidden="true" /></span>
-                    <span className="min-w-0 flex-1">
-                        <span className="block text-control font-semibold text-ink">Advanced: old automation source</span>
-                        <span className="mt-0.5 block text-meta text-ink-subtle">Read-only. Regenerating the Spec in a chat replaces it.</span>
-                    </span>
-                    <ChevronDown size={15} className="shrink-0 text-ink-subtle transition-transform group-data-[state=open]/source:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
-                </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="border-t border-line bg-surface-soft/60 p-3.5">
-                <HighlightedCode label="spec.robot (old format, read-only)" language="text" source={source} className="max-h-[26rem] overflow-y-auto" />
-            </CollapsibleContent>
-        </Collapsible>
     );
 }
 
@@ -621,14 +579,12 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
             } else if (rawYamlDraft !== current.content?.yamlSource) {
                 current = await updateSpecFiles(specId, { yaml: rawYamlDraft });
             }
-            // A legacy Spec has no spec.ts yet; only an explicit new source replaces it.
-            const legacy = isLegacySpec(detail);
-            if (current.content && testSourceDraft !== current.content.testSource && (!legacy || testSourceDraft.trim())) {
+            if (current.content && testSourceDraft !== current.content.testSource) {
                 current = await updateSpecFiles(specId, { testSource: testSourceDraft });
             }
             setDetail(current);
             setEditing(false);
-            const nowInvalid = current.spec.status === "invalid" && !isLegacySpec(current);
+            const nowInvalid = current.spec.status === "invalid";
             setSavedInvalid(nowInvalid);
             if (nowInvalid) requestAnimationFrame(() => bannerRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
         } catch (error) {
@@ -646,7 +602,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
             const { outcome } = await resolveProjectGit(projectId, [
                 { path: `${detail.spec.path}/spec.yml`, keep },
                 { path: `${detail.spec.path}/spec.ts`, keep },
-                ...(detail.content?.legacyRobotSource != null ? [{ path: `${detail.spec.path}/spec.robot`, keep }] : []),
             ]);
             if (outcome.status === "conflict") {
                 throw new Error("Other conflicting files still need an explicit choice in project settings.");
@@ -695,7 +650,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const { spec, feature, content, runs } = detail;
     const latestRun = runs[0];
     const crumbs: Crumb[] = [specsCrumb, ...(feature ? [{ label: feature.title, href: `/p/${projectId}/features/${feature.id}` }] : [])];
-    const legacy = isLegacySpec(detail);
     const sourceEdited = Boolean(content && testSourceDraft !== content.testSource);
     const stepsChanged = Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(stepsDraft)) !== JSON.stringify(content.humanSpec.steps));
 
@@ -764,7 +718,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                     </Field>
                                     <Field id="spec-steps" label="Steps" hint="One per line, in order. Each line becomes a numbered step.">
                                         <Textarea id="spec-steps" aria-describedby={stepsChanged ? "spec-steps-hint spec-steps-note" : "spec-steps-hint"} value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)} disabled={saving} rows={6} placeholder="Open the store home page" />
-                                        {stepsChanged && !legacy && (
+                                        {stepsChanged && (
                                             <p id="spec-steps-note" role="status" className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-meta text-ink">
                                                 <TriangleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-icon" />
                                                 <span>
@@ -785,16 +739,11 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                             ) : (
                                 <div className="space-y-3">
                                     <Alert variant="warning" role="alert">
-                                        <AlertDescription>{legacy
-                                            ? "This Spec is in the old format, so its fields are edited as spec.yml. Regenerating it in a chat is usually easier."
-                                            : "The Spec file could not be read as fields. Fix the source below, then save."}</AlertDescription>
+                                        <AlertDescription>The Spec file could not be read as fields. Fix the source below, then save.</AlertDescription>
                                     </Alert>
                                     <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={rawYamlDraft} onChange={setRawYamlDraft} disabled={saving} />
                                 </div>
                             )}
-                            {legacy && content.legacyRobotSource ? (
-                                <LegacySourceSection source={content.legacyRobotSource} open={sourceOpen} onOpenChange={setSourceOpen} />
-                            ) : (
                             <Collapsible open={sourceOpen} onOpenChange={setSourceOpen} className="group/source overflow-hidden rounded-xl border border-line">
                                 <CollapsibleTrigger asChild>
                                     <button type="button" className="flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none transition-colors hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
@@ -816,7 +765,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                     <p className="mt-2 text-meta text-ink-subtle">Each step(&quot;…&quot;) title must match a step above, in order. Invalid source is still saved, and the Spec is marked for correction.</p>
                                 </CollapsibleContent>
                             </Collapsible>
-                            )}
                             <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur-sm sm:mx-0 sm:flex-row sm:items-center sm:justify-between sm:rounded-b-none sm:px-0">
                                 <p className="text-meta text-ink-subtle">Saving commits the changes to the repository.</p>
                                 <div className="flex flex-col-reverse gap-2 sm:flex-row">
@@ -826,16 +774,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                             </div>
                         </form>
                     ) : content && content.humanSpec ? (
-                        <div className="space-y-7">
-                            <SpecificationView humanSpec={content.humanSpec} />
-                            {legacy && content.legacyRobotSource && <LegacySourceSection source={content.legacyRobotSource} open={sourceOpen} onOpenChange={setSourceOpen} />}
-                        </div>
-                    ) : content && legacy ? (
-                        // The old format has no spec.ts, so the fields are not parsed; show spec.yml as written.
-                        <div className="space-y-7">
-                            <HighlightedCode label="spec.yml" language="yaml" source={content.yamlSource} className="border border-line" />
-                            {content.legacyRobotSource && <LegacySourceSection source={content.legacyRobotSource} open={sourceOpen} onOpenChange={setSourceOpen} />}
-                        </div>
+                        <SpecificationView humanSpec={content.humanSpec} />
                     ) : content ? (
                         <div className="rounded-xl border border-line">
                             <EmptyState size="compact" tone="warning" icon={FileX2} title="The Spec file could not be read" description="Use Edit to fix the source by hand." />

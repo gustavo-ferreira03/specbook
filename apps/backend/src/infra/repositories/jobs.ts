@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { db, runBatch } from "../db/client";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { db } from "../db/client";
 import { inboxItems, jobActions, jobs } from "../db/schema";
 
 export type Job = typeof jobs.$inferSelect;
@@ -8,8 +8,8 @@ export type InboxItem = typeof inboxItems.$inferSelect;
 const now = () => new Date().toISOString();
 
 export const jobsRepository = {
-    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "budget">): Promise<Job> {
-        const [job] = await db.insert(jobs).values({ ...input, id: crypto.randomUUID(), status: "queued", pendingMessage: input.goal, createdAt: now(), updatedAt: now() }).returning();
+    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "budget"> & Partial<Pick<Job, "kind" | "specId" | "runId" | "pendingMessage">>): Promise<Job> {
+        const [job] = await db.insert(jobs).values({ ...input, id: crypto.randomUUID(), status: "queued", pendingMessage: input.pendingMessage ?? input.goal, createdAt: now(), updatedAt: now() }).returning();
         return job!;
     },
     async get(id: string) {
@@ -23,6 +23,13 @@ export const jobsRepository = {
     },
     async queued() {
         return db.select().from(jobs).where(eq(jobs.status, "queued")).orderBy(asc(jobs.createdAt));
+    },
+    async transition(id: string, from: Job["status"], status: Job["status"]) {
+        return (await db.update(jobs).set({ status, updatedAt: now() })
+            .where(and(eq(jobs.id, id), eq(jobs.status, from))).returning())[0] ?? null;
+    },
+    async forRun(runId: string) {
+        return (await db.select().from(jobs).where(eq(jobs.runId, runId)))[0] ?? null;
     },
     async update(id: string, patch: Partial<Omit<Job, "id" | "projectId" | "chatId">>) {
         await db.update(jobs).set({ ...patch, updatedAt: now() }).where(eq(jobs.id, id));
@@ -56,10 +63,16 @@ export const jobsRepository = {
         await db.update(inboxItems).set({ ...patch, updatedAt: now() }).where(eq(inboxItems.id, id));
     },
     async answer(item: InboxItem, answer: string) {
-        await runBatch([
-            db.update(inboxItems).set({ status: "answered", answer, updatedAt: now() }).where(eq(inboxItems.id, item.id)),
-            db.update(jobs).set({ status: "queued", updatedAt: now(), pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` }).where(eq(jobs.id, item.jobId)),
+        // changes() ties the Inbox update to the blocked-to-queued transition in this transaction.
+        const [resumed] = await db.batch([
+            db.update(jobs).set({ status: "queued", updatedAt: now(), pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` })
+                .where(and(eq(jobs.id, item.jobId), eq(jobs.status, "blocked"), inArray(jobs.id,
+                    db.select({ jobId: inboxItems.jobId }).from(inboxItems).where(and(eq(inboxItems.id, item.id), eq(inboxItems.status, "applying"))),
+                ))).returning({ id: jobs.id }),
+            db.update(inboxItems).set({ status: "answered", answer, updatedAt: now() })
+                .where(and(eq(inboxItems.id, item.id), eq(inboxItems.status, "applying"), sql`changes() = 1`)),
         ]);
+        if (!resumed.length) throw new Error("The job is no longer paused; its answer was not applied");
     },
     async recover() {
         for (const job of await db.select().from(jobs).where(eq(jobs.status, "running"))) {

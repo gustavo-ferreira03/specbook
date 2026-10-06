@@ -8,15 +8,9 @@ import Editor from "react-simple-code-editor";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-/** `text` renders the source without highlighting (used for the old, read-only automation format). */
-export type EditorLanguage = "yaml" | "typescript" | "text";
-
-function escapeHtml(source: string): string {
-    return source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+export type EditorLanguage = "yaml" | "typescript";
 
 function highlightCode(source: string, language: EditorLanguage): string {
-    if (language === "text") return escapeHtml(source);
     return Prism.highlight(source, Prism.languages[language], language);
 }
 

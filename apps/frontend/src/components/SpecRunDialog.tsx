@@ -1,22 +1,68 @@
 "use client";
 
-import { AlertCircle, CircleHelp, Clock3, ExternalLink, Minus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertCircle, ChevronDown, CircleHelp, Clock3, ExternalLink, Minus, RefreshCw } from "lucide-react";
+import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { errorMessage, getRunEvidence, isAbortError } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
+import type { RunEvidence } from "@/lib/types";
 
 export type SpecBatchStatus = "queued" | "running" | "passed" | "failed" | "error" | "skipped" | "unknown";
 
 export interface SpecBatchItem {
+    runId?: string;
     specId: string;
     title: string;
     status: SpecBatchStatus;
     durationMs: number | null;
     failReason: string | null;
+}
+
+function BatchDiagnostics({ runId }: { runId: string }) {
+    const [open, setOpen] = useState(false);
+    const [evidence, setEvidence] = useState<RunEvidence | null>(null);
+    const [error, setError] = useState("");
+    const [retryKey, setRetryKey] = useState(0);
+
+    useEffect(() => {
+        if (!open) return;
+        const controller = new AbortController();
+        setError("");
+        getRunEvidence(runId, controller.signal)
+            .then(setEvidence)
+            .catch((error) => { if (!isAbortError(error)) setError(errorMessage(error)); });
+        return () => controller.abort();
+    }, [open, runId, retryKey]);
+
+    return (
+        <Collapsible open={open} onOpenChange={setOpen} className="mt-2">
+            <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="group/toggle h-7 px-2">Diagnostics <ChevronDown size={13} aria-hidden="true" className="transition-transform group-data-[state=open]/toggle:rotate-180 motion-reduce:transition-none" /></Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+                {error ? (
+                    <Alert variant="danger" role="alert" className="space-y-2">
+                        <AlertDescription>{error}</AlertDescription>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setRetryKey((key) => key + 1)}><RefreshCw size={13} /> Try again</Button>
+                    </Alert>
+                ) : !evidence ? (
+                    <Skeleton className="h-14 w-full" aria-busy="true" aria-label="Loading diagnostics" role="status" />
+                ) : evidence.diagnostics?.length || evidence.errorContext ? (
+                    <RunDiagnostics evidence={evidence} />
+                ) : (
+                    <p className="text-meta text-ink-subtle">No console or network failures were recorded.</p>
+                )}
+            </CollapsibleContent>
+        </Collapsible>
+    );
 }
 
 /** Run statuses use the shared StatusPill; batch-only states (queued, skipped, unknown) are neutral. */
@@ -95,6 +141,7 @@ export function SpecRunDialog({
                                 <div className="min-w-0 flex-1">
                                     <p className="text-control font-medium break-words text-ink">{item.title}</p>
                                     {item.failReason && <p className="mt-1 line-clamp-4 font-mono text-meta whitespace-pre-wrap break-words text-danger">{item.failReason}</p>}
+                                    {item.runId && ["passed", "failed", "error"].includes(item.status) && <BatchDiagnostics runId={item.runId} />}
                                 </div>
                                 {item.durationMs !== null && <span className="shrink-0 pt-0.5 text-meta text-ink-subtle tabular">{formatDuration(item.durationMs)}</span>}
                             </li>

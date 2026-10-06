@@ -1,14 +1,24 @@
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
+import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
 import { featuresRepository } from "../../infra/repositories/features";
 import { repoGit } from "../repo/git";
 import { readSpecRawFiles } from "../repo/manual";
-import { createFeatureInRepo, createSpecInRepo, updateSpecInRepo, validateSpec } from "../repo/writer";
+import { createFeatureInRepo, createSpecInRepo, updateSpecInRepo, validateSpec, sourceHashOf } from "../repo/writer";
 import { parseSpecYaml } from "../repo/yaml";
 import { withSpecLock } from "../specs/lifecycle";
 import { featureProposalSchema, fixProposalSchema, newSpecProposalSchema } from "./schemas";
 
 export async function proposeMutation(job: Job, name: string, input: unknown): Promise<InboxItem> {
+    if (job.kind === "failure_triage") {
+        if ((await jobsRepository.get(job.id))?.classification !== "test_drift") {
+            throw new Error("Investigate and classify the failure as test_drift before proposing an implementation fix.");
+        }
+        const patch = fixProposalSchema.parse(input);
+        if (name !== "update_spec" || patch.specId !== job.specId || patch.humanSpec || patch.title !== undefined || patch.description !== undefined) {
+            throw new Error("Healing changes only this Spec’s implementation. Propose any behavior change as an Inbox question.");
+        }
+    }
     return repoGit.withRepoLock(job.projectId, async () => {
         const baseHead = await repoGit.getHeadSha(job.projectId);
         let kind: InboxItem["kind"];
@@ -27,7 +37,7 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
             kind = "spec_fix";
             title = `Proposed fix: ${spec.title}`;
             params = patch;
-            before = { yaml: raw.yaml, testSource: raw.testSource, legacyRobotSource: raw.legacyRobotSource };
+            before = { yaml: raw.yaml, testSource: raw.testSource };
         } else if (name === "create_spec") {
             const proposed = newSpecProposalSchema.parse(input);
             const feature = await featuresRepository.getFeature(proposed.featureId);
@@ -47,9 +57,9 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
             title = `Proposed Feature: ${proposed.title}`;
             params = proposed;
         }
-        const payload = { baseHead, params, before };
+        const payload = { baseHead, params, before, requiresVerification: job.kind === "failure_triage" };
         const existing = (await jobsRepository.inbox(job.projectId)).find((item) =>
-            item.jobId === job.id && item.status === "pending" && JSON.stringify(item.payload) === JSON.stringify(payload));
+            item.jobId === job.id && item.status === "pending" && item.payload.baseHead === baseHead && JSON.stringify(item.payload.params) === JSON.stringify(params));
         if (existing) return existing;
         return jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind, title,
             body: "Review the proposed files below. Approval commits this change to the project repository.", payload });
@@ -62,13 +72,23 @@ export async function applyProposal(item: InboxItem): Promise<string> {
     const git = repoGit.getProjectGit(item.projectId);
     const previous = await git.raw(["log", "--format=%H", "--fixed-strings", `--grep=${marker}`, "-1"]);
     if (previous.trim()) return previous.trim();
+    if (item.payload.requiresVerification && (item.payload.verification as { status?: string } | undefined)?.status !== "passed") {
+        throw new Error("This proposal needs a passing verification before approval");
+    }
     const options = { expectedHead: String(item.payload.baseHead), commitMessage: `${marker} ${item.title}` };
     if (item.kind === "spec_fix") {
         const { specId, ...patch } = fixProposalSchema.parse(item.payload.params);
+        if (item.payload.requiresVerification) {
+            const verified = item.payload.verification as { sourceHash: string; baseUrl: string };
+            const project = await projectsRepository.getProject(item.projectId);
+            if (verified.sourceHash !== sourceHashOf(patch.testSource ?? "") || verified.baseUrl !== project?.baseUrl) {
+                throw new Error("Proposal source or project URL changed; verify again before approval");
+            }
+        }
         return withSpecLock(specId, async () => {
             const spec = await specsRepository.getSpec(specId);
             if (!spec || spec.projectId !== item.projectId) throw new Error("Spec no longer exists in this project");
-            return (await updateSpecInRepo(spec, patch, options)).commitSha;
+            return (await updateSpecInRepo(spec, patch, { ...options, expectedHead: undefined, expectedSpec: item.payload.before as { yaml: string; testSource: string | null } })).commitSha;
         });
     }
     if (item.kind === "new_spec") {

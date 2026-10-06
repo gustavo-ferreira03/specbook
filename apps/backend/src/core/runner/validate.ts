@@ -75,7 +75,7 @@ export const LOCATOR_ACTIONS = [
     "waitFor",
 ];
 const KEYBOARD_ACTIONS = ["press", "type"];
-const PAGE_MATCHERS = ["toHaveURL", "toHaveTitle"];
+const PAGE_MATCHERS = ["toHaveURL", "toHaveTitle", "toMatchAriaSnapshot"];
 export const LOCATOR_MATCHERS = [
     "toBeVisible",
     "toBeHidden",
@@ -93,6 +93,7 @@ export const LOCATOR_MATCHERS = [
     "toHaveClass",
     "toBeEmpty",
     "toHaveAccessibleName",
+    "toMatchAriaSnapshot",
 ];
 const TEXT_METHODS = new Set(["fill", "pressSequentially", "type"]);
 
@@ -378,6 +379,14 @@ class Validator {
             const allowed = assertion === "page" ? PAGE_MATCHERS : LOCATOR_MATCHERS;
             if (!allowed.includes(method)) {
                 fail(callee.property, `Matcher ${method}() is not allowed for ${assertion === "page" ? "the page" : "a locator"}. Allowed: ${list(allowed)}.`);
+            }
+            if (method === "toMatchAriaSnapshot") {
+                if (staticString(expression.arguments[0]) === null) {
+                    fail(expression, "toMatchAriaSnapshot() needs an inline snapshot string literal.");
+                }
+                if (expression.arguments[1] && expression.arguments[1].type !== "ObjectExpression") {
+                    fail(expression.arguments[1], "toMatchAriaSnapshot() takes an options object after the snapshot.");
+                }
             }
             this.plainArgs(expression, 0, 2);
             return;

@@ -16,8 +16,6 @@ import { readOptionalRepoFile, UnsafeRepoPathError } from "./safe-fs";
 import { humanizeSlug } from "./slug";
 import {
     featureYamlFile,
-    legacyRobotFile,
-    LEGACY_ROBOT_REASON,
     markdownHashOf,
     sourceHashOf,
     specTestFile,
@@ -45,8 +43,6 @@ interface FoundSpec {
     dirPath: string;
     yaml: string | null;
     testSource: string | null;
-    /** spec.ts is missing but a Robot Framework spec.robot from before is present. */
-    legacyRobot: boolean;
     unsafeReason: string | null;
 }
 
@@ -94,14 +90,11 @@ async function walk(root: string, relative: string, dirs: string[], found: Found
         const specYaml = await readRepoEntry(root, specYamlFile(entryRelative));
         if (specYaml.content !== null || specYaml.unsafe !== null) {
             const test = specYaml.unsafe ? { content: null, unsafe: null } : await readRepoEntry(root, specTestFile(entryRelative));
-            const legacyRobot = test.content === null && test.unsafe === null &&
-                (await fs.lstat(path.join(root, legacyRobotFile(entryRelative))).then(() => true, () => false));
             found.push({
                 path: entryRelative,
                 dirPath: relative,
                 yaml: specYaml.content,
                 testSource: test.content,
-                legacyRobot,
                 unsafeReason: specYaml.unsafe ?? test.unsafe,
             });
         } else {
@@ -230,7 +223,7 @@ function planSpecs(found: FoundSpec[], featuresByPath: Map<string, Feature>, exi
             entry.invalidReason = `Invalid spec.yml: ${parseError}`;
         } else if (item.testSource === null) {
             entry.status = "invalid";
-            entry.invalidReason = item.legacyRobot ? LEGACY_ROBOT_REASON : "Missing spec.ts file in the spec directory";
+            entry.invalidReason = "Missing spec.ts file in the spec directory";
         } else if (
             existing &&
             existing.sourceHash === entry.sourceHash &&

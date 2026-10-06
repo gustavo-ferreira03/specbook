@@ -91,9 +91,10 @@ export function stopActiveProcesses(): void {
 export function runNodeCli(
     script: string,
     args: string[],
-    options: { cwd: string; timeoutMs: number; env?: Record<string, string | undefined> },
+    options: { cwd: string; timeoutMs: number; env?: Record<string, string | undefined>; signal?: AbortSignal },
 ): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
+        options.signal?.throwIfAborted();
         const proc = spawn(process.execPath, [script, ...args], {
             cwd: options.cwd,
             env: minimalChildEnv(options.env),
@@ -112,12 +113,16 @@ export function runNodeCli(
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            options.signal?.removeEventListener("abort", abort);
             resolve(result);
         };
         const timer = setTimeout(() => {
             terminateProcessTree(proc);
             finish({ code: null, output: collected(), timedOut: true });
         }, options.timeoutMs);
+        const abort = () => terminateProcessTree(proc);
+        options.signal?.addEventListener("abort", abort, { once: true });
+        if (options.signal?.aborted) abort();
         proc.stdout.on("data", append);
         proc.stderr.on("data", append);
         proc.once("error", (error) => {
@@ -125,6 +130,7 @@ export function runNodeCli(
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            options.signal?.removeEventListener("abort", abort);
             reject(error);
         });
         proc.once("exit", (code) => {
@@ -140,24 +146,38 @@ function maxConcurrentRuns(): number {
 }
 
 let runningSlots = 0;
-const slotQueue: (() => void)[] = [];
+const slotQueue: { resume: () => void; signal?: AbortSignal; abort: () => void }[] = [];
 
 /**
  * Global limit on concurrent browser-driving Spec executions (single runs and batches).
  * Lock ordering: callers acquire their spec lock(s) first and a slot second. A slot holder
  * only waits for its own Playwright process, never for spec locks, so the two cannot deadlock.
  */
-export async function withRunSlot<T>(work: () => Promise<T>): Promise<T> {
+export async function withRunSlot<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
     if (runningSlots >= maxConcurrentRuns()) {
-        await new Promise<void>((resolve) => slotQueue.push(resolve));
+        await new Promise<void>((resolve, reject) => {
+            const waiter = { resume: resolve, signal, abort: () => {
+                const index = slotQueue.indexOf(waiter);
+                if (index < 0) return;
+                slotQueue.splice(index, 1);
+                reject(signal?.reason ?? new Error("Run cancelled"));
+            } };
+            slotQueue.push(waiter);
+            signal?.addEventListener("abort", waiter.abort, { once: true });
+            if (signal?.aborted) waiter.abort();
+        });
     } else {
         runningSlots += 1;
     }
     try {
+        signal?.throwIfAborted();
         return await work();
     } finally {
         const next = slotQueue.shift();
-        if (next) next();
-        else runningSlots -= 1;
+        if (next) {
+            next.signal?.removeEventListener("abort", next.abort);
+            next.resume();
+        } else runningSlots -= 1;
     }
 }

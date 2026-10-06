@@ -44,6 +44,7 @@ export interface SuiteOutcome {
 }
 
 export interface SuiteOptions {
+    signal?: AbortSignal;
     /** Directory of this execution: work/, report/ and results.json are created here. */
     directory: string;
     baseUrl: string;
@@ -172,6 +173,7 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
         const processResult = await runNodeCli(playwrightCli(), ["test", "--config", "playwright.config.mjs"], {
             cwd: workDir,
             timeoutMs: options.timeoutMs,
+            signal: options.signal,
             env: {
                 ...options.secretEnv,
                 [RUNTIME_ENV]: JSON.stringify(runtime),
@@ -213,7 +215,13 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
                 : null;
             const status = safeResult ? statusOf(safeResult) : "error";
             await fs.mkdir(spec.outputDir, { recursive: true });
-            await writeRunEvidence(spec.outputDir, status, safeResult, spec.analysis.steps);
+            let evidenceRedacted = false;
+            await writeRunEvidence(spec.outputDir, status, safeResult, spec.analysis.steps, (text) => {
+                const safe = options.scrub(text);
+                if (safe !== text) evidenceRedacted = true;
+                return safe;
+            });
+            if (evidenceRedacted) await fs.rm(reportDir, { recursive: true, force: true });
             results.set(spec.key, {
                 status,
                 durationMs: safeResult?.durationMs ?? null,

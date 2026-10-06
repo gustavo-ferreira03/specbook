@@ -1,3 +1,5 @@
+import { prepareTriageGoal } from "./triage";
+import { closeChatBrowser } from "../browser/sessions";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
 import { logger } from "../../infra/logger";
 import { abortChatTurn } from "../chat/chat-registry";
@@ -14,8 +16,17 @@ let timer: ReturnType<typeof setInterval> | undefined;
 
 export async function enqueueJob(projectId: string, input: unknown = {}): Promise<Job> {
     const parsed = createJobSchema.parse(input);
+    let pendingMessage = parsed.goal;
+    if (parsed.kind === "failure_triage") {
+        const input = await prepareTriageGoal(projectId, parsed.runId);
+        const existing = await jobsRepository.forRun(input.runId);
+        if (existing) return existing;
+        parsed.specId = input.specId;
+        parsed.goal = input.goal;
+        pendingMessage = input.message;
+    }
     const chat = await createChat(projectId);
-    const job = await jobsRepository.create({ ...parsed, projectId, chatId: chat.id });
+    const job = await jobsRepository.create({ ...parsed, pendingMessage, projectId, chatId: chat.id });
     await jobsRepository.log(job.id, "queued", parsed.trigger);
     void drainJobs();
     return job;
@@ -32,9 +43,10 @@ async function executeJob(job: Job): Promise<void> {
             await jobsRepository.update(job.id, { status: "budget_exceeded" });
         } else {
             deadline = setTimeout(() => {
-                void jobsRepository.update(job.id, { status: "budget_exceeded" }).then(abort).catch((error) => logger.error("job deadline failed", { error }));
+                void jobsRepository.transition(job.id, "running", "budget_exceeded").then((updated) => { if (updated) abort(); }).catch((error) => logger.error("job deadline failed", { error }));
             }, remaining);
             await jobsRepository.log(job.id, "started");
+            if ((await jobsRepository.get(job.id))?.status !== "running") return;
             await runChatTurn(job.chatId, job.pendingMessage, undefined, createJobPolicy(job, abort));
         }
         if (stopped) return;
@@ -46,17 +58,20 @@ async function executeJob(job: Job): Promise<void> {
             const blocked = !items.length || /couldn't respond|No LLM model|not authenticated|turn failed|unavailable/.test(last ?? "");
             await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: blocked ? "question" : "note",
                 title: blocked ? "Job needs your input" : "Job result", body: await scrub(last || "The agent could not complete this turn. Check the provider settings and reply to resume.") });
-            await jobsRepository.update(job.id, { status: blocked ? "blocked" : "completed" });
+            await jobsRepository.transition(job.id, "running", blocked ? "blocked" : "completed");
         } else if (current?.status === "budget_exceeded") {
             await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Job budget reached",
                 body: "The job stopped at its configured budget. Review its proposals and audit log before starting another job." });
         }
     } catch (error) {
+        const current = await jobsRepository.get(job.id);
+        if (stopped || current?.status === "cancelled" || current?.status === "budget_exceeded") return;
         await jobsRepository.log(job.id, "error", await scrub(String(error)));
         await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "question", title: "Job needs help", body: await scrub(String(error)) });
         await jobsRepository.update(job.id, { status: "blocked" });
     } finally {
         clearTimeout(deadline);
+        await closeChatBrowser(job.chatId).catch(() => undefined);
         await jobsRepository.update(job.id, { elapsedMs: job.elapsedMs + Date.now() - started, startedAt: null });
         await jobsRepository.log(job.id, "stopped", (await jobsRepository.get(job.id))?.status ?? "unknown");
     }
@@ -67,9 +82,10 @@ export async function drainJobs(): Promise<void> {
     polling = true;
     try {
         const configured = Number(process.env.SPECBOOK_MAX_CONCURRENT_JOBS ?? process.env.SPECBOOK_MAX_CONCURRENT_RUNS ?? 2);
-        const limit = Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 2;
+        const limit = Number.isInteger(configured) && configured > 0 ? configured : 2;
         for (const row of await jobsRepository.queued()) {
             if (active.size >= limit || stopped) break;
+            if (active.has(row.id)) continue;
             const job = await jobsRepository.claim(row.id);
             if (!job) continue;
             active.add(job.id);

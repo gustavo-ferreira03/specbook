@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { startFailureMonitor, stopFailureMonitor } from "./core/jobs/failures";
 import { startJobWorker, stopJobWorker } from "./core/jobs/worker";
 import { createJobsRouter } from "./infra/web/routes/jobs";
 import { serve } from "@hono/node-server";
@@ -15,7 +16,6 @@ import { markInterruptedBatches } from "./core/runner/batch";
 import { stopActiveRunProcesses } from "./core/runner/run";
 import { runMigrations } from "./infra/db/migrate";
 import { logger } from "./infra/logger";
-import { projectsRepository } from "./infra/repositories/projects";
 import { runsRepository } from "./infra/repositories/runs";
 import { createChatsRouter } from "./infra/web/routes/chats";
 import { createCredentialsRouter } from "./infra/web/routes/credentials";
@@ -102,13 +102,12 @@ app.route("/", createCredentialsRouter());
 await runMigrations();
 await repoGit.recoverAllInterruptedState();
 // reindexAllProjects also applies the bare repository policy to every project.
-const migratedTokens = await projectsRepository.encryptLegacyGitTokens();
-if (migratedTokens > 0) logger.info("encrypted legacy Git tokens", { count: migratedTokens });
 await runsRepository.markInterruptedRuns();
 await markInterruptedBatches();
 await reindexAllProjects();
 startSyncLoop();
 await startJobWorker();
+startFailureMonitor();
 // ---------------------------------------------------------------------------
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     logger.info("backend listening", { hostname, port });
@@ -157,6 +156,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     const closed = new Promise<void>((resolve) => server.close(() => resolve()));
     for (const client of wss.clients) client.terminate();
     wss.close();
+    stopFailureMonitor();
     await stopJobWorker();
     stopActiveRunProcesses();
     await closeAllChatBrowsers().catch((error: unknown) => logger.error("closing browsers failed", { error }));

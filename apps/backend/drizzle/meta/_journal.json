@@ -57,6 +57,20 @@
       "when": 1791269493212,
       "tag": "0007_fat_valeria_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791270029709,
+      "tag": "0008_fluffy_captain_universe",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791270501713,
+      "tag": "0009_broad_scrambler",
+      "breakpoints": true
     }
   ]
 }

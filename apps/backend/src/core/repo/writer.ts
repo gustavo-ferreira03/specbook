@@ -37,13 +37,6 @@ export function specTestFile(specPath: string): string {
     return `${specPath}/spec.ts`;
 }
 
-/** The Robot Framework executable of Specs written before spec.ts; no longer run. */
-export function legacyRobotFile(specPath: string): string {
-    return `${specPath}/spec.robot`;
-}
-
-export const LEGACY_ROBOT_REASON = "This Spec uses the old Robot Framework format; regenerate it in a chat";
-
 export function featureYamlFile(featurePath: string): string {
     return `${featurePath}/feature.yml`;
 }
@@ -77,7 +70,7 @@ async function siblingNames(projectId: string, dirRelative: string): Promise<Set
     const entries = await fs.readdir(absolute(projectId, dirRelative), { withFileTypes: true }).catch(() => []);
     const names = new Set<string>(["feature", "context"]);
     for (const entry of entries) {
-        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|ts|robot)$/, ""));
+        names.add(entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|ts)$/, ""));
     }
     return names;
 }
@@ -118,6 +111,7 @@ async function rollbackWorkingTree(projectId: string): Promise<void> {
  */
 export interface RepoMutationOptions {
     expectedHead?: string;
+    expectedSpec?: { yaml: string; testSource: string | null };
     commitMessage?: string;
 }
 
@@ -305,13 +299,6 @@ async function readOptionalFile(projectId: string, relative: string): Promise<st
     return readOptionalRepoFile(repoGit.getRepoDir(projectId), absolute(projectId, relative));
 }
 
-/** Deletes a leftover spec.robot (even a symlink: only the link is removed). */
-async function removeLegacyRobot(projectId: string, specPath: string): Promise<void> {
-    const target = absolute(projectId, legacyRobotFile(specPath));
-    await assertRepoPathSafe(repoGit.getRepoDir(projectId), path.dirname(target));
-    await fs.rm(target, { force: true });
-}
-
 export interface SpecPatchInput {
     title?: string;
     description?: string;
@@ -322,7 +309,7 @@ export interface SpecPatchInput {
 /**
  * Writes a Spec's files, validates the resulting spec.ts against the resulting
  * spec.yml and records the matching status. The caller must hold the Spec lock (see
- * updateSpecWithLock). Writing spec.ts removes a leftover Robot Framework spec.robot.
+ * updateSpecWithLock).
  */
 export async function updateSpecInRepo(
     spec: Spec,
@@ -337,9 +324,13 @@ export async function updateSpecInRepo(
                 throw new SyncConflictError("Resolve the git sync conflict of this Spec before editing it");
             }
             const currentYaml = await readFile(current.projectId, specYamlFile(current.path));
+            if (options.expectedSpec && (currentYaml !== options.expectedSpec.yaml
+                || await readOptionalFile(current.projectId, specTestFile(current.path)) !== options.expectedSpec.testSource)) {
+                throw new Error("The Spec changed since this proposal. Ask the job to prepare a new proposal.");
+            }
             const testSource = patch.testSource ?? (await readOptionalFile(current.projectId, specTestFile(current.path)));
             if (testSource === null) {
-                throw new Error(`${LEGACY_ROBOT_REASON}: provide the new spec.ts source (testSource) with this update.`);
+                throw new Error("Missing spec.ts; provide the complete testSource with this update.");
             }
 
             const title = patch.title ?? current.title;
@@ -365,7 +356,6 @@ export async function updateSpecInRepo(
                 : serializeSpecYaml({ title, description, humanSpec });
             await writeFile(current.projectId, specYamlFile(specPath), markdown);
             await writeFile(current.projectId, specTestFile(specPath), testSource);
-            await removeLegacyRobot(current.projectId, specPath);
             const sourceHash = sourceHashOf(testSource);
             const markdownHash = markdownHashOf(markdown);
             const validation = validateSpec(testSource, humanSpec);

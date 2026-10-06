@@ -145,7 +145,7 @@ test("Sign in with valid credentials", async ({ page, step, secret }) => {
 });
 ```
 
-The file may contain only this shape: one import from `specbook`, one `test`, and `step` blocks whose titles are the `steps` of `spec.yml`, in order. Inside a step, only awaited `page`/locator actions (`goto` with a path, `click`, `fill`, `getByRole`, ...) and `expect` assertions with literal arguments are accepted; anything else makes the Spec invalid. `secret(profile, field)` types a credential value at run time, only on the project origin or the profile's allowed origins. A Spec directory that still has only a Robot Framework `spec.robot` is listed as invalid until it is regenerated in a chat.
+The file may contain only this shape: one import from `specbook`, one `test`, and `step` blocks whose titles are the `steps` of `spec.yml`, in order. Inside a step, only awaited `page`/locator actions (`goto` with a path, `click`, `fill`, `getByRole`, ...) and `expect` assertions with literal arguments are accepted; anything else makes the Spec invalid. `secret(profile, field)` types a credential value at run time, only on the project origin or the profile's allowed origins.
 
 <details>
 <summary><strong>Configuration and public deployments</strong></summary>

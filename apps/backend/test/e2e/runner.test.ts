@@ -50,7 +50,19 @@ before(async () => {
     });
     app = await listen((request, response) => {
         response.setHeader("content-type", "text/html");
-        if (request.url?.startsWith("/login")) {
+        if (request.url?.startsWith("/http-error")) {
+            response.statusCode = 503;
+            response.end("Temporarily unavailable");
+        } else if (request.url?.startsWith("/network-error")) {
+            request.socket.destroy();
+        } else if (request.url === "/diagnostics") {
+            response.end(`<h1>Diagnostics ${SECRET}</h1><script>
+console.error('Console failure ${SECRET}');
+fetch('/http-error?token=hidden-token');
+fetch('/network-error').catch(() => {});
+setTimeout(() => { throw new Error('Page failure ${SECRET}'); }, 0);
+</script>`);
+        } else if (request.url?.startsWith("/login")) {
             response.end(`<h1>Sign in</h1>
 <label>Password <input id="password" type="password"></label>
 <button onclick="document.querySelector('h1').textContent = document.getElementById('password').value === '${SECRET}' ? 'Welcome back' : 'Wrong password'">Sign in</button>
@@ -83,6 +95,7 @@ test("Sign in", async ({ page, step, secret }) => {
     });
     await step("See the welcome message", async () => {
         await expect(page.getByRole("heading")).toHaveText("Welcome back");
+        await expect(page.getByRole("heading")).toMatchAriaSnapshot('- heading "Welcome back"');
     });
 });
 `;
@@ -172,5 +185,50 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         const evidence = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8"));
         assert.equal(evidence.steps.length, 2);
         assert.equal(evidence.video, "evidence/execution.webm");
+        assert.match(evidence.errorContext, /heading "Home"/);
+    });
+
+    test("retains console, page and network failures with scrubbed error context", { timeout: 120_000 }, async () => {
+        const directory = tempDir();
+        const outcome = await runPlaywrightSuite({
+            directory,
+            baseUrl: origin(app),
+            specs: [suiteSpec("diagnostics", FAILING.replace('page.goto("/")', 'page.goto("/diagnostics")'), directory)],
+            timeoutMs: 110_000,
+            secretEnv: {},
+            secretOrigins: { defaultOrigins: [origin(app)], byRef: {} },
+            scrub: createSecretScrubber([SECRET]),
+        });
+        assert.equal(outcome.processFailure, null);
+        assert.equal(outcome.results.get("diagnostics")?.status, "failed");
+        const text = await fs.readFile(path.join(directory, "evidence.json"), "utf8");
+        assert.ok(!text.includes(SECRET));
+        const evidence = JSON.parse(text);
+        const diagnostics = evidence.diagnostics as { kind: string; message: string; url?: string; status?: number }[];
+        assert.ok(diagnostics.some((entry) => entry.kind === "console" && entry.message === "Console failure ••••"));
+        assert.ok(diagnostics.some((entry) => entry.kind === "pageerror" && entry.message === "Page failure ••••"));
+        assert.ok(diagnostics.some((entry) => entry.kind === "response" && entry.status === 503 && entry.url?.endsWith("/http-error")));
+        assert.ok(diagnostics.some((entry) => entry.kind === "requestfailed" && entry.url?.endsWith("/network-error")));
+        assert.match(evidence.errorContext, /heading "Diagnostics ••••"/);
+        assert.equal(outcome.reportAvailable, false, "reports that embed unredacted text are removed");
+        assert.ok(!existsSync(path.join(directory, "report")));
+        assert.ok(!existsSync(path.join(directory, "work")));
+
+        const passingDirectory = tempDir();
+        const passingSource = FAILING.replace('page.goto("/")', 'page.goto("/diagnostics")').replace('"Hello"', '/Diagnostics/');
+        const passing = await runPlaywrightSuite({
+            directory: passingDirectory,
+            baseUrl: origin(app),
+            specs: [suiteSpec("diagnostics-pass", passingSource, passingDirectory)],
+            timeoutMs: 110_000,
+            secretEnv: {},
+            secretOrigins: { defaultOrigins: [origin(app)], byRef: {} },
+            scrub: createSecretScrubber([SECRET]),
+        });
+        assert.equal(passing.results.get("diagnostics-pass")?.status, "passed");
+        assert.equal(passing.reportAvailable, false, "redaction in an attachment alone removes the report too");
+        const passingEvidence = JSON.parse(await fs.readFile(path.join(passingDirectory, "evidence.json"), "utf8"));
+        assert.ok(passingEvidence.diagnostics.some((entry: { message: string }) => entry.message === "Console failure ••••"));
+        assert.equal(passingEvidence.errorContext, undefined);
     });
 });

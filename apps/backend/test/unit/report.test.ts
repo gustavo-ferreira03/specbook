@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
+import { createSecretScrubber } from "../../src/core/credentials/scrub";
 import { writeRunEvidence } from "../../src/core/runner/evidence";
 import { executableSource } from "../../src/core/runner/playwright";
 import { parsePlaywrightReport, stripAnsi } from "../../src/core/runner/report";
@@ -118,5 +119,31 @@ describe("run evidence", () => {
         const source = executableSource(VALID_SPEC, analysis.analysis, "/app/dist/specbook-fixtures.mjs");
         assert.match(source, /^import \{ test, expect \} from "\/app\/dist\/specbook-fixtures\.mjs";/);
         assert.equal(source.split("\n").length, VALID_SPEC.split("\n").length, "line numbers stay the same");
+    });
+
+    test("retains bounded diagnostics and error context after scrubbing secrets", async () => {
+        const work = tempDir();
+        const output = tempDir();
+        const diagnosticFile = path.join(work, "diagnostics.json");
+        const contextFile = path.join(work, "error-context.md");
+        const secret = "private-password";
+        await fs.writeFile(diagnosticFile, JSON.stringify([{ kind: "console", message: `Login failed for ${secret}` }]));
+        await fs.writeFile(contextFile, `- heading "${secret}"\n${"x".repeat(40_000)}`);
+        const attachments = [
+            { name: "specbook-diagnostics", path: diagnosticFile, contentType: "application/json" },
+            { name: "error-context", path: contextFile, contentType: "text/markdown" },
+        ];
+        const manifest = await writeRunEvidence(output, "failed", { failedStep: "Log in", attachments }, [], createSecretScrubber([secret]));
+        assert.deepEqual(manifest.diagnostics, [{ kind: "console", message: "Login failed for ••••" }]);
+        assert.equal(manifest.errorContext?.length, 32_000);
+        assert.ok(manifest.errorContext?.startsWith('- heading "••••"'));
+        assert.ok(!(await fs.readFile(path.join(output, "evidence.json"), "utf8")).includes(secret));
+
+        const passed = await writeRunEvidence(output, "passed", { failedStep: null, attachments }, [], createSecretScrubber([secret]));
+        assert.equal(passed.errorContext, undefined);
+        assert.equal(passed.diagnostics?.length, 1, "diagnostics also accompany passing runs");
+        await fs.writeFile(diagnosticFile, JSON.stringify([{ kind: "console", message: "x".repeat(2001) }]));
+        const invalid = await writeRunEvidence(output, "failed", { failedStep: null, attachments }, []);
+        assert.equal(invalid.diagnostics, undefined, "malformed or oversized diagnostics are ignored");
     });
 });

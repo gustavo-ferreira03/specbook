@@ -41,7 +41,14 @@ export function analyzeForRun(title: string, testSource: string, markdown: strin
     return analysis.analysis;
 }
 
-async function executeSpecLocked(specId: string, options: { persistFailures?: boolean }): Promise<ExecutedRun> {
+interface RunOptions {
+    persistFailures?: boolean;
+    automate?: boolean;
+    signal?: AbortSignal;
+}
+
+async function executeSpecLocked(specId: string, options: RunOptions): Promise<ExecutedRun> {
+    options.signal?.throwIfAborted();
     const spec = await specsRepository.getSpec(specId);
     if (!spec) throw new Error("Spec not found");
     if (spec.status === "invalid") throw new Error(`Spec is invalid: ${spec.invalidReason ?? "unknown reason"}`);
@@ -77,7 +84,7 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     const secretOrigins = await resolveSecretOriginPolicy(spec.projectId, project.baseUrl, refs);
     const scrub = await projectSecretScrubber(spec.projectId);
 
-    const run = await runsRepository.createRun({ specId: spec.id, commitSha, sourceHash });
+    const run = await runsRepository.createRun({ specId: spec.id, commitSha, sourceHash, automate: options.automate });
     try {
         await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
     } catch (error) {
@@ -108,8 +115,9 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
                 secretEnv,
                 secretOrigins,
                 scrub,
+                signal: options.signal,
             });
-        });
+        }, options.signal);
         const result = outcome.results.get(run.id);
         if (outcome.processFailure || !result) {
             failReason = outcome.processFailure ?? result?.failReason ?? "Playwright produced no result";
@@ -142,7 +150,8 @@ async function executeSpecLocked(specId: string, options: { persistFailures?: bo
     return finished;
 }
 
-export async function executeSpec(specId: string, options: { persistFailures?: boolean } = {}): Promise<ExecutedRun> {
+export async function executeSpec(specId: string, options: RunOptions = {}): Promise<ExecutedRun> {
+    options.signal?.throwIfAborted();
     return withSpecLock(specId, () => executeSpecLocked(specId, options));
 }
 
