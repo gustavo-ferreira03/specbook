@@ -50,6 +50,13 @@
       "when": 1790693701466,
       "tag": "0006_source_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791269493212,
+      "tag": "0007_fat_valeria_richards",
+      "breakpoints": true
     }
   ]
 }

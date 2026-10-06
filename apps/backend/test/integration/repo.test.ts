@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -301,5 +302,70 @@ describe("project, feature and spec through the writer", () => {
         assert.ok(!existsSync(bareDir));
         assert.equal((await simpleGit(remoteDir).raw(["rev-parse", "main"])).trim(), remoteHead, "the remote keeps its history");
         assert.equal((await api("DELETE", `/projects/${projectId}`)).status, 404);
+    });
+});
+
+describe("autonomous job proposals", () => {
+    test("proposals preserve the contract, reject stale edits, and replay approval once", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { proposeMutation, applyProposal } = await import("../../src/core/jobs/proposals");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const projectId = await createProject("Job proposals");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
+        const { spec } = await createSpec(projectId, feature.id, "Login");
+        const yamlFile = path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml");
+        const original = `# Contract owned by the human\n${await fs.readFile(yamlFile, "utf8")}`;
+        await fs.writeFile(yamlFile, original);
+        await repoGit.commitAll(projectId, "test: add comment");
+        await reindexProject(projectId);
+        const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Fix implementation", budget: jobBudgetSchema.parse({}) });
+        const head = await repoGit.getHeadSha(projectId);
+        const source = VALID_SPEC.replace('page.goto("/")', 'page.goto("/login")');
+        const proposal = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source });
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+        assert.equal(await fs.readFile(yamlFile, "utf8"), original);
+        assert.equal((await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source })).id, proposal.id);
+        const commit = await applyProposal(proposal);
+        assert.notEqual(commit, head);
+        assert.equal(await fs.readFile(yamlFile, "utf8"), original);
+        assert.equal(await applyProposal(proposal), commit);
+        assert.equal(await repoGit.getHeadSha(projectId), commit);
+        const stale = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC });
+        await writer.createFeatureInRepo(projectId, null, "Another", "");
+        await assert.rejects(() => applyProposal(stale), /repository changed/);
+        const other = await createProject("Other project");
+        const otherFeature = await writer.createFeatureInRepo(other, null, "Other", "");
+        const { spec: otherSpec } = await createSpec(other, otherFeature.id, "Other");
+        await assert.rejects(() => proposeMutation(job, "update_spec", { specId: otherSpec.id, testSource: source }), /not found/);
+    });
+
+    test("job policy accounts before tool execution and pauses for credentials", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { createJobPolicy } = await import("../../src/core/jobs/policy");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const projectId = await createProject("Policy");
+        const row = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Inspect", budget: jobBudgetSchema.parse({ maxActions: 1 }) });
+        const job = (await jobsRepository.claim(row.id))!;
+        let executed = 0;
+        let aborted = false;
+        const { Type } = await import("@earendil-works/pi-ai");
+        const tools = createJobPolicy(job, () => { aborted = true; }).tools([{ name: "test_tool", label: "test_tool", description: "test", parameters: Type.Object({}), async execute() { executed++; return { content: [], details: undefined }; } }]);
+        const tool = tools[0]!;
+        await tool.execute("1", {}, undefined, undefined, {} as never);
+        assert.equal(executed, 1);
+        await assert.rejects(() => tool.execute("2", {}, undefined, undefined, {} as never), /budget/);
+        assert.equal(executed, 1);
+        assert.ok(aborted);
+        assert.equal((await jobsRepository.get(job.id))?.status, "budget_exceeded");
+        const row2 = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Credentials", budget: jobBudgetSchema.parse({}) });
+        const job2 = (await jobsRepository.claim(row2.id))!;
+        const credential = createJobPolicy(job2, () => {}).tools([{ name: "request_credential", label: "request", description: "test", parameters: Type.Object({}), async execute() { throw new Error("must be intercepted"); } }])[0]!;
+        await credential.execute("1", {}, undefined, undefined, {} as never);
+        assert.equal((await jobsRepository.get(job2.id))?.status, "blocked");
+        assert.equal((await jobsRepository.inbox(projectId))[0]?.kind, "question");
+        await assert.rejects(() => credential.execute("2", {}, undefined, undefined, {} as never), /paused/);
+        await jobsRepository.update(job2.id, { status: "running", startedAt: new Date().toISOString() });
+        await jobsRepository.recover();
+        assert.equal((await jobsRepository.get(job2.id))?.status, "queued");
     });
 });

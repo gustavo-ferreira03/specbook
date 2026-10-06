@@ -183,3 +183,43 @@ export const appSettings = sqliteTable("app_settings", {
     llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),
     updatedAt: text("updated_at").notNull(),
 });
+
+export const jobs = sqliteTable("jobs", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull().unique(),
+    trigger: text("trigger").notNull(),
+    goal: text("goal").notNull(),
+    status: text("status").$type<import("../../core/jobs/schemas").JobStatus>().notNull(),
+    budget: text("budget", { mode: "json" }).$type<import("../../core/jobs/schemas").JobBudget>().notNull(),
+    tokensUsed: integer("tokens_used").notNull().default(0),
+    actionsUsed: integer("actions_used").notNull().default(0),
+    elapsedMs: integer("elapsed_ms").notNull().default(0),
+    startedAt: text("started_at"),
+    pendingMessage: text("pending_message").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [index("jobs_project_status").on(table.projectId, table.status)]);
+
+export const inboxItems = sqliteTable("inbox_items", {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<import("../../core/jobs/schemas").InboxKind>().notNull(),
+    status: text("status").$type<"pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed">().notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    answer: text("answer"),
+    commitSha: text("commit_sha"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [index("inbox_project_status").on(table.projectId, table.status)]);
+
+export const jobActions = sqliteTable("job_actions", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    detail: text("detail").notNull(),
+    createdAt: text("created_at").notNull(),
+}, (table) => [index("job_actions_job").on(table.jobId)]);

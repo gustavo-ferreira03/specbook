@@ -24,6 +24,8 @@ import { chatsRepository } from "../../repositories/chats";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
 
+import { jobsRepository } from "../../repositories/jobs";
+
 const messageSchema = z.object({ text: z.string().trim().min(1) });
 const SSE_HEARTBEAT_MS = 20_000;
 
@@ -100,6 +102,7 @@ export function createChatsRouter(): Hono {
 
     router.delete("/chats/:id", async (c) => {
         try {
+            if (await jobsRepository.forChat(c.req.param("id"))) throw new HTTPException(409, { message: "Job sessions are retained for audit" });
             if (!(await deleteChatData(c.req.param("id")))) {
                 throw new HTTPException(404, { message: "Chat not found" });
             }
@@ -175,6 +178,7 @@ export function createChatsRouter(): Hono {
 async function assertChatWritable(id: string, options: { allowBusy?: boolean } = {}): Promise<void> {
     const row = await chatsRepository.getChatRow(id);
     if (!row) throw new HTTPException(404, { message: "Chat not found" });
+    if (await jobsRepository.forChat(id)) throw new HTTPException(409, { message: "Use the project Inbox to answer this job" });
     if (row.contextRevisionId) {
         const revision = await projectContextsRepository.getProjectContextRevision(row.contextRevisionId);
         if (revision?.status !== "draft") throw new HTTPException(409, { message: "This discovery is closed" });

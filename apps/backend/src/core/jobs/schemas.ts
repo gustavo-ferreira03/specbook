@@ -1,0 +1,41 @@
+import { z } from "zod";
+
+export const jobBudgetSchema = z.object({
+    maxTokens: z.number().int().min(1).max(2_000_000).default(100_000),
+    wallTimeMs: z.number().int().min(1000).max(3_600_000).default(600_000),
+    maxActions: z.number().int().min(1).max(1000).default(80),
+});
+export const createJobSchema = z.object({
+    goal: z.string().trim().min(1).max(12000).default("Review this project's Specs and propose useful improvements. Ask when blocked."),
+    trigger: z.enum(["manual", "schedule", "spec_failure", "webhook"]).default("manual"),
+    budget: jobBudgetSchema.default(() => jobBudgetSchema.parse({})),
+});
+export const humanSpecSchema = z.object({
+    preconditions: z.array(z.string()),
+    steps: z.array(z.string()).min(1),
+    expectedResult: z.string(),
+    postconditions: z.array(z.string()),
+});
+export const featureProposalSchema = z.object({
+    parentId: z.string().optional(), title: z.string().min(1), description: z.string(),
+});
+export const newSpecProposalSchema = z.object({
+    featureId: z.string(), title: z.string().min(1), description: z.string(),
+    humanSpec: humanSpecSchema, testSource: z.string().min(1),
+});
+export const fixProposalSchema = z.object({
+    specId: z.string(), title: z.string().optional(), description: z.string().optional(),
+    humanSpec: humanSpecSchema.optional(), testSource: z.string().optional(),
+});
+export const reportSchema = z.object({
+    kind: z.enum(["question", "bug_report", "note"]),
+    title: z.string().trim().min(1).max(200),
+    body: z.string().trim().min(1).max(30000),
+});
+export const reviewSchema = z.object({
+    action: z.enum(["approve", "reject", "answer", "dismiss"]),
+    answer: z.string().trim().min(1).max(12000).optional(),
+});
+export type JobBudget = z.infer<typeof jobBudgetSchema>;
+export type JobStatus = "queued" | "running" | "blocked" | "completed" | "budget_exceeded" | "cancelled";
+export type InboxKind = "new_spec" | "spec_fix" | "feature" | "question" | "bug_report" | "note";

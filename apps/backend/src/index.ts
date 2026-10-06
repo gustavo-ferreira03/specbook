@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { startJobWorker, stopJobWorker } from "./core/jobs/worker";
+import { createJobsRouter } from "./infra/web/routes/jobs";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -83,6 +85,7 @@ app.onError((err, c) => {
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/", createProjectsRouter());
+app.route("/", createJobsRouter());
 app.route("/", createSpecsRouter());
 app.route("/", createRunsRouter());
 app.route("/", createChatsRouter());
@@ -105,6 +108,7 @@ await runsRepository.markInterruptedRuns();
 await markInterruptedBatches();
 await reindexAllProjects();
 startSyncLoop();
+await startJobWorker();
 // ---------------------------------------------------------------------------
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     logger.info("backend listening", { hostname, port });
@@ -153,6 +157,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     const closed = new Promise<void>((resolve) => server.close(() => resolve()));
     for (const client of wss.clients) client.terminate();
     wss.close();
+    await stopJobWorker();
     stopActiveRunProcesses();
     await closeAllChatBrowsers().catch((error: unknown) => logger.error("closing browsers failed", { error }));
     // Open SSE streams would otherwise hold server.close() until the timeout.

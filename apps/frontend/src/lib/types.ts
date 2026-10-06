@@ -287,3 +287,30 @@ export interface CredentialFieldInput {
     key: string;
     value?: string;
 }
+
+export interface Job {
+    id: string;
+    projectId: string;
+    chatId: string;
+    trigger: string;
+    goal: string;
+    status: "queued" | "running" | "blocked" | "completed" | "budget_exceeded" | "cancelled";
+    budget: { maxTokens: number; wallTimeMs: number; maxActions: number };
+    tokensUsed: number;
+    actionsUsed: number;
+    elapsedMs: number;
+    createdAt: string;
+}
+export interface JobAction { id: number; action: string; detail: string; createdAt: string }
+export interface InboxItem {
+    id: string;
+    jobId: string;
+    kind: "new_spec" | "spec_fix" | "feature" | "question" | "bug_report" | "note";
+    status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
+    title: string;
+    body: string;
+    payload: { before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> };
+    answer: string | null;
+    commitSha: string | null;
+    createdAt: string;
+}

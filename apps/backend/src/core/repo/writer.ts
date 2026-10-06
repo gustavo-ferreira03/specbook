@@ -116,13 +116,22 @@ async function rollbackWorkingTree(projectId: string): Promise<void> {
  * working tree is restored so disk and DB never disagree. The commit happens only
  * after the DB write succeeded.
  */
+export interface RepoMutationOptions {
+    expectedHead?: string;
+    commitMessage?: string;
+}
+
 async function mutateRepoUnlocked<T>(
     projectId: string,
     message: string,
     work: () => Promise<T>,
+    options: RepoMutationOptions = {},
 ): Promise<{ result: T; commitSha: string }> {
     await assertNoSyncConflict(projectId);
     await repoGit.assertRepoWritableUnlocked(projectId);
+    if (options.expectedHead && options.expectedHead !== await repoGit.getHeadSha(projectId)) {
+        throw new Error("The repository changed since this proposal. Ask the job to prepare a new proposal.");
+    }
     let result: T;
     try {
         result = await work();
@@ -132,7 +141,7 @@ async function mutateRepoUnlocked<T>(
         });
         throw error;
     }
-    const commitSha = await repoGit.commitAll(projectId, message);
+    const commitSha = await repoGit.commitAll(projectId, options.commitMessage ?? message);
     repoRemote.schedulePush(projectId);
     return { result, commitSha };
 }
@@ -142,6 +151,7 @@ export async function createFeatureInRepo(
     parentId: string | null,
     title: string,
     description: string,
+    options: RepoMutationOptions = {},
 ): Promise<Feature> {
     return repoGit.withRepoLock(projectId, async () => {
         const { result } = await mutateRepoUnlocked(projectId, `feature: create "${title}"`, async () => {
@@ -154,7 +164,7 @@ export async function createFeatureInRepo(
             await fs.mkdir(await safePath(projectId, featurePath), { recursive: true });
             await writeFile(projectId, featureYamlFile(featurePath), serializeFeatureYaml({ title, description }));
             return featuresRepository.createFeature(projectId, parentId, title, description, featurePath, id);
-        });
+        }, options);
         return result;
     });
 }
@@ -166,7 +176,7 @@ export async function createSpecInRepo(input: {
     description: string;
     humanSpec: HumanSpec;
     testSource: string;
-}): Promise<{ spec: Spec; commitSha: string }> {
+}, options: RepoMutationOptions = {}): Promise<{ spec: Spec; commitSha: string }> {
     const validation = validateSpec(input.testSource, input.humanSpec);
     return repoGit.withRepoLock(input.projectId, async () => {
         const { result: spec, commitSha } = await mutateRepoUnlocked(
@@ -204,6 +214,7 @@ export async function createSpecInRepo(input: {
                 await specsRepository.createSpecRecordRow(row);
                 return row;
             },
+            options,
         );
         return { spec, commitSha };
     });
@@ -316,6 +327,7 @@ export interface SpecPatchInput {
 export async function updateSpecInRepo(
     spec: Spec,
     patch: SpecPatchInput,
+    options: RepoMutationOptions = {},
 ): Promise<{ spec: Spec; commitSha: string }> {
     return repoGit.withRepoLock(spec.projectId, async () => {
         const { commitSha } = await mutateRepoUnlocked(spec.projectId, `spec: update "${patch.title ?? spec.title}"`, async () => {
@@ -348,7 +360,9 @@ export async function updateSpecInRepo(
                     await fs.rename(from, to);
                 }
             }
-            const markdown = serializeSpecYaml({ title, description, humanSpec });
+            const markdown = patch.title === undefined && patch.description === undefined && patch.humanSpec === undefined
+                ? currentYaml
+                : serializeSpecYaml({ title, description, humanSpec });
             await writeFile(current.projectId, specYamlFile(specPath), markdown);
             await writeFile(current.projectId, specTestFile(specPath), testSource);
             await removeLegacyRobot(current.projectId, specPath);
@@ -374,7 +388,7 @@ export async function updateSpecInRepo(
                 status,
                 invalidReason,
             });
-        });
+        }, options);
         const updated = await specsRepository.getSpec(spec.id);
         if (!updated) throw new Error("Spec disappeared during update");
         return { spec: updated, commitSha };

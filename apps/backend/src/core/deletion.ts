@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { jobsRepository } from "../infra/repositories/jobs";
 import path from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import { blockChatBrowser, cancelChatBrowserDeletion, removeChatBrowserData } from "./browser/sessions";
@@ -129,6 +130,10 @@ export async function deleteProjectData(id: string): Promise<boolean> {
     const project = await projectsRepository.getProject(id);
     if (!project) return false;
 
+    if ((await jobsRepository.list(id)).some((job) => job.status === "running")) {
+        throw new ResourceBusyError("Cancel the active jobs before deleting this project");
+    }
+    await jobsRepository.cancelProject(id);
     const chatRows = await chatsRepository.listChatRows(id);
     if (chatRows.some((chat) => isChatBusy(chat.id) || isChatDeleting(chat.id))) {
         throw new ResourceBusyError("Wait for the active chat to finish before deleting this project");

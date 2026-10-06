@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { TurnPolicy } from "../jobs/policy";
 import {
     createAgentSession,
     DefaultResourceLoader,
@@ -117,9 +118,10 @@ export async function runChatTurn(
     id: string,
     userText: string,
     existingSessionManager?: SessionManager,
+    policy?: TurnPolicy,
 ): Promise<void> {
     if (!tryReserveChatTurn(id)) return;
-    await runReservedChatTurn(id, userText, existingSessionManager, existingSessionManager ? "retry" : "message");
+    await runReservedChatTurn(id, userText, existingSessionManager, existingSessionManager ? "retry" : "message", policy);
 }
 
 interface SessionEventValue {
@@ -143,6 +145,7 @@ async function runReservedChatTurn(
     userText: string,
     existingSessionManager: SessionManager | undefined,
     trigger: TurnTrigger,
+    turnPolicy?: TurnPolicy,
 ): Promise<void> {
     publishChatUpdate(id);
     const metrics = new TurnMetricsRecorder(id, trigger);
@@ -282,7 +285,7 @@ async function runReservedChatTurn(
             ? null
             : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
         const resourceLoader = await createResourceLoader(
-            buildSystemPrompt(project, discoveryRevision, confirmedContext),
+            buildSystemPrompt(project, discoveryRevision, confirmedContext) + (turnPolicy?.prompt ?? ""),
         );
         if (consumeAbortRequest(id)) {
             metrics.fail("aborted", "aborted_before_start");
@@ -293,7 +296,7 @@ async function runReservedChatTurn(
             modelRuntime,
             cwd,
             noTools: "builtin",
-            customTools,
+            customTools: turnPolicy ? turnPolicy.tools(customTools) : customTools,
             resourceLoader,
             sessionManager,
         });
@@ -327,6 +330,7 @@ async function runReservedChatTurn(
             }
             if (value.type === "message_end" && value.message?.role === "assistant") {
                 metrics.assistantMessage(value.message);
+                turnPolicy?.tokens(value.message.usage?.totalTokens ?? 0);
                 publishChatUpdate(id, { type: "message_end" });
             }
             if (value.type === "tool_execution_start" && value.toolName) {
@@ -406,6 +410,7 @@ async function runReservedChatTurn(
             console.error(error);
         }
     } finally {
+        await turnPolicy?.flush();
         releaseChatTurn(id);
         publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
         publishChatUpdate(id);
