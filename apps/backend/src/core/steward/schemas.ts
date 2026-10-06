@@ -23,4 +23,3 @@ export const stewardIntentSchema = z.object({
 
 export type StewardIntentInput = z.input<typeof stewardIntentSchema>;
 export type StewardIntent = z.infer<typeof stewardIntentSchema>;
-export type IntentKind = z.infer<typeof intentKindSchema>;

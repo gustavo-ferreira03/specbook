@@ -9,8 +9,9 @@ export async function isAgentPaused(projectId: string): Promise<boolean> {
 }
 
 export async function canRunAgentJob(job: Job): Promise<boolean> {
-    if (await isAgentPaused(job.projectId)) return false;
-    if ((await stewardRepository.get(job.projectId)).autonomy !== "observe" || ["manual", "chat"].includes(job.trigger)) return true;
+    const [globallyPaused, project] = await Promise.all([settingsRepository.getAgentPaused(), stewardRepository.get(job.projectId)]);
+    if (globallyPaused || project.paused) return false;
+    if (project.autonomy !== "observe" || ["manual", "chat"].includes(job.trigger)) return true;
     const intents = await stewardRepository.intents(job.projectId);
     const linked = intents.find((intent) => intent.jobId === job.id || intent.id === job.id);
     return linked?.source === "user" || Boolean(linked?.intent.kind === "run_specs" && runTriggerForIntent(linked, intents, await stewardRepository.signals(job.projectId, null)) === "schedule");

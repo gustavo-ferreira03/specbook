@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import { jobBaseUrl } from "./environment";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
@@ -10,20 +11,23 @@ import { parseSpecYaml } from "../repo/yaml";
 import { withSpecLock } from "../specs/lifecycle";
 import { featureProposalSchema, fixProposalSchema, newSpecProposalSchema } from "./schemas";
 
+type FixProposal = z.infer<typeof fixProposalSchema>;
+
+/** Changes only spec.ts: the spec.yml behavior contract, title and description stay as they are. */
+export function isImplementationOnly(patch: FixProposal): patch is FixProposal & { testSource: string } {
+    return Boolean(patch.testSource) && !patch.humanSpec && patch.title === undefined && patch.description === undefined;
+}
+
 export async function proposeMutation(job: Job, name: string, input: unknown): Promise<InboxItem> {
-    if (job.kind === "failure_triage") {
-        if ((await jobsRepository.get(job.id))?.classification !== "test_drift") {
-            throw new Error("Investigate and classify the failure as test_drift before proposing an implementation fix.");
-        }
-        const patch = fixProposalSchema.parse(input);
-        if (name !== "update_spec" || patch.specId !== job.specId || patch.humanSpec || patch.title !== undefined || patch.description !== undefined) {
-            throw new Error("Healing changes only this Spec’s implementation. Propose any behavior change as an Inbox question.");
-        }
+    if (job.kind === "failure_triage" && (await jobsRepository.get(job.id))?.classification !== "test_drift") {
+        throw new Error("Investigate and classify the failure as test_drift before proposing an implementation fix.");
     }
-    if (job.kind === "regenerate") {
+    if (job.kind === "failure_triage" || job.kind === "regenerate") {
         const patch = fixProposalSchema.parse(input);
-        if (name !== "update_spec" || patch.specId !== job.specId || patch.humanSpec || patch.title !== undefined || patch.description !== undefined) {
-            throw new Error("Regeneration changes only spec.ts. Ask the human about changes to spec.yml.");
+        if (name !== "update_spec" || patch.specId !== job.specId || !isImplementationOnly(patch)) {
+            throw new Error(job.kind === "failure_triage"
+                ? "Healing changes only this Spec’s implementation. Propose any behavior change as an Inbox question."
+                : "Regeneration changes only spec.ts. Ask the human about changes to spec.yml.");
         }
     }
     return repoGit.withRepoLock(job.projectId, async () => {

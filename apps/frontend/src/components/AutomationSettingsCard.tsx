@@ -2,7 +2,6 @@
 
 import { useAuth } from "@/components/AuthProvider";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, Clock3, Pause, Play, RefreshCw, X } from "lucide-react";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -41,11 +40,8 @@ interface AutomationResponse {
 
 export function AutomationSettingsCard({ projectId }: { projectId: string }) {
     const { isAdmin } = useAuth();
-    const [allowAutoApproveFixes, setAllowAutoApproveFixes] = useState(false);
     const [autonomy, setAutonomy] = useState("propose");
     const [savedAutonomy, setSavedAutonomy] = useState("propose");
-    const [autoApproveFixes, setAutoApproveFixes] = useState(false);
-    const [savedAutoApproveFixes, setSavedAutoApproveFixes] = useState(false);
     const [settings, setSettings] = useState<AutomationSettings | null>(null);
     const [notifications, setNotifications] = useState<AutomationResponse["notifications"]>([]);
     const [specs, setSpecs] = useState<SpecSummary[]>([]);
@@ -83,13 +79,11 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setSpecsError("");
         Promise.all([
             api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, { signal: controller.signal }),
-            api<{ autonomy: string; autoApproveFixes: boolean }>(apiPath`/projects/${projectId}/steward`, { signal: controller.signal }),
+            api<{ autonomy: string }>(apiPath`/projects/${projectId}/steward`, { signal: controller.signal }),
         ])
             .then(([result, steward]) => {
                 setAutonomy(steward.autonomy);
                 setSavedAutonomy(steward.autonomy);
-                setAutoApproveFixes(steward.autoApproveFixes);
-                setSavedAutoApproveFixes(steward.autoApproveFixes);
                 applySettings(result.automation);
                 setNotifications(result.notifications);
             })
@@ -103,16 +97,12 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
             api<{ paused: boolean }>("/settings/agent", { signal: controller.signal })
                 .then((result) => setGloballyPaused(result.paused))
                 .catch((error) => { if (!isAbortError(error)) setPauseError("The agent pause setting could not load. Try again."); });
-            api<{ allowAutoApproveFixes: boolean }>("/settings/security", { signal: controller.signal })
-                .then((result) => setAllowAutoApproveFixes(result.allowAutoApproveFixes))
-                .catch(() => setAllowAutoApproveFixes(false));
         }
         return () => controller.abort();
     }, [projectId, retryKey, isAdmin]);
 
     const dirty = settings !== null && (
         autonomy !== savedAutonomy
-        || autoApproveFixes !== savedAutoApproveFixes
         || cron.trim() !== (settings.cron ?? "")
         || JSON.stringify([...specIds].sort()) !== JSON.stringify([...settings.specIds].sort())
         || healFailures !== settings.healFailures
@@ -126,9 +116,8 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setSaving(true);
         setFeedback(null);
         try {
-            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ autonomy, ...(isAdmin && autoApproveFixes !== savedAutoApproveFixes ? { autoApproveFixes } : {}) }) });
+            await api(apiPath`/projects/${projectId}/steward`, { method: "PUT", body: JSON.stringify({ autonomy }) });
             setSavedAutonomy(autonomy);
-            setSavedAutoApproveFixes(autoApproveFixes);
             const result = await api<AutomationResponse>(apiPath`/projects/${projectId}/automation`, {
                 method: "PUT",
                 body: JSON.stringify({
@@ -191,14 +180,6 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                             </Select>
                             <p className="mt-1.5 text-meta text-ink-subtle">Behavior changes and assertion changes always need your approval.</p>
                         </SettingsRow>
-                        {isAdmin && <SettingsRow label="Automatic fixes" htmlFor="automation-auto-approve" description="Off by default. Available in the optional automatic fixes mode above.">
-                            <Select value={autoApproveFixes ? "enabled" : "disabled"} onValueChange={(value) => { setAutoApproveFixes(value === "enabled"); setFeedback(null); }} disabled={saving || autonomy !== "act" || !allowAutoApproveFixes}>
-                                <SelectTrigger id="automation-auto-approve" aria-describedby="automation-auto-approve-help"><SelectValue /></SelectTrigger>
-                                <SelectContent><SelectItem value="disabled">Review every fix</SelectItem><SelectItem value="enabled">Allow verified locator fixes</SelectItem></SelectContent>
-                            </Select>
-                            <p id="automation-auto-approve-help" className="mt-1.5 text-meta text-ink-subtle">Only action locators may change. Fixes must pass a test run and follow three approved locator fixes with no rejected fixes.</p>
-                            {!allowAutoApproveFixes && <p className="mt-1.5 text-meta text-ink-muted">Automatic fixes are disabled for this instance. <Link href="/settings?tab=security" className="underline underline-offset-2">Review agent safety settings</Link>.</p>}
-                        </SettingsRow>}
                         <SettingsRow label="Schedule" htmlFor="automation-cron" description="Optional, in UTC.">
                             <Input id="automation-cron" value={cron} onChange={(event) => { setCron(event.target.value); setFeedback(null); }} placeholder="0 9 * * 1-5" disabled={saving} className="font-mono" autoComplete="off" aria-describedby="automation-cron-help" />
                             <p id="automation-cron-help" className="mt-1.5 text-meta text-ink-subtle">Five cron fields: minute, hour, day, month, weekday. This example runs at 09:00 UTC on weekdays. Leave blank to turn scheduled runs off.</p>
@@ -237,7 +218,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
                         </SettingsRow>
                         {settings.lastError && <SettingsBlock><Alert variant="warning" role="status"><AlertTitle>Last automation attempt</AlertTitle><AlertDescription>{settings.lastError}</AlertDescription></Alert></SettingsBlock>}
                         <SettingsFooter feedback={feedback ? <InlineFeedback feedback={feedback} /> : dirty ? <span className="text-control text-ink-muted">Unsaved changes</span> : null}>
-                            {dirty && <Button type="button" variant="ghost" onClick={() => { applySettings(settings); setAutonomy(savedAutonomy); setAutoApproveFixes(savedAutoApproveFixes); setFeedback(null); }} disabled={saving}>Cancel</Button>}
+                            {dirty && <Button type="button" variant="ghost" onClick={() => { applySettings(settings); setAutonomy(savedAutonomy); setFeedback(null); }} disabled={saving}>Cancel</Button>}
                             <Button type="submit" disabled={saving || !dirty}>{saving ? "Saving…" : "Save changes"}</Button>
                         </SettingsFooter>
                     </form>

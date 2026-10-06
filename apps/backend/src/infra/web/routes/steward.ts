@@ -1,4 +1,4 @@
-import { access, requireRole } from "../access";
+import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import crypto from "node:crypto";
 import { Hono } from "hono";
@@ -12,7 +12,7 @@ import { projectsRepository } from "../../repositories/projects";
 import { settingsRepository } from "../../repositories/settings";
 import { stewardRepository } from "../../repositories/steward";
 
-const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose", "act"]).optional(), paused: z.boolean().optional(), autoApproveFixes: z.boolean().optional() }).strict()
+const settingsSchema = z.object({ autonomy: z.enum(["observe", "propose", "act"]).optional(), paused: z.boolean().optional() }).strict()
     .refine((input) => Object.keys(input).length > 0, "Provide an automation setting or pause state");
 const taskSchema = z.object({ kind: z.enum(["coverage", "explore"]), goal: z.string().trim().min(1).max(6000).optional() }).strict();
 
@@ -25,20 +25,19 @@ export function createStewardRouter(): Hono {
         const id = c.req.param("id");
         await check(id);
         const row = await stewardRepository.get(id);
-        return c.json({ autonomy: row.autonomy, paused: row.paused, autoApproveFixes: row.autoApproveFixes, globallyPaused: await settingsRepository.getAgentPaused() });
+        return c.json({ autonomy: row.autonomy, paused: row.paused, globallyPaused: await settingsRepository.getAgentPaused() });
     });
     router.put("/projects/:id/steward", access("editor"), zValidator("json", settingsSchema), async (c) => {
         const id = c.req.param("id");
         await check(id);
         const previous = await stewardRepository.get(id);
         const patch = c.req.valid("json");
-        if (patch.autoApproveFixes !== undefined) requireRole(c, "admin");
         await stewardRepository.update(id, patch);
         if (previous.autonomy === "observe" && patch.autonomy && patch.autonomy !== "observe") await resumeCurrentSignals(id);
         if (patch.paused === true) await pauseAgentJobs(id);
         else if (patch.paused === false) await resumeAgentJobs(id);
         const row = await stewardRepository.get(id);
-        return c.json({ autonomy: row.autonomy, paused: row.paused, autoApproveFixes: row.autoApproveFixes, globallyPaused: await settingsRepository.getAgentPaused() });
+        return c.json({ autonomy: row.autonomy, paused: row.paused, globallyPaused: await settingsRepository.getAgentPaused() });
     });
     router.post("/projects/:id/tasks", access("editor"), zValidator("json", taskSchema), async (c) => {
         const id = c.req.param("id");

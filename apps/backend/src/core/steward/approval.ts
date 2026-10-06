@@ -1,8 +1,7 @@
-import { getSecuritySettings } from "../chat/safety-settings";
 import { parse } from "@babel/parser";
 import { jobsRepository, type InboxItem } from "../../infra/repositories/jobs";
 import { stewardRepository } from "../../infra/repositories/steward";
-import { applyProposal } from "../jobs/proposals";
+import { applyProposal, isImplementationOnly } from "../jobs/proposals";
 import { fixProposalSchema } from "../jobs/schemas";
 import { isAgentPaused } from "../jobs/pause";
 import { recordAgentMetric } from "../jobs/metrics";
@@ -13,7 +12,7 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
     if (item.kind !== "spec_fix" || !item.payload.requiresVerification) return false;
     const patch = fixProposalSchema.safeParse(item.payload.params);
     const before = item.payload.before as { testSource?: unknown } | undefined;
-    if (!patch.success || !patch.data.testSource || patch.data.humanSpec || patch.data.title !== undefined || patch.data.description !== undefined || typeof before?.testSource !== "string") return false;
+    if (!patch.success || !isImplementationOnly(patch.data) || typeof before?.testSource !== "string") return false;
     const normalize = (source: string) => {
         const ast = parse(source, { sourceType: "module", plugins: ["typescript"] });
         const normalizeAction = (call: Record<string, any>) => {
@@ -54,7 +53,7 @@ export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> 
     if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
     if ((item.payload.verification as { status?: string } | undefined)?.status !== "passed") return false;
     const patch = fixProposalSchema.safeParse(item.payload.params);
-    if (!patch.success || !patch.data.testSource || patch.data.humanSpec || patch.data.title !== undefined || patch.data.description !== undefined) return false;
+    if (!patch.success || !isImplementationOnly(patch.data)) return false;
     const job = await jobsRepository.get(item.jobId);
     if (job?.kind === "regenerate") return true;
     return job?.kind === "failure_triage" && job.classification === "test_drift" && isLocatorOnlyFix(item);
@@ -85,35 +84,6 @@ export async function applyVerifiedRepairs(projectId: string): Promise<void> {
         } catch {
             // Stale base or a concurrent edit: leave it for the next pass or for a human.
             await jobsRepository.updateItem(item.id, { status: "pending" });
-        }
-    }
-}
-
-export async function applyTrustedFixes(projectId: string): Promise<void> {
-    const permitted = async () => {
-        const settings = await stewardRepository.get(projectId);
-        return (await getSecuritySettings()).allowAutoApproveFixes && settings.autonomy === "act" && settings.autoApproveFixes && !await isAgentPaused(projectId);
-    };
-    if (!await permitted()) return;
-    const items = await jobsRepository.inbox(projectId);
-    const trusted = items.filter((item) => item.status === "approved" && isLocatorOnlyFix(item));
-    if (trusted.length < 3 || items.some((item) => item.status === "rejected" && isLocatorOnlyFix(item))) return;
-    for (const item of items.filter((item) => item.status === "pending" && isLocatorOnlyFix(item))) {
-        if (!await permitted()) return;
-        const verification = item.payload.verification as { status?: string } | undefined;
-        const job = await jobsRepository.get(item.jobId);
-        if (verification?.status !== "passed" || job?.status !== "completed" || job.classification !== "test_drift") continue;
-        if (!await jobsRepository.claimItem(item.id)) continue;
-        try {
-            const checkPolicy = async () => { if (!await permitted()) throw new Error("Automatic approval is disabled or paused"); };
-            await checkPolicy();
-            const commitSha = await applyProposal(item, checkPolicy);
-            await jobsRepository.updateItem(item.id, { status: "approved", commitSha });
-            await recordAgentMetric(job, "decision", { itemId: item.id, itemKind: item.kind, decision: "approve", actor: "agent" });
-            await jobsRepository.log(item.jobId, "auto_approved", "Act policy: verified selector-only change after three human-approved locator fixes.");
-        } catch (error) {
-            await jobsRepository.updateItem(item.id, { status: "pending" });
-            await jobsRepository.log(item.jobId, "auto_approval_skipped", "The proposal could not be applied; human review is still available.");
         }
     }
 }
