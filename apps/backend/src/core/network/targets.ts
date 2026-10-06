@@ -40,6 +40,10 @@ export function httpTarget(value: string): URL {
     return url;
 }
 
+export function isHttpTarget(value: string): boolean {
+    try { httpTarget(value); return true; } catch { return false; }
+}
+
 export async function resolveTarget(value: string | URL, allowPrivate = false, resolver: AddressResolver = resolveAddresses): Promise<ResolvedAddress> {
     const url = typeof value === "string" ? httpTarget(value) : value;
     const hostname = url.hostname.replace(/^\[|\]$/g, "");
