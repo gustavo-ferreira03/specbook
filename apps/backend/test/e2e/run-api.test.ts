@@ -265,6 +265,95 @@ describe("scheduled runs", () => {
         assert.equal(removed.automation.webhookConfigured, false);
     });
 
+    test("scheduled prerequisites ask once and resume the saved selection in observation mode", { skip: !available, timeout: 120_000 }, async () => {
+        const { schedulesRepository } = await import("../../src/infra/repositories/schedules");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { updateAutomation, processSchedules } = await import("../../src/core/jobs/schedules");
+        const { getRunBatch } = await import("../../src/core/runner/batch");
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+        stopJobWorker();
+        const project = await projectsRepository.createProject("Scheduled sign-in", baseUrl);
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        await stewardRepository.update(project.id, { autonomy: "observe" });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
+        const source = VALID_SPEC.replace("({ page, step })", "({ page, step, secret })")
+            .replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByLabel("Password").fill(secret("shopper", "password"));');
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Scheduled sign-in", description: "", humanSpec: HUMAN_SPEC, testSource: source });
+        const { spec: unselected } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Unselected", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const head = await repoGit.getHeadSha(project.id);
+        await updateAutomation(project.id, { cron: "* * * * *", specIds: [spec.id], healFailures: false, webhookUrl: "https://example.com/schedule-events" });
+        const at = new Date();
+        const dueAt = new Date(at.getTime() - 300_000).toISOString();
+        try {
+            await schedulesRepository.update(project.id, { nextRunAt: dueAt });
+            await Promise.all([processSchedules(at), processSchedules(at)]);
+            const questions = await jobsRepository.inbox(project.id);
+            assert.equal(questions.length, 1);
+            const question = questions[0]!;
+            const [intent] = await stewardRepository.intents(project.id);
+            assert.equal(intent?.source, "event");
+            assert.equal(question.payload.waitingFor, "credentials");
+            assert.equal(question.payload.runIntentId, intent?.id);
+            assert.equal((await jobsRepository.get(question.jobId))?.status, "blocked");
+            assert.deepEqual(await runsRepository.listRuns(spec.id), []);
+            assert.deepEqual((await stewardRepository.signals(project.id)).map((signal) => signal.kind), ["schedule"]);
+            assert.equal((await schedulesRepository.get(project.id))?.lastBatchId, null);
+
+            for (let index = 0; index < 301; index++) {
+                await stewardRepository.signal({ projectId: project.id, key: `later-event:${index}`, kind: "observation", title: "Later observation", body: "No requested work." });
+            }
+            assert.equal((await stewardRepository.signals(project.id)).length, 300);
+            assert.equal((await stewardRepository.signals(project.id)).some((signal) => signal.kind === "schedule"), false, "the original occurrence is outside the presentation window");
+
+            await schedulesRepository.update(project.id, { nextRunAt: new Date(at.getTime() - 1000).toISOString() });
+            await processSchedules(at);
+            await processProjectSteward(project.id, false);
+            assert.equal((await jobsRepository.inbox(project.id)).length, 1, "missed ticks reuse the unresolved prerequisite");
+            assert.equal((await stewardRepository.intents(project.id)).length, 1);
+
+            await stewardRepository.update(project.id, { paused: true });
+            await createProfile(project.id, { name: "shopper", fields: [{ key: "password", value: "scheduled-test-secret" }] });
+            await stewardRepository.signal({ projectId: project.id, key: "credentials:scheduled-test", kind: "credentials_changed", title: "Access available", body: "The requested profile is available." });
+            await processProjectSteward(project.id, false);
+            assert.equal((await jobsRepository.item(question.id))?.status, "pending");
+            assert.deepEqual(await runsRepository.listRuns(spec.id), []);
+
+            // Later settings must not replace the occurrence's selection or healer policy.
+            await updateAutomation(project.id, { specIds: [unselected.id], healFailures: true });
+            await stewardRepository.update(project.id, { paused: false });
+            await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
+            const resumed = (await stewardRepository.intents(project.id)).filter((row) => row.key.startsWith(`resume-run:${intent!.id}:`));
+            assert.equal(resumed.length, 1);
+            assert.equal(resumed[0]?.source, "event");
+            assert.deepEqual(resumed[0]?.intent.specIds, [spec.id]);
+            let batch = await getRunBatch(resumed[0]!.batchId!);
+            assert.equal(batch?.trigger, "schedule");
+            assert.equal((await schedulesRepository.get(project.id))?.lastBatchId, batch?.id);
+            assert.equal((await runsRepository.getRun(batch!.specs[0]!.runId))?.healOnFailure, false);
+            assert.equal((await jobsRepository.item(question.id))?.status, "answered");
+            const deadline = Date.now() + 60_000;
+            while (batch?.status === "running" && Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                batch = await getRunBatch(resumed[0]!.batchId!);
+            }
+            assert.equal(batch?.status, "passed", batch?.failReason ?? "");
+            assert.deepEqual(batch?.specs.map((entry) => entry.specId), [spec.id]);
+            assert.deepEqual(await runsRepository.listRuns(unselected.id), []);
+            await updateAutomation(project.id, { cron: null });
+            const originalFetch = globalThis.fetch;
+            globalThis.fetch = async () => new Response(null, { status: 200 });
+            try { await processSchedules(); } finally { globalThis.fetch = originalFetch; }
+            assert.equal((await schedulesRepository.get(project.id))?.lastBatchStatus, "passed");
+            assert.equal((await schedulesRepository.get(project.id))?.lastError, null);
+            assert.deepEqual((await schedulesRepository.notifications(project.id)).map((row) => row.status).sort(), ["passed", "running"]);
+            assert.equal((await jobsRepository.list(project.id)).length, 1);
+            assert.equal((await jobsRepository.get(question.jobId))?.tokensUsed, 0);
+            assert.equal((await jobsRepository.get(question.jobId))?.actionsUsed, 0);
+            assert.equal(await repoGit.getHeadSha(project.id), head);
+        } finally { await updateAutomation(project.id, { cron: null, webhookUrl: null }); }
+    });
+
     test("coalesces missed ticks, avoids overlap and persists webhook retries and recovered status", { skip: !available, timeout: 120_000 }, async () => {
         const { schedulesRepository } = await import("../../src/infra/repositories/schedules");
         const { specsRepository } = await import("../../src/infra/repositories/specs");
@@ -489,7 +578,7 @@ describe("autonomous pause and decisions", () => {
 
     async function projectWithWork() {
         const project = await projectsRepository.createProject("Continuation", baseUrl);
-        await stewardRepository.update(project.id, { autonomy: "propose", lastPlannerAt: new Date().toISOString() });
+        await stewardRepository.update(project.id, { autonomy: "propose" });
         return project;
     }
 
@@ -560,7 +649,7 @@ describe("autonomous pause and decisions", () => {
         assert.equal((await jobsRepository.get(queued.id))?.status, "paused");
         assert.equal((await jobsRepository.get(running.id))?.status, "paused");
         assert.equal((await jobsRepository.get(blocked.id))?.status, "blocked");
-        const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Explore checkout", reason: "Human requested exploration" }, "pause-pending");
+        const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Explore checkout", reason: "Human requested exploration" }, "pause-pending", "user");
         await processProjectSteward(project.id, false);
         assert.equal((await stewardRepository.intents(project.id)).find((row) => row.id === intent.id)?.status, "pending");
         await jobsRepository.recover();
@@ -636,12 +725,12 @@ describe("autonomous pause and decisions", () => {
         assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "resumed").length, 1);
     });
 
-    test("past token and time usage never prevents a new event investigation", async () => {
+    test("past token and time usage never prevents a requested investigation", async () => {
         const project = await projectWithWork();
         const previous = await createWork(project.id);
         await jobsRepository.recordUsage(previous.id, 2_000_000, 36_000_000);
         await jobsRepository.update(previous.id, { status: "completed", actionsUsed: 3000 });
-        const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Investigate checkout", reason: "Human requested exploration" }, "no-usage-gate");
+        const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Investigate checkout", reason: "Human requested exploration" }, "no-usage-gate", "user");
         await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
         const next = (await jobsRepository.get(intent.id))!;
         assert.ok(next);
@@ -834,8 +923,12 @@ describe("autonomous pause and decisions", () => {
     });
 
     test("ignore stops a paused investigation and prevents an equivalent automatic continuation", async () => {
+        const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
         const project = await projectWithWork();
-        const input = { kind: "explore", goal: "Investigate checkout", reason: "Checkout has no coverage" };
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Checkout", "");
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const input = { kind: "regenerate", specIds: [spec.id], goal: "Repair checkout implementation", reason: "Checkout implementation is invalid" };
         const intent = await enqueueIntent(project.id, input, "first-check");
         await processProjectSteward(project.id, false);
         const job = (await jobsRepository.list(project.id))[0]!;
@@ -852,6 +945,220 @@ describe("autonomous pause and decisions", () => {
         assert.equal(ignored.status, "ignored");
         assert.match(ignored.reason, /human rejected/i);
         assert.equal((await jobsRepository.list(project.id)).length, 1);
+    });
+
+    test("scope migration retires unsolicited work while retaining human requests and findings", async () => {
+        const { createClient } = await import("@libsql/client");
+        const { tempDir } = await import("../helpers/storage");
+        const client = createClient({ url: `file:${path.join(tempDir(), "event-scope-migration.db")}` });
+        try {
+            await client.executeMultiple(`
+                CREATE TABLE project_stewards (project_id TEXT PRIMARY KEY, last_planner_at TEXT);
+                CREATE TABLE steward_intents (id TEXT PRIMARY KEY, key TEXT NOT NULL, intent TEXT NOT NULL, job_id TEXT, status TEXT NOT NULL, reason TEXT NOT NULL, updated_at TEXT NOT NULL);
+                CREATE TABLE jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, trigger TEXT NOT NULL, status TEXT NOT NULL, retry_at TEXT, stop_reason TEXT, updated_at TEXT NOT NULL, tokens_used INTEGER NOT NULL);
+                CREATE TABLE job_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
+                CREATE TABLE inbox_items (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
+                INSERT INTO project_stewards VALUES ('project', '2026-10-01T00:00:00.000Z');
+            `);
+            const rows = [
+                ["planner", "planner", "steward", "queued", "planner:date"],
+                ["coverage", "coverage", "steward", "blocked", "signal:empty"],
+                ["explore", "explore", "steward", "running", "run-blocker:previous"],
+                ["manual", "explore", "manual", "queued", null],
+                ["chat", "explore", "steward", "blocked", "chat:session:tool"],
+                ["interrupted-chat", "explore", "steward", "queued", "chat:session:interrupted-tool"],
+                ["regression", "coverage", "steward", "queued", "regression:item"],
+                ["manual-intent", "coverage", "manual", "paused", "signal:human"],
+                ["triage", "failure_triage", "spec_failure", "queued", "signal:failure"],
+                ["past-planner", "planner", "steward", "completed", "planner:past"],
+            ];
+            for (const [id, kind, trigger, status, key] of rows) {
+                await client.execute({ sql: "INSERT INTO jobs VALUES (?, ?, ?, ?, ?, NULL, ?, ?)", args: [id!, kind!, trigger!, status!, "2026-10-06T00:00:00.000Z", "2026-10-01T00:00:00.000Z", 12345] });
+                if (key) await client.execute({ sql: "INSERT INTO steward_intents VALUES (?, ?, ?, ?, ?, ?, ?)", args: [id!, key, JSON.stringify({ kind: kind === "failure_triage" ? "triage" : kind }), id!, status === "completed" ? "completed" : "running", "Original request", "2026-10-01T00:00:00.000Z"] });
+                await client.execute({ sql: "INSERT INTO inbox_items VALUES (?, ?, 'question', 'pending', ?, ?)", args: [`question-${id}`, id!, JSON.stringify({ evidence: "preserved" }), "2026-10-01T00:00:00.000Z"] });
+            }
+            await client.execute("UPDATE steward_intents SET job_id = NULL WHERE id = 'interrupted-chat'");
+            await client.execute("INSERT INTO steward_intents VALUES ('resume', 'resume-run:chat:answer', '{\"kind\":\"run_specs\"}', NULL, 'pending', 'Continue requested run', '2026-10-01T00:00:00.000Z')");
+            await client.execute("INSERT INTO job_actions (job_id, action, detail, created_at) VALUES ('coverage', 'inspected', 'Evidence from checkout', '2026-10-01T00:00:00.000Z')");
+            await client.execute("INSERT INTO inbox_items VALUES ('bug', 'coverage', 'bug_report', 'pending', '{\"steps\":[\"Open checkout\"]}', '2026-10-01T00:00:00.000Z')");
+            await client.execute("INSERT INTO inbox_items VALUES ('proposal', 'coverage', 'new_spec', 'pending', '{\"testSource\":\"preserved\"}', '2026-10-01T00:00:00.000Z')");
+            const migration = await fs.readFile(new URL("../../drizzle/0017_rapid_sunspot.sql", import.meta.url), "utf8");
+            for (const statement of migration.split("--> statement-breakpoint")) await client.execute(statement.trim());
+            const jobs = (await client.execute("SELECT * FROM jobs")).rows;
+            for (const id of ["planner", "coverage", "explore"]) {
+                assert.equal(jobs.find((row) => row.id === id)?.status, "cancelled", id);
+                const question = (await client.execute({ sql: "SELECT * FROM inbox_items WHERE id = ?", args: [`question-${id}`] })).rows[0]!;
+                assert.equal(question.status, "dismissed");
+                assert.deepEqual(JSON.parse(String(question.payload)), { evidence: "preserved", retiredByScope: true });
+                assert.equal((await client.execute({ sql: "SELECT status FROM steward_intents WHERE id = ?", args: [id] })).rows[0]?.status, "ignored");
+            }
+            for (const id of ["manual", "chat", "interrupted-chat", "regression", "manual-intent", "triage"]) {
+                assert.notEqual(jobs.find((row) => row.id === id)?.status, "cancelled", id);
+                assert.equal((await client.execute({ sql: "SELECT status FROM inbox_items WHERE id = ?", args: [`question-${id}`] })).rows[0]?.status, "pending");
+            }
+            for (const id of ["chat", "interrupted-chat", "regression", "manual-intent", "resume"]) {
+                assert.equal((await client.execute({ sql: "SELECT source FROM steward_intents WHERE id = ?", args: [id] })).rows[0]?.source, "user", id);
+            }
+            assert.equal(jobs.find((row) => row.id === "past-planner")?.status, "completed");
+            assert.ok(jobs.every((row) => row.tokens_used === 12345));
+            assert.equal((await client.execute("SELECT detail FROM job_actions WHERE action = 'inspected'")).rows[0]?.detail, "Evidence from checkout");
+            assert.equal((await client.execute("SELECT count(*) AS count FROM job_actions WHERE action = 'retired'")).rows[0]?.count, 3);
+            assert.equal((await client.execute("SELECT status FROM inbox_items WHERE id = 'bug'")).rows[0]?.status, "pending");
+            assert.equal((await client.execute("SELECT payload FROM inbox_items WHERE id = 'proposal'")).rows[0]?.payload, '{"testSource":"preserved"}');
+            assert.equal((await client.execute("PRAGMA table_info(project_stewards)")).rows.some((row) => row.name === "last_planner_at"), false);
+        } finally { client.close(); }
+    });
+
+    test("an unchanged empty project stays idle without a planner or unsolicited exploration", async () => {
+        const project = await projectWithWork();
+        await processProjectSteward(project.id);
+        await processProjectSteward(project.id);
+        assert.deepEqual(await stewardRepository.signals(project.id), []);
+        assert.deepEqual(await stewardRepository.intents(project.id), []);
+        assert.deepEqual(await jobsRepository.list(project.id), []);
+        for (const kind of ["empty_project", "context_changed", "app_unavailable"]) {
+            await stewardRepository.signal({ projectId: project.id, key: `old:${kind}`, kind, title: "Old automatic observation", body: "Previously queued automatic work" });
+        }
+        await processProjectSteward(project.id, false);
+        assert.deepEqual(await stewardRepository.intents(project.id), []);
+        assert.deepEqual(await jobsRepository.list(project.id), []);
+        assert.ok((await stewardRepository.signals(project.id)).every((signal) => signal.status === "handled"));
+    });
+
+    test("explicit tasks run under observe and concurrent duplicate requests share the same work", async () => {
+        const project = await projectWithWork();
+        await stewardRepository.update(project.id, { autonomy: "observe" });
+        const endpoint = `/projects/${project.id}/tasks`;
+        const requests = await Promise.all([post(endpoint, { kind: "coverage" }), post(endpoint, { kind: "coverage" })]);
+        assert.deepEqual(requests.map((response) => response.status), [202, 202]);
+        const [first, duplicate] = await Promise.all(requests.map((response) => response.json()));
+        assert.deepEqual(first, duplicate);
+        assert.equal(first.status, "queued");
+        const intent = (await stewardRepository.intents(project.id))[0]!;
+        assert.equal(intent.id, first.intentId);
+        assert.equal(intent.source, "user");
+        assert.equal((await jobsRepository.get(intent.id))?.kind, "coverage");
+        assert.equal((await jobsRepository.list(project.id)).length, 1);
+        await jobsRepository.update(intent.id, { status: "completed" });
+        await processProjectSteward(project.id, false);
+        const next = await post(endpoint, { kind: "coverage" });
+        assert.equal(next.status, 202);
+        const repeated = await next.json();
+        assert.notEqual(repeated.intentId, first.intentId, "an explicit request must bypass the automatic cooldown");
+        assert.equal((await jobsRepository.get(repeated.intentId))?.status, "queued");
+        await jobsRepository.update(repeated.intentId, { status: "completed" });
+        const explore = await post(endpoint, { kind: "explore", goal: "Explore checkout with a guest account" });
+        const exploration = await explore.json();
+        assert.equal((await jobsRepository.get(exploration.intentId))?.kind, "explore");
+        assert.match((await jobsRepository.get(exploration.intentId))?.goal ?? "", /guest account/);
+        assert.equal((await stewardRepository.get(project.id)).autonomy, "observe");
+    });
+
+    test("requested tasks persist through local and global pause without required setup", async () => {
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const project = await projectWithWork();
+        await stewardRepository.update(project.id, { autonomy: "observe", paused: true });
+        const response = await post(`/projects/${project.id}/tasks`, { kind: "explore" });
+        const pending = await response.json();
+        assert.equal(response.status, 202);
+        assert.equal(pending.status, "paused");
+        assert.deepEqual(await jobsRepository.list(project.id), []);
+        assert.equal((await stewardRepository.intents(project.id))[0]?.source, "user");
+        await jobsRepository.recover();
+        try {
+            await put("/settings/agent", { paused: true });
+            await put(`/projects/${project.id}/steward`, { paused: false });
+            assert.deepEqual(await jobsRepository.list(project.id), []);
+            assert.equal((await stewardRepository.intents(project.id))[0]?.status, "pending");
+            await put("/settings/agent", { paused: false });
+            assert.equal((await jobsRepository.get(pending.intentId))?.status, "queued");
+            assert.equal((await jobsRepository.list(project.id)).length, 1);
+        } finally { await settingsRepository.setAgentPaused(false); }
+    });
+
+    test("task requests reject internal kinds and enforce project boundaries", async () => {
+        const project = await projectWithWork();
+        const endpoint = `/projects/${project.id}/tasks`;
+        for (const body of [{}, { kind: "planner" }, { kind: "triage" }, { kind: "explore", source: "user" }, { kind: "explore", goal: " " }, { kind: "coverage", specIds: [] }]) {
+            assert.equal((await post(endpoint, body)).status, 400);
+        }
+        assert.equal((await post("/projects/missing/tasks", { kind: "explore" })).status, 404);
+        assert.deepEqual(await stewardRepository.intents(project.id), []);
+        assert.deepEqual(await jobsRepository.list(project.id), []);
+        assert.equal((await router.request(`/projects/${project.id}/activity`)).status, 404);
+        assert.equal((await router.request(`/projects/${project.id}/inbox`)).status, 404);
+    });
+
+    test("chat requests are durable user intents but autonomous jobs cannot spawn more work", async () => {
+        const { createBackgroundTaskTool } = await import("../../src/core/steward/tools");
+        const { createJobPolicy } = await import("../../src/core/jobs/policy");
+        const project = await projectWithWork();
+        await stewardRepository.update(project.id, { autonomy: "observe" });
+        const tool = createBackgroundTaskTool(project.id, "chat:human-session");
+        const input = { kind: "explore" as const, goal: "Explore guest checkout", reason: "The user asked to investigate guest checkout" };
+        await tool.execute("requested", input, undefined, undefined, {} as never);
+        await tool.execute("requested", input, undefined, undefined, {} as never);
+        const intents = await stewardRepository.intents(project.id);
+        assert.equal(intents.length, 1);
+        assert.equal(intents[0]?.source, "user");
+        await processProjectSteward(project.id, false);
+        const job = (await jobsRepository.get(intents[0]!.id))!;
+        const policy = createJobPolicy(job, () => {});
+        assert.equal(policy.tools([tool]).some((candidate) => candidate.name === "start_background_task"), false);
+        assert.equal(policy.tools([tool]).some((candidate) => candidate.name === "propose_intents"), false);
+        assert.equal((await jobsRepository.list(project.id)).length, 1);
+    });
+
+    test("missing run credentials ask once and the answer resumes the same selection without an agent turn", { skip: available ? false : "Chromium is not installed", timeout: 120_000 }, async () => {
+        const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+        const { getRunBatch } = await import("../../src/core/runner/batch");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const project = await projectsRepository.createProject("Requested preview check", "http://127.0.0.1:1");
+        await stewardRepository.update(project.id, { autonomy: "observe" });
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
+        const source = VALID_SPEC.replace("({ page, step })", "({ page, step, secret })")
+            .replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByLabel("Password").fill(secret("shopper", "password"));');
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Sign in", description: "", humanSpec: HUMAN_SPEC, testSource: source });
+        const { spec: unselected } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Unselected check", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const head = await repoGit.getHeadSha(project.id);
+        const intent = await enqueueIntent(project.id, { kind: "run_specs", goal: "Check sign-in on the preview", reason: "The user requested this preview check", specIds: [spec.id], baseUrl }, "chat:preview:run", "user");
+        await processProjectSteward(project.id, false);
+        const blocked = (await jobsRepository.get(intent.id))!;
+        assert.equal(blocked.kind, "review");
+        assert.equal(blocked.status, "blocked");
+        assert.ok(blocked.stopReason);
+        assert.equal(blocked.tokensUsed, 0);
+        assert.equal(blocked.actionsUsed, 0);
+        await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
+        const questions = await jobsRepository.inbox(project.id);
+        assert.equal(questions.length, 1);
+        assert.equal(questions[0]?.payload.runIntentId, intent.id);
+        assert.equal(questions[0]?.payload.waitingFor, "credentials");
+        assert.deepEqual((await jobsRepository.list(project.id)).map((job) => job.kind), ["review"]);
+        await createProfile(project.id, { name: "shopper", allowedOrigins: [new URL(baseUrl).origin], fields: [{ key: "password", value: "local-test-secret" }] });
+        const answer = await post(`/projects/${project.id}/inbox/${questions[0]!.id}/review`, { action: "answer", answer: "The shopper profile is available now." });
+        assert.equal(answer.status, 200);
+        assert.equal((await jobsRepository.get(intent.id))?.status, "completed");
+        await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
+        const resumed = (await stewardRepository.intents(project.id)).filter((row) => row.key.startsWith(`resume-run:${intent.id}:`));
+        assert.equal(resumed.length, 1);
+        assert.equal(resumed[0]?.source, "user");
+        assert.deepEqual(resumed[0]?.intent.specIds, [spec.id]);
+        assert.equal(resumed[0]?.intent.baseUrl, baseUrl);
+        let batch = await getRunBatch(resumed[0]!.batchId!);
+        const deadline = Date.now() + 60_000;
+        while (batch?.status === "running" && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            batch = await getRunBatch(resumed[0]!.batchId!);
+        }
+        assert.equal(batch?.status, "passed", batch?.failReason ?? "");
+        assert.deepEqual(batch?.specs.map((entry) => entry.specId), [spec.id]);
+        assert.equal(batch?.baseUrl, baseUrl);
+        assert.deepEqual(await runsRepository.listRuns(unselected.id), []);
+        assert.equal((await jobsRepository.list(project.id)).length, 1);
+        assert.equal((await jobsRepository.get(intent.id))?.tokensUsed, 0);
+        assert.equal(await repoGit.getHeadSha(project.id), head);
     });
 
     test("discuss opens a visible human chat with suggestion context and reuses it", async () => {

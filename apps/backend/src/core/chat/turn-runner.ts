@@ -285,7 +285,7 @@ async function runReservedChatTurn(
                 const job = await jobsRepository.forChat(id);
                 if (!job) return;
                 await jobsRepository.log(job.id, "page_scan", json);
-                return `/p/${row.projectId}/activity#${job.id}`;
+                return `/p/${row.projectId}/overview#${job.id}`;
             },
         });
         const customTools = discoveryRevision

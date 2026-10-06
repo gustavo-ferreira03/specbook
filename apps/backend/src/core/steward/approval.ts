@@ -3,6 +3,7 @@ import { jobsRepository, type InboxItem } from "../../infra/repositories/jobs";
 import { applyProposal } from "../jobs/proposals";
 import { fixProposalSchema } from "../jobs/schemas";
 import { isAgentPaused } from "../jobs/pause";
+import { recordAgentMetric } from "../jobs/metrics";
 
 /** Only selector literals may differ. No new calls, behavior, input values or assertions. */
 export function isLocatorOnlyFix(item: InboxItem): boolean {
@@ -43,6 +44,7 @@ export async function applyTrustedFixes(projectId: string): Promise<void> {
             if (await isAgentPaused(projectId)) { await jobsRepository.updateItem(item.id, { status: "pending" }); return; }
             const commitSha = await applyProposal(item);
             await jobsRepository.updateItem(item.id, { status: "approved", commitSha });
+            await recordAgentMetric(job, "decision", { itemId: item.id, itemKind: item.kind, decision: "approve", actor: "agent" });
             await jobsRepository.log(item.jobId, "auto_approved", "Act policy: verified selector-only change after three human-approved locator fixes.");
         } catch (error) {
             await jobsRepository.updateItem(item.id, { status: "pending" });

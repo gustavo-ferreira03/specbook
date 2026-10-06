@@ -8,7 +8,7 @@ import { decryptSecret } from "../credentials/crypto";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { getRunBatch, startSpecBatch, type RunBatch } from "../runner/batch";
 import { areSpecsLocked } from "../specs/lifecycle";
-import { stewardRepository } from "../../infra/repositories/steward";
+import { recordScheduledPrerequisite } from "../steward/engine";
 import { isAgentPaused } from "./pause";
 
 interface CronField {
@@ -144,6 +144,11 @@ async function recordBatch(automation: ProjectAutomation, batch: RunBatch): Prom
     await schedulesRepository.recordBatch(automation.projectId, batch.id, batch.status, notification);
 }
 
+export async function recordScheduledBatch(batch: RunBatch): Promise<void> {
+    const automation = await schedulesRepository.get(batch.projectId);
+    if (automation) await recordBatch(automation, batch);
+}
+
 async function scheduleProject(projectId: string, at: Date): Promise<void> {
     await withAutomationLock(projectId, async () => {
         const automation = await schedulesRepository.get(projectId);
@@ -170,6 +175,7 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
             }
             if (!ids.length) throw new Error("There are no runnable Specs. Add a Spec or resolve the invalid Specs before the next scheduled run.");
             await startSpecBatch(projectId, ids, "Scheduled run", {
+                trigger: "schedule",
                 healFailures: automation.healFailures,
                 onPrepared: async (batch) => {
                     if (stopped || await isAgentPaused(projectId)) throw new Error("Scheduling stopped before execution");
@@ -181,10 +187,7 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
             const scrub = await projectSecretScrubber(projectId);
             const message = scrub(error instanceof Error ? error.message : String(error)).slice(0, 4000);
             await schedulesRepository.update(projectId, { lastError: message });
-            if (automation.lastError !== message) await stewardRepository.signal({
-                projectId, kind: "app_unavailable", key: `schedule:${message}`, title: "A scheduled run could not start",
-                body: `A scheduled Spec run could not start: ${message}\nInvestigate the blocker. Ask for credentials or a human decision through the Inbox when needed. Keep spec.yml unchanged.`,
-            });
+            await recordScheduledPrerequisite(projectId, automation.specIds.length ? automation.specIds : ids, automation.nextRunAt, message, automation.healFailures);
         }
     });
 }

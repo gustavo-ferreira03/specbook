@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { httpUrlSchema } from "../ci/schemas";
 
-export const intentKindSchema = z.enum(["triage", "regenerate", "coverage", "explore", "run_specs", "planner"]);
+export const intentKindSchema = z.enum(["triage", "regenerate", "coverage", "explore", "run_specs"]);
 
 export const stewardIntentSchema = z.object({
     kind: intentKindSchema,
@@ -19,10 +19,6 @@ export const stewardIntentSchema = z.object({
         context.addIssue({ code: "custom", path: ["specIds"], message: "Regeneration needs at least one Spec id" });
     }
 });
-
-export const proposeIntentsSchema = z.object({
-    intents: z.array(stewardIntentSchema).max(8),
-}).strict();
 
 export type StewardIntentInput = z.input<typeof stewardIntentSchema>;
 export type StewardIntent = z.infer<typeof stewardIntentSchema>;

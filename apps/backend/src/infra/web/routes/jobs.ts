@@ -8,7 +8,6 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { abortChatTurn, isChatBusy } from "../../../core/chat/chat-registry";
 import { applyProposal } from "../../../core/jobs/proposals";
-import { projectPresentation } from "../../../core/jobs/presentation";
 import { projectOverview } from "../../../core/jobs/overview";
 import { createJobSchema, reviewSchema } from "../../../core/jobs/schemas";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
@@ -46,11 +45,6 @@ export function createJobsRouter(): Hono {
         await jobsRepository.log(job.id, "cancelled", "Cancelled by human");
         return c.json({ ok: true });
     });
-    router.get("/projects/:id/inbox", async (c) => {
-        if (!await projectsRepository.getProject(c.req.param("id"))) throw new HTTPException(404, { message: "Project not found" });
-        const { items, summary } = await projectPresentation(c.req.param("id"));
-        return c.json({ items, summary });
-    });
     router.get("/projects/:id/inbox/:itemId/evidence/:file{.+}", async (c) => {
         const item = await jobsRepository.item(c.req.param("itemId"));
         if (!item || item.projectId !== c.req.param("id")) throw new HTTPException(404, { message: "Inbox item not found" });
@@ -72,7 +66,7 @@ export function createJobsRouter(): Hono {
             goal: `The human requested a regression Spec for this bug. Inspect existing coverage, reproduce the issue and propose a new Spec or a behavior change in Inbox. Do not silently edit spec.yml.
 ${item.title}
 ${item.body}`.slice(0, 6000),
-        }, `regression:${item.id}`);
+        }, `regression:${item.id}`, "user");
         await jobsRepository.updateItem(item.id, { payload: { ...item.payload, regressionIntentId: intent.id } });
         return c.json({ intentId: intent.id }, 202);
     });

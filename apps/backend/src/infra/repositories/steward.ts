@@ -13,15 +13,16 @@ export const stewardRepository = {
         await db.insert(projectStewards).values({ projectId, updatedAt: now() }).onConflictDoNothing();
         return (await db.select().from(projectStewards).where(eq(projectStewards.projectId, projectId)))[0]!;
     },
-    async update(projectId: string, patch: Partial<Pick<Steward, "autonomy" | "paused" | "observation" | "lastPlannerAt">>) {
+    async update(projectId: string, patch: Partial<Pick<Steward, "autonomy" | "paused" | "observation">>) {
         await this.get(projectId);
         await db.update(projectStewards).set({ ...patch, updatedAt: now() }).where(eq(projectStewards.projectId, projectId));
     },
     async signal(input: Pick<ProjectSignal, "projectId" | "key" | "kind" | "title" | "body"> & { payload?: Record<string, unknown> }) {
         await db.insert(projectSignals).values({ ...input, id: crypto.randomUUID(), createdAt: now() }).onConflictDoNothing();
     },
-    async signals(projectId: string) {
-        return db.select().from(projectSignals).where(eq(projectSignals.projectId, projectId)).orderBy(desc(projectSignals.createdAt)).limit(300);
+    async signals(projectId: string, limit: number | null = 300) {
+        const query = db.select().from(projectSignals).where(eq(projectSignals.projectId, projectId)).orderBy(desc(projectSignals.createdAt));
+        return limit === null ? query : query.limit(limit);
     },
     async pendingSignals(projectId: string) {
         return db.select().from(projectSignals).where(and(eq(projectSignals.projectId, projectId), eq(projectSignals.status, "pending")));
@@ -32,7 +33,7 @@ export const stewardRepository = {
     async acknowledge(id: string, status: ProjectSignal["status"]) {
         await db.update(projectSignals).set({ status }).where(eq(projectSignals.id, id));
     },
-    async addIntent(input: Pick<Intent, "projectId" | "key" | "fingerprint" | "intent" | "priority" | "reason">) {
+    async addIntent(input: Pick<Intent, "projectId" | "key" | "fingerprint" | "intent" | "priority" | "reason"> & Partial<Pick<Intent, "source">>) {
         await db.insert(stewardIntents).values({ ...input, id: crypto.randomUUID(), createdAt: now(), updatedAt: now() }).onConflictDoNothing();
         return (await db.select().from(stewardIntents).where(and(eq(stewardIntents.projectId, input.projectId), eq(stewardIntents.key, input.key))))[0]!;
     },

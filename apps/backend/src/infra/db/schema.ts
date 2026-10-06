@@ -267,7 +267,6 @@ export const projectStewards = sqliteTable("project_stewards", {
     autonomy: text("autonomy").$type<"observe" | "propose" | "act">().notNull().default("propose"),
     paused: integer("paused", { mode: "boolean" }).notNull().default(false),
     observation: text("observation", { mode: "json" }).$type<import("../../core/steward/signals").ProjectObservation>().notNull().default({}),
-    lastPlannerAt: text("last_planner_at"),
     updatedAt: text("updated_at").notNull(),
 });
 
@@ -288,6 +287,7 @@ export const stewardIntents = sqliteTable("steward_intents", {
     projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     fingerprint: text("fingerprint").notNull(),
+    source: text("source").$type<"user" | "event">().notNull().default("event"),
     intent: text("intent", { mode: "json" }).$type<import("../../core/steward/schemas").StewardIntent>().notNull(),
     priority: integer("priority").notNull(),
     status: text("status").$type<"pending" | "running" | "completed" | "ignored" | "failed">().notNull().default("pending"),

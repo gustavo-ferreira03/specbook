@@ -4,19 +4,19 @@ Branch: `feat/autonomous-agent`. Product owner: Gus. No pushes; `main` is untouc
 
 ## Product decisions
 
-- Jobs are internal. The project steward observes signals, persists intentions and dispatches work; the UI is Activity + Inbox, with no job creation form.
+- Jobs are internal. Deterministic event rules persist intentions and dispatch work; there is no LLM planner. Overview contains Needs you, Failing and Recent runs, with no job creation form. Coverage and exploration require an explicit request.
 - Steering, schedules and integrations are optional. Propose is the default autonomy level. Missing access leads to a question; credentials belong in Settings → Credentials.
 - `spec.yml` is the behavior contract. Autonomous repository tools create proposals; human approval is required for behavior changes. Source-only patches preserve the existing YAML bytes.
 - Gus cancelled Robot migration and requested removal of obsolete compatibility. Only `spec.yml` + `spec.ts` are supported. The GitHub repository mirror is removed; built-in Smart HTTP Git and GitHub Copilot OAuth remain.
 - Existing Specbook layout, components, typography and status tokens are reused. Proposed changes are unified file diffs, as requested in the latest correction.
 
-Both addenda have been applied. Their source files were read from `/tmp/claude-1000/-home-gus-projetos-specbook/ebbefea2-f0e2-47c9-923c-2abbc941647f/scratchpad/codex-brief-addendum.md` and `codex-brief-addendum-2.md`.
+The six addenda have been read; the current scope follows addendum 6, with implementation and validation checkpoints below. The original source files were read from `/tmp/claude-1000/-home-gus-projetos-specbook/ebbefea2-f0e2-47c9-923c-2abbc941647f/scratchpad/codex-brief-addendum.md` and `codex-brief-addendum-2.md`.
 
 ## Implemented
 
 ### Jobs and Inbox
 
-Persistent jobs reuse the chat runner, sessions and tools. SQLite retains queue state, budgets, audit entries, proposals and answers. Job chats stay out of the human chat list. Tokens and active wall time accumulate across turns; tool actions are reserved before execution. Questions pause the job, answers resume it, and interrupted jobs reconcile previous output after restart.
+Persistent jobs reuse the chat runner, sessions and tools. SQLite retains queue state, internal loop safeguards, audit entries, proposals and answers. Job chats stay out of the human chat list. Tokens and active wall time accumulate across turns; tool actions are reserved before execution. Questions pause the job, answers resume it, and interrupted jobs reconcile previous output after restart.
 
 Approval uses the existing repository writer with an original-file check for edits, a repository-head check for additions, and an Inbox commit marker for idempotent replay. Candidate verification runs outside the project checkout. The Inbox shows file diffs generated with the writer's YAML serializers; additions show all added lines, and untouched contracts show “No changes”. A test compares preview content with the bytes committed on approval.
 
@@ -36,19 +36,19 @@ Settings → Automation supports optional five-field numeric UTC cron, all or se
 
 ### Project steward
 
-Persistent observations, signals and intentions cover failed/invalid/stale/changed Specs, confirmed context, empty projects, deployments, credentials and chat requests. Lightweight deployment checks compare build asset URLs, ETag/Last-Modified or a bounded response hash every five minutes, with availability backoff. Deterministic observation generations deduplicate crash replay while retaining actual A→B→A changes.
+Persistent observations, signals and intentions cover failed, invalid or changed Specs, deployments, credentials and explicit user requests. Empty projects, context changes, stale checks and availability probes do not launch agent work. Lightweight deployment checks compare build asset URLs, ETag/Last-Modified or a bounded response hash every five minutes, with availability backoff. Deterministic observation generations deduplicate crash replay while retaining actual A→B→A changes.
 
-A daily planner uses a compact project digest and Zod-derived `propose_intents`; chat and jobs can request background work through the same intention queue. Independent coverage goals remain distinct. Equivalent work has a six-hour cooldown, blocked work prevents equivalent dispatch, and rejected proposals are remembered. Exact rejected proposals cannot be silently recreated.
+The LLM planner, planner tools and recursive background requests from agent sessions are removed. Chat retains `start_background_task` because it expresses a human request. Intention source distinguishes user requests from events; equivalent active work is deduplicated. Automatic work also has a six-hour cooldown and remembers rejections. Exact rejected proposals cannot be silently recreated.
 
-The steward serializes investigations within a project. There is no daily quota, token reservation or per-day batch cap. A run that cannot start creates a prerequisite investigation; after resolution it can retry the original selection and URL without an unlimited loop. New credentials resume explicitly tagged credential questions.
+The steward serializes investigations within a project. There is no daily quota, token reservation or per-day batch cap. A run that cannot start creates a deterministic prerequisite question, without an LLM turn. An answer retries the original selection and URL once; if the prerequisite persists, a new question is required. New credentials resume explicitly tagged credential questions.
 
-Observe records signals without dispatching new work. Propose submits changes for review. Act may apply a verified selector-only fix after three approved examples and no rejected examples; AST comparison excludes assertions, input data and contract changes.
+Observe records signals without dispatching automatic work; explicit requests remain available. Propose submits changes for review. Act may apply a verified selector-only fix after three approved examples and no rejected examples; AST comparison excludes assertions, input data and contract changes.
 
 ### Coverage and exploration
 
-Coverage jobs compare confirmed areas, roles and rules with existing Specs and Features. Findings become proposals or questions in Inbox. “Promote to regression Spec” creates one persisted coverage intention from a bug report; approval remains required for any repository mutation.
+Only a project action or chat request starts coverage or exploration. Coverage jobs compare confirmed areas, roles and rules with existing Specs and Features. Findings become proposals or questions in Inbox. “Promote to regression Spec” creates one persisted coverage intention from a bug report; approval remains required for any repository mutation.
 
-`scan_page` uses a strict empty Zod input and fixed trusted code. It runs axe on the current main document, captures console/network errors and checks up to twenty safe same-origin links with HEAD. It skips destructive link names/URLs, including encoded variants, and never follows link-check redirects. HEAD-unsupported responses are not reported as broken links. Output is bounded, scrubbed and saved in the job audit log with an Activity evidence link. Agents must confirm findings and include reproduction steps before reporting them.
+`scan_page` uses a strict empty Zod input and fixed trusted code. It runs axe on the current main document, captures console/network errors and checks up to twenty safe same-origin links with HEAD. It skips destructive link names/URLs, including encoded variants, and never follows link-check redirects. HEAD-unsupported responses are not reported as broken links. Output is bounded, scrubbed and saved in the job audit log with an Overview evidence link. Agents must confirm findings and include reproduction steps before reporting them.
 
 ### CI/CD and mirror removal
 
@@ -67,7 +67,7 @@ Quality gates snapshot open Inbox bugs at batch creation. By default, previously
 
 Preview URLs persist through execution, retry, investigation and candidate verification. They do not authorize stored secrets: credential origin rules remain tied to the canonical project URL and the profile's explicit allowed origins. The README explains preview authorization and all five pipeline snippets.
 
-## Verification
+## Earlier verification checkpoint (before addenda 3–6)
 
 - `pnpm typecheck`: passed for both apps.
 - `pnpm test`: 212 passed, zero failures or skips.
@@ -81,11 +81,11 @@ Preview URLs persist through execution, retry, investigation and candidate verif
 
 ## Limits and remaining optional work
 
-The requested core features and both addenda are implemented. Provider-specific deploy adapters for Vercel, Netlify and Render were optional and are not included; their pipelines can call the generic endpoint.
+The requested core features are implemented within the event-driven scope of addendum 6. Provider-specific deploy adapters for Vercel, Netlify and Render were optional and are not included; their pipelines can call the generic endpoint.
 
 Exploration is bounded to the rendered main document and safe links; it does not claim exhaustive accessibility or application coverage. Passive deployment fingerprints are heuristic; explicit deployment webhooks provide a reliable pipeline signal.
 
-Token usage is recorded after each model response, so a response can cross the threshold before further work stops. Browser side effects cannot be rolled back after a crash; recovered jobs are instructed to inspect state before repeating an action.
+Token usage is recorded for evaluation, never used as a scheduling quota. Browser side effects cannot be rolled back after a crash; recovered jobs are instructed to inspect state before repeating an action.
 
 ## Commits and workspace
 
@@ -131,7 +131,7 @@ Gus rejected the daily allowance and all cost controls. Daily accounting, advanc
 
 The only execution ceiling is internal: 500 actions and one active hour per attempt. There is no token ceiling. Up to two subsequent attempts use backoff and a prompt requiring a different approach. Continued inability to finish becomes a specific question with the recorded failure, not a quota notification. Infrastructure failures remain automatic service retries. The Overview and Automation settings expose only user pause controls.
 
-Validation: both app typechecks, backend build and the full suite passed, including persistent local/global pause, simultaneous requests, safe tool cancellation, cumulative recovery, retry backoff and migration preservation. The live backend watcher was temporarily suspended during the next reduction so the superseded planner cannot launch work between migrations; it must be resumed for final UI verification.
+Validation: both app typechecks, backend build and the full suite passed, including persistent local/global pause, simultaneous requests, safe tool cancellation, cumulative recovery, retry backoff and migration preservation. The live backend watcher was temporarily suspended during the next reduction so the superseded planner could not launch work between migrations. It was resumed and restarted with migration 0017 for the final UI verification.
 
 ## Addendum 6: event-driven autonomy (current product decision)
 
@@ -149,4 +149,18 @@ Octomind's company announcement stated that it had not obtained sufficient marke
 
 The evaluation should use injected faults with independently assigned labels: test drift, application bug and environment failure. Report classification accuracy and the number of unclassified or interrupted investigations. Record whether a verified correction was merely proposed, approved by a person or applied under the established trust policy; a passing candidate alone is not a resolved production check. Measure approval and rejection among decided suggestions, reporting pending suggestions separately.
 
-For chat-created versus hand-written Specs, use matched application flows and record authoring time, validator acceptance and repeat-run stability. Manual authoring times and injected-fault labels must be supplied by the experiment protocol, not inferred from an agent's own classification. Existing chat-turn metrics remain available; the implementation will extend exportable evaluation records with investigation, classification, verification and decision events. No experiment results are claimed here.
+For chat-created versus hand-written Specs, use matched application flows and record authoring time, validator acceptance and repeat-run stability. Manual authoring times and injected-fault labels must be supplied by the experiment protocol, not inferred from an agent's own classification. Existing chat-turn metrics remain available; the implementation extends exportable evaluation records with investigation, classification, verification and decision events. No experiment results are claimed here.
+
+### Addendum 6 implementation checkpoint
+
+The planner loop, `propose_intents`, planner kind, last-planning timestamp and automatic coverage/exploration rules are deleted. Migration 0017 records why obsolete work was retired, preserves existing findings, proposals and audit history, and removes its pending questions from the decision surface. It preserves identifiable user requests, including chat and regression promotion. New requests store their source explicitly.
+
+Run prerequisites now become questions directly, without an agent turn. Answering or supplying credentials resumes the original selected checks and preview URL. Observe still permits explicit user requests; project/global pause gates both sources. Chat agents can request background work, but background sessions cannot recursively create new tasks.
+
+`storage/metrics/agent-events.jsonl` records classification, verification and decision events with stable identifiers and cumulative usage. Human and automatic approvals are distinct. `node apps/backend/scripts/export-metrics.mjs --agent --out agent-events.csv` exports them alongside the existing turn/run exports. Metrics exclude prompts, URLs, errors and credentials; external fault labels and manual timing still belong to the evaluation protocol.
+
+The final Overview has three sections with shared health counts and per-check triage. Run counts use mutually exclusive outcomes during retry; resumed deployments retain their trigger, and an older classification cannot label a different failure. Pause does not overwrite run health. Coverage/exploration actions use the existing dropdown, and evidence/review stays in the existing side sheet.
+
+Live checks covered Agora Leads, Swag Labs and a temporary empty project at 1440px and 390px, with no horizontal overflow and no text below 12px. Evidence screenshots loaded, diffs stayed collapsed by default, and keyboard closure restored focus. A temporary verified locator proposal displayed one removed/added line, then approval created a repository commit with byte-identical YAML. Project pause/resume persisted. An empty project stayed at zero jobs/intentions until an explicit coverage action; that request remained pending while paused. The temporary projects were deleted through the API.
+
+Final validation: `pnpm typecheck` passed for both apps; `SPECBOOK_TEST_VNC=1 pnpm test` passed all 239 tests with no failures or skips; the backend build passed. The added cases cover idle projects, explicit requests under Observe, migration/restart preservation, deterministic credential questions, scheduled recovery with the original selection and healer policy, exclusive retry counts, current-failure triage and metric export without sensitive text. Final live reload had zero browser console errors; font-preload warnings came from Next development mode. No frontend production build was run.

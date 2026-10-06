@@ -80,6 +80,7 @@ export function createCiRouter(): Hono {
         if (!input.specIds) specs = specs.filter((spec) => spec.status !== "invalid");
         try {
             const batch = await startSpecBatch(projectId, specs.map((spec) => spec.id), "CI run", {
+                trigger: "ci",
                 baseUrl: input.baseUrl,
                 rejectIfBusy: true,
                 ci: { commitSha: input.commitSha, ref: input.ref, buildUrl: input.buildUrl, qualityGate: input.qualityGate, knownBugSpecIds: await knownBugSpecIds(projectId) },

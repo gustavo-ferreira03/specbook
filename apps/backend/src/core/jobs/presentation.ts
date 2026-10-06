@@ -140,7 +140,7 @@ export async function projectPresentation(projectId: string) {
         || inbox.some((item) => item.jobId === job.id && item.kind === "question" && awaiting(item) && isInfrastructureFailure(`${item.title}\n${item.body}`)))) .map((job) => job.id));
     const items: PresentedItem[] = [];
     for (const item of inbox) {
-        if (item.kind === "note") continue;
+        if (item.kind === "note" || item.payload.retiredByScope === true) continue;
         const job = jobsById.get(item.jobId);
         if (job && infrastructureJobs.has(job.id)) continue;
         const subject = forItem(item, job);
@@ -246,9 +246,8 @@ export async function projectPresentation(projectId: string) {
             : noticed?.kind === "spec_changed" ? `“${subject.name}” changed` : `Reviewing “${subject.name}”`
             : subject.type === "deployment" ? status === "completed" ? "Checked the application after an update" : "Checking the application after an update"
             : subject.type === "feature" ? `Looking for missing checks in “${subject.name}”`
-            : latestJob?.kind === "coverage" || ["empty_project", "context_changed"].includes(noticed?.kind ?? "") ? `Looking for missing checks in ${project.name}`
+            : latestJob?.kind === "coverage" ? `Looking for missing checks in ${project.name}`
             : latestJob?.kind === "explore" ? `Exploring ${project.name} for application problems`
-            : noticed?.kind === "app_unavailable" ? `${project.name} did not respond to the latest connection check`
             : `Reviewing changes to ${project.name}’s checks`;
         const nextStep = status === "waiting" ? "Add the requested access in Settings, then answer the question."
             : status === "needs_attention" ? "Review the suggestion, or discuss the check in chat."
@@ -260,8 +259,7 @@ export async function projectPresentation(projectId: string) {
             : "Specbook will check again when the application or its checks change.";
         const noticedText: Record<string, string> = {
             invalid_spec: "The current check could not run.", spec_failure: "A test run did not complete as expected.", spec_changed: "The check was edited.",
-            deployment: "A new deployment was reported.", deployment_changed: "An application update was detected.", stale_spec: "This check has not run recently.",
-            context_changed: "The confirmed project information changed.", empty_project: "This project has no checks yet.", app_unavailable: "The application could not be reached.",
+            deployment: "A new deployment was reported.", deployment_changed: "An application update was detected.",
         };
         const summary = decisions[0]?.presentation.summary ?? failureReason ?? (noticed ? noticedText[noticed.kind] : undefined) ?? "";
         const timeline: ActivityStory["timeline"] = [];

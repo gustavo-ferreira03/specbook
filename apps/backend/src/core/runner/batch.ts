@@ -19,6 +19,7 @@ import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
 import type { SpecAnalysis } from "./validate";
 
 type FinalRunStatus = Exclude<RunStatus, "running">;
+export type RunBatchTrigger = "deploy" | "ci" | "schedule" | "manual" | "spec_change";
 
 export interface RunBatchItem {
     runId: string;
@@ -44,6 +45,7 @@ export interface RunBatch {
     id: string;
     projectId: string;
     label: string;
+    trigger?: RunBatchTrigger;
     baseUrl?: string;
     ci?: CiBatchMetadata;
     status: RunStatus;
@@ -202,6 +204,7 @@ async function prepareSpecBatch(
     baseUrl: string,
     healOnFailure: boolean,
     ci?: CiBatchMetadata,
+    trigger: RunBatchTrigger = "manual",
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
         if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
@@ -284,6 +287,7 @@ async function prepareSpecBatch(
         id: crypto.randomUUID(),
         projectId,
         label: label.trim().slice(0, 120) || "Run Specs",
+        trigger,
         baseUrl,
         ...(ci ? { ci } : {}),
         status: "running",
@@ -319,7 +323,7 @@ async function prepareSpecBatch(
     return { batch, prepared, secrets };
 }
 
-export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { baseUrl?: string; ci?: CiBatchMetadata; healFailures?: boolean; rejectIfBusy?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {
+export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { baseUrl?: string; ci?: CiBatchMetadata; trigger?: RunBatchTrigger; healFailures?: boolean; rejectIfBusy?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {
     const project = await projectsRepository.getProject(projectId);
     if (!project) throw new Error("Project not found");
     const ids = [...new Set(specIds)];
@@ -330,7 +334,7 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     let prepared: PreparedSpec[];
     let secrets: BatchSecrets;
     try {
-        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, options.baseUrl ?? project.baseUrl, options.healFailures !== false, options.ci));
+        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, options.baseUrl ?? project.baseUrl, options.healFailures !== false, options.ci, options.trigger ?? (options.ci ? "ci" : "manual")));
         try {
             await options.onPrepared?.(batch);
         } catch (error) {

@@ -253,7 +253,7 @@ describe("autonomous job proposals", () => {
         const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Propose coverage", limits: jobLimitsSchema.parse({}) });
         const router = createJobsRouter();
         const preview = async (id: string) => {
-            const response = await router.request(`/projects/${projectId}/inbox`);
+            const response = await router.request(`/projects/${projectId}/overview`);
             assert.equal(response.status, 200);
             const { items } = await response.json() as { items: { id: string; payload: { files: { path: string; before: string | null; after: string }[] } }[] };
             return items.find((item) => item.id === id)!.payload.files;
@@ -411,38 +411,66 @@ describe("autonomous job proposals", () => {
 });
 
 describe("project steward", () => {
-    test("observes without launching work, then deduplicates intents across concurrent processing", async () => {
+    test("stays idle without events and only runs requested work in observation mode", async (t) => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
         const { enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
+        const { canRunAgentJob } = await import("../../src/core/jobs/pause");
+        const { createJobPolicy } = await import("../../src/core/jobs/policy");
+        const { createBackgroundTaskTool } = await import("../../src/core/steward/tools");
+        const { createJobSchema, jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         await stopJobWorker();
-        const projectId = await createProject("Steward decisions");
-        await stewardRepository.update(projectId, { autonomy: "observe" });
-        const signal = { projectId, key: "empty", kind: "empty_project", title: "No Specs", body: "Propose a first Spec" };
-        await stewardRepository.signal(signal);
-        await stewardRepository.signal(signal);
-        await processProjectSteward(projectId, false);
-        assert.equal((await stewardRepository.signals(projectId)).length, 1);
-        assert.equal((await stewardRepository.signals(projectId))[0]?.status, "observed");
+        t.mock.method(globalThis, "fetch", async () => new Response('<script src="/unchanged.js"></script>'));
+        const projectId = await createProject("Event decisions");
+        for (let i = 0; i < 3; i++) await processProjectSteward(projectId);
+        assert.equal((await stewardRepository.intents(projectId)).length, 0, "an empty project does not schedule exploration or planning");
         assert.equal((await jobsRepository.list(projectId)).length, 0);
-        await stewardRepository.update(projectId, { autonomy: "propose" });
-        const intent = { kind: "coverage", goal: "Explore sign in", reason: "Sign in lacks coverage", priority: 90 };
-        const one = await enqueueIntent(projectId, intent, "chat:one");
-        const duplicate = await enqueueIntent(projectId, intent, "chat:one");
+        assert.equal((await stewardRepository.signals(projectId)).length, 0);
+        for (const kind of ["empty_project", "context_changed", "stale_spec", "app_unavailable"]) {
+            await stewardRepository.signal({ projectId, key: kind, kind, title: "Changed", body: "Inspect this change" });
+        }
+        await processProjectSteward(projectId, false);
+        assert.equal((await stewardRepository.intents(projectId)).length, 0, "these observations are not automatic work triggers");
+        await assert.rejects(() => enqueueIntent(projectId, { kind: "coverage", goal: "Find gaps", reason: "No checks" }, "automatic:gaps"), /explicit human request/);
+        await assert.rejects(() => enqueueIntent(projectId, { kind: "explore", goal: "Explore", reason: "No checks" }, "automatic:explore"), /explicit human request/);
+        assert.equal(createJobSchema.safeParse({ kind: "planner" }).success, false);
+        await stewardRepository.update(projectId, { autonomy: "observe" });
+        const feature = await writer.createFeatureInRepo(projectId, null, "Access", "");
+        const { spec } = await createSpec(projectId, feature.id, "Sign in");
+        const event = await enqueueIntent(projectId, { kind: "regenerate", goal: "Repair sign in", reason: "Invalid check", specIds: [spec.id] }, "event:repair");
+        const requested = { kind: "coverage", goal: "Explore sign in", reason: "The human requested missing coverage", priority: 90 };
+        const one = await enqueueIntent(projectId, requested, "chat:one", "user");
+        const duplicate = await enqueueIntent(projectId, requested, "chat:one", "user");
         assert.equal(one.id, duplicate.id);
         await Promise.all([processProjectSteward(projectId, false), processProjectSteward(projectId, false)]);
         const jobs = await jobsRepository.list(projectId);
         assert.equal(jobs.length, 1);
-        assert.equal(jobs[0]?.id, one.id, "job identity allows dispatch recovery without duplicates");
-        const proposal = await jobsRepository.addItem({ projectId, jobId: one.id, kind: "new_spec", title: "Sign in", body: "Proposed coverage" });
-        await jobsRepository.updateItem(proposal.id, { status: "rejected" });
+        assert.equal(jobs[0]?.id, one.id, "dispatch recovery keeps the original identity");
+        assert.equal(await canRunAgentJob(jobs[0]!), true);
+        assert.equal((await stewardRepository.intents(projectId)).find((item) => item.id === event.id)?.status, "pending");
+        const eventJob = await jobsRepository.create({ id: event.id, projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair sign in", limits: jobLimitsSchema.parse({}) });
+        assert.equal(await canRunAgentJob(eventJob), false, "worker dispatch respects observation mode too");
+        const tools = createJobPolicy(jobs[0]!, () => undefined).tools([createBackgroundTaskTool(projectId, "chat:policy-check")]);
+        assert.equal(tools.some((tool) => ["start_background_task", "propose_intents"].includes(tool.name)), false, "an autonomous session cannot create more work");
         await jobsRepository.update(one.id, { status: "completed" });
-        const again = await enqueueIntent(projectId, intent, "chat:two");
+        const again = await enqueueIntent(projectId, requested, "chat:two", "user");
         await processProjectSteward(projectId, false);
-        const remembered = (await stewardRepository.intents(projectId)).find((item) => item.id === again.id);
-        assert.equal(remembered?.status, "ignored");
-        assert.match(remembered?.reason ?? "", /human rejected/i);
+        assert.equal((await jobsRepository.get(again.id))?.status, "queued", "a fresh explicit request does not wait for a six-hour cooldown");
+        await stewardRepository.update(projectId, { paused: true });
+        assert.equal(await canRunAgentJob(jobs[0]!), false, "pause still applies to explicit requests");
+        const failedRuns = [];
+        for (let i = 0; i < 2; i++) {
+            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+            await runsRepository.finishRun(run.id, "failed", 1, "Expected sign-in result was missing");
+            failedRuns.push(run);
+        }
+        const firstFailure = { kind: "triage", goal: "Investigate sign in", reason: "The latest check failed", specIds: [spec.id], runId: failedRuns[0]!.id };
+        const firstTriage = await enqueueIntent(projectId, firstFailure, `failure:${failedRuns[0]!.id}`);
+        const replay = await enqueueIntent(projectId, firstFailure, `failure:${failedRuns[0]!.id}`);
+        const nextTriage = await enqueueIntent(projectId, { ...firstFailure, runId: failedRuns[1]!.id }, `failure:${failedRuns[1]!.id}`);
+        assert.equal(firstTriage.id, replay.id, "replaying one failure still deduplicates");
+        assert.notEqual(firstTriage.fingerprint, nextTriage.fingerprint, "a new failed run cannot be hidden by the previous investigation's cooldown");
     });
 
     test("trusted automatic fixes compare syntax, not selector-like text inside input values", async () => {
@@ -488,68 +516,66 @@ describe("project steward", () => {
             assert.deepEqual(replay.specGenerations, observation.specGenerations);
             assert.equal(replay.deployment?.generation, observation.deployment?.generation);
             const signals = await stewardRepository.signals(projectId);
-            assert.equal(signals.filter((signal) => signal.kind === "spec_changed").length, index + 1);
+            assert.equal(signals.filter((signal) => signal.kind === "spec_changed").length, index + 2);
             assert.equal(signals.filter((signal) => signal.kind === "deployment_changed").length, index + 1);
-            assert.equal(observation.specGenerations?.[spec.id], index + 1);
+            assert.equal(observation.specGenerations?.[spec.id], index + 2);
             await stewardRepository.update(projectId, { observation });
         }
     });
 
-    test("run preparation blockers create one investigation and retry only after it finishes", async () => {
+    test("run prerequisites ask once and resume the original request without exploratory work", async () => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stopJobWorker } = await import("../../src/core/jobs/worker");
         const { enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
         await stopJobWorker();
         const projectId = await createProject("Missing run access");
-        await stewardRepository.update(projectId, { lastPlannerAt: new Date().toISOString() });
+        await stewardRepository.update(projectId, { autonomy: "observe" });
         const feature = await writer.createFeatureInRepo(projectId, null, "Sign in", "");
         const source = VALID_SPEC.replace("{ page, step }", "{ page, step, secret }")
             .replace('await page.goto("/");', 'await page.goto("/");\n        await page.getByLabel("Email").fill(secret("shopper", "email"));');
         const { spec } = await createSpec(projectId, feature.id, "Sign in", source);
-        const intent = await enqueueIntent(projectId, { kind: "run_specs", goal: "Verify the preview", reason: "A preview deployed", specIds: [spec.id], baseUrl: "https://preview.example.com" }, "deploy:missing-access");
+        const intent = await enqueueIntent(projectId, { kind: "run_specs", goal: "Verify the preview", reason: "The human requested a preview check", specIds: [spec.id], baseUrl: "https://preview.example.com" }, "chat:missing-access", "user");
         await processProjectSteward(projectId, false);
-        const failed = (await stewardRepository.intents(projectId)).find((item) => item.id === intent.id)!;
-        assert.equal(failed.status, "failed");
-        assert.match(failed.reason, /credentials.*not configured/);
-        const investigation = (await stewardRepository.intents(projectId)).find((item) => item.key === `run-blocker:${intent.id}`)!;
-        assert.equal(investigation.intent.kind, "explore");
-        assert.equal(investigation.intent.baseUrl, "https://preview.example.com");
-        assert.deepEqual(investigation.intent.specIds, [spec.id]);
-        assert.match(investigation.intent.goal, /Inbox.*remain blocked/);
+        const waiting = (await stewardRepository.intents(projectId)).find((item) => item.id === intent.id)!;
+        assert.equal(waiting.status, "running");
+        const job = (await jobsRepository.get(intent.id))!;
+        assert.equal(job.status, "blocked");
+        assert.equal(job.kind, "review");
+        assert.equal(job.tokensUsed, 0);
+        assert.match(job.stopReason ?? "", /credentials.*not configured/);
+        const question = (await jobsRepository.inbox(projectId))[0]!;
+        assert.equal(question.kind, "question");
+        assert.equal(question.payload.waitingFor, "credentials");
+        assert.equal(question.payload.runIntentId, intent.id);
+        for (let i = 0; i < 3; i++) await processProjectSteward(projectId, false);
+        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
+        assert.equal((await stewardRepository.intents(projectId)).length, 1);
+        await stewardRepository.signal({ projectId, kind: "credentials_changed", key: "access:changed", title: "Access changed", body: "Profiles changed" });
         await processProjectSteward(projectId, false);
-        const job = (await jobsRepository.get(investigation.id))!;
-        assert.equal(job.status, "queued");
-        assert.equal(job.limits.maxActions, 500);
-        await jobsRepository.update(job.id, { status: "blocked" });
-        const question = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Credentials needed", body: "Configure the shopper profile", payload: { waitingFor: "credentials" } });
-        await processProjectSteward(projectId, false);
-        assert.equal((await stewardRepository.intents(projectId)).filter((item) => item.key.startsWith("resume-run:")).length, 0);
-        await stewardRepository.signal({ projectId, kind: "credentials_changed", key: "access:changed", title: "Access changed", body: "Inspect the new profiles" });
-        await processProjectSteward(projectId, false);
-        assert.equal((await jobsRepository.get(job.id))?.status, "queued");
+        assert.equal((await jobsRepository.get(job.id))?.status, "completed", "answering a run prerequisite never starts an LLM turn");
         assert.equal((await jobsRepository.item(question.id))?.status, "answered");
-        // Even if an agent incorrectly finishes before access is usable, do not spin on failing preparation.
-        await jobsRepository.update(job.id, { status: "completed" });
-        await processProjectSteward(projectId, false);
-        await processProjectSteward(projectId, false);
-        const intents = await stewardRepository.intents(projectId);
-        const resumed = intents.find((item) => item.key === `resume-run:${intent.id}:${investigation.id}`)!;
+        const resumed = (await stewardRepository.intents(projectId)).find((item) => item.key === `resume-run:${intent.id}:${question.id}`)!;
+        assert.ok(resumed);
+        assert.equal(resumed.source, "user");
         assert.equal(resumed.intent.baseUrl, "https://preview.example.com");
         assert.deepEqual(resumed.intent.specIds, [spec.id]);
-        assert.equal((await jobsRepository.list(projectId)).length, 1, "the matching recent investigation prevents an unbounded retry loop");
-        assert.equal(intents.filter((item) => item.key.startsWith("run-blocker:")).length, 2);
-        assert.equal(intents.find((item) => item.key === `run-blocker:${resumed.id}`)?.status, "ignored");
+        // The access signal did not actually add the profile: retry asks the exact prerequisite again, then waits.
+        for (let i = 0; i < 3; i++) await processProjectSteward(projectId, false);
+        assert.equal((await jobsRepository.get(resumed.id))?.status, "blocked");
+        assert.equal((await jobsRepository.list(projectId)).length, 2);
+        assert.equal((await jobsRepository.inbox(projectId)).filter((item) => item.status === "pending").length, 1);
+        assert.equal((await stewardRepository.intents(projectId)).some((item) => ["explore", "coverage"].includes(item.intent.kind)), false);
     });
 
     test("keeps independent coverage requests and promoted bug reports distinct", async () => {
         const { enqueueIntent } = await import("../../src/core/steward/engine");
         const projectId = await createProject("Independent coverage");
         const base = { kind: "coverage", reason: "Missing coverage", goal: "Cover login" };
-        const login = await enqueueIntent(projectId, base, "chat:login");
-        const duplicate = await enqueueIntent(projectId, { ...base, goal: " Cover   LOGIN " }, "chat:repeat");
-        const checkout = await enqueueIntent(projectId, { ...base, goal: "Cover checkout" }, "chat:checkout");
-        const regression = await enqueueIntent(projectId, base, "regression:bug-one");
+        const login = await enqueueIntent(projectId, base, "chat:login", "user");
+        const duplicate = await enqueueIntent(projectId, { ...base, goal: " Cover   LOGIN " }, "chat:repeat", "user");
+        const checkout = await enqueueIntent(projectId, { ...base, goal: "Cover checkout" }, "chat:checkout", "user");
+        const regression = await enqueueIntent(projectId, base, "regression:bug-one", "user");
         assert.equal(login.fingerprint, duplicate.fingerprint);
         assert.notEqual(login.fingerprint, checkout.fingerprint);
         assert.notEqual(login.fingerprint, regression.fingerprint);
@@ -813,4 +839,33 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(again.queued.length, 1, "an old completed batch cannot hide a new pending check of the same subject");
         assert.equal(again.queued[0]?.specId, spec.id);
     });
+});
+
+test("agent evaluation records outcomes and decisions without prompts or credentials", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+    const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+    const { jobMetricsPath, recordAgentMetric } = await import("../../src/core/jobs/metrics");
+    const projectId = await createProject("Evaluation records");
+    const secret = "private-input-never-exported";
+    const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), kind: "failure_triage", trigger: "spec_failure", goal: secret, limits: jobLimitsSchema.parse({}) });
+    await jobsRepository.claim(job.id);
+    await jobsRepository.update(job.id, { classification: "test_drift", tokensUsed: 123, actionsUsed: 4, elapsedMs: 500 });
+    const item = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_fix", title: secret, body: secret });
+    await jobsRepository.log(job.id, "proposal:verified", `${item.id}: passed`);
+    await jobsRepository.log(job.id, "inbox:reject", item.id);
+    const current = (await jobsRepository.get(job.id))!;
+    await recordAgentMetric(current, "decision", { itemId: item.id, decision: "approve", actor: "agent" });
+    const records = (await fs.readFile(jobMetricsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line)).filter((event) => event.jobId === job.id);
+    assert.deepEqual(records.map((event) => event.event), ["created", "started", "classified", "item_created", "verified", "decision", "decision"]);
+    assert.equal(records[2].classification, "test_drift");
+    assert.equal(records[4].verificationStatus, "passed");
+    assert.equal(records[5].actor, "human");
+    assert.equal(records[6].actor, "agent");
+    assert.equal(records[6].tokensUsed, 123);
+    assert.doesNotMatch(JSON.stringify(records), new RegExp(secret));
+    const csv = execFileSync(process.execPath, ["scripts/export-metrics.mjs", jobMetricsPath, "--agent"], { encoding: "utf8" });
+    assert.match(csv, /classification,tokensUsed,actionsUsed,elapsedMs/);
+    assert.match(csv, new RegExp(`${item.id},,reject,human`));
+    assert.doesNotMatch(csv, new RegExp(secret));
 });

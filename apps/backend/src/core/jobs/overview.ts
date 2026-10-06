@@ -134,7 +134,7 @@ export async function projectOverview(projectId: string) {
         history.push({ ...base, id: `item:${item.id}`, title, summary: item.presentation.summary, status: "completed", outcome: "reviewed", nextStep: "", createdAt: item.createdAt, updatedAt: item.updatedAt,
             jobIds: [item.jobId], inboxIds: [item.id], timeline: [{ id: item.id, label: item.status === "approved" ? "Saved" : item.status === "answered" ? "Answered" : "Reviewed", detail: title, createdAt: item.updatedAt }], technicalDetails: item.presentation.technicalDetails });
     }
-    for (const job of jobs.filter((job) => ["completed", "cancelled"].includes(job.status) && job.kind !== "planner" && !job.systemError)) {
+    for (const job of jobs.filter((job) => ["completed", "cancelled"].includes(job.status) && !job.systemError)) {
         if (view.items.some((item) => item.jobId === job.id)) continue;
         const base = view.activity.find((story) => story.jobIds.includes(job.id));
         if (!base) continue;

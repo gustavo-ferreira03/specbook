@@ -5,7 +5,7 @@ export const jobLimitsSchema = z.object({
     maxActions: z.number().int().min(1).max(10_000).default(500),
 }).strict();
 export const createJobSchema = z.object({
-    kind: z.enum(["review", "failure_triage", "planner", "regenerate", "coverage", "explore"]).default("review"),
+    kind: z.enum(["review", "failure_triage", "regenerate", "coverage", "explore"]).default("review"),
     specId: z.string().uuid().optional(),
     runId: z.string().uuid().optional(),
     goal: z.string().trim().min(1).max(12000).default("Review this project's Specs and propose useful improvements. Ask when blocked."),

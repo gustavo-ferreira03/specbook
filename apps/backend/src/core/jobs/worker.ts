@@ -11,7 +11,7 @@ import { createJobSchema } from "./schemas";
 import { createJobPolicy } from "./policy";
 import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure, stallJob } from "./retry";
-import { isAgentPaused } from "./pause";
+import { canRunAgentJob, isAgentPaused } from "./pause";
 import { projectsRepository } from "../../infra/repositories/projects";
 
 const active = new Map<string, Promise<void>>();
@@ -56,6 +56,7 @@ async function executeJob(job: Job): Promise<void> {
             await jobsRepository.transition(job.id, "running", "paused");
             return;
         }
+        if (!await canRunAgentJob(job)) { await jobsRepository.transition(job.id, "running", "queued", { startedAt: null }); return; }
         if (remaining <= 0 || job.actionsUsed >= job.limits.maxActions) {
             if (job.systemError) await retryInfrastructure(job, job.systemError);
             else await stallJob(job, "The investigation did not reach a confirmed result.");
@@ -103,6 +104,7 @@ export async function drainJobs(): Promise<void> {
             if (active.size >= limit || stopped) break;
             if (active.has(row.id)) continue;
             if (await isAgentPaused(row.projectId)) { await jobsRepository.transition(row.id, "queued", "paused"); continue; }
+            if (!await canRunAgentJob(row)) continue;
             if (row.retryAt && Date.parse(row.retryAt) > Date.now()) continue;
             const siblings = await jobsRepository.list(row.projectId);
             if (siblings.some((job) => job.status === "running" || active.has(job.id))) continue;
