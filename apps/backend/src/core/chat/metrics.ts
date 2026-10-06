@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { storageRoot } from "../paths";
+import { withFileQueue } from "../operations/file-queue";
 
 // Per-turn evaluation metrics, appended as JSONL to <storageRoot>/metrics/chat-turns.jsonl.
 // Records hold identifiers, counters, timings and token usage only: never message
@@ -227,10 +228,10 @@ export class TurnMetricsRecorder {
 let writeQueue: Promise<void> = Promise.resolve();
 
 function appendMetricsLine(line: string): Promise<void> {
-    const write = writeQueue.then(async () => {
+    const write = writeQueue.then(() => withFileQueue(chatTurnMetricsPath, async () => {
         await fs.mkdir(metricsDir, { recursive: true });
         await fs.appendFile(chatTurnMetricsPath, `${line}\n`, "utf8");
-    });
+    }));
     writeQueue = write.catch(() => undefined);
     return write;
 }

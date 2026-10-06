@@ -1,4 +1,7 @@
 import "dotenv/config";
+import { acquireStorageLock } from "./core/operations/lock";
+import { migrateSecrets } from "./core/credentials/migration";
+import { startRetentionMonitor, stopRetentionMonitor } from "./core/operations/retention";
 import { createCiRouter, createCiSettingsRouter } from "./infra/web/routes/ci";
 import { startSteward, stopSteward } from "./core/steward/engine";
 import { createStewardRouter } from "./infra/web/routes/steward";
@@ -109,7 +112,9 @@ app.route("/", createCredentialsRouter());
 // ---- Boot sequence --------------------------------------------------------
 // Order matters: schema first, then repository repair, then state that reads
 // the repositories. Wire new boot steps here, before the server starts.
+const releaseStorage = await acquireStorageLock();
 await runMigrations();
+await migrateSecrets();
 await repoGit.recoverAllInterruptedState();
 // reindexAllProjects also applies the bare repository policy to every project.
 await runsRepository.markInterruptedRuns();
@@ -119,6 +124,7 @@ await startJobWorker();
 startFailureMonitor();
 startScheduleMonitor();
 startSteward();
+startRetentionMonitor();
 // ---------------------------------------------------------------------------
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     logger.info("backend listening", { hostname, port });
@@ -171,12 +177,14 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     stopFailureMonitor();
     stopScheduleMonitor();
     stopSteward();
+    await stopRetentionMonitor();
     await stopJobWorker();
     stopActiveRunProcesses();
     await closeAllChatBrowsers().catch((error: unknown) => logger.error("closing browsers failed", { error }));
     // Open SSE streams would otherwise hold server.close() until the timeout.
     if ("closeAllConnections" in server) server.closeAllConnections();
     await closed;
+    await releaseStorage();
     clearTimeout(timer);
     process.exit(0);
 }

@@ -171,7 +171,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.match(guard?.failReason ?? "", /Refusing to type a secret: the current page origin is not allowed/);
         const guardEvidence = JSON.parse(await fs.readFile(path.join(guardDir, "evidence.json"), "utf8"));
         assert.equal(guardEvidence.failedStep, "Type the password on the other origin");
-        assert.equal(guardEvidence.video, "evidence/execution.webm");
+        assert.equal(guardEvidence.video, null, "secret runs never record failure videos");
 
         assert.equal(outcome.reportAvailable, false, "no HTML report when a Spec types secrets");
         assert.ok(!existsSync(path.join(directory, "batch", "report")));

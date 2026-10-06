@@ -13,7 +13,7 @@ RUN npm install --global corepack@0.36.0 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl git procps tini xvfb x11vnc \
+        ca-certificates curl git procps tini util-linux xvfb x11vnc \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

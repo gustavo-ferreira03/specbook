@@ -1392,3 +1392,103 @@ describe("repository recovery", () => {
         assert.equal(await fs.readFile(path.join(root, ".git", "index.lock"), "utf8"), "active operation");
     });
 });
+
+describe("encrypted credentials and operations", () => {
+    test("migrates old credentials, rotates every stored secret and restores an independent backup", { timeout: 60_000 }, async () => {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const exec = promisify(execFile);
+        const root = tempDir("specbook-operations-");
+        const original = path.join(root, "original");
+        const restored = path.join(root, "restored");
+        const archive = path.join(root, "backup.tar.gz");
+        const keyFile = path.join(root, "external.key");
+        const env = { ...process.env, SPECBOOK_STORAGE_DIR: original, SPECBOOK_ENCRYPTION_KEY: "", SPECBOOK_ENCRYPTION_KEY_FILE: "" };
+        const script = `
+            import assert from 'node:assert/strict'; import fs from 'node:fs/promises'; import crypto from 'node:crypto';
+            const {runMigrations}=await import('./src/infra/db/migrate.ts'); await runMigrations();
+            const {createProject}=await import('./src/core/projects.ts'); const p=await createProject('Backup check','https://example.com');
+            const old=crypto.randomBytes(32); await fs.writeFile(process.env.SPECBOOK_STORAGE_DIR+'/credentials.key',old);
+            const {createProfile}=await import('./src/core/credentials/profiles.ts');
+            const profile=await createProfile(p.id,{name:'account',fields:[{key:'password',value:'credential-to-preserve'}]});
+            const {db}=await import('./src/infra/db/client.ts'); const schema=await import('./src/infra/db/schema.ts');
+            const {encryptSecret,decryptSecret}=await import('./src/core/credentials/crypto.ts');
+            await db.insert(schema.chatSessions).values({id:'saved',projectId:p.id,profileId:profile.id,state:encryptSecret('saved-browser-state'),savedAt:new Date().toISOString()});
+            await db.insert(schema.projectAutomations).values({projectId:p.id,webhookUrl:encryptSecret('https://hooks.example/secret'),updatedAt:new Date().toISOString()});
+            await db.insert(schema.appSettings).values({id:1,llm:{provider:'',model:''},sso:{clientSecret:encryptSecret('oidc-secret')},updatedAt:new Date().toISOString()});
+            await db.insert(schema.oidcStates).values({stateHash:'state',browserHash:'browser',pkceVerifier:encryptSecret('pkce-verifier'),nonce:'nonce',redirectUri:'https://specbook.example/callback',issuer:'https://issuer.example',clientId:'client',expiresAt:new Date().toISOString()});
+            const auth=process.env.SPECBOOK_STORAGE_DIR+'/pi-auth.json'; await fs.writeFile(auth,JSON.stringify({example:{type:'api_key',key:'model-to-preserve'}}));
+            const {migrateSecrets,rotateEncryptionKey}=await import('./src/core/credentials/migration.ts');
+            process.env.SPECBOOK_ENCRYPTION_KEY=crypto.randomBytes(32).toString('base64'); await migrateSecrets();
+            assert.ok(!(await fs.readFile(auth,'utf8')).includes('model-to-preserve'));
+            assert.equal((await fs.stat(auth)).mode & 0o777,0o600);
+            await assert.rejects(fs.access(process.env.SPECBOOK_STORAGE_DIR+'/credentials.key'));
+            const next=crypto.randomBytes(32); const result=await rotateEncryptionKey(next); assert.equal(result.requiresConfiguration,true);
+            await assert.rejects(migrateSecrets(),/Configure the new/);
+            process.env.SPECBOOK_ENCRYPTION_KEY=next.toString('base64'); await migrateSecrets();
+            const {FileCredentialStore}=await import('./src/core/llm/credentials.ts'); assert.equal((await new FileCredentialStore(auth).read('example')).key,'model-to-preserve');
+            assert.equal(decryptSecret((await db.select().from(schema.credentialProfiles))[0].fields[0].value),'credential-to-preserve');
+            assert.equal(decryptSecret((await db.select().from(schema.chatSessions))[0].state),'saved-browser-state');
+            assert.equal(decryptSecret((await db.select().from(schema.projectAutomations))[0].webhookUrl),'https://hooks.example/secret');
+            assert.equal(decryptSecret((await db.select().from(schema.appSettings))[0].sso.clientSecret),'oidc-secret');
+            assert.equal(decryptSecret((await db.select().from(schema.oidcStates))[0].pkceVerifier),'pkce-verifier');
+            await fs.writeFile(process.env.OPS_TEST_KEY,next,{mode:0o600});
+        `;
+        await exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { env: { ...env, OPS_TEST_KEY: keyFile } });
+        const keyedEnv = { ...env, SPECBOOK_ENCRYPTION_KEY_FILE: keyFile };
+        const cli = ["--import", "tsx", "src/operations-cli.ts"];
+        await exec(process.execPath, [...cli, "backup", archive], { env: keyedEnv });
+        assert.equal((await fs.stat(archive)).mode & 0o777, 0o600);
+        await exec(process.execPath, [...cli, "restore", archive, "--storage", restored], { env: keyedEnv });
+        assert.ok(existsSync(path.join(restored, "specbook.db")));
+        assert.equal(await fs.readFile(path.join(restored, "pi-auth.json"), "utf8"), await fs.readFile(path.join(original, "pi-auth.json"), "utf8"));
+        assert.deepEqual(await fs.readdir(path.join(restored, "repos")), await fs.readdir(path.join(original, "repos")));
+        await assert.rejects(exec(process.execPath, [...cli, "restore", archive, "--storage", restored], { env: keyedEnv }), /empty storage directory/);
+        const wrong = path.join(root, "wrong-key");
+        await fs.writeFile(wrong, crypto.randomBytes(32));
+        const rejected = path.join(root, "rejected");
+        await assert.rejects(exec(process.execPath, [...cli, "restore", archive, "--storage", rejected], { env: { ...env, SPECBOOK_ENCRYPTION_KEY_FILE: wrong } }), /matching encryption key/);
+        assert.deepEqual((await fs.readdir(rejected)).filter((name) => name !== ".operations.lock"), []);
+    });
+
+    test("retention keeps current runs and pending evidence while pruning expired data", async () => {
+        const { db } = await import("../../src/infra/db/client");
+        const { runs } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { cleanupRetention } = await import("../../src/core/operations/retention");
+        const { storageRoot, runsDir } = await import("../../src/core/paths");
+        const projectId = await createProject("Retention");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Retention", "");
+        const { spec } = await createSpec(projectId, feature.id, "Retained evidence");
+        const old = new Date(Date.now() - 200 * 86_400_000);
+        const ids: string[] = [];
+        for (let index = 0; index < 4; index++) {
+            const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash!, commitSha: "sha" });
+            await runsRepository.finishRun(run.id, "passed", 1, null);
+            await db.update(runs).set({ startedAt: new Date(old.getTime() + index * 1000).toISOString() }).where(eq(runs.id, run.id));
+            await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+            await fs.writeFile(path.join(runsDir, run.id, "evidence.txt"), "retained only when needed");
+            ids.push(run.id);
+        }
+        const batchId = crypto.randomUUID();
+        const batchDirectory = path.join(runsDir, "batches", batchId);
+        await fs.mkdir(batchDirectory, { recursive: true });
+        await fs.writeFile(path.join(batchDirectory, "batch.json"), JSON.stringify({ id: batchId, projectId, label: "Retained batch", status: "passed", startedAt: old.toISOString(), durationMs: 2, failReason: null,
+            specs: ids.slice(2).map((runId) => ({ runId, specId: spec.id, status: "passed", title: spec.title, sourceHash: spec.sourceHash, markdownHash: spec.markdownHash, commitSha: "sha", durationMs: 1, failReason: null })) }));
+        await db.update(runs).set({ automationPending: true }).where(eq(runs.id, ids[0]));
+        const metrics = path.join(storageRoot, "metrics", "chat-turns.jsonl");
+        await fs.mkdir(path.dirname(metrics), { recursive: true });
+        await fs.writeFile(metrics, `${JSON.stringify({ startedAt: old.toISOString() })}\n${JSON.stringify({ startedAt: new Date().toISOString() })}\n`);
+        await settingsRepository.updateRetention({ runsPerSpec: 1, runDays: 30, videoDays: 7, batchDays: 30, metricDays: 90, browserProfileDays: 30 });
+        const result = await cleanupRetention();
+        assert.ok(result.removedRuns >= 1);
+        assert.ok(await runsRepository.getRun(ids[0]), "pending failure evidence survives");
+        assert.equal(await runsRepository.getRun(ids[1]), null);
+        assert.ok(await runsRepository.getRun(ids[2]), "a retained batch keeps all attempts needed to report its CI status");
+        assert.ok(await runsRepository.getRun(ids[3]), "last run survives regardless of age");
+        assert.equal((await fs.readFile(metrics, "utf8")).trim().split("\n").length, 1);
+        assert.ok(result.removedMetrics >= 1);
+        await settingsRepository.updateRetention({ runsPerSpec: 20, runDays: 30, videoDays: 7, batchDays: 30, metricDays: 90, browserProfileDays: 30 });
+    });
+});
