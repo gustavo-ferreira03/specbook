@@ -182,7 +182,7 @@ function sameChatState(left: ChatState, right: ChatState): boolean {
     });
 }
 
-function StreamingBubble({ store, busy, continuing, onGrow }: { store: StreamStore; busy: boolean; continuing: boolean; onGrow: () => void }) {
+function StreamingBubble({ store, busy, onGrow }: { store: StreamStore; busy: boolean; onGrow: () => void }) {
     const text = useSyncExternalStore(store.subscribe, store.get, () => "");
     useEffect(() => {
         if (text) onGrow();
@@ -190,10 +190,10 @@ function StreamingBubble({ store, busy, continuing, onGrow }: { store: StreamSto
     if (!text || !busy) return null;
     // Hidden from assistive technology: the persisted message is announced by the log once it lands.
     return (
-        <article className={cn("flex items-start gap-3", continuing ? "mt-3" : "mt-7")} aria-hidden="true">
-            {continuing ? <span className="w-7 shrink-0" /> : <AgentAvatar />}
+        <article className="mt-3 flex items-start gap-3" aria-hidden="true">
+            <AgentAvatar />
             <div className="min-w-0 flex-1">
-                {!continuing && <p className="mb-1 flex h-7 items-center text-control font-semibold text-ink">Specbook</p>}
+                <p className="mb-1 flex h-7 items-center text-control font-semibold text-ink">Specbook</p>
                 <div className="text-body leading-[1.65] text-ink break-words [overflow-wrap:anywhere]">
                     <MessageContent content={text} />
                     <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-full bg-ink align-[-3px] motion-reduce:animate-none" />
@@ -292,7 +292,6 @@ interface MessageHandlers {
 
 const MessageItem = memo(function MessageItem({
     message,
-    continuing,
     first,
     editing,
     editingText,
@@ -302,8 +301,6 @@ const MessageItem = memo(function MessageItem({
     handlers,
 }: {
     message: ChatMessage;
-    /** Follows a message from the same author: no repeated avatar or name. */
-    continuing: boolean;
     first: boolean;
     editing: boolean;
     editingText: string;
@@ -313,7 +310,7 @@ const MessageItem = memo(function MessageItem({
     handlers: MessageHandlers;
 }) {
     const userMessage = message.role === "user";
-    const spacing = first ? "" : continuing ? "" : "mt-3";
+    const spacing = first ? "" : "mt-3";
     const actions = !editing && (
         <MessageActions
             userMessage={userMessage}
@@ -364,9 +361,9 @@ const MessageItem = memo(function MessageItem({
 
     return (
         <article className={cn("group flex items-start gap-3", spacing)} aria-label="Specbook said">
-            {continuing ? <span className="w-7 shrink-0" aria-hidden="true" /> : <AgentAvatar />}
+            <AgentAvatar />
             <div className="min-w-0 flex-1">
-                {!continuing && <p className="mb-1 flex h-7 items-center text-control font-semibold text-ink">Specbook</p>}
+                <p className="mb-1 flex h-7 items-center text-control font-semibold text-ink">Specbook</p>
                 <div className="max-w-full overflow-x-auto text-body leading-[1.65] text-ink break-words select-text [overflow-wrap:anywhere]">
                     <MessageContent content={message.content} />
                 </div>
@@ -419,7 +416,6 @@ const MessageList = memo(function MessageList({
                         <MessageItem
                             message={message}
                             first={index === 0}
-                            continuing={index > 0 && messages[index - 1].role === message.role}
                             editing={editing}
                             editingText={editing ? editingText : ""}
                             actionBusy={actionMessageId === message.id}
@@ -884,7 +880,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         );
     }
 
-    const lastMessage = state.messages[state.messages.length - 1];
     const browserBeside = canEdit && wide && Boolean(state.vncSessionId);
     const browserOrigin = originOf(revisionInfo?.brief.startUrl) || projectOrigin;
 
@@ -1009,7 +1004,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                     handlers={messageHandlers}
                                 />
 
-                                <StreamingBubble store={streamStore} busy={state.busy} continuing={lastMessage?.role === "agent"} onGrow={scrollToBottomIfPinned} />
+                                <StreamingBubble store={streamStore} busy={state.busy} onGrow={scrollToBottomIfPinned} />
 
                                 {state.busy && (
                                     <div
