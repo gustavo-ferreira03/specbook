@@ -17,9 +17,10 @@ import { CiSettingsCard } from "@/components/CiSettingsCard";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const SETTINGS_TABS = ["general", "environments", "git", "credentials", "automation", "ci"] as const;
+const SETTINGS_TABS = ["general", "automation", "git"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
-const TAB_LABELS: [SettingsTab, string][] = [["general", "General"], ["environments", "Environments"], ["git", "Git"], ["credentials", "Credentials"], ["automation", "Automation"], ["ci", "CI/CD"]];
+const TAB_LABELS: [SettingsTab, string][] = [["general", "General"], ["automation", "Automation"], ["git", "Git"]];
+const LEGACY_TABS: Record<string, SettingsTab> = { environments: "general", credentials: "general", ci: "automation" };
 
 function SettingsContent() {
     const { canEdit, isAdmin } = useAuth();
@@ -27,8 +28,8 @@ function SettingsContent() {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
-    const tab = searchParams.get("tab");
-    const activeTab = SETTINGS_TABS.includes(tab as SettingsTab) ? tab as SettingsTab : "general";
+    const tab = searchParams.get("tab") ?? "";
+    const activeTab = SETTINGS_TABS.includes(tab as SettingsTab) ? tab as SettingsTab : LEGACY_TABS[tab] ?? "general";
     const [gitToken, setGitToken] = useState<string | null>(null);
     const [ciToken, setCiToken] = useState<{ projectId: string; token: string | null } | null>(null);
 
@@ -51,12 +52,9 @@ function SettingsContent() {
                 </TabsList>
             </div>
             <PageContainer width="reading" className="pb-16">
-                <TabsContent value="general"><ProjectSettingsCard projectId={projectId} /></TabsContent>
-                <TabsContent value="environments"><EnvironmentsSettingsCard projectId={projectId} /></TabsContent>
+                <TabsContent value="general"><ProjectSettingsCard projectId={projectId}><EnvironmentsSettingsCard projectId={projectId} /><CredentialProfilesCard projectId={projectId} /></ProjectSettingsCard></TabsContent>
+                <TabsContent value="automation"><div className="space-y-10"><AutomationSettingsCard projectId={projectId} /><CiSettingsCard key={projectId} projectId={projectId} oneTimeToken={ciToken?.projectId === projectId ? ciToken.token : null} onOneTimeTokenChange={(token) => setCiToken({ projectId, token })} /></div></TabsContent>
                 <TabsContent value="git"><div className="space-y-10"><RepositoryRecovery projectId={projectId} /><GitRemoteAccess projectId={projectId} oneTimeToken={gitToken} onOneTimeTokenChange={setGitToken} /></div></TabsContent>
-                <TabsContent value="credentials"><CredentialProfilesCard projectId={projectId} /></TabsContent>
-                <TabsContent value="automation"><AutomationSettingsCard projectId={projectId} /></TabsContent>
-                <TabsContent value="ci"><CiSettingsCard key={projectId} projectId={projectId} oneTimeToken={ciToken?.projectId === projectId ? ciToken.token : null} onOneTimeTokenChange={(token) => setCiToken({ projectId, token })} /></TabsContent>
             </PageContainer>
         </Tabs>
     </div>;

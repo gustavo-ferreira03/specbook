@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { deleteProject, getProject, updateProject, errorMessage } from "@/lib/api";
 import type { Project } from "@/lib/types";
 
-export function ProjectSettingsCard({ projectId }: { projectId: string }) {
+export function ProjectSettingsCard({ projectId, children }: { projectId: string; children?: React.ReactNode }) {
     const router = useRouter();
     const [project, setProject] = useState<Project | null>(null);
     const [name, setName] = useState("");
@@ -75,7 +75,7 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
 
     return (
         <div className="space-y-10">
-            <SettingsSection id="project-settings-heading" title="Project" description="The Production address is set in Environments.">
+            <SettingsSection id="project-settings-heading" title="Project">
                 {loading && (
                     <div aria-label="Loading project settings" aria-busy="true" role="status">
                         {[0].map((row) => (
@@ -111,6 +111,8 @@ export function ProjectSettingsCard({ projectId }: { projectId: string }) {
                     </form>
                 )}
             </SettingsSection>
+
+            {children}
 
             {!loading && project && (
                 <SettingsSection id="danger-zone-heading" title="Danger zone" tone="danger">

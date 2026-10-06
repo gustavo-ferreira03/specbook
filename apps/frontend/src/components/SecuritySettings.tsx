@@ -21,7 +21,7 @@ export function SecuritySettings() {
         catch (reason) { setFeedback({ type: "error", text: errorMessage(reason) }); }
         finally { setBusy(false); }
     }
-    return <SettingsSection id="agent-safety-heading" title="Agent safety" description="Controls that apply to every project on this instance.">
+    return <SettingsSection id="agent-safety-heading" title="Agent safety">
         {!settings ? <SettingsBlock>{feedback ? <><InlineFeedback feedback={feedback} /><Button type="button" variant="outline" className="mt-3" onClick={() => void load()}>Try again</Button></> : <Skeleton className="h-32 w-full" />}</SettingsBlock> : <form onSubmit={save}>
             <SettingsRow label="Screenshots sent to model" htmlFor="model-screenshots" description="When disabled, screenshots remain local run evidence and are not sent to the model provider."><Select value={settings.sendScreenshotsToModel ? "enabled" : "disabled"} onValueChange={(value) => setSettings({ ...settings, sendScreenshotsToModel: value === "enabled" })} disabled={busy}><SelectTrigger id="model-screenshots"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="enabled">Enabled</SelectItem><SelectItem value="disabled">Disabled</SelectItem></SelectContent></Select></SettingsRow>
             <SettingsFooter feedback={<InlineFeedback feedback={feedback} />}><Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save safety settings"}</Button></SettingsFooter>

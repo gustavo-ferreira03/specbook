@@ -128,7 +128,7 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
 
     return (
         <div className="space-y-10">
-            <SettingsSection id="automation-settings-heading" title="Automation" description="Schedule runs, investigate failures, and receive status changes. All settings are optional.">
+            <SettingsSection id="automation-settings-heading" title="Automation">
                 {loading ? (
                     <div aria-label="Loading automation settings" aria-busy="true" role="status">
                         {[0, 1, 2].map((row) => <SettingsBlock key={row} className="grid gap-3 md:grid-cols-[13rem_1fr] md:gap-8"><Skeleton className="h-4 w-24 md:mt-2.5" /><Skeleton className="h-9" /></SettingsBlock>)}
