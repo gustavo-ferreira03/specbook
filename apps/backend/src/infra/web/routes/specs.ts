@@ -3,8 +3,12 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
+import { SyncConflictError } from "../../../core/repo/errors";
+import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
+import { parseSpecYaml, YamlParseError } from "../../../core/repo/yaml";
+import type { HumanSpec } from "../../db/schema";
 import { editSpecFiles, readSpecRawFiles, RepoConflictError } from "../../../core/repo/manual";
-import { readSpecFiles, updateSpecInRepo } from "../../../core/repo/writer";
+import { updateSpecWithLock } from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
 import { runsRepository } from "../../repositories/runs";
 import { specsRepository, type Spec } from "../../repositories/specs";
@@ -12,10 +16,10 @@ import { specsRepository, type Spec } from "../../repositories/specs";
 const editFilesSchema = z
     .object({
         yaml: z.string().optional(),
-        robot: z.string().optional(),
+        testSource: z.string().optional(),
     })
-    .refine((body) => body.yaml !== undefined || body.robot !== undefined, {
-        message: "Provide yaml and/or robot content",
+    .refine((body) => body.yaml !== undefined || body.testSource !== undefined, {
+        message: "Provide yaml and/or testSource content",
     });
 
 const humanSpecSchema = z.object({
@@ -36,24 +40,47 @@ const updateSpecSchema = z
     });
 
 function mapManualError(error: unknown): never {
-    if (error instanceof RepoConflictError) throw new HTTPException(409, { message: error.message });
+    if (error instanceof HTTPException) throw error;
+    if (
+        error instanceof RepoConflictError ||
+        error instanceof SyncConflictError ||
+        error instanceof ResourceBusyError ||
+        error instanceof UnsafeRepoPathError
+    ) {
+        throw new HTTPException(409, { message: error.message });
+    }
+    if (error instanceof YamlParseError) throw new HTTPException(400, { message: error.message });
     if (error instanceof Error && /unfinished rebase|uncommitted changes/.test(error.message)) {
         throw new HTTPException(409, { message: error.message });
     }
     throw error;
 }
 
-async function specDetail(spec: Spec) {
+async function specDetail(spec: Spec, runLimit?: number) {
     const feature = await featuresRepository.getFeature(spec.featureId);
-    const runs = await runsRepository.listRuns(spec.id);
-    const parsed = await readSpecFiles(spec).catch(() => null);
-    const raw = await readSpecRawFiles(spec);
+    const runs = await runsRepository.listRuns(spec.id, { limit: runLimit });
+    // A symlinked spec file is reported through the spec's invalid status; never serve it.
+    const raw = await readSpecRawFiles(spec).catch((error) => {
+        if (error instanceof UnsafeRepoPathError) return { yaml: null, testSource: null, legacyRobotSource: null };
+        throw error;
+    });
+    // Parse spec.yml on its own so a legacy Spec (no spec.ts) still shows its behavior.
+    let humanSpec: HumanSpec | null = null;
+    if (raw.yaml !== null) {
+        try {
+            humanSpec = parseSpecYaml(raw.yaml).humanSpec;
+        } catch {
+            humanSpec = null;
+        }
+    }
     const content =
-        raw.yaml !== null || raw.robot !== null
+        raw.yaml !== null || raw.testSource !== null || raw.legacyRobotSource !== null
             ? {
-                  humanSpec: parsed?.humanSpec ?? null,
-                  robotSource: raw.robot ?? "",
+                  humanSpec,
+                  testSource: raw.testSource ?? "",
                   yamlSource: raw.yaml ?? "",
+                  // Set only for a Spec that still has spec.robot and no spec.ts.
+                  legacyRobotSource: raw.legacyRobotSource,
               }
             : null;
     return { spec, feature, content, runs };
@@ -65,14 +92,14 @@ export function createSpecsRouter(): Hono {
     router.get("/specs/:id", async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
-        return c.json(await specDetail(spec));
+        const limit = Number.parseInt(c.req.query("limit") ?? "", 10);
+        return c.json(await specDetail(spec, Number.isFinite(limit) && limit > 0 ? limit : undefined));
     });
 
     router.patch("/specs/:id", zValidator("json", updateSpecSchema), async (c) => {
-        const spec = await specsRepository.getSpec(c.req.param("id"));
-        if (!spec) throw new HTTPException(404, { message: "Spec not found" });
-        const { spec: updated } = await updateSpecInRepo(spec, c.req.valid("json")).catch(mapManualError);
-        return c.json(await specDetail(updated));
+        const result = await updateSpecWithLock(c.req.param("id"), c.req.valid("json")).catch(mapManualError);
+        if (!result) throw new HTTPException(404, { message: "Spec not found" });
+        return c.json(await specDetail(result.spec));
     });
 
     router.put("/specs/:id/files", zValidator("json", editFilesSchema), async (c) => {
@@ -90,9 +117,7 @@ export function createSpecsRouter(): Hono {
             }
             return c.body(null, 204);
         } catch (error) {
-            if (error instanceof HTTPException) throw error;
-            if (error instanceof ResourceBusyError) throw new HTTPException(409, { message: error.message });
-            throw error;
+            mapManualError(error);
         }
     });
 

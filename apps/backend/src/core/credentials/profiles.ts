@@ -5,9 +5,10 @@ import {
     credentialsRepository,
     type CredentialProfileRow,
 } from "../../infra/repositories/credentials";
+import { secretEnvName, SECRET_NAME_PATTERN } from "../runner/specbook/guard";
 import { decryptSecret, encryptSecret } from "./crypto";
 
-const NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
+const NAME_PATTERN = SECRET_NAME_PATTERN;
 const MAX_NAME_LENGTH = 40;
 
 export interface CredentialFieldInput {
@@ -35,13 +36,8 @@ export interface SecretValue {
     value: string;
 }
 
-function envSegment(name: string): string {
-    return name.toUpperCase().replace(/-/g, "_");
-}
-
-export function secretEnvName(profileName: string, fieldKey: string): string {
-    return `SPECBOOK_SECRET_${envSegment(profileName)}_${envSegment(fieldKey)}`;
-}
+// Shared with the "specbook" test module, which reads the value from this env name.
+export { secretEnvName };
 
 function assertValidName(kind: string, value: string): void {
     if (!NAME_PATTERN.test(value) || value.length > MAX_NAME_LENGTH) {

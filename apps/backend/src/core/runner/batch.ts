@@ -2,28 +2,29 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import { XMLParser } from "fast-xml-parser";
 import type { RunStatus } from "../../infra/db/schema";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runBatchesDir, runsDir } from "../paths";
 import { repoGit } from "../repo/git";
-import { markdownHashOf, robotHashOf, specYamlFile, specRobotFile } from "../repo/writer";
+import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "../repo/writer";
 import { resolveSecretEnv } from "../credentials/profiles";
+import { projectSecretScrubber } from "../credentials/scrub";
 import { acquireSpecLocks } from "../specs/lifecycle";
-import { finalizeRunEvidence, instrumentRobotSource, type PlannedEvidenceStep } from "./evidence";
-import { runRobotProcess } from "./robot";
-import { secretEnvRefs } from "./validate";
+import { runPlaywrightSuite } from "./playwright";
+import { withRunSlot } from "./process";
+import { analyzeForRun, MAX_FAIL_REASON_CHARS, RUN_TIMEOUT_MS } from "./run";
+import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
+import type { SpecAnalysis } from "./validate";
 
-type XmlNode = Record<string, unknown>;
 type FinalRunStatus = Exclude<RunStatus, "running">;
 
 export interface RunBatchItem {
     runId: string;
     specId: string;
     commitSha: string;
-    robotHash: string;
+    sourceHash: string;
     markdownHash: string;
     title: string;
     status: RunStatus;
@@ -45,85 +46,25 @@ export interface RunBatch {
 interface PreparedSpec {
     run: Run;
     markdown: string;
-    robotSource: string;
+    testSource: string;
+    analysis: SpecAnalysis;
     item: RunBatchItem;
-    suiteKey: string;
-    plannedEvidence: PlannedEvidenceStep[];
 }
 
-interface ParsedSuiteResult {
-    status: "passed" | "failed";
-    durationMs: number | null;
-    failReason: string | null;
+interface BatchSecrets {
+    env: Record<string, string>;
+    origins: SecretOriginPolicy;
+    scrub: (text: string) => string;
 }
 
+const MAX_BATCH_TIMEOUT_MS = 30 * 60 * 1000;
 const activeBatches = new Map<string, Promise<void>>();
-
-function records(value: unknown): XmlNode[] {
-    if (Array.isArray(value)) return value.filter((item): item is XmlNode => !!item && typeof item === "object");
-    return value && typeof value === "object" ? [value as XmlNode] : [];
-}
-
-function statusOf(node: XmlNode): XmlNode | null {
-    return records(node.status)[0] ?? null;
-}
-
-function statusMessage(status: XmlNode | null): string {
-    const text = status?.["#text"];
-    return typeof text === "string" ? text.trim() : text == null ? "" : String(text).trim();
-}
-
-function allSuites(suites: XmlNode[]): XmlNode[] {
-    return suites.flatMap((suite) => [suite, ...allSuites(records(suite.suite))]);
-}
-
-function allTests(suites: XmlNode[]): XmlNode[] {
-    return suites.flatMap((suite) => [...records(suite.test), ...allTests(records(suite.suite))]);
-}
-
-function parseBatchOutput(xml: string): Map<string, ParsedSuiteResult> {
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-    const doc = parser.parse(xml) as XmlNode;
-    const robot = records(doc.robot)[0];
-    if (!robot) throw new Error("Robot output.xml has no robot result");
-    const results = new Map<string, ParsedSuiteResult>();
-    for (const suite of allSuites(records(robot.suite))) {
-        const source = typeof suite["@_source"] === "string" ? suite["@_source"] : "";
-        if (!source.toLowerCase().endsWith(".robot")) continue;
-        const key = path.basename(source, path.extname(source));
-        const suiteStatus = statusOf(suite);
-        const tests = allTests([suite]);
-        const failedTests = tests.filter((test) => statusOf(test)?.["@_status"] !== "PASS");
-        const failures = failedTests.map((test) => {
-            const status = statusOf(test);
-            return `${String(test["@_name"] ?? "Unnamed test")}: ${statusMessage(status) || String(status?.["@_status"] ?? "UNKNOWN")}`;
-        });
-        const suiteMessage = statusMessage(suiteStatus);
-        if (suiteMessage) failures.push(suiteMessage);
-        const elapsed = Number(suiteStatus?.["@_elapsed"]);
-        results.set(key, {
-            status: suiteStatus?.["@_status"] === "PASS" && failedTests.length === 0 ? "passed" : "failed",
-            durationMs: Number.isFinite(elapsed) ? Math.round(elapsed * 1000) : null,
-            failReason: failures.join("\n") || null,
-        });
-    }
-    return results;
-}
 
 function batchDirectory(id: string): string {
     const root = path.resolve(runBatchesDir);
     const directory = path.resolve(root, id);
     if (path.dirname(directory) !== root) throw new Error("Invalid run batch id");
     return directory;
-}
-
-function robotSuiteFileStem(title: string): string {
-    const stem = title
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-zA-Z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "");
-    return stem.slice(0, 120).replace(/_+$/g, "") || "Spec";
 }
 
 async function writeBatch(batch: RunBatch): Promise<void> {
@@ -148,33 +89,28 @@ export function getRunBatchDirectory(id: string): string {
     return batchDirectory(id);
 }
 
-async function copyIfPresent(source: string, destination: string): Promise<void> {
-    try {
-        await fs.cp(source, destination, { recursive: true });
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-}
-
 async function finishPreparedSpec(
     batchId: string,
-    batchDir: string,
     prepared: PreparedSpec,
-    result: { status: FinalRunStatus; durationMs: number | null; failReason: string | null },
+    outcome: { status: FinalRunStatus; durationMs: number | null; failReason: string | null },
+    scrub: (text: string) => string,
 ): Promise<void> {
+    const result = {
+        ...outcome,
+        failReason: outcome.failReason === null ? null : scrub(outcome.failReason).slice(0, MAX_FAIL_REASON_CHARS),
+    };
     const runDir = path.join(runsDir, prepared.run.id);
     await fs.mkdir(runDir, { recursive: true });
-    await Promise.all([
-        copyIfPresent(path.join(batchDir, "spec-evidence", prepared.run.id), path.join(runDir, "evidence")),
-        copyIfPresent(path.join(batchDir, "spec-video", prepared.run.id), path.join(runDir, "video")),
-        fs.writeFile(path.join(runDir, "batch.json"), JSON.stringify({ batchId }), "utf8"),
-    ]);
-    await finalizeRunEvidence(runDir, result.status, prepared.plannedEvidence);
+    await fs.writeFile(path.join(runDir, "batch.json"), JSON.stringify({ batchId }), "utf8");
+    // A Spec without a result still gets an (empty) evidence manifest.
+    if (!(await fs.stat(path.join(runDir, "evidence.json")).catch(() => null))) {
+        await fs.writeFile(path.join(runDir, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null }), "utf8");
+    }
     await runsRepository.finishRun(prepared.run.id, result.status, result.durationMs, result.failReason);
     if (result.status === "passed" || result.status === "failed") {
         await specsRepository.updateSpecStatusForContent(
             prepared.item.specId,
-            prepared.item.robotHash,
+            prepared.item.sourceHash,
             prepared.item.markdownHash,
             result.status,
         );
@@ -188,54 +124,44 @@ async function executeBatch(
     batch: RunBatch,
     prepared: PreparedSpec[],
     baseUrl: string,
-    secretEnv: Record<string, string>,
+    secrets: BatchSecrets,
 ): Promise<void> {
-    const started = Date.now();
+    let started = Date.now();
     const batchDir = batchDirectory(batch.id);
-    const suiteDir = path.join(batchDir, "suite");
-    await fs.mkdir(suiteDir, { recursive: true });
+    await fs.mkdir(batchDir, { recursive: true });
     try {
-        const usedSuiteKeys = new Set<string>();
         for (const entry of prepared) {
-            const baseSuiteKey = robotSuiteFileStem(entry.item.title);
-            let suiteKey = baseSuiteKey;
-            let suffix = 2;
-            while (usedSuiteKeys.has(suiteKey.toLowerCase())) suiteKey = `${baseSuiteKey}_${suffix++}`;
-            usedSuiteKeys.add(suiteKey.toLowerCase());
-            entry.suiteKey = suiteKey;
-            const instrumented = instrumentRobotSource(entry.robotSource, {
-                evidence: `spec-evidence/${entry.run.id}`,
-                video: `spec-video/${entry.run.id}`,
-            });
-            entry.plannedEvidence = instrumented.steps;
             await fs.mkdir(path.join(runsDir, entry.run.id), { recursive: true });
             await Promise.all([
-                fs.writeFile(path.join(suiteDir, `${entry.suiteKey}.robot`), instrumented.source, "utf8"),
-                fs.writeFile(path.join(runsDir, entry.run.id, "spec.robot"), instrumented.source, "utf8"),
+                fs.writeFile(path.join(runsDir, entry.run.id, "spec.ts"), entry.testSource, "utf8"),
                 fs.writeFile(path.join(runsDir, entry.run.id, "spec.yml"), entry.markdown, "utf8"),
             ]);
         }
 
-        const timeout = Math.min(30 * 60 * 1000, Math.max(120_000, prepared.length * 120_000));
-        const singleSpec = prepared.length === 1 ? prepared[0] : null;
-        const target = singleSpec ? `suite/${singleSpec.suiteKey}.robot` : "suite";
-        const suiteName = singleSpec?.item.title ?? batch.label;
-        const processResult = await runRobotProcess(batchDir, batchDir, baseUrl, target, timeout, suiteName, secretEnv);
-        const outputXml = await fs.readFile(path.join(batchDir, "output.xml"), "utf8").catch(() => null);
-        let processFailure: string | null = null;
-        if (processResult.timedOut) processFailure = `Batch timed out after ${Math.round(timeout / 1000)}s`;
-        else if (processResult.code === null || processResult.code >= 251) {
-            processFailure = processResult.output.trim().slice(0, 2000) || `robot exited with code ${processResult.code}`;
-        } else if (!outputXml) {
-            processFailure = processResult.output.trim().slice(0, 2000) || "robot produced no output.xml";
-        }
-
-        const suiteResults = outputXml ? parseBatchOutput(outputXml) : new Map<string, ParsedSuiteResult>();
+        const timeout = Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(RUN_TIMEOUT_MS, prepared.length * RUN_TIMEOUT_MS));
+        const outcome = await withRunSlot(() => {
+            started = Date.now();
+            return runPlaywrightSuite({
+                directory: batchDir,
+                baseUrl,
+                specs: prepared.map((entry) => ({
+                    key: entry.run.id,
+                    source: entry.testSource,
+                    analysis: entry.analysis,
+                    outputDir: path.join(runsDir, entry.run.id),
+                })),
+                timeoutMs: timeout,
+                secretEnv: secrets.env,
+                secretOrigins: secrets.origins,
+                scrub: secrets.scrub,
+            });
+        });
+        const processFailure = outcome.processFailure;
         for (const entry of prepared) {
-            const parsed = suiteResults.get(entry.suiteKey);
-            await finishPreparedSpec(batch.id, batchDir, entry, parsed
-                ? parsed
-                : { status: "error", durationMs: null, failReason: processFailure ?? "Robot produced no result for this Spec" });
+            const result = outcome.results.get(entry.run.id);
+            await finishPreparedSpec(batch.id, entry, result && result.status !== "error"
+                ? { status: result.status, durationMs: result.durationMs, failReason: result.failReason }
+                : { status: "error", durationMs: null, failReason: result?.failReason ?? processFailure ?? "Playwright produced no result for this Spec" }, secrets.scrub);
         }
         batch.status = processFailure
             ? "error"
@@ -244,17 +170,17 @@ async function executeBatch(
               : "passed";
         batch.failReason = processFailure;
     } catch (error) {
-        const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
+        const message = error instanceof Error ? error.message : String(error);
         for (const entry of prepared) {
             if (entry.item.status !== "running") continue;
-            await finishPreparedSpec(batch.id, batchDir, entry, { status: "error", durationMs: null, failReason: message }).catch(console.error);
+            await finishPreparedSpec(batch.id, entry, { status: "error", durationMs: null, failReason: message }, secrets.scrub)
+                .catch(console.error);
         }
         batch.status = "error";
         batch.failReason = message;
     } finally {
         batch.durationMs = Date.now() - started;
-        await fs.rm(path.join(batchDir, "spec-evidence"), { recursive: true, force: true });
-        await fs.rm(path.join(batchDir, "spec-video"), { recursive: true, force: true });
+        batch.failReason = batch.failReason === null ? null : secrets.scrub(batch.failReason).slice(0, MAX_FAIL_REASON_CHARS);
         await writeBatch(batch);
     }
 }
@@ -263,7 +189,8 @@ async function prepareSpecBatch(
     projectId: string,
     ids: string[],
     label: string,
-): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secretEnv: Record<string, string> }> {
+    baseUrl: string,
+): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
         if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
             throw new Error("The project repository has uncommitted changes; sync or commit them before running");
@@ -272,9 +199,10 @@ async function prepareSpecBatch(
         const definitions: {
             spec: Spec;
             markdown: string;
-            robotSource: string;
-            robotHash: string;
+            testSource: string;
+            sourceHash: string;
             markdownHash: string;
+            analysis: SpecAnalysis;
         }[] = [];
         for (const id of ids) {
             const spec = await specsRepository.getSpec(id);
@@ -285,36 +213,43 @@ async function prepareSpecBatch(
             if (spec.status === "conflict") {
                 throw new Error(`Spec "${spec.title}" has a git sync conflict`);
             }
-            const [markdown, robotSource] = await Promise.all([
+            const [markdown, testSource] = await Promise.all([
                 fs.readFile(path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)), "utf8"),
-                fs.readFile(path.join(repoGit.getRepoDir(projectId), specRobotFile(spec.path)), "utf8"),
+                fs.readFile(path.join(repoGit.getRepoDir(projectId), specTestFile(spec.path)), "utf8"),
             ]);
-            const robotHash = robotHashOf(robotSource);
+            const sourceHash = sourceHashOf(testSource);
             const markdownHash = markdownHashOf(markdown);
-            if (robotHash !== spec.robotHash || markdownHash !== spec.markdownHash) {
+            if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
                 throw new Error(`Spec "${spec.title}" changed without being reindexed`);
             }
             definitions.push({
                 spec,
                 markdown,
-                robotSource,
-                robotHash,
+                testSource,
+                sourceHash,
                 markdownHash,
+                analysis: analyzeForRun(spec.title, testSource, markdown),
             });
         }
         return { commitSha, definitions };
     });
 
-    const refs = [...new Set(definitions.flatMap((definition) => secretEnvRefs(definition.robotSource)))];
+    const refsOf = (analysis: SpecAnalysis) => analysis.secretRefs.map((ref) => ref.envName);
+    const refs = [...new Set(definitions.flatMap((definition) => refsOf(definition.analysis)))];
     const { env: secretEnv, missing } = await resolveSecretEnv(projectId, refs);
     if (missing.length > 0) {
         const titles = definitions
-            .filter((definition) => secretEnvRefs(definition.robotSource).some((ref) => missing.includes(ref)))
+            .filter((definition) => refsOf(definition.analysis).some((ref) => missing.includes(ref)))
             .map((definition) => `"${definition.spec.title}"`);
         throw new Error(
             `Specs ${titles.join(", ")} reference credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
         );
     }
+    const secrets: BatchSecrets = {
+        env: secretEnv,
+        origins: await resolveSecretOriginPolicy(projectId, baseUrl, refs),
+        scrub: await projectSecretScrubber(projectId),
+    };
 
     const createdRuns: Run[] = [];
     try {
@@ -322,7 +257,7 @@ async function prepareSpecBatch(
             const run = await runsRepository.createRun({
                 specId: definition.spec.id,
                 commitSha,
-                robotHash: definition.robotHash,
+                sourceHash: definition.sourceHash,
             });
             createdRuns.push(run);
             await repoGit.withRepoLock(projectId, () => repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha));
@@ -345,7 +280,7 @@ async function prepareSpecBatch(
             runId: createdRuns[index].id,
             specId: definition.spec.id,
             commitSha,
-            robotHash: definition.robotHash,
+            sourceHash: definition.sourceHash,
             markdownHash: definition.markdownHash,
             title: definition.spec.title,
             status: "running",
@@ -363,12 +298,11 @@ async function prepareSpecBatch(
     const prepared = definitions.map((definition, index): PreparedSpec => ({
         run: createdRuns[index],
         markdown: definition.markdown,
-        robotSource: definition.robotSource,
+        testSource: definition.testSource,
+        analysis: definition.analysis,
         item: batch.specs[index],
-        suiteKey: "",
-        plannedEvidence: [],
     }));
-    return { batch, prepared, secretEnv };
+    return { batch, prepared, secrets };
 }
 
 export async function startSpecBatch(projectId: string, specIds: string[], label: string): Promise<RunBatch> {
@@ -379,14 +313,14 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     const releaseSpecLocks = await acquireSpecLocks(ids);
     let batch: RunBatch;
     let prepared: PreparedSpec[];
-    let secretEnv: Record<string, string>;
+    let secrets: BatchSecrets;
     try {
-        ({ batch, prepared, secretEnv } = await prepareSpecBatch(projectId, ids, label));
+        ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, project.baseUrl));
     } catch (error) {
         await releaseSpecLocks();
         throw error;
     }
-    const task = executeBatch(batch, prepared, project.baseUrl, secretEnv).finally(releaseSpecLocks);
+    const task = executeBatch(batch, prepared, project.baseUrl, secrets).finally(releaseSpecLocks);
     activeBatches.set(batch.id, task);
     void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
     return batch;

@@ -192,3 +192,27 @@ export function parseYamlTitle(source: string): string | null {
         return null;
     }
 }
+
+function canonicalJson(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+    if (value && typeof value === "object") {
+        const entries = Object.entries(value as Record<string, unknown>)
+            .filter(([, entry]) => entry !== undefined)
+            .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+        return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+    }
+    return JSON.stringify(value ?? null);
+}
+
+function normalizedContext(context: ProjectContext): ProjectContext {
+    try {
+        return parseContextYaml(serializeContextYaml(context));
+    } catch {
+        return context;
+    }
+}
+
+/** Compares contexts as they would read back from context.yml, ignoring key order. */
+export function sameProjectContext(left: ProjectContext, right: ProjectContext): boolean {
+    return canonicalJson(normalizedContext(left)) === canonicalJson(normalizedContext(right));
+}

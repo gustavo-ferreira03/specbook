@@ -4,6 +4,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { projectContextSchema } from "../../../core/chat/context-tools";
 import { createChat } from "../../../core/chat/session";
+import { SyncConflictError } from "../../../core/repo/errors";
+import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { syncBeforeMutation } from "../../../core/repo/sync";
 import { writeContextToRepo } from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
@@ -53,6 +55,16 @@ export function resolveDiscoveryBrief(
         startUrl,
         safetyNotes: input.safetyNotes,
     };
+}
+
+function mapRepoError(error: unknown): never {
+    if (error instanceof SyncConflictError || error instanceof UnsafeRepoPathError) {
+        throw new HTTPException(409, { message: error.message });
+    }
+    if (error instanceof Error && /unfinished rebase|uncommitted changes/.test(error.message)) {
+        throw new HTTPException(409, { message: error.message });
+    }
+    throw error;
 }
 
 export function createProjectContextsRouter(): Hono {
@@ -129,7 +141,7 @@ export function createProjectContextsRouter(): Hono {
             const revision = await projectContextsRepository.getProjectContextRevision(initial.id);
             if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
             if (revision.status === "confirmed") {
-                await writeContextToRepo(revision.projectId, revision.context);
+                await writeContextToRepo(revision.projectId, revision.context).catch(mapRepoError);
                 return c.json({ revision });
             }
             if (revision.status !== "draft") {
@@ -142,8 +154,9 @@ export function createProjectContextsRouter(): Hono {
                 throw new HTTPException(400, { message: "Confirmation requires at least one area or unknown" });
             }
             await syncBeforeMutation(revision.projectId);
-            await writeContextToRepo(revision.projectId, revision.context);
-            const confirmed = await projectContextsRepository.confirmProjectContextRevision(revision.id);
+            const confirmed = await writeContextToRepo(revision.projectId, revision.context, {
+                confirmRevisionId: revision.id,
+            }).catch(mapRepoError);
             return c.json({ revision: confirmed ?? revision });
         });
     });

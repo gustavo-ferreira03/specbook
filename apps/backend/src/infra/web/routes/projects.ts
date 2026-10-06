@@ -1,13 +1,19 @@
+import fs from "node:fs/promises";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteProjectData, ResourceBusyError } from "../../../core/deletion";
+import { SyncConflictError } from "../../../core/repo/errors";
+import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
+import { YamlParseError } from "../../../core/repo/yaml";
+import { repoBare } from "../../../core/repo/bare";
 import { repoGit } from "../../../core/repo/git";
 import { createManualSpec, editContextFile, readContextRaw, RepoConflictError } from "../../../core/repo/manual";
 import { syncProject } from "../../../core/repo/sync";
 import { featuresRepository } from "../../repositories/features";
 import { projectsRepository } from "../../repositories/projects";
+import { runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
 
 function publicProject(project: NonNullable<Awaited<ReturnType<typeof projectsRepository.getProject>>>) {
@@ -41,11 +47,41 @@ const createSpecSchema = z.object({
 const contextFileSchema = z.object({ yaml: z.string().min(1) });
 
 function mapManualError(error: unknown): never {
-    if (error instanceof RepoConflictError) throw new HTTPException(409, { message: error.message });
+    if (error instanceof HTTPException) throw error;
+    if (
+        error instanceof RepoConflictError ||
+        error instanceof SyncConflictError ||
+        error instanceof ResourceBusyError ||
+        error instanceof UnsafeRepoPathError
+    ) {
+        throw new HTTPException(409, { message: error.message });
+    }
+    if (error instanceof YamlParseError) throw new HTTPException(400, { message: error.message });
     if (error instanceof Error && /unfinished rebase|uncommitted changes/.test(error.message)) {
         throw new HTTPException(409, { message: error.message });
     }
     throw error;
+}
+
+// The tree endpoint answers from the DB; opening a page only nudges a sync
+// (fetch, reindex, push) in the background, at most once per interval.
+const BACKGROUND_SYNC_INTERVAL_MS = 30_000;
+const lastSyncStarts = new Map<string, number>();
+const syncsInFlight = new Set<string>();
+const lastSyncErrors = new Map<string, string>();
+
+function scheduleBackgroundSync(projectId: string): void {
+    const now = Date.now();
+    if (syncsInFlight.has(projectId)) return;
+    if (now - (lastSyncStarts.get(projectId) ?? 0) < BACKGROUND_SYNC_INTERVAL_MS) return;
+    lastSyncStarts.set(projectId, now);
+    syncsInFlight.add(projectId);
+    void syncProject(projectId)
+        .then(() => lastSyncErrors.delete(projectId))
+        .catch((error: unknown) => {
+            lastSyncErrors.set(projectId, error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => syncsInFlight.delete(projectId));
 }
 
 export function createProjectsRouter(): Hono {
@@ -56,8 +92,13 @@ export function createProjectsRouter(): Hono {
         const project = await projectsRepository.createProject(name, baseUrl);
         try {
             await repoGit.ensureProjectRepo(project.id, { create: true });
+            await repoBare.ensureBareRepo(project.id, repoGit.getRepoDir(project.id));
         } catch (error) {
             await projectsRepository.deleteProject(project.id);
+            await Promise.allSettled([
+                fs.rm(repoGit.getRepoDir(project.id), { recursive: true, force: true }),
+                repoBare.removeBareRepo(project.id),
+            ]);
             throw error;
         }
         return c.json({ project: publicProject(project) });
@@ -89,9 +130,7 @@ export function createProjectsRouter(): Hono {
             }
             return c.body(null, 204);
         } catch (error) {
-            if (error instanceof HTTPException) throw error;
-            if (error instanceof ResourceBusyError) throw new HTTPException(409, { message: error.message });
-            throw error;
+            mapManualError(error);
         }
     });
 
@@ -99,18 +138,13 @@ export function createProjectsRouter(): Hono {
         const projectId = c.req.param("id");
         const project = await projectsRepository.getProject(projectId);
         if (!project) throw new HTTPException(404, { message: "Project not found" });
-        let syncError: string | null = null;
-        if (!project.gitConflictPaths?.length) {
-            try {
-                await syncProject(projectId);
-            } catch (error) {
-                syncError = error instanceof Error ? error.message : String(error);
-            }
-        }
+        if (!project.gitConflictPaths?.length) scheduleBackgroundSync(projectId);
+        const syncError = lastSyncErrors.get(projectId) ?? null;
         const [features, specs] = await Promise.all([
             featuresRepository.listFeatures(projectId),
             specsRepository.listSpecs(projectId),
         ]);
+        const lastRuns = await runsRepository.latestRuns(specs.map((spec) => spec.id));
         return c.json({
             features,
             specs: specs.map((spec) => ({
@@ -118,6 +152,7 @@ export function createProjectsRouter(): Hono {
                 featureId: spec.featureId,
                 title: spec.title,
                 status: spec.status,
+                lastRun: lastRuns.get(spec.id) ?? null,
             })),
             syncError,
         });

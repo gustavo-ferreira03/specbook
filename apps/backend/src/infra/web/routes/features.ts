@@ -3,6 +3,9 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteFeatureData, ResourceBusyError } from "../../../core/deletion";
+import { SyncConflictError } from "../../../core/repo/errors";
+import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
+import { YamlParseError } from "../../../core/repo/yaml";
 import { editFeatureFile, readFeatureRaw, RepoConflictError } from "../../../core/repo/manual";
 import { createFeatureInRepo, updateFeatureInRepo } from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
@@ -26,7 +29,16 @@ const updateFeatureSchema = z
     });
 
 function mapManualError(error: unknown): never {
-    if (error instanceof RepoConflictError) throw new HTTPException(409, { message: error.message });
+    if (error instanceof HTTPException) throw error;
+    if (
+        error instanceof RepoConflictError ||
+        error instanceof SyncConflictError ||
+        error instanceof ResourceBusyError ||
+        error instanceof UnsafeRepoPathError
+    ) {
+        throw new HTTPException(409, { message: error.message });
+    }
+    if (error instanceof YamlParseError) throw new HTTPException(400, { message: error.message });
     if (error instanceof Error && /unfinished rebase|uncommitted changes/.test(error.message)) {
         throw new HTTPException(409, { message: error.message });
     }
@@ -77,9 +89,7 @@ export function createFeaturesRouter(): Hono {
             }
             return c.body(null, 204);
         } catch (error) {
-            if (error instanceof HTTPException) throw error;
-            if (error instanceof ResourceBusyError) throw new HTTPException(409, { message: error.message });
-            throw error;
+            mapManualError(error);
         }
     });
 

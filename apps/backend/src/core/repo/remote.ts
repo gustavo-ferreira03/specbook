@@ -3,6 +3,13 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { repoGit } from "./git";
 
 const PUSH_RETRY_MS = 60_000;
+// GitHub pull failures share the mirror error field (gitPushError) with push
+// failures. The prefix tells them apart so each side only clears its own.
+export const SYNC_ERROR_PREFIX = "GitHub sync failed: ";
+
+export function isSyncError(message: string | null | undefined): boolean {
+    return Boolean(message?.startsWith(SYNC_ERROR_PREFIX));
+}
 
 class RepoRemote {
     private pending = new Set<string>();
@@ -56,7 +63,11 @@ class RepoRemote {
                 await repoGit.getProjectGit(projectId).push(url, "main");
                 await projectsRepository.setGitPushError(projectId, null);
             } catch (error) {
-                await projectsRepository.setGitPushError(projectId, repoGit.sanitizeGitError(error, project.gitToken));
+                // A failed pull usually explains the failed push (the remote
+                // is ahead); keep that message rather than the push rejection.
+                if (!isSyncError(project.gitPushError)) {
+                    await projectsRepository.setGitPushError(projectId, repoGit.sanitizeGitError(error, project.gitToken));
+                }
                 const timer = setTimeout(() => {
                     this.retryTimers.delete(projectId);
                     this.schedulePush(projectId);

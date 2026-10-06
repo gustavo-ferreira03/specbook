@@ -1,7 +1,7 @@
 import type { SimpleGit } from "simple-git";
 import type { Spec } from "../../infra/repositories/specs";
 import { repoGit } from "./git";
-import { specRobotFile, specYamlFile } from "./writer";
+import { legacyRobotFile, specTestFile, specYamlFile } from "./writer";
 
 export interface SpecHistoryEntry {
     sha: string;
@@ -14,7 +14,7 @@ interface HistoryRecord extends SpecHistoryEntry {
 }
 
 function docBaseOf(filePath: string): string {
-    return filePath.replace(/\.(yml|robot)$/, "");
+    return filePath.replace(/\.(yml|ts|robot)$/, "");
 }
 
 async function showAt(git: SimpleGit, sha: string, filePath: string): Promise<string | null> {
@@ -49,7 +49,8 @@ export async function specHistory(spec: Spec): Promise<SpecHistoryEntry[]> {
     return repoGit.withRepoLock(spec.projectId, async () => {
         const entries = await Promise.all([
             historyForPath(spec, specYamlFile(spec.path)),
-            historyForPath(spec, specRobotFile(spec.path)),
+            historyForPath(spec, specTestFile(spec.path)),
+            historyForPath(spec, legacyRobotFile(spec.path)),
         ]);
         const unique = new Map<string, HistoryRecord>();
         for (const entry of entries.flat()) if (!unique.has(entry.sha)) unique.set(entry.sha, entry);
@@ -63,7 +64,8 @@ export async function specHistory(spec: Spec): Promise<SpecHistoryEntry[]> {
 async function pathAtCommit(spec: Spec, sha: string): Promise<string | null> {
     const records = await Promise.all([
         historyForPath(spec, specYamlFile(spec.path)),
-        historyForPath(spec, specRobotFile(spec.path)),
+        historyForPath(spec, specTestFile(spec.path)),
+        historyForPath(spec, legacyRobotFile(spec.path)),
     ]);
     const historical = records.flat().find((entry) => entry.sha === sha)?.path;
     if (historical) return docBaseOf(historical);
@@ -73,16 +75,18 @@ async function pathAtCommit(spec: Spec, sha: string): Promise<string | null> {
 export async function specAtCommit(
     spec: Spec,
     sha: string,
-): Promise<{ yaml: string | null; robot: string | null }> {
+): Promise<{ yaml: string | null; testSource: string | null; legacyRobotSource: string | null }> {
     if (!/^[0-9a-f]{40}$/i.test(sha)) throw new Error("Invalid commit sha");
     return repoGit.withRepoLock(spec.projectId, async () => {
         const base = await pathAtCommit(spec, sha);
-        if (!base) return { yaml: null, robot: null };
+        if (!base) return { yaml: null, testSource: null, legacyRobotSource: null };
         const git = repoGit.getProjectGit(spec.projectId);
-        const [document, robot] = await Promise.all([
+        const [document, testSource, legacyRobotSource] = await Promise.all([
             documentAt(git, sha, base),
+            showAt(git, sha, `${base}.ts`),
             showAt(git, sha, `${base}.robot`),
         ]);
-        return { yaml: document, robot };
+        // Commits from before spec.ts carry the Robot Framework file instead.
+        return { yaml: document, testSource, legacyRobotSource };
     });
 }

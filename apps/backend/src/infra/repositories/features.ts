@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { db } from "../db/client";
+import { db, runBatch, type DbQuery } from "../db/client";
 import { features, runs, specs } from "../db/schema";
 
 export type Feature = typeof features.$inferSelect;
@@ -85,35 +85,46 @@ class FeaturesRepository {
         return specRows.map((spec) => spec.id);
     }
 
+    insertFeatureQuery(row: Feature): DbQuery {
+        return db.insert(features).values(row);
+    }
+
+    updateFeatureQuery(
+        id: string,
+        patch: Partial<Pick<Feature, "title" | "description" | "path" | "parentId">>,
+    ): DbQuery {
+        return db.update(features).set(patch).where(eq(features.id, id));
+    }
+
+    deleteFeaturesQuery(ids: string[]): DbQuery[] {
+        return ids.length ? [db.delete(features).where(inArray(features.id, ids))] : [];
+    }
+
     async deleteFeatureWithRelations(id: string): Promise<DeleteFeatureResult> {
-        return db.transaction(async (tx) => {
-            const targets = await tx.select().from(features).where(eq(features.id, id));
-            const target = targets[0];
-            if (!target) return { status: "not_found" };
-            const projectFeatures = await tx
-                .select()
-                .from(features)
-                .where(eq(features.projectId, target.projectId));
-            const featureIds = this.collectFeatureIds(id, projectFeatures);
-            const specRows = await tx
-                .select({ id: specs.id })
-                .from(specs)
-                .where(inArray(specs.featureId, featureIds));
-            const specIds = specRows.map((spec) => spec.id);
-            const runRows = specIds.length
-                ? await tx
-                      .select({ id: runs.id, status: runs.status })
-                      .from(runs)
-                      .where(inArray(runs.specId, specIds))
-                : [];
-            if (runRows.some((run) => run.status === "running")) return { status: "busy" };
-            if (specIds.length) {
-                await tx.delete(runs).where(inArray(runs.specId, specIds));
-                await tx.delete(specs).where(inArray(specs.id, specIds));
-            }
-            await tx.delete(features).where(inArray(features.id, featureIds));
-            return { status: "deleted", specIds, runIds: runRows.map((run) => run.id) };
-        });
+        const target = await this.getFeature(id);
+        if (!target) return { status: "not_found" };
+        const featureIds = this.collectFeatureIds(id, await this.listFeatures(target.projectId));
+        const specRows = await db
+            .select({ id: specs.id })
+            .from(specs)
+            .where(inArray(specs.featureId, featureIds));
+        const specIds = specRows.map((spec) => spec.id);
+        const runRows = specIds.length
+            ? await db
+                  .select({ id: runs.id, status: runs.status })
+                  .from(runs)
+                  .where(inArray(runs.specId, specIds))
+            : [];
+        if (runRows.some((run) => run.status === "running")) return { status: "busy" };
+        // A spec added to one of these features after the reads above violates the
+        // specs -> features foreign key and rolls the batch back.
+        await runBatch([
+            ...(specIds.length
+                ? [db.delete(runs).where(inArray(runs.specId, specIds)), db.delete(specs).where(inArray(specs.id, specIds))]
+                : []),
+            ...this.deleteFeaturesQuery(featureIds),
+        ]);
+        return { status: "deleted", specIds, runIds: runRows.map((run) => run.id) };
     }
 }
 

@@ -1,17 +1,20 @@
 import crypto from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, max, or } from "drizzle-orm";
 import { db } from "../db/client";
 import { runs, type RunStatus } from "../db/schema";
 
 export type Run = typeof runs.$inferSelect;
 
+export const DEFAULT_RUN_LIST_LIMIT = 50;
+export const MAX_RUN_LIST_LIMIT = 200;
+
 class RunsRepository {
-    async createRun(input: { specId: string; commitSha: string; robotHash: string }): Promise<Run> {
+    async createRun(input: { specId: string; commitSha: string; sourceHash: string }): Promise<Run> {
         const row: Run = {
             id: crypto.randomUUID(),
             specId: input.specId,
             commitSha: input.commitSha,
-            robotHash: input.robotHash,
+            sourceHash: input.sourceHash,
             status: "running",
             startedAt: new Date().toISOString(),
             durationMs: null,
@@ -30,12 +33,42 @@ class RunsRepository {
         await db.update(runs).set({ status, durationMs, failReason }).where(eq(runs.id, id));
     }
 
-    async listRuns(specId: string): Promise<Run[]> {
+    /** Newest first. `before` is a run id cursor: only runs older than it are returned. */
+    async listRuns(specId: string, options: { limit?: number; before?: string } = {}): Promise<Run[]> {
+        const limit = Math.min(Math.max(Math.trunc(options.limit ?? DEFAULT_RUN_LIST_LIMIT), 1), MAX_RUN_LIST_LIMIT);
+        let condition = eq(runs.specId, specId);
+        if (options.before) {
+            const cursor = await this.getRun(options.before);
+            if (!cursor || cursor.specId !== specId) return [];
+            condition = and(
+                condition,
+                or(lt(runs.startedAt, cursor.startedAt), and(eq(runs.startedAt, cursor.startedAt), lt(runs.id, cursor.id))),
+            )!;
+        }
         return db
             .select()
             .from(runs)
-            .where(eq(runs.specId, specId))
-            .orderBy(desc(runs.startedAt), desc(runs.id));
+            .where(condition)
+            .orderBy(desc(runs.startedAt), desc(runs.id))
+            .limit(limit);
+    }
+
+    /** The most recent run of each of the given Specs, keyed by Spec id. */
+    async latestRuns(specIds: string[]): Promise<Map<string, Run>> {
+        const latest = new Map<string, Run>();
+        if (specIds.length === 0) return latest;
+        const newest = db
+            .select({ specId: runs.specId, startedAt: max(runs.startedAt).as("newest_started_at") })
+            .from(runs)
+            .where(inArray(runs.specId, specIds))
+            .groupBy(runs.specId)
+            .as("newest");
+        const rows = await db
+            .select({ run: runs })
+            .from(runs)
+            .innerJoin(newest, and(eq(runs.specId, newest.specId), eq(runs.startedAt, newest.startedAt)));
+        for (const { run } of rows) latest.set(run.specId, run);
+        return latest;
     }
 
     async getRun(id: string): Promise<Run | null> {

@@ -1,3 +1,6 @@
+/** Thrown when a Spec, Feature, chat or project is in use and cannot be changed right now. */
+export class ResourceBusyError extends Error {}
+
 const locks = new Map<string, Promise<unknown>>();
 
 export function areSpecsLocked(specIds: string[]): boolean {

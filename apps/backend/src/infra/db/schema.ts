@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export interface HumanSpec {
     preconditions: string[];
@@ -57,39 +57,53 @@ export const projects = sqliteTable("projects", {
     gitPushError: text("git_push_error"),
     gitConflictPaths: text("git_conflict_paths", { mode: "json" }).$type<string[] | null>(),
     contextSyncError: text("context_sync_error"),
+    gitAccessTokenHash: text("git_access_token_hash"),
+    gitAccessTokenPrefix: text("git_access_token_prefix"),
+    gitAccessTokenCreatedAt: text("git_access_token_created_at"),
+    gitAccessTokenLastUsedAt: text("git_access_token_last_used_at"),
+    gitExternalSyncError: text("git_external_sync_error"),
     createdAt: text("created_at").notNull(),
 });
 
-export const features = sqliteTable("features", {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-        .notNull()
-        .references(() => projects.id),
-    parentId: text("parent_id"),
-    title: text("title").notNull(),
-    description: text("description").notNull().default(""),
-    path: text("path").notNull(),
-    createdAt: text("created_at").notNull(),
-});
+export const features = sqliteTable(
+    "features",
+    {
+        id: text("id").primaryKey(),
+        projectId: text("project_id")
+            .notNull()
+            .references(() => projects.id),
+        parentId: text("parent_id"),
+        title: text("title").notNull(),
+        description: text("description").notNull().default(""),
+        path: text("path").notNull(),
+        createdAt: text("created_at").notNull(),
+    },
+    (table) => [uniqueIndex("features_project_path_unique").on(table.projectId, table.path)],
+);
 
-export const specs = sqliteTable("specs", {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-        .notNull()
-        .references(() => projects.id),
-    featureId: text("feature_id")
-        .notNull()
-        .references(() => features.id),
-    title: text("title").notNull(),
-    description: text("description").notNull().default(""),
-    status: text("status").$type<SpecStatus>().notNull().default("unverified"),
-    path: text("path").notNull(),
-    robotHash: text("robot_hash").notNull(),
-    markdownHash: text("markdown_hash").notNull().default(""),
-    invalidReason: text("invalid_reason"),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-});
+export const specs = sqliteTable(
+    "specs",
+    {
+        id: text("id").primaryKey(),
+        projectId: text("project_id")
+            .notNull()
+            .references(() => projects.id),
+        featureId: text("feature_id")
+            .notNull()
+            .references(() => features.id),
+        title: text("title").notNull(),
+        description: text("description").notNull().default(""),
+        status: text("status").$type<SpecStatus>().notNull().default("unverified"),
+        path: text("path").notNull(),
+        sourceHash: text("source_hash").notNull(),
+        markdownHash: text("markdown_hash").notNull().default(""),
+        invalidReason: text("invalid_reason"),
+        createdAt: text("created_at").notNull(),
+        updatedAt: text("updated_at").notNull(),
+    },
+    // The unique (project_id, path) index also serves lookups by project_id alone.
+    (table) => [uniqueIndex("specs_project_path_unique").on(table.projectId, table.path)],
+);
 
 export const chats = sqliteTable("chats", {
     id: text("id").primaryKey(),
@@ -114,18 +128,22 @@ export const projectContextRevisions = sqliteTable("project_context_revisions", 
     confirmedAt: text("confirmed_at"),
 });
 
-export const runs = sqliteTable("runs", {
-    id: text("id").primaryKey(),
-    specId: text("spec_id")
-        .notNull()
-        .references(() => specs.id),
-    commitSha: text("commit_sha").notNull(),
-    robotHash: text("robot_hash").notNull(),
-    status: text("status").$type<RunStatus>().notNull(),
-    startedAt: text("started_at").notNull(),
-    durationMs: integer("duration_ms"),
-    failReason: text("fail_reason"),
-});
+export const runs = sqliteTable(
+    "runs",
+    {
+        id: text("id").primaryKey(),
+        specId: text("spec_id")
+            .notNull()
+            .references(() => specs.id),
+        commitSha: text("commit_sha").notNull(),
+        sourceHash: text("source_hash").notNull(),
+        status: text("status").$type<RunStatus>().notNull(),
+        startedAt: text("started_at").notNull(),
+        durationMs: integer("duration_ms"),
+        failReason: text("fail_reason"),
+    },
+    (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt)],
+);
 
 export interface CredentialField {
     key: string;

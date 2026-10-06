@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
-import { db } from "../db/client";
+import { db, type DbQuery } from "../db/client";
 import {
     EMPTY_PROJECT_CONTEXT,
     projectContextRevisions,
@@ -109,13 +109,13 @@ class ProjectContextsRepository {
         return this.getProjectContextRevision(revisionId);
     }
 
-    async insertConfirmedRevision(
+    private confirmedRevisionRow(
         projectId: string,
         brief: DiscoveryBrief,
         context: ProjectContext,
-    ): Promise<ProjectContextRevisionRow> {
+    ): ProjectContextRevisionRow {
         const now = new Date().toISOString();
-        const row: ProjectContextRevisionRow = {
+        return {
             id: crypto.randomUUID(),
             projectId,
             sourceChatId: null,
@@ -126,8 +126,24 @@ class ProjectContextsRepository {
             updatedAt: now,
             confirmedAt: now,
         };
+    }
+
+    async insertConfirmedRevision(
+        projectId: string,
+        brief: DiscoveryBrief,
+        context: ProjectContext,
+    ): Promise<ProjectContextRevisionRow> {
+        const row = this.confirmedRevisionRow(projectId, brief, context);
         await db.insert(projectContextRevisions).values(row);
         return row;
+    }
+
+    insertConfirmedRevisionQuery(projectId: string, brief: DiscoveryBrief, context: ProjectContext): DbQuery {
+        return db.insert(projectContextRevisions).values(this.confirmedRevisionRow(projectId, brief, context));
+    }
+
+    deleteAllForProjectQuery(projectId: string): DbQuery {
+        return db.delete(projectContextRevisions).where(eq(projectContextRevisions.projectId, projectId));
     }
 
     async confirmProjectContextRevision(revisionId: string): Promise<ProjectContextRevisionRow | null> {

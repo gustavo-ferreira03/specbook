@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { storageRoot } from "../paths";
+import { isChatBusy } from "../chat/chat-registry";
 import { launchBrowserMcp, type BrowserMcp } from "./mcp";
 import { getVncSession, startVncStack, stopVncStack, type VncSession } from "./vnc";
 
@@ -21,7 +22,12 @@ const deletingChats = new Set<string>();
 
 function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
     clearTimeout(browser.idleTimer);
-    browser.idleTimer = setTimeout(() => void closeChatBrowser(chatId), BROWSER_IDLE_MS);
+    browser.idleTimer = setTimeout(() => {
+        // A turn may think or run Specs for a long time without browser tool calls.
+        // Keep the browser while it is active and re-check after another idle period.
+        if (isChatBusy(chatId) || browser.activeTools.size > 0) touchChatBrowser(chatId, browser);
+        else void closeChatBrowser(chatId);
+    }, BROWSER_IDLE_MS);
     browser.idleTimer.unref();
 }
 
@@ -29,11 +35,14 @@ export async function getChatBrowser(chatId: string): Promise<ChatBrowser | null
     if (deletingChats.has(chatId)) return null;
     const browser = browsers.get(chatId);
     if (!browser) return null;
+    // Never close a browser from a status read while its chat turn is running: the turn
+    // owns it and recovers from a dead browser itself (ensureBrowser/getOrCreateChatBrowser).
+    const turnActive = isChatBusy(chatId);
     if (!getVncSession(browser.vnc.id)) {
-        void closeChatBrowser(chatId);
+        if (!turnActive) void closeChatBrowser(chatId);
         return null;
     }
-    if (Date.now() - browser.lastHealthCheck >= 5000) {
+    if (!turnActive && Date.now() - browser.lastHealthCheck >= 5000) {
         try {
             await browser.mcp.client.listTools();
             browser.lastHealthCheck = Date.now();

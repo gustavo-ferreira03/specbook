@@ -1,22 +1,25 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { eq, inArray } from "drizzle-orm";
 import { blockChatBrowser, cancelChatBrowserDeletion, removeChatBrowserData } from "./browser/sessions";
 import { beginChatDeletion, cancelChatDeletion, isChatBusy, isChatDeleting, removeChatSession } from "./chat/session";
-import { deleteProfile } from "./credentials/profiles";
 import { runsDir } from "./paths";
+import { repoBare } from "./repo/bare";
 import { repoGit } from "./repo/git";
+import { repoRemote } from "./repo/remote";
 import { deleteFeatureDirectory, deleteSpecFiles } from "./repo/writer";
 import { getRunBatch, getRunBatchDirectory } from "./runner/batch";
-import { areSpecsLocked, withSpecLock, withSpecLocks } from "./specs/lifecycle";
+import { areSpecsLocked, ResourceBusyError, withSpecLock, withSpecLocks } from "./specs/lifecycle";
+import { db, runBatch } from "../infra/db/client";
+import { chatSessions, chats, credentialProfiles, features, projects, runs, specs } from "../infra/db/schema";
 import { chatsRepository } from "../infra/repositories/chats";
-import { credentialsRepository } from "../infra/repositories/credentials";
 import { projectContextsRepository } from "../infra/repositories/project-contexts";
 import { featuresRepository } from "../infra/repositories/features";
 import { projectsRepository } from "../infra/repositories/projects";
 import { runsRepository } from "../infra/repositories/runs";
 import { specsRepository } from "../infra/repositories/specs";
 
-export class ResourceBusyError extends Error {}
+export { ResourceBusyError };
 
 function entityDirectory(root: string, id: string): string {
     const absoluteRoot = path.resolve(root);
@@ -36,6 +39,10 @@ async function removeEntityDirectories(root: string, ids: string[]): Promise<voi
 
 async function removeRunResources(projectId: string, runIds: string[]): Promise<void> {
     await repoGit.withRepoLock(projectId, () => repoGit.deleteRunCommitRefsUnlocked(projectId, runIds));
+    await removeRunDirectories(runIds);
+}
+
+async function removeRunDirectories(runIds: string[]): Promise<void> {
     const batchIds = new Set<string>();
     for (const runId of runIds) {
         try {
@@ -134,33 +141,49 @@ export async function deleteProjectData(id: string): Promise<boolean> {
         throw new ResourceBusyError("Wait for a running Spec verification to finish before deleting this project");
     }
 
+    // Deleting a project never touches its Git history: nothing is committed and
+    // no pending push may run, so the GitHub remote keeps every file.
+    repoRemote.cancelScheduledPush(id);
+
     for (const chat of chatRows) {
         await deleteChatData(chat.id);
     }
 
-    const features = await featuresRepository.listFeatures(id);
-    const knownFeatureIds = new Set(features.map((feature) => feature.id));
-    const rootFeatures = features.filter(
-        (feature) => feature.parentId === null || !knownFeatureIds.has(feature.parentId),
-    );
-    for (const feature of rootFeatures) {
-        await deleteFeatureData(feature.id);
-    }
-
-    for (const spec of await specsRepository.listSpecs(id)) {
-        await deleteSpecData(spec.id);
-    }
-
-    for (const profile of await credentialsRepository.listProfiles(id)) {
-        await deleteProfile(profile);
-    }
-
-    await projectContextsRepository.deleteAllForProject(id);
-
-    await repoGit.withRepoLock(id, async () => {
-        await fs.rm(repoGit.getRepoDir(id), { recursive: true, force: true });
+    const runIds = await repoGit.withRepoLock(id, async () => {
+        repoRemote.cancelScheduledPush(id);
+        const projectSpecIds = (await specsRepository.listSpecs(id)).map((spec) => spec.id);
+        if (await runsRepository.hasRunningRuns(projectSpecIds)) {
+            throw new ResourceBusyError("Wait for a running Spec verification to finish before deleting this project");
+        }
+        const runRows = projectSpecIds.length
+            ? await db.select({ id: runs.id }).from(runs).where(inArray(runs.specId, projectSpecIds))
+            : [];
+        const projectSpecs = db.select({ id: specs.id }).from(specs).where(eq(specs.projectId, id));
+        // One atomic batch, children before parents so the foreign keys hold.
+        await runBatch([
+            db.delete(chatSessions).where(eq(chatSessions.projectId, id)),
+            db.delete(credentialProfiles).where(eq(credentialProfiles.projectId, id)),
+            projectContextsRepository.deleteAllForProjectQuery(id),
+            db.delete(runs).where(inArray(runs.specId, projectSpecs)),
+            db.delete(specs).where(eq(specs.projectId, id)),
+            db.delete(features).where(eq(features.projectId, id)),
+            db.delete(chats).where(eq(chats.projectId, id)),
+            db.delete(projects).where(eq(projects.id, id)),
+        ]);
+        // Files go last: a failure here leaves stray directories, never a half-deleted project.
+        const removal = await Promise.allSettled([
+            fs.rm(repoGit.getRepoDir(id), { recursive: true, force: true }),
+            repoBare.removeBareRepo(id),
+        ]);
+        for (const result of removal) {
+            if (result.status === "rejected") console.error(`[specbook] removing repositories of ${id} failed:`, result.reason);
+        }
+        return runRows.map((run) => run.id);
     });
+    repoRemote.cancelScheduledPush(id);
 
-    await projectsRepository.deleteProject(id);
+    await removeRunDirectories(runIds).catch((error: unknown) => {
+        console.error(`[specbook] removing run artifacts of project ${id} failed:`, error);
+    });
     return true;
 }

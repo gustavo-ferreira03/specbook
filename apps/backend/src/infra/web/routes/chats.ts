@@ -7,23 +7,25 @@ import { getChatBrowser, getChatBrowserActivity } from "../../../core/browser/se
 import { getPendingCredentialRequest } from "../../../core/chat/credential-requests";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import {
+    abortChatTurn,
     createChat,
-    branchChatForTurn,
-    getChatMessages,
     getChatQueueState,
+    getChatView,
     isChatBusy,
     isChatDeleting,
     listChats,
-    abortChatTurn,
     queueChatFollowUp,
-    runChatTurn,
+    startBranchedChatTurn,
+    startChatTurn,
     subscribeToChatUpdates,
+    type ChatUpdateEvent,
 } from "../../../core/chat/session";
 import { chatsRepository } from "../../repositories/chats";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
 
 const messageSchema = z.object({ text: z.string().trim().min(1) });
+const SSE_HEARTBEAT_MS = 20_000;
 
 export function createChatsRouter(): Hono {
     const router = new Hono();
@@ -42,18 +44,18 @@ export function createChatsRouter(): Hono {
 
     router.get("/chats/:id", async (c) => {
         const id = c.req.param("id");
-        const [row, messages] = await Promise.all([chatsRepository.getChatRow(id), getChatMessages(id)]);
-        if (!row || !messages) throw new HTTPException(404, { message: "Chat not found" });
-        const chat = (await listChats(row.projectId)).find((item) => item.id === id);
-        const browser = await getChatBrowser(id);
+        const [row, view] = await Promise.all([chatsRepository.getChatRow(id), getChatView(id)]);
+        if (!row || !view) throw new HTTPException(404, { message: "Chat not found" });
+        // Runs the browser health check (it never closes a browser while a turn is active).
+        await getChatBrowser(id);
         const browserActivity = getChatBrowserActivity(id);
         const revision = row.contextRevisionId
             ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
             : null;
         const pendingCredential = getPendingCredentialRequest(id);
         return c.json({
-            title: chat?.title ?? "Chat",
-            messages,
+            title: view.title,
+            messages: view.messages,
             busy: isChatBusy(id),
             queue: getChatQueueState(id),
             vncSessionId: browserActivity?.sessionId ?? null,
@@ -77,7 +79,7 @@ export function createChatsRouter(): Hono {
         const id = c.req.param("id");
         if (!(await chatsRepository.getChatRow(id))) throw new HTTPException(404, { message: "Chat not found" });
         return streamSSE(c, async (stream) => {
-            const notify = (event: Parameters<typeof subscribeToChatUpdates>[1] extends (event: infer T) => void ? T : never) =>
+            const notify = (event: ChatUpdateEvent) =>
                 void stream
                     .writeSSE({
                         event: event.type,
@@ -85,7 +87,12 @@ export function createChatsRouter(): Hono {
                     })
                     .catch(() => undefined);
             const unsubscribe = subscribeToChatUpdates(id, notify);
-            stream.onAbort(unsubscribe);
+            // SSE comment lines keep proxies and the browser from dropping an idle stream.
+            const heartbeat = setInterval(() => void stream.write(":ping\n\n").catch(() => undefined), SSE_HEARTBEAT_MS);
+            stream.onAbort(() => {
+                clearInterval(heartbeat);
+                unsubscribe();
+            });
             await stream.writeSSE({ event: "connected", data: "" });
             await new Promise<void>((resolve) => stream.onAbort(resolve));
         });
@@ -108,7 +115,11 @@ export function createChatsRouter(): Hono {
         const id = c.req.param("id");
         await assertChatWritable(id);
         const { text } = c.req.valid("json");
-        void runChatTurn(id, text).catch(console.error);
+        try {
+            startChatTurn(id, text);
+        } catch (error) {
+            throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });
+        }
         return c.json({ ok: true });
     });
 
@@ -140,8 +151,7 @@ export function createChatsRouter(): Hono {
         await assertChatWritable(id);
         const { text } = c.req.valid("json");
         try {
-            const branch = await branchChatForTurn(id, c.req.param("messageId"), { editedText: text, userOnly: true });
-            void runChatTurn(id, branch.text, branch.sessionManager).catch(console.error);
+            await startBranchedChatTurn(id, c.req.param("messageId"), { editedText: text, userOnly: true });
             return c.json({ ok: true });
         } catch (error) {
             throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });
@@ -152,8 +162,7 @@ export function createChatsRouter(): Hono {
         const id = c.req.param("id");
         await assertChatWritable(id);
         try {
-            const branch = await branchChatForTurn(id, c.req.param("messageId"));
-            void runChatTurn(id, branch.text, branch.sessionManager).catch(console.error);
+            await startBranchedChatTurn(id, c.req.param("messageId"));
             return c.json({ ok: true });
         } catch (error) {
             throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });

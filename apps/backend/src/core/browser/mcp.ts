@@ -5,6 +5,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { minimalChildEnv } from "../runner/process";
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./vnc";
 
 const require = createRequire(import.meta.url);
@@ -81,17 +82,16 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string 
     };
     const configPath = path.join(opts.workDir, "mcp-config.json");
     await fs.writeFile(configPath, JSON.stringify(config), "utf8");
-    const env: NodeJS.ProcessEnv = {
-        ...process.env,
+    // Only an allowlisted environment reaches the browser process (no LLM keys or other backend secrets).
+    const env = minimalChildEnv({
         DISPLAY: opts.display,
         XDG_SESSION_TYPE: "x11",
-    };
-    delete env.WAYLAND_DISPLAY;
+    });
     const transport = new StdioClientTransport({
         command: process.execPath,
         args: [MCP_CLI, "--config", configPath],
         cwd: opts.workDir,
-        env: env as Record<string, string>,
+        env,
         stderr: "ignore",
     });
     const client = new Client({ name: "specbook-agent", version: "1.0.0" });
