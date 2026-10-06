@@ -250,7 +250,12 @@ async function runReservedChatTurn(
             };
             browserTools = bridgeBrowserTools(browser.mcp, browser.workDir, policy);
             metrics.setBrowserAvailable(true);
+            await turnPolicy?.browserReady?.();
         } catch (error) {
+            if (turnPolicy?.infrastructureFailure) {
+                await turnPolicy.infrastructureFailure(String(error));
+                return;
+            }
             appendWarning(
                 sessionManager,
                 `The agent browser failed to start: ${error instanceof Error ? error.message : String(error)}. Browser tools are unavailable for this turn.`,

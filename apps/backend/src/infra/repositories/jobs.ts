@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { inboxItems, jobActions, jobs } from "../db/schema";
+import { dailyUsageFor } from "../../core/jobs/usage";
 
 export type Job = typeof jobs.$inferSelect;
 export type InboxItem = typeof inboxItems.$inferSelect;
@@ -33,6 +34,16 @@ export const jobsRepository = {
     },
     async update(id: string, patch: Partial<Omit<Job, "id" | "projectId" | "chatId">>) {
         await db.update(jobs).set({ ...patch, updatedAt: now() }).where(eq(jobs.id, id));
+    },
+    async recordUsage(id: string, tokens: number, wallTimeMs = 0) {
+        const job = await this.get(id);
+        if (!job) return;
+        const date = now().slice(0, 10);
+        const previous = dailyUsageFor(job, date);
+        await this.update(id, {
+            tokensUsed: job.tokensUsed + tokens, elapsedMs: job.elapsedMs + wallTimeMs,
+            dailyUsage: { date, tokens: previous.tokens + tokens, wallTimeMs: previous.wallTimeMs + wallTimeMs },
+        });
     },
     async claim(id: string) {
         const [job] = await db.update(jobs).set({ status: "running", startedAt: now(), updatedAt: now() })
@@ -76,8 +87,8 @@ export const jobsRepository = {
     },
     async recover() {
         for (const job of await db.select().from(jobs).where(eq(jobs.status, "running"))) {
-            const elapsedMs = job.elapsedMs + Math.max(0, Date.now() - Date.parse(job.startedAt ?? now()));
-            await this.update(job.id, { status: "queued", elapsedMs, startedAt: null });
+            await this.recordUsage(job.id, 0, Math.max(0, Date.now() - Date.parse(job.startedAt ?? now())));
+            await this.update(job.id, { status: "queued", startedAt: null });
             await this.log(job.id, "recovered", "Backend restarted. Reconcile existing Inbox proposals before continuing; do not repeat browser mutations.");
         }
         // An approval may have committed before the process stopped. Require a

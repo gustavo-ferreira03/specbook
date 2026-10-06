@@ -9,6 +9,8 @@ import { runChatTurn } from "../chat/turn-runner";
 import { createProjectScrubber } from "../credentials/scrub";
 import { createJobSchema } from "./schemas";
 import { createJobPolicy } from "./policy";
+import { isInfrastructureFailure } from "./presentation-errors";
+import { retryInfrastructure } from "./retry";
 
 const active = new Set<string>();
 let polling = false;
@@ -62,24 +64,26 @@ async function executeJob(job: Job): Promise<void> {
         const messages = await getChatMessages(job.chatId);
         const last = messages?.filter((message) => message.role === "agent").at(-1)?.content;
         if (current?.status === "running") {
-            const blocked = !last || /couldn't respond|No LLM model|not authenticated|turn failed|unavailable/.test(last ?? "");
-            await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: blocked ? "question" : "note",
-                title: blocked ? "Job needs your input" : "Job result", body: await scrub(last || "The agent could not complete this turn. Check the provider settings and reply to resume.") });
-            await jobsRepository.transition(job.id, "running", blocked ? "blocked" : "completed");
+            if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
+                await retryInfrastructure(job, last || "The agent service could not complete its response.");
+            } else {
+                await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Investigation finished", body: await scrub(last), payload: { language: "en" } });
+                await jobsRepository.update(job.id, { status: "completed", systemError: null, retryAt: null });
+            }
         } else if (current?.status === "budget_exceeded") {
-            await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Job budget reached",
-                body: "The job stopped at its configured budget. Review its proposals and activity log. The steward will consider follow-up work within the next available budget." });
+            await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Paused until more usage is available",
+                body: "Specbook saved its progress. It can continue tomorrow, or you can allow another round today.", payload: { language: "en" } });
         }
     } catch (error) {
         const current = await jobsRepository.get(job.id);
         if (stopped || current?.status === "cancelled" || current?.status === "budget_exceeded") return;
         await jobsRepository.log(job.id, "error", await scrub(String(error)));
-        await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "question", title: "Job needs help", body: await scrub(String(error)) });
-        await jobsRepository.update(job.id, { status: "blocked" });
+        await retryInfrastructure(job, String(error));
     } finally {
         clearTimeout(deadline);
         await closeChatBrowser(job.chatId).catch(() => undefined);
-        await jobsRepository.update(job.id, { elapsedMs: job.elapsedMs + Date.now() - started, startedAt: null });
+        await jobsRepository.recordUsage(job.id, 0, Date.now() - started);
+        await jobsRepository.update(job.id, { startedAt: null });
         await jobsRepository.log(job.id, "stopped", (await jobsRepository.get(job.id))?.status ?? "unknown");
     }
 }
@@ -93,6 +97,7 @@ export async function drainJobs(): Promise<void> {
         for (const row of await jobsRepository.queued()) {
             if (active.size >= limit || stopped) break;
             if (active.has(row.id)) continue;
+            if (row.retryAt && Date.parse(row.retryAt) > Date.now()) continue;
             const siblings = await jobsRepository.list(row.projectId);
             if (siblings.some((job) => job.status === "running" || active.has(job.id))) continue;
             const job = await jobsRepository.claim(row.id);
@@ -108,6 +113,16 @@ export async function drainJobs(): Promise<void> {
 
 export async function startJobWorker(): Promise<void> {
     await jobsRepository.recover();
+    // Internal service failures belong to automatic recovery, including earlier unanswered reports.
+    for (const project of await (await import("../../infra/repositories/projects")).projectsRepository.listProjects()) {
+        for (const item of await jobsRepository.inbox(project.id)) {
+            if (item.kind !== "question" || item.status !== "pending" || !isInfrastructureFailure(`${item.title}\n${item.body}`)) continue;
+            const job = await jobsRepository.get(item.jobId);
+            if (job?.status !== "blocked") continue;
+            await retryInfrastructure(job, `${item.title}\n${item.body}`);
+            await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, internalRecovery: true } });
+        }
+    }
     stopped = false;
     timer = setInterval(() => void drainJobs().catch((error) => logger.error("job queue failed", { error })), 2000);
     timer.unref();

@@ -110,3 +110,15 @@ Vocabulary for user-facing copy: hide job; steward → Specbook; budget → dail
 Xvfb diagnosis: orphaned browser processes from earlier backend exits occupied every fixed display from :99 through :119. Display ownership only existed in the current process's map. The fix selects high candidate displays, checks existing sockets/locks, lets Xvfb claim its native lock atomically and waits for displayfd readiness. VNC binds an available port independently. Child supervisors close only their own processes when the backend's pipe closes, including abrupt termination; shutdown is awaited and no foreign lock is removed.
 
 Validation: a real test started two concurrent stacks and a third in another backend process, killed only that test backend, confirmed its browser processes/lock were cleaned up and the other two stayed available, then confirmed normal shutdown closed their ports. Existing user browser processes and locks were untouched. The test lives in the existing runner suite and is explicitly enabled with SPECBOOK_TEST_VNC=1.
+
+Addendum 3 checkpoint: Inbox questions now include consequences, available before/after screenshots and collapsed file diffs. Activity groups work by subject. Internal browser/provider failures retry without creating human questions; historical internal-failure questions are removed from the decision view. Failed required test runs remain internal while investigation continues and become a request for help only after it stops.
+
+Daily-limit diagnosis found partially funded investigations stopping before useful work, small planner allocations and blocked work reserving its full unused allowance. Dispatch now waits for a complete allocation, counts today's consumption separately from cumulative audit totals, and reserves only queued/running work's remaining allowance. Continue now grants one additional round for today; automatic continuation can resume the following day. Recovery preserves elapsed usage.
+
+Validation at this checkpoint: both app typechecks passed; 225 tests passed with SPECBOOK_TEST_VNC=1, including browser process cleanup, presentation filtering, chronological data, usage/recovery, continuation concurrency and decision actions. Inbox and Activity were inspected at desktop and phone widths in the running app. Browser fix is committed separately as 1cbf1c3.
+
+## Addendum 4: one project Overview
+
+Gus superseded the two-screen layout before further CI work. Replace Inbox and Activity navigation with Overview, keep their old URLs as redirects, and use fixed sections: Needs you, Working on it now, Problems found, one aggregated Paused row, and History grouped by day. Use compact rows with details in the existing side sheet. Status counts and Spec-tree dots must share a single health interpretation. Remove generic narrative and repeated timeline text, sort panel events chronologically, and preserve question wording, screenshots and file diffs in review details.
+
+This restructuring is in progress and will be committed separately. Verification must include Agora Leads, Swag Labs and a temporary empty project at 1440px and phone width.

@@ -200,6 +200,10 @@ export const jobs = sqliteTable("jobs", {
     tokensUsed: integer("tokens_used").notNull().default(0),
     actionsUsed: integer("actions_used").notNull().default(0),
     elapsedMs: integer("elapsed_ms").notNull().default(0),
+    dailyUsage: text("daily_usage", { mode: "json" }).$type<{ date: string; tokens: number; wallTimeMs: number }>(),
+    retryAt: text("retry_at"),
+    systemError: text("system_error"),
+    infrastructureRetries: integer("infrastructure_retries").notNull().default(0),
     startedAt: text("started_at"),
     pendingMessage: text("pending_message").notNull(),
     createdAt: text("created_at").notNull(),
@@ -261,6 +265,7 @@ export const projectStewards = sqliteTable("project_stewards", {
     autonomy: text("autonomy").$type<"observe" | "propose" | "act">().notNull().default("propose"),
     observation: text("observation", { mode: "json" }).$type<import("../../core/steward/signals").ProjectObservation>().notNull().default({}),
     lastPlannerAt: text("last_planner_at"),
+    extraUsage: text("extra_usage", { mode: "json" }).$type<{ date: string; tokens: number; wallTimeMs: number }>(),
     updatedAt: text("updated_at").notNull(),
 });
 

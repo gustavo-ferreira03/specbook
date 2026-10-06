@@ -285,7 +285,10 @@ describe("autonomous job proposals", () => {
         const changed = await preview(behavior.id);
         assert.equal(changed[0]?.before, original);
         assert.notEqual(changed[0]?.before, changed[0]?.after);
-        await applyProposal(behavior);
+        const approved = await router.request(`/projects/${projectId}/inbox/${behavior.id}/review`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "approve" }),
+        });
+        assert.equal(approved.status, 200);
         assert.equal(await fs.readFile(yamlFile, "utf8"), changed[0]?.after);
         assert.deepEqual(await preview(behavior.id), changed, "review history retains the proposal snapshot");
     });
@@ -599,4 +602,111 @@ describe("project steward", () => {
         assert.equal(different.status, "pending");
     });
 
+});
+
+describe("plain-language autonomous presentation", () => {
+    test("unfinished updates stay out of Inbox, stopped attempts offer help, and stale updates disappear", async () => {
+        const { projectPresentation } = await import("../../src/core/jobs/presentation");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const projectId = await createProject("Understandable updates");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const { spec } = await createSpec(projectId, feature.id, "View results");
+        const job = await jobsRepository.create({ projectId, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair the check", budget: jobBudgetSchema.parse({}) });
+        await jobsRepository.update(job.id, { status: "running" });
+        const source = VALID_SPEC.replace('page.goto("/")', 'page.goto("/results")');
+        const item = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source });
+        const error = 'TimeoutError: expected result did not appear\n    at Object.click (/home/gus/specbook/src/core/runner/guard.ts:279:36)\n> 279 | await locator.click();\n      | ^\nArtifact: /tmp/specbook/storage/runs/private/error.txt';
+        await jobsRepository.updateItem(item.id, { payload: { ...item.payload, verification: { status: "failed", failReason: error, screenshots: [] } } });
+        assert.equal((await projectPresentation(projectId)).items.length, 0);
+        await jobsRepository.update(job.id, { status: "budget_exceeded" });
+        const paused = await projectPresentation(projectId);
+        assert.equal(paused.items.length, 1);
+        assert.equal(paused.items[0]?.presentation.type, "help");
+        assert.match(paused.items[0]?.presentation.title ?? "", /Look at it together\?/);
+        assert.equal(paused.summary.pausedCount, 1);
+        assert.equal(paused.summary.canContinue, true);
+        assert.doesNotMatch(JSON.stringify(paused), /\/home\/gus|\/tmp\/specbook|src\/core\/runner|Object\.click|279 \|/);
+        await writer.updateSpecWithLock(spec.id, { testSource: source });
+        assert.equal((await projectPresentation(projectId)).items.length, 0, "an outdated failed suggestion is not a new decision");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        await stewardRepository.update(projectId, { autonomy: "observe" });
+        const observing = await projectPresentation(projectId);
+        assert.equal(observing.summary.pausedCount, 0);
+        assert.equal(observing.summary.canContinue, false);
+        assert.match(observing.summary.statusText, /is watching/);
+        assert.doesNotMatch(observing.summary.statusText, /tomorrow/);
+        assert.equal(observing.activity[0]?.status, "observing");
+        assert.match(observing.activity[0]?.nextStep ?? "", /Automation settings/);
+        await jobsRepository.update(job.id, { status: "running" });
+        const working = await projectPresentation(projectId);
+        assert.equal(working.activity[0]?.status, "working");
+        assert.match(working.summary.statusText, /is checking/);
+    });
+
+    test("groups repeated observations and investigations around one check and pairs the same screenshot step", async () => {
+        const { projectPresentation } = await import("../../src/core/jobs/presentation");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const { sourceHashOf } = await import("../../src/core/repo/writer");
+        const { runsDir } = await import("../../src/core/paths");
+        const projectId = await createProject("Grouped story");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const { spec } = await createSpec(projectId, feature.id, "Open results");
+        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
+        await runsRepository.finishRun(run.id, "failed", 1, "Missing results");
+        await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+        await fs.writeFile(path.join(runsDir, run.id, "evidence.json"), JSON.stringify({ failedStep: "Abrir a página", steps: [{ label: "Abrir a página", file: "evidence/step-01.png" }] }));
+        const job = await jobsRepository.create({ projectId, runId: run.id, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair", budget: jobBudgetSchema.parse({}) });
+        const source = VALID_SPEC.replace('page.goto("/")', 'page.goto("/results")');
+        const item = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source });
+        await jobsRepository.updateItem(item.id, { payload: { ...item.payload, verification: { id: crypto.randomUUID(), status: "passed", sourceHash: sourceHashOf(source), screenshots: ["evidence/step-01.png", "evidence/step-02.png"] } } });
+        await jobsRepository.update(job.id, { status: "completed" });
+        await jobsRepository.log(job.id, "browser_snapshot:completed", "Captured the page");
+        for (const key of ["changed:one", "changed:two"]) await stewardRepository.signal({ projectId, key, kind: "invalid_spec", title: "Internal invalid status", body: "Internal detail", payload: { specIds: [spec.id] } });
+        const view = await projectPresentation(projectId);
+        assert.equal(view.activity.length, 1);
+        assert.equal(view.activity[0]?.subject.id, spec.id);
+        assert.deepEqual(view.activity[0]?.timeline.map((entry) => entry.label), ["Noticed", "Investigated", "Your decision"]);
+        assert.match(view.items[0]?.presentation.screenshots.before?.url ?? "", /step-01\.png$/);
+        assert.match(view.items[0]?.presentation.screenshots.after?.url ?? "", /step-01\.png$/);
+        assert.equal(view.items[0]?.presentation.type, "update");
+        assert.equal(view.items[0]?.presentation.summary, "Missing results. The expected behavior stays the same.");
+        assert.doesNotMatch(view.items[0]?.presentation.summary ?? "", /passed/);
+        assert.match(view.items[0]?.presentation.workDone ?? "", /passed/);
+        assert.match(view.activity[0]?.title ?? "", /could not be checked/);
+        assert.equal(view.summary.attentionCount, 1);
+        assert.match(view.summary.statusText, /is watching/);
+    });
+
+    test("keeps internal browser failures out of Inbox and removes source frames from optional diagnostics", async () => {
+        const { projectPresentation } = await import("../../src/core/jobs/presentation");
+        const { sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobBudgetSchema } = await import("../../src/core/jobs/schemas");
+        const projectId = await createProject("Service recovery");
+        for (const display of [118, 119]) {
+            const job = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", goal: "Inspect", budget: jobBudgetSchema.parse({}) });
+            await jobsRepository.update(job.id, { status: "blocked" });
+            await jobsRepository.addItem({ projectId, jobId: job.id, kind: "question", title: "Job needs help", body: `O navegador não iniciou devido ao conflito do servidor X (display ${display}).` });
+        }
+        const view = await projectPresentation(projectId);
+        assert.deepEqual(view.items, []);
+        assert.equal(view.summary.attentionCount, 0);
+        assert.ok(view.summary.systemHealth);
+        assert.match(view.summary.systemHealth.message, /resume automatically/);
+        assert.equal(view.activity.length, 0, "infrastructure recovery is represented by one health notice");
+        const technical = sanitizeTechnicalDetails('TimeoutError: missing button\n    at Object.click (/home/gus/app/src/core/runner/guard.ts:279)\n> 279 | await locator.click()\n    ^\nC:\\Users\\gus\\specbook\\error.log\nSee /var/log/specbook/errors.txt\nURL: https://app.example.com/results');
+        assert.match(technical, /TimeoutError: missing button/);
+        assert.match(technical, /https:\/\/app.example.com\/results/);
+        assert.doesNotMatch(technical, /\/home|C:\\Users|\/var\/log|guard\.ts|locator\.click|\bat Object/);
+        assert.equal(isInfrastructureFailure("The application returned HTTP 503"), false);
+        assert.equal(isInfrastructureFailure("browserType.launch: Xvfb failed"), true);
+        assert.equal(isInfrastructureFailure("BrowserUnavailableError"), true);
+        assert.equal(isInfrastructureFailure("Specbook couldn’t start its browser."), true);
+        assert.equal(isInfrastructureFailure("Specbook could not start its browser."), true);
+    });
 });

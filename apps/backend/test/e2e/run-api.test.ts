@@ -18,6 +18,11 @@ const writer = await import("../../src/core/repo/writer");
 const { executeSpec } = await import("../../src/core/runner/run");
 const { createRunsRouter } = await import("../../src/infra/web/routes/runs");
 const { createProfile } = await import("../../src/core/credentials/profiles");
+const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+const { stewardRepository } = await import("../../src/infra/repositories/steward");
+const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
+const { allocationFor } = await import("../../src/core/jobs/usage");
+const { dailyBudget, enqueueIntent, processProjectSteward } = await import("../../src/core/steward/engine");
 
 async function chromiumAvailable(): Promise<boolean> {
     try {
@@ -465,4 +470,240 @@ test("Store", async ({ page, step }) => {
         assert.equal(retry.flaky, true);
     });
 
+});
+
+describe("autonomous continuation and decisions", () => {
+    const router = createJobsRouter();
+    const today = () => new Date().toISOString().slice(0, 10);
+    const post = (url: string, body?: unknown) => router.request(url, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+    before(async () => {
+        const { stopJobWorker } = await import("../../src/core/jobs/worker");
+        await stopJobWorker();
+    });
+
+    async function projectWithWork() {
+        const project = await projectsRepository.createProject("Continuation", baseUrl);
+        await stewardRepository.update(project.id, { autonomy: "propose", lastPlannerAt: new Date().toISOString() });
+        return project;
+    }
+
+    async function createWork(projectId: string) {
+        return jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "steward", kind: "explore",
+            goal: "Investigate checkout", budget: allocationFor("explore") });
+    }
+
+    test("waits for a full allocation instead of launching a tiny remaining token or time budget", async () => {
+        for (const usage of [{ tokens: 210_000, wallTimeMs: 0 }, { tokens: 0, wallTimeMs: 1300_000 }]) {
+            const project = await projectWithWork();
+            const previous = await createWork(project.id);
+            await jobsRepository.recordUsage(previous.id, usage.tokens, usage.wallTimeMs);
+            await jobsRepository.update(previous.id, { status: "completed" });
+            const intent = await enqueueIntent(project.id, { kind: "explore", goal: "Investigate checkout", reason: "Checkout has no coverage" }, crypto.randomUUID());
+            await processProjectSteward(project.id, false);
+            assert.equal((await stewardRepository.intents(project.id)).find((row) => row.id === intent.id)?.status, "pending");
+            assert.equal((await jobsRepository.list(project.id)).length, 1, "insufficient daily allowance must not create a partial investigation");
+            assert.equal((await post(`/projects/${project.id}/continue-now`)).status, 200);
+            const next = (await jobsRepository.list(project.id)).find((job) => job.id !== previous.id)!;
+            assert.equal(next.status, "queued");
+            assert.deepEqual(next.budget, allocationFor("explore"));
+            assert.deepEqual((await stewardRepository.get(project.id)).extraUsage, {
+                date: today(), tokens: Math.max(0, usage.tokens - 200_000), wallTimeMs: Math.max(0, usage.wallTimeMs - 1200_000),
+            });
+        }
+    });
+
+    test("reserves only unfinished queued work and releases unused allowance while waiting for a person", async () => {
+        const project = await projectWithWork();
+        const blocked = await createWork(project.id);
+        await jobsRepository.recordUsage(blocked.id, 25_000, 60_000);
+        await jobsRepository.update(blocked.id, { status: "blocked" });
+        const queued = await createWork(project.id);
+        await jobsRepository.update(queued.id, { tokensUsed: 60_000, elapsedMs: 120_000,
+            dailyUsage: { date: today(), tokens: 10_000, wallTimeMs: 20_000 } });
+        const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+        const old = await createWork(project.id);
+        await jobsRepository.update(old.id, { status: "completed", tokensUsed: 300_000, elapsedMs: 1800_000,
+            dailyUsage: { date: yesterday, tokens: 300_000, wallTimeMs: 1800_000 } });
+        assert.deepEqual(dailyBudget(await jobsRepository.list(project.id)), { tokens: 225_000, wallTimeMs: 1240_000 });
+        await jobsRepository.update(queued.id, { status: "blocked" });
+        assert.deepEqual(dailyBudget(await jobsRepository.list(project.id)), { tokens: 265_000, wallTimeMs: 1720_000 });
+    });
+
+    test("continue now retains cumulative usage and grants only one allowance for concurrent requests", async () => {
+        const project = await projectWithWork();
+        const job = await createWork(project.id);
+        await jobsRepository.recordUsage(job.id, 300_000, 1800_000);
+        await jobsRepository.update(job.id, { status: "budget_exceeded", actionsUsed: 87 });
+        const answers = await Promise.all([post(`/projects/${project.id}/continue-now`), post(`/projects/${project.id}/continue-now`)]);
+        assert.deepEqual(answers.map((response) => response.status).sort(), [200, 409]);
+        const resumed = (await jobsRepository.get(job.id))!;
+        assert.equal(resumed.status, "queued");
+        assert.equal(resumed.tokensUsed, 300_000);
+        assert.equal(resumed.elapsedMs, 1800_000);
+        assert.equal(resumed.actionsUsed, 87);
+        assert.deepEqual(resumed.budget, { maxTokens: 400_000, wallTimeMs: 2400_000, maxActions: 167 });
+        assert.deepEqual(resumed.dailyUsage, { date: today(), tokens: 300_000, wallTimeMs: 1800_000 });
+        const extraUsage = (await stewardRepository.get(project.id)).extraUsage;
+        assert.deepEqual(extraUsage, { date: today(), tokens: 100_000, wallTimeMs: 600_000 });
+        assert.deepEqual(dailyBudget(await jobsRepository.list(project.id), Date.now(), extraUsage), { tokens: 0, wallTimeMs: 0 });
+        assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "continued").length, 1);
+        await jobsRepository.recover();
+        assert.deepEqual((await jobsRepository.get(job.id))?.budget, resumed.budget);
+        assert.equal((await jobsRepository.list(project.id)).length, 1);
+    });
+
+    test("resumes unfinished work on the next day without resetting lifetime counters or spending yesterday's allowance", async () => {
+        const { db } = await import("../../src/infra/db/client");
+        const { jobs } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const project = await projectWithWork();
+        const job = await createWork(project.id);
+        const yesterday = new Date(Date.now() - 86400_000).toISOString();
+        await db.update(jobs).set({ status: "budget_exceeded", tokensUsed: 250_000, elapsedMs: 900_000, actionsUsed: 73,
+            updatedAt: yesterday, dailyUsage: { date: yesterday.slice(0, 10), tokens: 250_000, wallTimeMs: 900_000 } }).where(eq(jobs.id, job.id));
+        await stewardRepository.update(project.id, { extraUsage: { date: yesterday.slice(0, 10), tokens: 100_000, wallTimeMs: 600_000 } });
+        await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
+        const resumed = (await jobsRepository.get(job.id))!;
+        assert.equal(resumed.status, "queued");
+        assert.equal(resumed.tokensUsed, 250_000);
+        assert.equal(resumed.elapsedMs, 900_000);
+        assert.equal(resumed.actionsUsed, 73);
+        assert.deepEqual(resumed.budget, { maxTokens: 350_000, wallTimeMs: 1500_000, maxActions: 153 });
+        assert.deepEqual(resumed.dailyUsage, { date: today(), tokens: 0, wallTimeMs: 0 });
+        assert.deepEqual(dailyBudget([resumed], Date.now(), (await stewardRepository.get(project.id)).extraUsage), { tokens: 200_000, wallTimeMs: 1200_000 });
+        assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "continued").length, 1);
+    });
+
+    test("backend recovery charges interrupted time to daily usage exactly once", async () => {
+        const project = await projectWithWork();
+        const job = await createWork(project.id);
+        await jobsRepository.recordUsage(job.id, 1500, 5000);
+        await jobsRepository.update(job.id, { status: "running", startedAt: new Date(Date.now() - 30_000).toISOString() });
+        await jobsRepository.recover();
+        const recovered = (await jobsRepository.get(job.id))!;
+        assert.equal(recovered.status, "queued");
+        assert.equal(recovered.startedAt, null);
+        assert.ok(recovered.elapsedMs >= 35_000);
+        assert.equal(recovered.dailyUsage?.wallTimeMs, recovered.elapsedMs);
+        assert.equal(recovered.dailyUsage?.tokens, 1500);
+        await jobsRepository.recover();
+        assert.equal((await jobsRepository.get(job.id))?.elapsedMs, recovered.elapsedMs);
+        assert.equal((await jobsRepository.actions(job.id)).filter((entry) => entry.action === "recovered").length, 1);
+    });
+
+    test("infrastructure failures persist a delayed retry and scrub details without asking the human", async () => {
+        const { retryInfrastructure } = await import("../../src/core/jobs/retry");
+        const project = await projectWithWork();
+        await createProfile(project.id, { name: "operator", fields: [{ key: "password", value: "infrastructure-secret-value" }] });
+        const job = await createWork(project.id);
+        const running = (await jobsRepository.claim(job.id))!;
+        const before = Date.now();
+        await retryInfrastructure(running, "Browser unavailable: infrastructure-secret-value");
+        const queued = (await jobsRepository.get(job.id))!;
+        assert.equal(queued.status, "queued");
+        assert.equal(queued.infrastructureRetries, 1);
+        assert.ok(Date.parse(queued.retryAt!) >= before + 15_000);
+        assert.ok(!queued.systemError?.includes("infrastructure-secret-value"));
+        assert.match(queued.pendingMessage ?? "", /not a question for the human/);
+        await jobsRepository.recover();
+        await retryInfrastructure(running, "Duplicate callback");
+        assert.equal((await jobsRepository.get(job.id))?.retryAt, queued.retryAt);
+        assert.equal((await jobsRepository.get(job.id))?.infrastructureRetries, 1);
+        await retryInfrastructure((await jobsRepository.claim(job.id))!, "LLM provider temporarily unavailable");
+        const second = (await jobsRepository.get(job.id))!;
+        assert.equal(second.infrastructureRetries, 2);
+        assert.ok(Date.parse(second.retryAt!) >= before + 30_000);
+        assert.deepEqual(await jobsRepository.inbox(project.id), []);
+        const actions = await jobsRepository.actions(job.id);
+        assert.equal(actions.filter((entry) => entry.action === "service_retry").length, 2);
+        assert.ok(!JSON.stringify(actions).includes("infrastructure-secret-value"));
+    });
+
+    test("report bug rejects a suggested fix once, leaves both files untouched and enforces project isolation", async () => {
+        const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+        const { proposeMutation } = await import("../../src/core/jobs/proposals");
+        const project = await projectWithWork();
+        const other = await projectWithWork();
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Checkout", "");
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Checkout", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const job = await createWork(project.id);
+        const item = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/checkout")') });
+        const directory = path.join(repoGit.getRepoDir(project.id), spec.path);
+        const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf8");
+        const head = await repoGit.getHeadSha(project.id);
+        const endpoint = `/projects/${project.id}/inbox/${item.id}/review`;
+        assert.equal((await post(`/projects/${other.id}/inbox/${item.id}/review`, { action: "report_bug" })).status, 404);
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
+        const responses = await Promise.all([post(endpoint, { action: "report_bug" }), post(endpoint, { action: "report_bug" })]);
+        assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+        assert.equal((await jobsRepository.item(item.id))?.status, "rejected");
+        assert.equal((await post(endpoint, { action: "approve" })).status, 409);
+        const reports = (await jobsRepository.inbox(project.id)).filter((row) => row.kind === "bug_report");
+        assert.equal(reports.length, 1);
+        assert.equal(reports[0]?.payload.sourceItemId, item.id);
+        assert.equal(reports[0]?.payload.specId, spec.id);
+        assert.deepEqual(await jobsRepository.inbox(other.id), []);
+        assert.equal(await fs.readFile(path.join(directory, "spec.ts"), "utf8"), VALID_SPEC);
+        assert.equal(await fs.readFile(path.join(directory, "spec.yml"), "utf8"), yaml);
+        assert.equal(await repoGit.getHeadSha(project.id), head);
+    });
+
+    test("ignore stops a paused investigation and prevents an equivalent automatic continuation", async () => {
+        const project = await projectWithWork();
+        const input = { kind: "explore", goal: "Investigate checkout", reason: "Checkout has no coverage" };
+        const intent = await enqueueIntent(project.id, input, "first-check");
+        await processProjectSteward(project.id, false);
+        const job = (await jobsRepository.list(project.id))[0]!;
+        assert.equal(job.id, intent.id);
+        await jobsRepository.update(job.id, { status: "budget_exceeded" });
+        const item = await jobsRepository.addItem({ jobId: job.id, projectId: project.id, kind: "question", title: "Continue checking checkout?", body: "The update still does not work." });
+        assert.equal((await post(`/projects/${project.id}/inbox/${item.id}/review`, { action: "ignore" })).status, 200);
+        assert.equal((await jobsRepository.get(job.id))?.status, "cancelled");
+        assert.equal((await jobsRepository.item(item.id))?.payload.ignoredCheck, true);
+        assert.equal((await post(`/projects/${project.id}/continue-now`)).status, 409);
+        const next = await enqueueIntent(project.id, input, "later-check");
+        await processProjectSteward(project.id, false);
+        const ignored = (await stewardRepository.intents(project.id)).find((row) => row.id === next.id)!;
+        assert.equal(ignored.status, "ignored");
+        assert.match(ignored.reason, /human rejected/i);
+        assert.equal((await jobsRepository.list(project.id)).length, 1);
+    });
+
+    test("discuss opens a visible human chat with suggestion context and reuses it", async () => {
+        const { createChat, getChatMessages, listChats } = await import("../../src/core/chat/session-store");
+        const { isChatBusy } = await import("../../src/core/chat/chat-registry");
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        await settingsRepository.updateLlmSettings({ provider: "", model: "" });
+        const project = await projectWithWork();
+        const other = await projectWithWork();
+        const internal = await createChat(project.id);
+        const job = await jobsRepository.create({ projectId: project.id, chatId: internal.id, trigger: "steward", kind: "explore", goal: "Investigate checkout", budget: allocationFor("explore") });
+        const item = await jobsRepository.addItem({ jobId: job.id, projectId: project.id, kind: "question", title: "Should checkout allow guests?", body: "Guest checkout is unavailable." });
+        assert.deepEqual(await listChats(project.id), []);
+        assert.equal((await post(`/projects/${other.id}/inbox/${item.id}/discuss`)).status, 404);
+        const endpoint = `/projects/${project.id}/inbox/${item.id}/discuss`;
+        const response = await post(endpoint);
+        assert.equal(response.status, 200);
+        const { chatId } = await response.json();
+        assert.notEqual(chatId, internal.id);
+        const repeated = await post(endpoint);
+        assert.equal((await repeated.json()).chatId, chatId);
+        const deadline = Date.now() + 5000;
+        while (isChatBusy(chatId) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(isChatBusy(chatId), false);
+        assert.deepEqual((await listChats(project.id)).map((chat) => chat.id), [chatId]);
+        assert.deepEqual(await listChats(other.id), []);
+        const messages = await getChatMessages(chatId);
+        const context = messages?.filter((message) => message.role === "user");
+        assert.equal(context?.length, 1);
+        assert.match(context![0]!.content, /Should checkout allow guests/);
+        assert.match(context![0]!.content, /Guest checkout is unavailable/);
+        assert.match(context![0]!.content, /Do not change files unless I ask/);
+        assert.equal((await jobsRepository.item(item.id))?.status, "pending");
+        assert.equal((await jobsRepository.list(project.id)).length, 1);
+    });
 });

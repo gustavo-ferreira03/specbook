@@ -277,20 +277,6 @@ export interface CredentialFieldInput {
     value?: string;
 }
 
-export interface Job {
-    id: string;
-    projectId: string;
-    chatId: string;
-    trigger: string;
-    goal: string;
-    status: "queued" | "running" | "blocked" | "completed" | "budget_exceeded" | "cancelled";
-    budget: { maxTokens: number; wallTimeMs: number; maxActions: number };
-    tokensUsed: number;
-    actionsUsed: number;
-    elapsedMs: number;
-    createdAt: string;
-}
-export interface JobAction { id: number; action: string; detail: string; createdAt: string }
 export interface InboxItem {
     id: string;
     jobId: string;
@@ -298,8 +284,54 @@ export interface InboxItem {
     status: "pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed";
     title: string;
     body: string;
-    payload: { files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown>; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
+    payload: { files?: { path: string; before: string | null; after: string }[]; regressionIntentId?: string; specId?: string; runId?: string; before?: { yaml?: string; testSource?: string }; params?: Record<string, unknown> & { humanSpec?: HumanSpec; description?: string }; requiresVerification?: boolean; verification?: { status: string; failReason: string | null; durationMs: number | null; screenshots: string[] } };
     answer: string | null;
     commitSha: string | null;
     createdAt: string;
+}
+
+export interface AgentSummary {
+    projectName: string;
+    statusText: string;
+    attentionCount: number;
+    activeCount: number;
+    queuedCount: number;
+    pausedCount: number;
+    lastCheckedAt: string | null;
+    canContinue: boolean;
+    autonomy: string;
+    systemHealth?: { message: string; detail?: string };
+}
+
+export interface PresentedInboxItem extends InboxItem {
+    presentation: {
+        type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
+        title: string;
+        summary: string;
+        workDone: string;
+        consequence: string;
+        screenshots: { before?: { url: string; label: string }; after?: { url: string; label: string } };
+        technicalDetails: string;
+        credentialRequest: boolean;
+        specId?: string;
+        chatId?: string;
+        activityId: string;
+    };
+}
+
+export interface ActivityStory {
+    id: string;
+    subject: { type: "spec" | "feature" | "deployment" | "project"; id?: string; name: string };
+    title: string;
+    summary: string;
+    status: "working" | "queued" | "waiting" | "needs_attention" | "paused" | "completed" | "observing" | "stopped";
+    nextStep: string;
+    updatedAt: string;
+    createdAt: string;
+    timeline: { id: string; label: string; detail: string; createdAt: string }[];
+    jobIds: string[];
+    specId?: string;
+    runId?: string;
+    inboxIds: string[];
+    technicalDetails: string;
 }

@@ -9,6 +9,7 @@ import { stewardRepository, type Intent, type ProjectSignal } from "../../infra/
 import { logger } from "../../infra/logger";
 import { createProjectScrubber } from "../credentials/scrub";
 import { enqueueJob } from "../jobs/worker";
+import { allocationFor, dailyUsageFor } from "../jobs/usage";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { collectProjectSignals, fingerprint } from "./signals";
 import { stewardIntentSchema, type StewardIntent } from "./schemas";
@@ -19,7 +20,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let processing = false;
 const day = 86400_000;
 
-async function withProjectLock<T>(id: string, work: () => Promise<T>): Promise<T> {
+export async function withProjectLock<T>(id: string, work: () => Promise<T>): Promise<T> {
     const previous = locks.get(id) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(work);
     locks.set(id, current);
@@ -74,17 +75,17 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
     await stewardRepository.acknowledge(signal.id, "handled");
 }
 
-export function dailyBudget(jobs: Awaited<ReturnType<typeof jobsRepository.list>>, at = Date.now()) {
+export function dailyBudget(jobs: Awaited<ReturnType<typeof jobsRepository.list>>, at = Date.now(), extraUsage?: { date: string; tokens: number; wallTimeMs: number } | null) {
     const date = new Date(at).toISOString().slice(0, 10);
     let tokens = 0;
     let wallTimeMs = 0;
     for (const job of jobs) {
-        const reserved = ["queued", "running", "blocked"].includes(job.status);
-        if (!reserved && job.updatedAt.slice(0, 10) !== date) continue;
-        tokens += reserved ? Math.max(job.budget.maxTokens, job.tokensUsed) : job.tokensUsed;
-        wallTimeMs += reserved ? Math.max(job.budget.wallTimeMs, job.elapsedMs) : job.elapsedMs;
+        const reserved = ["queued", "running"].includes(job.status);
+        const usage = dailyUsageFor(job, date);
+        tokens += usage.tokens + (reserved ? Math.max(0, job.budget.maxTokens - job.tokensUsed) : 0);
+        wallTimeMs += usage.wallTimeMs + (reserved ? Math.max(0, job.budget.wallTimeMs - job.elapsedMs) : 0);
     }
-    return { tokens: Math.max(0, 300_000 - tokens), wallTimeMs: Math.max(0, 1800_000 - wallTimeMs) };
+    return { tokens: Math.max(0, 300_000 + (extraUsage?.date === date ? extraUsage.tokens : 0) - tokens), wallTimeMs: Math.max(0, 1800_000 + (extraUsage?.date === date ? extraUsage.wallTimeMs : 0) - wallTimeMs) };
 }
 
 async function dispatchIntent(row: Intent): Promise<void> {
@@ -96,7 +97,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     if (siblings.some((other) => other.id !== row.id && other.status === "running" && other.batchId)) return;
     const inbox = await jobsRepository.inbox(row.projectId);
     const previous = siblings.filter((other) => other.id !== row.id && other.fingerprint === row.fingerprint && (other.jobId || other.batchId));
-    const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && item.status === "rejected"));
+    const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && (item.status === "rejected" || item.payload.ignoredCheck === true)));
     if (rejected || previous.some((other) => projectJobs.some((job) => job.id === other.jobId && ["queued", "running", "blocked"].includes(job.status))) || previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000)) {
         await stewardRepository.updateIntent(row.id, { status: "ignored", reason: rejected ? "A human rejected this proposal for the current Spec/context version." : "Equivalent work is already active or was handled recently." });
         return;
@@ -113,9 +114,10 @@ async function dispatchIntent(row: Intent): Promise<void> {
         });
         return;
     }
-    const remaining = dailyBudget(projectJobs);
-    if (remaining.tokens < 1000 || remaining.wallTimeMs < 1000) return;
     const kind = row.intent.kind === "triage" ? "failure_triage" : row.intent.kind;
+    const remaining = dailyBudget(projectJobs, Date.now(), (await stewardRepository.get(row.projectId)).extraUsage);
+    const allocation = allocationFor(kind);
+    if (remaining.tokens < allocation.maxTokens || remaining.wallTimeMs < allocation.wallTimeMs) return;
     const context = await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
     const specs = await specsRepository.listSpecs(row.projectId);
     const decisions = inbox.filter((item) => ["approved", "rejected", "dismissed"].includes(item.status)).slice(0, 12).map((item) => ({ title: item.title, status: item.status }));
@@ -124,7 +126,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
         : `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${kind === "regenerate" ? "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval." : kind === "explore" ? "Investigate the stated problem, inspect available access, and ask through the Inbox when a prerequisite needs human help. Keep this investigation focused on its goal." : "Compare confirmed areas, roles and rules to the existing Specs before proposing additional coverage. Investigate in the browser and ask when blocked."}\nRecent human decisions: ${JSON.stringify(decisions)}`;
     const job = await enqueueJob(row.projectId, { kind, goal: goal.slice(0, 12000), trigger: row.intent.kind === "triage" ? "spec_failure" : "steward",
         specId: row.intent.specIds?.[0], runId: row.intent.runId,
-        budget: { maxTokens: Math.min(kind === "planner" ? 20_000 : 100_000, remaining.tokens), wallTimeMs: Math.min(kind === "planner" ? 120_000 : 600_000, remaining.wallTimeMs), maxActions: kind === "planner" ? 8 : 80 },
+        budget: allocation,
     }, row.id);
     await stewardRepository.updateIntent(row.id, { status: "running", jobId: job.id });
 }
@@ -134,6 +136,18 @@ export async function processProjectSteward(projectId: string, collect = true): 
         const project = await projectsRepository.getProject(projectId);
         if (!project) return;
         const settings = await stewardRepository.get(projectId);
+        const projectJobs = await jobsRepository.list(projectId);
+        if (settings.autonomy !== "observe" && !projectJobs.some((job) => ["queued", "running"].includes(job.status))) {
+            const paused = projectJobs.find((job) => job.status === "budget_exceeded" && job.updatedAt.slice(0, 10) < new Date().toISOString().slice(0, 10));
+            if (paused) {
+                const remaining = dailyBudget(projectJobs, Date.now(), settings.extraUsage);
+                const allocation = allocationFor(paused.kind);
+                if (remaining.tokens >= allocation.maxTokens && remaining.wallTimeMs >= allocation.wallTimeMs) {
+                    const { resumeLimitedJob } = await import("../jobs/continuation");
+                    await resumeLimitedJob(paused);
+                }
+            }
+        }
         if (collect) await stewardRepository.update(projectId, { observation: await collectProjectSignals(project, settings.observation) });
         for (const signal of await stewardRepository.pendingSignals(projectId)) await handleSignal(signal, settings.autonomy === "observe");
         const intents = await stewardRepository.intents(projectId);

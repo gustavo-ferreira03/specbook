@@ -13,7 +13,7 @@ export const stewardRepository = {
         await db.insert(projectStewards).values({ projectId, updatedAt: now() }).onConflictDoNothing();
         return (await db.select().from(projectStewards).where(eq(projectStewards.projectId, projectId)))[0]!;
     },
-    async update(projectId: string, patch: Partial<Pick<Steward, "autonomy" | "observation" | "lastPlannerAt">>) {
+    async update(projectId: string, patch: Partial<Pick<Steward, "autonomy" | "observation" | "lastPlannerAt" | "extraUsage">>) {
         await this.get(projectId);
         await db.update(projectStewards).set({ ...patch, updatedAt: now() }).where(eq(projectStewards.projectId, projectId));
     },
