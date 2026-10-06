@@ -10,7 +10,6 @@ import { createSchedulesRouter } from "./infra/web/routes/schedules";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { HTTPException } from "hono/http-exception";
 import { WebSocketServer } from "ws";
 import { closeAllChatBrowsers } from "./core/browser/sessions";
 import { getVncSession, proxyVncSession } from "./core/browser/vnc";
@@ -31,11 +30,15 @@ import { createProjectsRouter } from "./infra/web/routes/projects";
 import { createRunsRouter } from "./infra/web/routes/runs";
 import { createSettingsRouter } from "./infra/web/routes/settings";
 import { createSpecsRouter } from "./infra/web/routes/specs";
+import { createSetupRouter } from "./infra/web/routes/setup";
+import { createRepositoryRecoveryRoutes } from "./infra/web/routes/repository-recovery";
+import { handleRequestError } from "./infra/web/errors";
 import {
     buildHostAllowlist,
     csrfGuard,
     hostGuard,
     isAllowedHost,
+    isAllowedWebsocketOrigin,
     jsonBodyLimit,
     REQUEST_HEADER,
     requestLogger,
@@ -73,6 +76,7 @@ app.use(
     cors({
         origin: (origin) => (allowedOrigins.has(origin) ? origin : undefined),
         allowHeaders: ["Content-Type", REQUEST_HEADER],
+        credentials: true,
     }),
 );
 // CORS only stops other sites from reading responses. These guards stop them
@@ -81,13 +85,11 @@ app.use(
 app.use("*", hostGuard(hostAllowlist));
 app.use("*", csrfGuard());
 app.use("*", jsonBodyLimit());
-app.onError((err, c) => {
-    if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
-    logger.error("request failed", { method: c.req.method, path: c.req.path, error: err });
-    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
-});
+app.onError(handleRequestError);
 
 app.get("/health", (c) => c.json({ ok: true }));
+app.route("/", createSetupRouter());
+app.route("/", createRepositoryRecoveryRoutes());
 app.route("/", createProjectsRouter());
 app.route("/", createJobsRouter());
 app.route("/", createStewardRouter());
@@ -137,10 +139,11 @@ wss.on("connection", (websocket, request) => {
 });
 
 server.on("upgrade", (request, socket, head) => {
+    const headers = new Headers(Object.entries(request.headers).flatMap(([key, value]) => typeof value === "string" ? [[key, value]] : []));
     if (
         !request.url?.startsWith("/vnc/") ||
         !isAllowedHost(hostAllowlist, request.headers.host) ||
-        (request.headers.origin !== undefined && !allowedOrigins.has(request.headers.origin))
+        !isAllowedWebsocketOrigin(headers, hostAllowlist, allowedOrigins)
     ) {
         socket.destroy();
         return;

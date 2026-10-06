@@ -415,7 +415,7 @@ const MessageList = memo(function MessageList({
 function ChatContent({ projectId, chatId }: { projectId: string; chatId: string }) {
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
-    const regenerate = searchParams.get("intent") === "regenerate";
+    const repair = searchParams.get("intent") === "repair";
     const [state, setState] = useState<ChatState | null>(null);
     const [text, setText] = useState("");
     const [loadError, setLoadError] = useState("");
@@ -449,11 +449,11 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         setText(
             !specId
                 ? ""
-                : regenerate
-                    ? `Regenerate the automation for the Spec ${specId} in the current format, keeping its steps and expected result. `
+                : repair
+                    ? `Repair the executable check for Spec ${specId}, keeping its saved steps and expected result unchanged. `
                     : `I want to change the Spec ${specId}. `,
         );
-    }, [chatId, regenerate, specId]);
+    }, [chatId, repair, specId]);
 
     useEffect(() => {
         let active = true;
@@ -785,7 +785,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const modelMissing = modelReady === false;
     const composerDisabled = discoveryTerminal || modelMissing;
     const chatsHref = `/p/${projectId}/chats`;
-    const modelSettingsHref = `/p/${projectId}/settings?tab=model`;
+    const modelSettingsHref = "/settings?tab=model";
 
     useEffect(() => {
         // Autosize, including text set programmatically (suggestions, the Spec prefill, a failed send).

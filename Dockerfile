@@ -32,8 +32,6 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
 
 COPY . .
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:4000
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 RUN pnpm --filter backend build \
     && pnpm --filter frontend build
 
@@ -66,13 +64,11 @@ RUN rm -rf /app/apps/frontend/.next/cache \
     && mkdir -p /app/apps/backend/storage \
     && chown node:node /app/apps/backend/storage
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:4000
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NODE_ENV=production
 ENV SPECBOOK_STORAGE_DIR=/app/apps/backend/storage
 ENV HOST=0.0.0.0
 
-# 4000 API, 4001 web UI, 1455 OpenAI Codex OAuth callback, 53692 Anthropic OAuth callback.
+# 4000 direct API/Git, 4001 web UI with same-origin API and VNC, 1455 OpenAI Codex OAuth callback, 53692 Anthropic OAuth callback.
 EXPOSE 4000 4001 1455 53692
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

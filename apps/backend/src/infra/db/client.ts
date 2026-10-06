@@ -12,10 +12,12 @@ fs.mkdirSync(storageRoot, { recursive: true });
 // transaction, so it is set here rather than with a per-connection PRAGMA.
 const client = createClient({ url: `file:${dbPath}`, timeout: 5000 });
 
-await client.execute("PRAGMA journal_mode = WAL");
-await client.execute("PRAGMA busy_timeout = 5000");
-// libsql already enables foreign keys on every connection; keep it explicit.
-await client.execute("PRAGMA foreign_keys = ON");
+export async function initializeDatabase(): Promise<void> {
+    await client.execute("PRAGMA journal_mode = WAL");
+    await client.execute("PRAGMA busy_timeout = 5000");
+    // libsql already enables foreign keys on every connection; keep it explicit.
+    await client.execute("PRAGMA foreign_keys = ON");
+}
 
 export const db = drizzle(client, { schema });
 

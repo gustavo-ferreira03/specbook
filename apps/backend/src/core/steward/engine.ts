@@ -21,7 +21,6 @@ import { retryStalledJob } from "../jobs/retry";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { collectProjectSignals, fingerprint, runSignalForIntent, runTriggerForIntent } from "./signals";
 import { stewardIntentSchema, type StewardIntent } from "./schemas";
-import { syncRegenerationDecision } from "./regeneration";
 
 const locks = new Map<string, Promise<unknown>>();
 let stopped = false;
@@ -269,7 +268,6 @@ export async function processProjectSteward(projectId: string, collect = true): 
         const project = await projectsRepository.getProject(projectId);
         if (!project) return;
         const settings = await stewardRepository.get(projectId);
-        await syncRegenerationDecision(projectId);
         if (await isAgentPaused(projectId)) return;
         const projectJobs = await jobsRepository.list(projectId);
         for (const blocked of projectJobs.filter((job) => job.status === "blocked" && job.safetyRetries > 0)) if (await canRunAgentJob(blocked)) await retryStalledJob(blocked);

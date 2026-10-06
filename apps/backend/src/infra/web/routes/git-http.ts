@@ -1,3 +1,4 @@
+import { buildHostAllowlist, frontendProxyOrigin } from "../security";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -47,6 +48,8 @@ function trustProxy(): boolean {
 export function publicGitOrigin(c: Context): string {
     const configured = process.env.SPECBOOK_PUBLIC_API_URL;
     if (configured) return configured.replace(/\/$/, "");
+    const proxied = frontendProxyOrigin(c.req.raw.headers, buildHostAllowlist(Number(process.env.PORT ?? 4000)));
+    if (proxied) return `${proxied}/api`;
     const requestUrl = new URL(c.req.url);
     const forwarded = trustProxy();
     const forwardedHost = forwarded ? c.req.header("x-forwarded-host")?.split(",")[0]?.trim() : undefined;

@@ -72,7 +72,9 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
     const tokenRef = useRef<HTMLElement | null>(null);
     const snippetRef = useRef<HTMLPreElement | null>(null);
     const confirmTriggerRef = useRef<HTMLElement | null>(null);
-    const snippet = ciSnippet(provider, API_URL, projectId, failOnFlaky, failOnKnownBugs);
+    const [publicApiUrl, setPublicApiUrl] = useState(API_URL);
+    useEffect(() => { setPublicApiUrl(`${window.location.origin}${API_URL}`); }, []);
+    const snippet = ciSnippet(provider, publicApiUrl, projectId, failOnFlaky, failOnKnownBugs);
     const selectedProvider = CI_PROVIDERS.find(([value]) => value === provider)!;
 
     useEffect(() => {

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { WebSocket } from "ws";
 import { minimalChildEnv } from "../runner/process";
+import { browserFailureMessage } from "../jobs/presentation-errors";
 
 export const SCREEN_WIDTH = 1280;
 export const SCREEN_HEIGHT = 800;
@@ -25,7 +26,7 @@ interface VncSessionRecord extends VncSession {
 
 export class BrowserUnavailableError extends Error {
     constructor(cause: unknown) {
-        super("Specbook could not start its browser. It will retry automatically.", { cause });
+        super(browserFailureMessage(cause), { cause });
         this.name = "BrowserUnavailableError";
     }
 }

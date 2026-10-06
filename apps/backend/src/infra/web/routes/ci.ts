@@ -1,3 +1,4 @@
+import { publicFrontendOrigin } from "../security";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -58,7 +59,7 @@ export function createCiSettingsRouter(): Hono {
         const id = c.req.param("id");
         const project = await requireProject(id);
         c.header("Cache-Control", "no-store");
-        return c.json({ allowedOrigins: project.ciAllowedOrigins, projectOrigin: new URL(project.baseUrl).origin, token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map(ciResult)) });
+        return c.json({ allowedOrigins: project.ciAllowedOrigins, projectOrigin: new URL(project.baseUrl).origin, token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map((batch) => ciResult(batch, publicFrontendOrigin(c)))) });
     });
     router.put("/projects/:id/ci", zValidator("json", ciSettingsSchema), async (c) => {
         const project = await requireProject(c.req.param("id"));
@@ -112,7 +113,7 @@ export function createCiRouter(): Hono {
                 ci: { commitSha: input.commitSha, ref: input.ref, buildUrl: input.buildUrl, qualityGate: input.qualityGate, knownBugSpecIds: await knownBugSpecIds(projectId) },
             });
             c.header("Location", `/ci/runs/${batch.id}`);
-            return c.json(await ciResult(batch), 202);
+            return c.json(await ciResult(batch, publicFrontendOrigin(c)), 202);
         } catch (error) {
             throw new HTTPException(error instanceof ResourceBusyError ? 409 : 400, { message: error instanceof Error ? error.message : String(error) });
         }
@@ -127,14 +128,14 @@ export function createCiRouter(): Hono {
         const query = ciResultQuerySchema.safeParse(c.req.query());
         if (!query.success) throw new HTTPException(400, { message: "Invalid CI result query" });
         const { wait, format } = query.data;
-        let result = await ciResult(batch);
+        let result = await ciResult(batch, publicFrontendOrigin(c));
         const deadline = Date.now() + 25_000;
         while (wait === "true" && !result.complete && Date.now() < deadline && !c.req.raw.signal.aborted) {
             await new Promise((resolve) => setTimeout(resolve, 500));
             await authenticate(c, batch.projectId);
             batch = await getRunBatch(id);
             if (!batch) throw new HTTPException(404, { message: "CI batch not found" });
-            result = await ciResult(batch);
+            result = await ciResult(batch, publicFrontendOrigin(c));
         }
         if (format === "junit") return c.body(junitResult(result), 200, { "Content-Type": "application/xml; charset=utf-8" });
         if (format === "markdown") return c.body(markdownResult(result), 200, { "Content-Type": "text/markdown; charset=utf-8" });

@@ -62,7 +62,7 @@ The repository accepts the `main` branch only. Generated files and edits made in
 
 ## Autonomous QA
 
-Specbook acts on events: deployments and changed Specs start checks; failures that persist after retry start an investigation; missing prerequisites become questions. Invalid Specs appear as one regeneration decision; only your request starts their repair. The first observation records existing Specs without running them. New credentials resume blocked work. Schedules and CI requests run the selected checks. Without an event or a user request, the agent stays idle; there is no LLM planning loop. Work persists across backend restarts and uses the same agent and browser tools as chat.
+Specbook acts on events: deployments and changed Specs start checks; failures that persist after retry start an investigation; missing prerequisites become questions. Invalid or incomplete Specs show a reason and can be repaired in chat. The first observation records existing Specs without running them. New credentials resume blocked work. Schedules and CI requests run the selected checks. Without an event or a user request, the agent stays idle; there is no LLM planning loop. Work persists across backend restarts and uses the same agent and browser tools as chat.
 
 **Overview** shows **Needs you**, **Failing** and **Recent runs**. The header and Specs tree share the same health counts. Failing checks show their triage status; recent runs are grouped by trigger. Rows open a side panel with evidence and the next step.
 

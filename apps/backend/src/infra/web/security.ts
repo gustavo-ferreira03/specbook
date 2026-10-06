@@ -1,6 +1,18 @@
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { logger } from "../logger";
+import { buildHostAllowlist, frontendProxyOrigin, isAllowedHost, type HostAllowlist } from "../../../../../shared/http-origin";
+export { buildHostAllowlist, frontendProxyOrigin, isAllowedHost };
+
+export function publicFrontendOrigin(c: Context): string {
+    return frontendProxyOrigin(c.req.raw.headers, buildHostAllowlist(Number(process.env.PORT ?? 4000)))
+        ?? (process.env.FRONTEND_ORIGIN ?? "").replace(/\/$/, "");
+}
+
+export function isAllowedWebsocketOrigin(headers: Headers, allowlist: HostAllowlist, allowedOrigins: Set<string>): boolean {
+    const origin = headers.get("origin");
+    return origin !== null && (allowedOrigins.has(origin) || origin === frontendProxyOrigin(headers, allowlist));
+}
 
 export const REQUEST_HEADER = "X-Specbook-Request";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -12,58 +24,6 @@ const DEFAULT_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
  */
 function isGitHttpPath(pathname: string): boolean {
     return pathname.startsWith("/git/");
-}
-
-function hostOf(value: string | undefined): string | null {
-    if (!value) return null;
-    try {
-        return new URL(value).host.toLowerCase();
-    } catch {
-        return null;
-    }
-}
-
-function hostnameOf(host: string): string {
-    if (host.startsWith("[")) {
-        const end = host.indexOf("]");
-        return end < 0 ? host : host.slice(0, end + 1);
-    }
-    const colon = host.lastIndexOf(":");
-    return colon < 0 ? host : host.slice(0, colon);
-}
-
-interface HostAllowlist {
-    any: boolean;
-    exact: Set<string>;
-    anyPort: Set<string>;
-}
-
-/**
- * Hosts the API answers for. Entries in SPECBOOK_ALLOWED_HOSTS without a port
- * match that hostname on any port; `*` disables the check.
- */
-export function buildHostAllowlist(port: number, env: NodeJS.ProcessEnv = process.env): HostAllowlist {
-    const allowlist: HostAllowlist = { any: false, exact: new Set(), anyPort: new Set() };
-    for (const hostname of ["localhost", "127.0.0.1", "[::1]"]) allowlist.exact.add(`${hostname}:${port}`);
-    for (const url of [env.FRONTEND_ORIGIN, env.NEXT_PUBLIC_API_URL, env.SPECBOOK_PUBLIC_API_URL]) {
-        const host = hostOf(url);
-        if (host) allowlist.exact.add(host);
-    }
-    for (const raw of (env.SPECBOOK_ALLOWED_HOSTS ?? "").split(",")) {
-        const entry = raw.trim().toLowerCase();
-        if (!entry) continue;
-        if (entry === "*") allowlist.any = true;
-        else if (hostnameOf(entry) === entry) allowlist.anyPort.add(entry);
-        else allowlist.exact.add(entry);
-    }
-    return allowlist;
-}
-
-export function isAllowedHost(allowlist: HostAllowlist, host: string | undefined): boolean {
-    if (allowlist.any) return true;
-    if (!host) return false;
-    const normalized = host.trim().toLowerCase();
-    return allowlist.exact.has(normalized) || allowlist.anyPort.has(hostnameOf(normalized));
 }
 
 /** Rejects requests whose Host header is not ours, which defeats DNS rebinding. */

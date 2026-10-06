@@ -7,6 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
     beginChatBrowserTool,
+    closeChatBrowser,
     endChatBrowserTool,
     getOrCreateChatBrowser,
 } from "../browser/sessions";
@@ -19,6 +20,7 @@ import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
+import { logger } from "../../infra/logger";
 import {
     ChatBusyError,
     clearActiveChatSession,
@@ -51,6 +53,8 @@ import {
 } from "./session-store";
 import { createSessionTools } from "./session-tools";
 import { createDomainTools } from "./tools";
+import { ChatTurnTimeoutError, withTurnTimeout } from "./deadline";
+import { browserFailureMessage, providerFailure, providerFailureMessage } from "../jobs/presentation-errors";
 
 const agentDir = path.join(storageRoot, "pi-agent");
 
@@ -252,13 +256,14 @@ async function runReservedChatTurn(
             metrics.setBrowserAvailable(true);
             await turnPolicy?.browserReady?.();
         } catch (error) {
+            logger.warn("chat browser unavailable", { chatId: id, error });
             if (turnPolicy?.infrastructureFailure) {
                 await turnPolicy.infrastructureFailure(String(error));
                 return;
             }
             appendWarning(
                 sessionManager,
-                `The agent browser failed to start: ${error instanceof Error ? error.message : String(error)}. Browser tools are unavailable for this turn.`,
+                browserFailureMessage(error),
             );
         }
 
@@ -328,6 +333,8 @@ async function runReservedChatTurn(
         setActiveChatSession(id, active);
         const queuedFollowUps = takePendingFollowUps(id);
         let modelError = "";
+        let promptFailed = false;
+        let timedOut = false;
         const unsubscribe = session.subscribe((event) => {
             const value = event as unknown as SessionEventValue;
             const messages =
@@ -371,7 +378,7 @@ async function runReservedChatTurn(
                 publishChatUpdate(
                     id,
                     value.willRetry
-                        ? { type: "agent_status", status: "retrying", message: value.errorMessage }
+                        ? { type: "agent_status", status: "retrying", message: providerFailureMessage(value.errorMessage) }
                         : { type: "updated" },
                 );
             }
@@ -396,16 +403,27 @@ async function runReservedChatTurn(
         });
 
         try {
-            const promptPromise = session.prompt(userText);
-            for (const followUp of queuedFollowUps) await session.followUp(followUp);
-            await promptPromise;
+            await withTurnTimeout(async () => {
+                const promptPromise = session.prompt(userText);
+                for (const followUp of queuedFollowUps) await session.followUp(followUp);
+                await promptPromise;
+            }, async () => {
+                active.aborted = true;
+                await Promise.allSettled([session.abort(), closeChatBrowser(id)]);
+            });
         } catch (error) {
-            if (!active.aborted) {
+            promptFailed = true;
+            if (error instanceof ChatTurnTimeoutError) {
+                timedOut = true;
+                metrics.fail("error", "turn_timeout");
+                ensureUserMessage(sessionManager, userText, previousUserCount);
+                appendError(sessionManager, error.message);
+            } else if (!active.aborted) {
                 metrics.fail("error", "prompt_failed");
                 ensureUserMessage(sessionManager, userText, previousUserCount);
                 appendError(
                     sessionManager,
-                    `The model couldn't respond: ${error instanceof Error ? error.message : String(error)}`,
+                    providerFailureMessage(error),
                 );
             }
         } finally {
@@ -413,30 +431,37 @@ async function runReservedChatTurn(
             session.dispose();
             clearActiveChatSession(id, session);
         }
-        if (active.aborted) metrics.fail("aborted", "user_abort");
-        if (modelError && !active.aborted) {
+        if (active.aborted && !timedOut) metrics.fail("aborted", "user_abort");
+        if (modelError && !active.aborted && !promptFailed) {
             metrics.fail("error", "model_error");
-            appendError(sessionManager, `The model couldn't respond: ${modelError}`);
+            appendError(sessionManager, providerFailureMessage(modelError));
         }
     } catch (error) {
         const aborted = activeSession?.aborted ?? getActiveChatSession(id)?.aborted ?? false;
         metrics.fail(aborted ? "aborted" : "error", aborted ? "user_abort" : "turn_failed");
+        if (!aborted) logger.error("chat turn failed", { chatId: id, error });
         if (sessionManager) {
             if (!aborted) {
                 ensureUserMessage(sessionManager, userText, previousUserCount);
                 appendError(
                     sessionManager,
-                    `The chat turn failed: ${error instanceof Error ? error.message : String(error)}`,
+                    providerFailure(error).code === "provider_error"
+                        ? "Specbook could not complete this conversation turn. Try again. If it keeps failing, check System status in global Settings."
+                        : providerFailureMessage(error),
                 );
             }
         } else {
             console.error(error);
         }
     } finally {
-        await turnPolicy?.flush();
-        releaseChatTurn(id);
-        publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
-        publishChatUpdate(id);
-        void metrics.finish();
+        try {
+            await turnPolicy?.flush();
+        } finally {
+            releaseChatTurn(id);
+            publishChatUpdate(id, { type: "agent_status", status: "idle" });
+            publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
+            publishChatUpdate(id);
+            void metrics.finish();
+        }
     }
 }

@@ -8,6 +8,7 @@ import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runBatchesDir, runsDir } from "../paths";
 import { repoGit } from "../repo/git";
+import { prepareRunRepositoryUnlocked } from "../repo/recovery";
 import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "../repo/writer";
 import { resolveSecretEnv } from "../credentials/profiles";
 import { projectSecretScrubber } from "../credentials/scrub";
@@ -71,6 +72,33 @@ interface BatchSecrets {
 
 const MAX_BATCH_TIMEOUT_MS = 30 * 60 * 1000;
 const activeBatches = new Map<string, Promise<void>>();
+const batchIndex = new Map<string, Map<string, { startedAt: string; ci: boolean }>>();
+let indexing: Promise<void> | undefined;
+let indexedDirectoryStamp: string | undefined;
+const indexedBatchIds = new Set<string>();
+
+function indexBatch(batch: RunBatch): void {
+    let project = batchIndex.get(batch.projectId);
+    if (!project) { project = new Map(); batchIndex.set(batch.projectId, project); }
+    project.set(batch.id, { startedAt: batch.startedAt, ci: Boolean(batch.ci) });
+    indexedBatchIds.add(batch.id);
+}
+
+function ensureBatchIndex(): Promise<void> {
+    return indexing ??= (async () => {
+        const stamp = await fs.stat(runBatchesDir).then((stat) => `${stat.ino}:${stat.mtimeMs}`).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return "missing";
+            throw error;
+        });
+        if (stamp === indexedDirectoryStamp) return;
+        const entries = await fs.readdir(runBatchesDir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return [];
+            throw error;
+        });
+        for (const entry of entries) if (entry.isDirectory() && !indexedBatchIds.has(entry.name)) await getRunBatch(entry.name);
+        indexedDirectoryStamp = stamp;
+    })().finally(() => { indexing = undefined; });
+}
 
 function batchDirectory(id: string): string {
     const root = path.resolve(runBatchesDir);
@@ -86,11 +114,14 @@ async function writeBatch(batch: RunBatch): Promise<void> {
     const temporary = `${target}.${crypto.randomUUID()}.tmp`;
     await fs.writeFile(temporary, JSON.stringify(batch), "utf8");
     await fs.rename(temporary, target);
+    indexBatch(batch);
 }
 
 export async function getRunBatch(id: string): Promise<RunBatch | null> {
     try {
-        return JSON.parse(await fs.readFile(path.join(batchDirectory(id), "batch.json"), "utf8")) as RunBatch;
+        const batch = JSON.parse(await fs.readFile(path.join(batchDirectory(id), "batch.json"), "utf8")) as RunBatch;
+        indexBatch(batch);
+        return batch;
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
         throw error;
@@ -208,9 +239,7 @@ async function prepareSpecBatch(
     trigger: RunBatchTrigger = "manual",
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
-        if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
-            throw new Error("The project repository has uncommitted changes; sync or commit them before running");
-        }
+        await prepareRunRepositoryUnlocked(projectId);
         const commitSha = await repoGit.getHeadSha(projectId);
         const definitions: {
             spec: Spec;
@@ -233,7 +262,7 @@ async function prepareSpecBatch(
             const sourceHash = sourceHashOf(testSource);
             const markdownHash = markdownHashOf(markdown);
             if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
-                throw new Error(`Spec "${spec.title}" changed without being reindexed`);
+                throw new Error(`The check "${spec.title}" changed while it was being prepared. Run it again to use the latest version.`);
             }
             definitions.push({
                 spec,
@@ -379,17 +408,19 @@ export async function markInterruptedBatches(): Promise<void> {
 }
 
 export async function listRunBatches(projectId: string, limit = 100, ciOnly = false): Promise<RunBatch[]> {
-    const entries = await fs.readdir(runBatchesDir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return [];
-        throw error;
-    });
+    await ensureBatchIndex();
+    const project = batchIndex.get(projectId);
+    if (!project) return [];
+    const candidates = [...project].filter(([, entry]) => !ciOnly || entry.ci)
+        .sort(([, a], [, b]) => b.startedAt.localeCompare(a.startedAt));
     const batches: RunBatch[] = [];
-    for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const batch = await getRunBatch(entry.name);
-        if (batch?.projectId === projectId && (!ciOnly || batch.ci)) batches.push(batch);
+    for (const [id] of candidates) {
+        if (batches.length >= limit) break;
+        const batch = await getRunBatch(id);
+        if (!batch) { project.delete(id); continue; }
+        if (batch.projectId === projectId && (!ciOnly || batch.ci)) batches.push(batch);
     }
-    return batches.sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, limit);
+    return batches;
 }
 
 export async function listCiBatches(projectId: string, limit = 20): Promise<RunBatch[]> {

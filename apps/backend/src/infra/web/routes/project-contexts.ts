@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { projectContextSchema } from "../../../core/chat/context-tools";
 import { createChat } from "../../../core/chat/session";
+import { configuredModel } from "../../../core/llm/runtime";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { writeContextToRepo } from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
@@ -74,6 +75,9 @@ export function createProjectContextsRouter(): Hono {
         async (c) => {
             const project = await projectsRepository.getProject(c.req.param("id"));
             if (!project) throw new HTTPException(404, { message: "Project not found" });
+            if (!(await configuredModel()).ready) {
+                throw new HTTPException(409, { message: "Connect a model in global Settings before exploring this application." });
+            }
             return projectContextsRepository.withProjectContextDraftLock(project.id, async () => {
                 const activeDraft = await projectContextsRepository.getActiveProjectContextDraft(project.id);
                 if (activeDraft) {

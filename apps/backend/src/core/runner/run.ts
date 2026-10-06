@@ -6,6 +6,7 @@ import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
 import { repoGit } from "../repo/git";
+import { prepareRunRepositoryUnlocked } from "../repo/recovery";
 import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "../repo/writer";
 import { parseSpecYaml } from "../repo/yaml";
 import { resolveSecretEnv } from "../credentials/profiles";
@@ -55,27 +56,27 @@ interface RunOptions {
 
 async function executeSpecLocked(specId: string, options: RunOptions): Promise<ExecutedRun> {
     options.signal?.throwIfAborted();
-    const spec = await specsRepository.getSpec(specId);
-    if (!spec) throw new Error("Spec not found");
-    if (spec.status === "invalid") throw new Error(`Spec is invalid: ${spec.invalidReason ?? "unknown reason"}`);
-    const project = await projectsRepository.getProject(spec.projectId);
+    const original = await specsRepository.getSpec(specId);
+    if (!original) throw new Error("Spec not found");
+    const project = await projectsRepository.getProject(original.projectId);
     if (!project) throw new Error("Project not found");
-    const snapshot = await repoGit.withRepoLock(spec.projectId, async () => {
-        if (!(await repoGit.getProjectGit(spec.projectId).status()).isClean()) {
-            throw new Error("The project repository has uncommitted changes; sync or commit them before running");
-        }
+    const snapshot = await repoGit.withRepoLock(project.id, async () => {
+        await prepareRunRepositoryUnlocked(project.id);
+        const spec = await specsRepository.getSpec(specId);
+        if (!spec) throw new Error("This check was removed. Refresh the project to see its current checks.");
+        if (spec.status === "invalid") throw new Error(`This check needs repair before it can run. ${spec.invalidReason ?? "Open the check and choose Repair in chat."}`);
         const [testSource, markdown, commitSha] = await Promise.all([
             fs.readFile(path.join(repoGit.getRepoDir(spec.projectId), specTestFile(spec.path)), "utf8"),
             fs.readFile(path.join(repoGit.getRepoDir(spec.projectId), specYamlFile(spec.path)), "utf8"),
             repoGit.getHeadSha(spec.projectId),
         ]);
-        return { testSource, markdown, commitSha };
+        return { spec, testSource, markdown, commitSha };
     });
-    const { testSource, markdown, commitSha } = snapshot;
+    const { spec, testSource, markdown, commitSha } = snapshot;
     const sourceHash = sourceHashOf(testSource);
     const markdownHash = markdownHashOf(markdown);
     if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
-        throw new Error("Spec files changed without being reindexed");
+        throw new Error("The check changed while it was being prepared. Run it again to use the latest version.");
     }
     if (options.expected && (sourceHash !== options.expected.sourceHash || markdownHash !== options.expected.markdownHash)) {
         throw new StaleRunError("Spec changed after the failed run; retry skipped");

@@ -303,7 +303,7 @@ export interface AgentSummary {
 
 export interface PresentedInboxItem extends InboxItem {
     presentation: {
-        type: "update" | "new_check" | "feature" | "bug" | "question" | "help" | "regenerate";
+        type: "update" | "new_check" | "feature" | "bug" | "question" | "help";
         title: string;
         summary: string;
         workDone: string;
@@ -371,4 +371,17 @@ export interface OverviewResponse {
     recentRuns: RecentRun[];
     items: PresentedInboxItem[];
     stories: ActivityStory[];
+}
+
+export interface SetupStatus {
+    needsAdmin: boolean;
+    modelReady: boolean;
+    needsProject: boolean;
+    completed: boolean;
+}
+
+export interface SystemReadiness {
+    ok: boolean;
+    checkedAt: string;
+    checks: { id: string; label: string; ok: boolean; message: string; nextStep?: string }[];
 }

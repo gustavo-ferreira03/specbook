@@ -39,13 +39,15 @@ on_signal() {
 trap stop_processes EXIT
 trap on_signal TERM INT
 
+export SPECBOOK_BACKEND_URL="${SPECBOOK_BACKEND_URL:-http://127.0.0.1:${PORT:-4000}}"
+
 # The backend applies database migrations itself before it starts listening.
 cd /app/apps/backend
 node dist/index.js &
 backend=$!
 
 cd /app/apps/frontend
-node_modules/.bin/next start -p 4001 -H 0.0.0.0 &
+node_modules/.bin/next start -p "${FRONTEND_PORT:-4001}" -H 0.0.0.0 &
 frontend=$!
 
 set +e

@@ -74,6 +74,21 @@ after(() => site?.close());
 const app = new Hono();
 app.route("/", createRunsRouter());
 
+test("chat events disable compression and buffering in the frontend proxy", async () => {
+    const { createChatsRouter } = await import("../../src/infra/web/routes/chats");
+    const project = await projectsRepository.createProject("Streaming", "https://example.com");
+    const chatApp = new Hono().route("/", createChatsRouter());
+    const { chat } = await (await chatApp.request(`/projects/${project.id}/chats`, { method: "POST" })).json();
+    const response = await chatApp.request(`/chats/${chat.id}/events`);
+    assert.equal(response.headers.get("cache-control"), "no-cache, no-transform");
+    assert.equal(response.headers.get("x-accel-buffering"), "no");
+    const reader = response.body!.getReader();
+    try {
+        const chunk = await reader.read();
+        assert.match(new TextDecoder().decode(chunk.value), /event: connected/);
+    } finally { await reader.cancel(); }
+});
+
 describe("executeSpec (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
     test("blocks redirected navigation outside the configured project origins", { timeout: 120_000 }, async () => {
         let privateRequests = 0;
@@ -134,6 +149,7 @@ test("Store", async ({ page, step, secret }) => {
         assert.equal(run.failedStep, "See the store");
         assert.equal(run.sourceHash, spec.sourceHash);
         assert.match(run.failReason ?? "", /toHaveText/);
+        assert.doesNotMatch(run.failReason ?? "", /\/tmp\/specbook|node_modules|src\/core\/runner|\n\s+at /);
 
         const evidence = (await (await app.request(`/runs/${run.id}/evidence`)).json()) as {
             steps: { label: string; file: string }[];
@@ -1454,5 +1470,30 @@ describe("autonomous pause and decisions", () => {
         assert.match(context![0]!.content, /Do not change files unless I ask/);
         assert.equal((await jobsRepository.item(item.id))?.status, "pending");
         assert.equal((await jobsRepository.list(project.id)).length, 1);
+    });
+});
+
+describe("run repository recovery", { skip: available ? false : "Chromium is not installed" }, () => {
+    test("refreshes an outdated index without weakening retry content guards or saving unreviewed edits", async () => {
+        const { specsRepository } = await import("../../src/infra/repositories/specs");
+        const { StaleRunError } = await import("../../src/core/runner/run");
+        const project = await projectsRepository.createProject("Reindex on run", baseUrl);
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Home", "");
+        const testSource = 'import { test, expect } from "specbook"; test("Home", async ({ page, step }) => { await step("Open", async () => { await page.goto("/"); await expect(page.getByRole("heading", { name: "Store" })).toBeVisible(); }); });';
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Home", description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "Store appears", postconditions: [] }, testSource });
+        const sourceFile = path.join(repoGit.getRepoDir(project.id), spec.path, "spec.ts");
+        const changed = testSource.replace('page.goto("/")', 'page.goto("/changed")');
+        await fs.writeFile(sourceFile, changed);
+        const head = await repoGit.getHeadSha(project.id);
+        await assert.rejects(() => executeSpec(spec.id), /pending file edits/);
+        assert.equal(await repoGit.getHeadSha(project.id), head);
+        await repoGit.withRepoLock(project.id, () => repoGit.commitAll(project.id, "External edit"));
+        assert.equal((await specsRepository.getSpec(spec.id))?.sourceHash, spec.sourceHash, "the index is still the old version");
+        await assert.rejects(() => executeSpec(spec.id, { expected: { sourceHash: spec.sourceHash, markdownHash: spec.markdownHash } }), StaleRunError);
+        const run = await executeSpec(spec.id);
+        assert.equal(run.status, "passed", run.failReason ?? "");
+        assert.equal(run.sourceHash, writer.sourceHashOf(changed));
+        assert.equal((await specsRepository.getSpec(spec.id))?.sourceHash, run.sourceHash);
     });
 });

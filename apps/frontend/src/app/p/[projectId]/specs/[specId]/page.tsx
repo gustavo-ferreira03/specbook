@@ -151,13 +151,13 @@ function VerificationBanner({
     } else if (spec.status === "invalid") {
         status = "invalid";
         headline = "This Spec can't run";
-        detail = "Its files could not be validated. Fix them with Edit or Edit with AI, then run it again.";
+        detail = "Its saved steps or executable check need attention. Ask the agent to repair it, then verify the result.";
         body = (
             <>
                 <InvalidReason reason={spec.invalidReason ?? "The spec.yml or spec.ts file could not be validated."} testSource={specDetail.content?.testSource ?? null} />
                 <div className="mt-3 flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="outline">
-                        <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={13} /> Edit with AI</Link>
+                        <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}&intent=repair`}><PencilLine size={13} /> Repair in chat</Link>
                     </Button>
                 </div>
             </>
@@ -673,7 +673,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 }
             />
             <PageContainer width="reading" className="min-w-0 [overflow-wrap:anywhere] lg:pb-14" innerClassName="space-y-9">
-                {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}</AlertDescription></Alert>}
+                {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}{/pending file edits/.test(actionError) && <Link href={`/p/${projectId}/settings?tab=git`} className="mt-2 block font-medium underline underline-offset-2">Review pending edits</Link>}</AlertDescription></Alert>}
                 {runRefreshError && <Alert variant="warning" role="status"><AlertDescription>Run updates are delayed: {runRefreshError} Retrying…</AlertDescription></Alert>}
 
                 <div ref={bannerRef} className="scroll-mt-4 space-y-3">

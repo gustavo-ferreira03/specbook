@@ -134,7 +134,7 @@ describe("project, feature and spec through the writer", () => {
         await repoGit.commitAll(projectId, "test: remove executable");
         await reindexProject(projectId);
         const invalid = await specsRepository.getSpec(spec.id);
-        assert.equal(invalid?.invalidReason, "Missing spec.ts file in the spec directory");
+        assert.equal(invalid?.invalidReason, "This check is incomplete: spec.ts is missing. Repair it in chat.");
         const { spec: repaired } = await writer.updateSpecInRepo(invalid!, { testSource: VALID_SPEC });
         assert.equal(repaired.status, "unverified");
     });
@@ -240,6 +240,105 @@ describe("project, feature and spec through the writer", () => {
         assert.ok(!existsSync(checkoutDir));
         assert.ok(!existsSync(bareDir));
         assert.equal((await api("DELETE", `/projects/${projectId}`)).status, 404);
+    });
+});
+
+describe("first-run setup", () => {
+    async function setupApp() {
+        const { createSetupRouter } = await import("../../src/infra/web/routes/setup");
+        const { createSettingsRouter } = await import("../../src/infra/web/routes/settings");
+        const { createProjectContextsRouter } = await import("../../src/infra/web/routes/project-contexts");
+        const { handleRequestError } = await import("../../src/infra/web/errors");
+        const setup = new Hono();
+        setup.onError(handleRequestError);
+        setup.route("/", createSetupRouter());
+        setup.route("/", createSettingsRouter());
+        setup.route("/", createProjectContextsRouter());
+        return setup;
+    }
+
+    test("demo creates an ordinary project with public credentials and discovery requires a connected model", async () => {
+        const setup = await setupApp();
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { listSecretValues } = await import("../../src/core/credentials/profiles");
+        const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
+        const { chatsRepository } = await import("../../src/infra/repositories/chats");
+        await settingsRepository.updateLlmSettings({ provider: "", model: "" });
+        const status = await (await setup.request("/setup/status")).json();
+        assert.equal(status.needsAdmin, false);
+        assert.equal(status.modelReady, false);
+        assert.equal(status.completed, false);
+        const response = await setup.request("/setup/demo", { method: "POST" });
+        assert.equal(response.status, 201);
+        const { project } = await response.json();
+        assert.equal(project.baseUrl, "https://www.saucedemo.com");
+        assert.equal(await repoBare.bareExists(project.id), true);
+        assert.deepEqual((await listSecretValues(project.id)).map(({ field, value }) => ({ field, value })), [
+            { field: "username", value: "standard_user" }, { field: "password", value: "secret_sauce" },
+        ]);
+        assert.deepEqual(await chatsRepository.listChatRows(project.id), []);
+        const discovery = await setup.request(`/projects/${project.id}/context-discoveries`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+        assert.equal(discovery.status, 409);
+        assert.match((await discovery.json()).error, /Connect a model in global Settings/);
+        assert.equal(await projectContextsRepository.getActiveProjectContextDraft(project.id), null);
+    });
+
+    test("test connection makes a bounded request and presents provider errors without raw secrets", async (t) => {
+        const setup = await setupApp();
+        const { settingsRepository } = await import("../../src/infra/repositories/settings");
+        const { modelRegistryPromise, modelRuntimePromise } = await import("../../src/core/llm/runtime");
+        const missing = await setup.request("/settings/llm/test", { method: "POST" });
+        assert.equal(missing.status, 400);
+        assert.equal((await missing.json()).code, "model_not_configured");
+        const registry = await modelRegistryPromise;
+        const runtime = await modelRuntimePromise;
+        const model = registry.getAll()[0];
+        assert.ok(model);
+        await settingsRepository.updateLlmSettings({ provider: model.provider, model: model.id });
+        t.mock.method(registry, "hasConfiguredAuth", () => true);
+        let called = 0;
+        t.mock.method(runtime, "completeSimple", async (_model: unknown, context: Parameters<typeof runtime.completeSimple>[1], options: Parameters<typeof runtime.completeSimple>[2]) => {
+            called++;
+            assert.equal(context.messages[0].content, "Reply with OK.");
+            assert.equal(options?.maxTokens, 16);
+            assert.ok(options?.signal instanceof AbortSignal);
+            if (called === 1) throw new Error("401 invalid API key sk-never-expose");
+            return { stopReason: "stop" };
+        });
+        try {
+            const failed = await setup.request("/settings/llm/test", { method: "POST" });
+            assert.equal(failed.status, 400);
+            const body = await failed.json();
+            assert.equal(body.code, "provider_auth");
+            assert.match(body.nextStep, /reconnect/);
+            assert.doesNotMatch(JSON.stringify(body), /sk-never-expose/);
+            const passed = await setup.request("/settings/llm/test", { method: "POST" });
+            assert.equal(passed.status, 200);
+            assert.equal((await passed.json()).ok, true);
+            assert.equal((await (await setup.request("/setup/status")).json()).modelReady, true);
+        } finally { await settingsRepository.updateLlmSettings({ provider: "", model: "" }); }
+    });
+
+    test("readiness checks both Chromium builds and reports missing programs with installation instructions", async (t) => {
+        const setup = await setupApp();
+        const access = fs.access.bind(fs);
+        t.mock.method(fs, "access", async (file: Parameters<typeof fs.access>[0], mode: Parameters<typeof fs.access>[1]) => {
+            if (/chrome|chromium|Xvfb|x11vnc/.test(String(file))) throw new Error("ENOENT /home/server/private");
+            return access(file, mode);
+        });
+        const response = await setup.request("/ready");
+        assert.equal(response.status, 503);
+        const status = await response.json();
+        assert.equal(status.ok, false);
+        assert.deepEqual(status.checks.map((check: { id: string }) => check.id), ["database", "storage", "chromium", "mcp_chromium", "xvfb", "x11vnc"]);
+        assert.equal(status.checks[0].ok, true);
+        assert.equal(status.checks[1].ok, true);
+        assert.equal(status.checks[2].ok, false);
+        assert.equal(status.checks[3].ok, false);
+        assert.ok(status.checks[4].nextStep);
+        assert.doesNotMatch(JSON.stringify(status), /private|ENOENT/);
+        const { storageRoot } = await import("../../src/core/paths");
+        assert.equal((await fs.readdir(storageRoot)).some((name) => name.startsWith(".ready-")), false);
     });
 });
 
@@ -1014,7 +1113,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
         assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
         assert.equal(view.specHealth[invalid!.id]?.status, "invalid");
-        assert.equal(view.specHealth[invalid!.id]?.label, "Created by an older version, needs regenerating");
+        assert.equal(view.specHealth[invalid!.id]?.label, "Check needs repairing");
         assert.equal(view.specHealth[flaky!.id]?.status, "flaky");
         assert.equal(view.recentRuns.length, 3, "recent activity contains actual runs, not completed agent sessions");
         assert.equal(view.stories.some((story) => story.inboxIds.includes(older.id)), true, "pending decisions retain a detail timeline");
@@ -1042,35 +1141,6 @@ describe("plain-language autonomous presentation", () => {
         const currentTriage = await jobsRepository.create({ projectId, specId: failing!.id, runId: newFailure.id, kind: "failure_triage", chatId: crypto.randomUUID(), trigger: "spec_failure", goal: "Investigate the current failure", limits: jobLimitsSchema.parse({}) });
         await jobsRepository.update(currentTriage.id, { status: "running" });
         assert.equal((await projectOverview(projectId)).failing.find((entry) => entry.specId === failing!.id)?.triageStatus, "Investigating…", "the original and retry belong to the same investigation");
-    });
-
-    test("older checks share one regeneration decision instead of failing rows", async () => {
-        const { projectOverview } = await import("../../src/core/jobs/overview");
-        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
-        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { stewardRepository } = await import("../../src/infra/repositories/steward");
-        const projectId = await createProject("Older checks");
-        await stewardRepository.update(projectId, { paused: true });
-        const feature = await writer.createFeatureInRepo(projectId, null, "Surveys", "");
-        for (const title of ["List surveys", "Open survey", "See responses"]) {
-            const { spec } = await createSpec(projectId, feature.id, title);
-            await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
-        }
-        await syncRegenerationDecision(projectId);
-        const view = await projectOverview(projectId);
-        assert.equal(view.summary.specHealth.invalid, 3);
-        assert.equal(view.summary.specHealth.failing, 0);
-        assert.equal(view.summary.lastCheckedAt, null);
-        assert.equal(view.failing.length, 0);
-        assert.equal(view.needsYou.length, 1);
-        assert.equal(view.needsYou[0]?.presentation.type, "regenerate");
-        assert.match(view.needsYou[0]?.presentation.title ?? "", /3 checks were created by an older version/);
-        assert.equal(view.summary.nextCheck, "Resume Specbook to continue.");
-        await stewardRepository.update(projectId, { paused: false });
-        assert.equal((await projectOverview(projectId)).summary.nextCheck, "Review the regeneration request in Needs you.");
-        await projectOverview(projectId);
-        await syncRegenerationDecision(projectId);
-        assert.equal((await jobsRepository.list(projectId)).length, 1, "viewing or observing the project does not start regeneration or duplicate the question");
     });
 
     test("overview health and last checked use the same current implementation and behavior", async () => {
@@ -1242,21 +1312,7 @@ test("agent evaluation records outcomes and decisions without prompts or credent
     assert.doesNotMatch(csv, new RegExp(secret));
 });
 
-describe("regeneration review", () => {
-    async function olderChecks(count = 2) {
-        const { stewardRepository } = await import("../../src/infra/repositories/steward");
-        const projectId = await createProject("Regeneration review");
-        await stewardRepository.update(projectId, { paused: true });
-        const feature = await writer.createFeatureInRepo(projectId, null, "Checkout", "");
-        const specs = [];
-        for (let i = 0; i < count; i++) {
-            const { spec } = await createSpec(projectId, feature.id, `Checkout ${i + 1}`);
-            await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
-            specs.push((await specsRepository.getSpec(spec.id))!);
-        }
-        return { projectId, feature, specs };
-    }
-
+describe("existing checks baseline", () => {
     test("first observation seeds 80 existing checks without automatic runs or repairs", async (t) => {
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
@@ -1276,117 +1332,63 @@ describe("regeneration review", () => {
             assert.equal((await stewardRepository.signals(projectId)).length, 0);
             assert.equal((await stewardRepository.intents(projectId)).length, 0);
             const jobs = await jobsRepository.list(projectId);
-            assert.equal(jobs.length, invalid ? 1 : 0);
-            assert.ok(jobs.every((job) => job.kind === "review" && job.status === "blocked"));
+            assert.equal(jobs.length, 0);
             const inbox = await jobsRepository.inbox(projectId);
-            assert.equal(inbox.length, invalid ? 1 : 0);
-            if (invalid) assert.match(inbox[0]!.title, /80 checks were created by an older version/);
+            assert.equal(inbox.length, 0);
         }
     });
 
-    test("regeneration requires its explicit decision and concurrent approvals queue each selected check once", async () => {
-        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { stewardRepository } = await import("../../src/infra/repositories/steward");
-        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
-        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
-        const { projectId, specs } = await olderChecks();
-        await syncRegenerationDecision(projectId);
-        const item = (await jobsRepository.inbox(projectId))[0]!;
+});
+
+describe("repository recovery", () => {
+    test("reviews all edits and rejects an obsolete review before committing", async () => {
+        const { createRepositoryRecoveryRoutes } = await import("../../src/infra/web/routes/repository-recovery");
+        const recoveryApp = new Hono();
+        recoveryApp.route("/", createRepositoryRecoveryRoutes());
+        const projectId = await createProject("Pending edits");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Login", "");
+        const { spec } = await createSpec(projectId, feature.id, "Sign in");
+        const root = repoGit.getRepoDir(projectId);
+        const target = path.join(root, spec.path, "spec.yml");
+        const before = await fs.readFile(target, "utf8");
+        const after = before.replace("title: Sign in", "title: Reviewed sign in");
+        await fs.writeFile(target, after);
+        await fs.writeFile(path.join(root, "notes.md"), "Keep these notes.\n");
         const head = await repoGit.getHeadSha(projectId);
-        const router = createJobsRouter();
-        const review = (action: string) => router.request(`/projects/${projectId}/inbox/${item.id}/review`, {
-            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, answer: "Yes" }),
-        });
-        assert.equal((await review("answer")).status, 409, "a generic answer must never turn the deterministic question into an LLM job");
-        assert.equal((await jobsRepository.get(item.jobId))?.status, "blocked");
-        const approvals = await Promise.all([review("regenerate"), review("regenerate")]);
-        assert.deepEqual(approvals.map((response) => response.status).sort(), [200, 409]);
-        const intents = await stewardRepository.intents(projectId);
-        assert.equal(intents.length, specs.length);
-        assert.ok(intents.every((intent) => intent.source === "user" && intent.status === "pending"));
-        assert.deepEqual(intents.flatMap((intent) => intent.intent.specIds ?? []).sort(), specs.map((spec) => spec.id).sort());
-        assert.equal((await jobsRepository.get(item.jobId))?.status, "completed");
-        assert.equal((await jobsRepository.item(item.id))?.status, "answered");
-        assert.equal(await repoGit.getHeadSha(projectId), head, "accepting regeneration queues proposals and does not change files");
-        await syncRegenerationDecision(projectId);
-        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
-        assert.equal((await jobsRepository.list(projectId)).length, 1);
+        const endpoint = `/projects/${projectId}/repository/recovery`;
+        const preview = await (await recoveryApp.request(endpoint)).json() as { dirty: boolean; canSave: boolean; fingerprint: string; files: { path: string; before: string | null; after: string }[] };
+        assert.equal(preview.canSave, true);
+        assert.equal(preview.files.length, 2);
+        assert.equal(preview.files.find((file) => file.path.endsWith("spec.yml"))?.before, before);
+        assert.equal(preview.files.find((file) => file.path.endsWith("spec.yml"))?.after, after);
+        assert.equal(await repoGit.getHeadSha(projectId), head, "preview never commits behavior changes");
+        await fs.writeFile(path.join(root, "notes.md"), "Keep these updated notes.\n");
+        const save = (fingerprint: string) => recoveryApp.request(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fingerprint }) });
+        assert.equal((await save(preview.fingerprint)).status, 409);
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+        const fresh = await (await recoveryApp.request(endpoint)).json() as typeof preview;
+        assert.equal((await save(fresh.fingerprint)).status, 200);
+        assert.notEqual(await repoGit.getHeadSha(projectId), head);
+        assert.equal(await fs.readFile(target, "utf8"), after, "explicit review preserves the exact behavior edit");
+        assert.equal((await specsRepository.getSpec(spec.id))?.title, "Reviewed sign in");
+        assert.equal((await repoGit.getProjectGit(projectId).status()).isClean(), true);
+        assert.equal((await save(fresh.fingerprint)).status, 409, "a consumed review cannot commit again");
     });
 
-    test("regeneration resumes a partially recorded approval without duplicate intentions or another question", async () => {
-        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { stewardRepository } = await import("../../src/infra/repositories/steward");
-        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
-        const { enqueueIntent } = await import("../../src/core/steward/engine");
-        const { projectId, specs } = await olderChecks();
-        await syncRegenerationDecision(projectId);
-        const item = (await jobsRepository.inbox(projectId))[0]!;
-        await jobsRepository.claimItem(item.id);
-        await jobsRepository.updateItem(item.id, { payload: { ...item.payload, regenerationAccepted: true } });
-        await enqueueIntent(projectId, { kind: "regenerate", specIds: [specs[0]!.id], goal: "Regenerate checkout", reason: "Human requested regeneration" }, `regeneration:${item.id}:${specs[0]!.id}`, "user");
-        await jobsRepository.recover();
-        await syncRegenerationDecision(projectId);
-        await syncRegenerationDecision(projectId);
-        assert.equal((await stewardRepository.intents(projectId)).length, specs.length);
-        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
-        assert.equal((await jobsRepository.item(item.id))?.status, "answered");
-        assert.equal((await jobsRepository.get(item.jobId))?.status, "completed");
-    });
-
-    test("declining regeneration finishes the decision and new invalid checks do not replay declined subjects", async () => {
-        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
-        const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
-        const { projectId, feature } = await olderChecks();
-        await syncRegenerationDecision(projectId);
-        const item = (await jobsRepository.inbox(projectId))[0]!;
-        const response = await createJobsRouter().request(`/projects/${projectId}/inbox/${item.id}/review`, {
-            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "dismiss" }),
-        });
-        assert.equal(response.status, 200);
-        assert.equal((await jobsRepository.get(item.jobId))?.status, "completed");
-        await syncRegenerationDecision(projectId);
-        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
-        const { spec } = await createSpec(projectId, feature.id, "Another checkout");
-        await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
-        await syncRegenerationDecision(projectId);
-        const pending = (await jobsRepository.inbox(projectId)).filter((item) => item.status === "pending");
-        assert.equal(pending.length, 1);
-        assert.deepEqual((pending[0]!.payload.regenerationSpecs as { id: string }[]).map((target) => target.id), [spec.id]);
-    });
-
-    test("a retired unreviewed regeneration question can return when its check becomes invalid again", async () => {
-        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
-        const { projectId, specs } = await olderChecks(1);
-        await syncRegenerationDecision(projectId);
-        const old = (await jobsRepository.inbox(projectId))[0]!;
-        await specsRepository.updateSpecStatus(specs[0]!.id, "unverified");
-        await syncRegenerationDecision(projectId);
-        assert.equal((await jobsRepository.item(old.id))?.payload.retiredByScope, true);
-        await specsRepository.updateSpecStatus(specs[0]!.id, "invalid", "Missing spec.ts file in the spec directory");
-        await syncRegenerationDecision(projectId);
-        const pending = (await jobsRepository.inbox(projectId)).filter((item) => item.status === "pending");
-        assert.equal(pending.length, 1);
-        assert.notEqual(pending[0]?.id, old.id);
-    });
-
-    test("a current verified repair proposal suppresses a second regeneration question", async () => {
-        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
-        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
-        const { proposeMutation } = await import("../../src/core/jobs/proposals");
-        const { syncRegenerationDecision } = await import("../../src/core/steward/regeneration");
-        const { projectId, specs } = await olderChecks(1);
-        const spec = specs[0]!;
-        const job = await jobsRepository.create({ projectId, specId: spec.id, chatId: crypto.randomUUID(), trigger: "manual", kind: "regenerate", goal: "Repair checkout", limits: jobLimitsSchema.parse({}) });
-        const proposal = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/checkout")') });
-        await jobsRepository.updateItem(proposal.id, { payload: { ...proposal.payload, verification: { status: "passed" } } });
-        await jobsRepository.update(job.id, { status: "completed" });
-        await syncRegenerationDecision(projectId);
-        assert.equal((await jobsRepository.inbox(projectId)).length, 1);
-        await writer.updateSpecWithLock(spec.id, { humanSpec: { ...HUMAN_SPEC, expectedResult: "A different confirmation appears" } });
-        await specsRepository.updateSpecStatus(spec.id, "invalid", "Missing spec.ts file in the spec directory");
-        await syncRegenerationDecision(projectId);
-        assert.equal((await jobsRepository.inbox(projectId)).filter((item) => item.kind === "question" && item.status === "pending").length, 1, "a stale proposal must not hide the decision for the current behavior");
+    test("does not expose symlink targets or change files while an update is in progress", async () => {
+        const { repositoryRecoveryUnlocked, prepareRunRepositoryUnlocked } = await import("../../src/core/repo/recovery");
+        const projectId = await createProject("Unsafe pending edit");
+        const root = repoGit.getRepoDir(projectId);
+        const outside = path.join(tempDir(), "recovery-outside.txt");
+        await fs.writeFile(outside, "do not expose this file");
+        await fs.symlink(outside, path.join(root, "pending.md"));
+        const preview = await repoGit.withRepoLock(projectId, () => repositoryRecoveryUnlocked(projectId));
+        assert.equal(preview.canSave, false);
+        assert.deepEqual(preview.files, []);
+        assert.doesNotMatch(JSON.stringify(preview), /do not expose|recovery-outside/);
+        await fs.unlink(path.join(root, "pending.md"));
+        await fs.writeFile(path.join(root, ".git", "index.lock"), "active operation");
+        await assert.rejects(() => repoGit.withRepoLock(projectId, () => prepareRunRepositoryUnlocked(projectId)), /files are being updated/);
+        assert.equal(await fs.readFile(path.join(root, ".git", "index.lock"), "utf8"), "active operation");
     });
 });

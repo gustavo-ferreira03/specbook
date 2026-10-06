@@ -11,9 +11,10 @@ function configuredLevel(): number {
 
 const threshold = configuredLevel();
 
-function serializeError(error: unknown): unknown {
+function serializeError(error: unknown, depth = 0): unknown {
     if (!(error instanceof Error)) return error;
-    return { name: error.name, message: error.message, stack: error.stack };
+    return { name: error.name, message: error.message, stack: error.stack,
+        ...(error.cause !== undefined && depth < 3 ? { cause: serializeError(error.cause, depth + 1) } : {}) };
 }
 
 function write(level: LogLevel, message: string, fields?: LogFields): void {

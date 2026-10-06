@@ -1,4 +1,3 @@
-import fs from "node:fs/promises";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -6,22 +5,12 @@ import { z } from "zod";
 import { deleteProjectData, ResourceBusyError } from "../../../core/deletion";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { YamlParseError } from "../../../core/repo/yaml";
-import { repoBare } from "../../../core/repo/bare";
-import { repoGit } from "../../../core/repo/git";
+import { createProject, publicProject } from "../../../core/projects";
 import { createManualSpec, editContextFile, readContextRaw } from "../../../core/repo/manual";
 import { featuresRepository } from "../../repositories/features";
 import { projectsRepository } from "../../repositories/projects";
 import { runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
-
-function publicProject(project: NonNullable<Awaited<ReturnType<typeof projectsRepository.getProject>>>) {
-    return {
-        id: project.id,
-        name: project.name,
-        baseUrl: project.baseUrl,
-        createdAt: project.createdAt,
-    };
-}
 
 const createProjectSchema = z.object({
     name: z.string().min(1),
@@ -66,18 +55,7 @@ export function createProjectsRouter(): Hono {
 
     router.post("/projects", zValidator("json", createProjectSchema), async (c) => {
         const { name, baseUrl } = c.req.valid("json");
-        const project = await projectsRepository.createProject(name, baseUrl);
-        try {
-            await repoGit.ensureProjectRepo(project.id, { create: true });
-            await repoBare.ensureBareRepo(project.id, repoGit.getRepoDir(project.id));
-        } catch (error) {
-            await projectsRepository.deleteProject(project.id);
-            await Promise.allSettled([
-                fs.rm(repoGit.getRepoDir(project.id), { recursive: true, force: true }),
-                repoBare.removeBareRepo(project.id),
-            ]);
-            throw error;
-        }
+        const project = await createProject(name, baseUrl);
         return c.json({ project: publicProject(project) });
     });
 
