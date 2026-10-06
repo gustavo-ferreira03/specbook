@@ -58,7 +58,7 @@ async function commentContext(provider) {
     const mergeRequest = process.env.CI_MERGE_REQUEST_IID;
     if (!mergeRequest) { console.log("Specbook: no merge request in this job; note skipped"); return null; }
     if (!process.env.SPECBOOK_GITLAB_TOKEN) throw new Error("GitLab note publishing requires SPECBOOK_GITLAB_TOKEN: a project access token with api scope. CI_JOB_TOKEN cannot create or update merge-request notes.");
-    const project = process.env.CI_MERGE_REQUEST_TARGET_PROJECT_ID ?? required("CI_PROJECT_ID");
+    const project = process.env.CI_MERGE_REQUEST_PROJECT_ID || required("CI_PROJECT_ID");
     return { provider, api: httpUrl(required("CI_API_V4_URL"), "CI_API_V4_URL"),
         route: `/projects/${encodeURIComponent(project)}/merge_requests/${number(mergeRequest, "Merge request number")}/notes`,
         headers: { "PRIVATE-TOKEN": required("SPECBOOK_GITLAB_TOKEN") } };

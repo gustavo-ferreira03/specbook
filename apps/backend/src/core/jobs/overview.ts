@@ -161,7 +161,7 @@ export async function projectOverview(projectId: string) {
     const verdict = [specs.length ? `${healthCounts.passing} of ${specs.length - healthCounts.draft} active Specs passing` : "No Specs yet",
         healthCounts.failing ? `${healthCounts.failing} failing` : "", healthCounts.flaky ? `${healthCounts.flaky} flaky` : "",
         healthCounts.invalid ? `${healthCounts.invalid} need repairing` : "",
-        healthCounts.draft ? `${healthCounts.draft} drafts` : "",
+        healthCounts.draft ? countLabel(healthCounts.draft, "draft") : "",
         healthCounts.not_checked ? `${healthCounts.not_checked} not run yet` : "", healthCounts.running ? `${healthCounts.running} running` : ""].filter(Boolean).join(" · ");
     const activeCount = recentRuns.filter((run) => run.status === "working").length + jobs.filter((job) => job.status === "running").length;
     const nextCheckAt = agentPaused ? null : schedule?.nextRunAt ?? null;

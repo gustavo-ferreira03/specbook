@@ -2,7 +2,7 @@
 
 Open **Settings → CI/CD** in a project and create a CI token. Store it in your CI provider's secret settings as `SPECBOOK_CI_TOKEN`. Tokens belong to one project, are hashed at rest, and are shown once. Rotation and revocation take effect immediately. Git remote tokens and CI tokens have separate scopes.
 
-The dependency-free [Node client](../apps/backend/scripts/specbook-ci.mjs) starts a batch, waits for the result, writes `specbook-junit.xml` and `specbook-summary.md`, and exits with status 1 when the quality gate fails or the request cannot complete. Your CI runner must be able to reach the Specbook API; Specbook must be able to reach the application under test. Run the check after your deployment is ready.
+The dependency-free [Node client](../apps/backend/scripts/specbook-ci.mjs) starts a batch, waits for the result, writes `specbook-junit.xml` and `specbook-summary.md`, and exits with status 1 when the quality gate fails or the request cannot complete. Your CI runner must be able to reach the Specbook API; Specbook must be able to reach the application under test. Run the Specs after your deployment is ready.
 
 ```bash
 export SPECBOOK_API_URL="https://specbook.example.com/api"
@@ -40,14 +40,14 @@ Draft Specs never run in CI or deployment batches and don't affect the quality g
 
 With `SPECBOOK_COMMENT_PROVIDER=github`, the client reads the PR number from `GITHUB_EVENT_PATH` and uses the job's `GITHUB_TOKEN` to create or update one comment per Specbook project. Set `SPECBOOK_PR_NUMBER` explicitly when a trusted workflow already knows the PR number. `GITHUB_REPOSITORY` and `GITHUB_API_URL` come from GitHub Actions, including GitHub Enterprise. The workflow below grants only the [pull-request permission](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions) needed to publish the summary.
 
-For GitLab, set `SPECBOOK_COMMENT_PROVIDER=gitlab` and save a project access token with `api` scope as the masked CI variable `SPECBOOK_GITLAB_TOKEN`. The client uses `CI_MERGE_REQUEST_IID`, `CI_MERGE_REQUEST_TARGET_PROJECT_ID` (or `CI_PROJECT_ID`) and `CI_API_V4_URL` to update a [merge-request note](https://docs.gitlab.com/api/notes/#modify-existing-merge-request-note). GitLab's standard [`CI_JOB_TOKEN` only reads MR notes](https://docs.gitlab.com/ci/jobs/ci_job_token/#job-token-access); it cannot create or update them. The client reports that limitation before starting a batch if an MR job enables notes without the project token.
+For GitLab, set `SPECBOOK_COMMENT_PROVIDER=gitlab` and save a project access token with `api` scope as the masked CI variable `SPECBOOK_GITLAB_TOKEN`. The client uses `CI_MERGE_REQUEST_IID`, [`CI_MERGE_REQUEST_PROJECT_ID`](https://docs.gitlab.com/ci/variables/predefined_variables/#predefined-variables-for-merge-request-pipelines) (or `CI_PROJECT_ID`) and `CI_API_V4_URL` to update a [merge-request note](https://docs.gitlab.com/api/notes/#modify-existing-merge-request-note). GitLab's standard [`CI_JOB_TOKEN` only reads MR notes](https://docs.gitlab.com/ci/jobs/ci_job_token/#job-token-access); it cannot create or update them. The client reports that limitation before starting a batch if an MR job enables notes without the project token.
 
 Provider tokens stay in the CI job; the client never sends them to Specbook. Jobs without a PR or MR still write their reports and skip commenting. A failed quality gate publishes the failure summary and exits 1. If the provider rejects publishing, the job also exits 1 and retains both local reports so the error remains visible. Existing comments from people or other token identities are left alone. The snippets serialize jobs for the same project and PR/MR to prevent concurrent jobs from creating duplicate summaries.
 
 <details>
 <summary><strong>GitHub Actions</strong></summary>
 
-Save the Specbook token as a repository secret. Add this job after the deployment job in your existing workflow and choose the corresponding saved environment. It updates a PR comment, writes the [GitHub job summary](https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions#adding-a-job-summary) and uploads both reports as artifacts. Fork and Dependabot PRs are skipped because their jobs [cannot access repository secrets or a writable token](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request). Use your existing trusted deployment workflow for those checks.
+Save the Specbook token as a repository secret. Add this job after the deployment job in your existing workflow and choose the corresponding saved environment. It updates a PR comment, writes the [GitHub job summary](https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions#adding-a-job-summary) and uploads both reports as artifacts. Fork and Dependabot PRs are skipped because their jobs [cannot access repository secrets or a writable token](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request). Use your existing trusted deployment workflow for those runs.
 
 `.github/workflows/specbook.yml`:
 
@@ -101,12 +101,19 @@ jobs:
 
 Save `SPECBOOK_CI_TOKEN` and `SPECBOOK_GITLAB_TOKEN` as masked CI/CD variables. The latter is the GitLab project access token described above; it never reaches Specbook. Add this job after your deployment stage. GitLab reads the [JUnit report](https://docs.gitlab.com/ci/testing/unit_test_reports/) even when the job fails, and the client updates one note when the pipeline has merge-request context. Only expose these variables to trusted pipelines.
 
+The job runs in merge-request pipelines, pushes without an open merge request, and pipelines started manually in GitLab. If your project already defines `workflow: rules`, allow [merge-request pipelines](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/) there too. The open-MR rule follows GitLab's [branch/MR switching pattern](https://docs.gitlab.com/ci/yaml/workflow/#switch-between-branch-pipelines-and-merge-request-pipelines) so the Specbook job does not run twice for the same push.
+
 `.gitlab-ci.yml`:
 
 ```yaml
 specbook:
   image: node:26
   resource_group: specbook-$SPECBOOK_PROJECT_ID-$CI_MERGE_REQUEST_IID
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web"'
   variables:
     SPECBOOK_API_URL: "https://specbook.example.com/api"
     SPECBOOK_PROJECT_ID: "<project-id>"
@@ -258,7 +265,7 @@ Authenticate every request below with `Authorization: Bearer <CI token>`. These 
 | `GET /ci/runs/:batchId?format=junit` | JUnit XML report |
 | `GET /ci/runs/:batchId?format=markdown` | Markdown summary for your CI job to publish |
 | `GET /ci/projects/:id/client.mjs` | Downloads the dependency-free client |
-| `POST /ci/projects/:id/deploy` | Records a deployment signal for the project steward |
+| `POST /ci/projects/:id/deploy` | Records a deployment event that runs active Specs |
 
 Send `{}` to run all active, runnable Specs, `{ "featureId": "<feature-id>" }` for a Feature subtree, or `{ "specIds": ["<spec-id>"] }` for a selection. The run request also accepts `environment` (a saved name, default `production`), `baseUrl`, `commitSha`, `ref`, `buildUrl`, and `qualityGate: { failOnFlaky: false, failOnKnownBugs: false }`. Invalid Specs are excluded from all/Feature batches; explicitly selecting an invalid Spec returns its validation failure. Drafts are excluded from CI selection.
 
@@ -274,7 +281,7 @@ The JSON response contains `batch.id`, `complete`, `status`, `qualityGate`, and 
 
 ### Deploy notifications
 
-Send a deploy event when the new application is ready. Deterministic rules run the project's checks under its automation policy. A deploy event acknowledges the signal; use the runs endpoint above when the pipeline must wait for a gate result.
+Send a deploy event when the new application is ready. Deterministic rules run the project's Specs under its automation policy. A deploy event acknowledges the signal; use the runs endpoint above when the pipeline must wait for a gate result.
 
 ```bash
 curl -fsS -X POST \

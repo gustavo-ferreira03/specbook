@@ -256,7 +256,7 @@ async function prepareSpecBatch(
         for (const id of ids) {
             const spec = await specsRepository.getSpec(id);
             if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
-            if (trigger !== "manual" && spec.lifecycle === "draft") throw new Error(`Check "${spec.title}" is a draft. Activate it before automatic runs.`);
+            if (trigger !== "manual" && spec.lifecycle === "draft") throw new Error(`Spec "${spec.title}" is a draft. Activate it before automatic runs.`);
             if (spec.status === "invalid") {
                 throw new Error(`Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
             }
@@ -267,7 +267,7 @@ async function prepareSpecBatch(
             const sourceHash = sourceHashOf(testSource);
             const markdownHash = markdownHashOf(markdown);
             if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
-                throw new Error(`The check "${spec.title}" changed while it was being prepared. Run it again to use the latest version.`);
+                throw new Error(`The Spec "${spec.title}" changed while it was being prepared. Run it again to use the latest version.`);
             }
             definitions.push({
                 spec,

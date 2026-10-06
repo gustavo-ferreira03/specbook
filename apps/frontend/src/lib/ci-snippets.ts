@@ -60,6 +60,11 @@ ${yamlEnv(6)}
         case "gitlab": return `specbook:
   image: node:26
   resource_group: specbook-$SPECBOOK_PROJECT_ID-$CI_MERGE_REQUEST_IID
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web"'
   variables:
 ${yamlEnv(4)}
     SPECBOOK_COMMIT_SHA: "$CI_COMMIT_SHA"

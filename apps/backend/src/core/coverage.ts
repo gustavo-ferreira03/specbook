@@ -26,6 +26,7 @@ export interface CoverageArea {
     coverage: CoverageStatus;
     featureIds: string[];
     specIds: string[];
+    specs: { id: string; title: string }[];
     matchedRoutes: string[];
     reason: string;
 }
@@ -135,7 +136,7 @@ export async function projectCoverage(projectId: string, environmentName?: strin
             : coverage === "partial" ? `${routes.length - matchedRoutes.length} known route${routes.length - matchedRoutes.length === 1 ? " has" : "s have"} no matching active Spec`
             : routes.length ? "Active Specs reference every known route" : "Matching active Specs exist";
         const featureIds = [...new Set([...features.filter((feature) => contains(featureText(feature, featureMap), name)).map((feature) => feature.id), ...matched.map((spec) => spec.featureId)])];
-        areas.push({ kind, name, description, routes, coverage, featureIds, specIds: matched.map((spec) => spec.id), matchedRoutes, reason });
+        areas.push({ kind, name, description, routes, coverage, featureIds, specIds: matched.map((spec) => spec.id), specs: matched.map((spec) => ({ id: spec.id, title: spec.title })), matchedRoutes, reason });
     };
     if (revision) {
         for (const area of revision.context.areas) addArea("area", area.name, area.description, area.routes);

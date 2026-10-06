@@ -40,7 +40,7 @@ A Spec pairs a human-readable `spec.yml` with a validated Playwright `spec.ts`. 
 
 ## Run Specs when the app changes
 
-Schedules, CI requests, deployment events and changed Specs can start verification. A failed Spec runs once more; a pass on retry is marked flaky. Persistent failures trigger investigation, which produces a verified test fix, an application bug report or a question for you.
+Schedules, CI requests, deployment events and changed Specs can start a run. A failed Spec runs once more; a pass on retry is marked flaky. Persistent failures trigger investigation, which produces a verified test fix, an application bug report or a question for you.
 
 Autonomy is event-driven. Coverage review and exploratory bug hunting start when you request them in the interface or chat. You can pause automation for a project or the entire instance.
 
@@ -58,7 +58,7 @@ The CI client can update one GitHub PR comment with the Markdown report using th
 
 ## Specbook and runtime-AI testing
 
-Specbook runs saved Playwright code deterministically. AI helps discover behavior, generate Specs and investigate failures; a normal Spec run does not call a model. Tests and expected behavior remain in your Git repository, proposed edits are diffs, and the runtime is self-hosted. Runtime-AI testing can adapt actions while executing; Specbook instead makes the executable check reviewable before activating it.
+Specbook runs saved Playwright code deterministically. AI helps discover behavior, generate Specs and investigate failures; a normal Spec run does not call a model. Tests and expected behavior remain in your Git repository, proposed edits are diffs, and the runtime is self-hosted. Runtime-AI testing can adapt actions while executing; Specbook makes each executable Spec reviewable before activating it.
 
 ## Work on Specbook
 

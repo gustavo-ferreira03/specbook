@@ -360,6 +360,7 @@ describe("CI access and quality gates", () => {
             assert.equal(github ? request.headers.authorization : request.headers["private-token"], github ? "Bearer github-test-token" : "gitlab-test-token");
             assert.ok(!body.includes("test-ci-token") && !body.includes("github-test-token") && !body.includes("gitlab-test-token"));
             if (!github && target.pathname.endsWith("/user")) { response.end(JSON.stringify({ id: 77 })); return; }
+            if (!github) assert.match(target.pathname, /^\/gitlab\/projects\/123\//, "notes belong to the MR project even when the CI job runs in a fork");
             const list = github ? comments : notes;
             if (request.method === "GET") {
                 const start = (Number(target.searchParams.get("page")) - 1) * 100;
@@ -398,7 +399,7 @@ describe("CI access and quality gates", () => {
             const child = spawn(process.execPath, [path.join(backendRoot, "scripts", "specbook-ci.mjs"), ...args], {
                 env: { ...process.env, SPECBOOK_API_URL: `${api}/specbook`, SPECBOOK_PROJECT_ID: "project-id", SPECBOOK_CI_TOKEN: "test-ci-token", SPECBOOK_ENVIRONMENT: "production", SPECBOOK_COMMENT_PROVIDER: "none", SPECBOOK_TIMEOUT_SECONDS: "20",
                     SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), GITHUB_EVENT_PATH: path.join(directory, "event.json"), GITHUB_REPOSITORY: "example/application", GITHUB_API_URL: `${api}/github`, GITHUB_TOKEN: "github-test-token",
-                    CI_API_V4_URL: `${api}/gitlab`, CI_PROJECT_ID: "123", CI_MERGE_REQUEST_IID: "42", SPECBOOK_GITLAB_TOKEN: "gitlab-test-token", ...env },
+                    CI_API_V4_URL: `${api}/gitlab`, CI_PROJECT_ID: "123", CI_MERGE_REQUEST_PROJECT_ID: "", CI_MERGE_REQUEST_IID: "42", SPECBOOK_GITLAB_TOKEN: "gitlab-test-token", ...env },
                 stdio: ["ignore", "pipe", "pipe"],
             });
             let output = "";
@@ -425,7 +426,7 @@ describe("CI access and quality gates", () => {
             assert.equal(commentDeletes, 1, "only duplicate bot comments with this project marker are removed");
             assert.match(comments.at(-1)!.body, /Specbook: failed/);
             passing = true;
-            const gitlab = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab" });
+            const gitlab = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab", CI_MERGE_REQUEST_PROJECT_ID: "123", CI_PROJECT_ID: "999" });
             assert.equal(gitlab.code, 0, gitlab.output);
             assert.equal(notes.length, 2);
             const gitlabUpdated = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab" });
@@ -454,6 +455,37 @@ describe("CI access and quality gates", () => {
             server.closeAllConnections();
             await new Promise<void>((resolve) => server.close(() => resolve()));
         }
+    });
+
+    test("CI snippets match the guide and include merge-request pipelines without duplicate push jobs", async () => {
+        const { ciSnippet } = await import("../../../frontend/src/lib/ci-snippets");
+        const { parse } = await import("yaml");
+        const { backendRoot } = await import("../../src/core/paths");
+        const guide = await fs.readFile(path.resolve(backendRoot, "../../docs/ci.md"), "utf8");
+        const examples = [...guide.matchAll(/```(?:yaml|groovy)\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+        const providers = ["github", "gitlab", "bitbucket", "circleci", "jenkins"] as const;
+        for (const [index, provider] of providers.entries()) {
+            const snippet = ciSnippet(provider, "https://specbook.example.com/api", "<project-id>", false, false);
+            assert.equal(snippet, examples[index], `${provider} settings and documentation must agree`);
+            if (provider !== "jenkins") assert.ok(parse(snippet));
+        }
+        const job = parse(ciSnippet("gitlab", "https://specbook.example.com/api", "project", false, false)).specbook;
+        const rules = job.rules as { if: string; when?: string }[];
+        const evaluate = (source: string, branch = "", openMergeRequests = "") => {
+            const values: Record<string, string> = { CI_PIPELINE_SOURCE: source, CI_COMMIT_BRANCH: branch, CI_OPEN_MERGE_REQUESTS: openMergeRequests };
+            const rule = rules.find((rule) => rule.if.split(" || ").some((group) => group.split(" && ").every((expression) => {
+                const [variable, expected] = expression.split(" == ");
+                const value = values[variable.slice(1)];
+                return expected === undefined ? Boolean(value) : value === JSON.parse(expected);
+            })));
+            return Boolean(rule && rule.when !== "never");
+        };
+        assert.equal(evaluate("merge_request_event"), true);
+        assert.equal(evaluate("push", "feature/login"), true);
+        assert.equal(evaluate("push", "feature/login", "example/application!42"), false);
+        assert.equal(evaluate("push"), true, "tag pushes are not branch/MR duplicates");
+        assert.equal(evaluate("web", "feature/login", "example/application!42"), true);
+        assert.equal(evaluate("schedule", "main"), false);
     });
 
 });

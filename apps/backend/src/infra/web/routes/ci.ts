@@ -97,7 +97,7 @@ export function createCiRouter(): Hono {
             specs = specs.filter((spec) => selected.has(spec.id));
         }
         if (input.specIds) {
-            if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected checks must be active and belong to this project" });
+            if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected Specs must be active and belong to this project" });
             specs = specs.filter((spec) => input.specIds!.includes(spec.id));
         }
         // All/Feature runs include runnable Specs. Explicitly selected invalid Specs report their validation error.

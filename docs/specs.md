@@ -43,17 +43,17 @@ git clone https://your-specbook-host/api/git/<project-id>.git
 
 The repository accepts the `main` branch only. Generated files and edits made in Specbook are committed before the remote is advertised, and pushes are reindexed into the project after they complete. Rotating or revoking the token immediately prevents new Git requests; existing connections must authenticate again.
 
-A missing or invalid `spec.ts` makes a check incomplete. Open its validation reason and use **Repair in chat**. The agent may propose an implementation repair; changing `spec.yml` requires a human decision.
+A missing or invalid `spec.ts` makes a Spec incomplete. Open its validation reason and use **Repair in chat**. The agent may propose an implementation repair; changing `spec.yml` requires a human decision.
 
 ## Drafts and environments
 
-Selected batches generate drafts with their first run result. Drafts run manually; activate a check to include it in schedules, CI, deployment events and failure investigation. Activation is an operational setting saved in Specbook, separate from the behavior contract. New checks imported through Git begin as drafts; existing checks retain their state when reindexed.
+Selected batches generate drafts with their first run result. Drafts run manually; activate a Spec to include it in schedules, CI, deployment events and failure investigation. Activation is an operational setting saved in Specbook, separate from the behavior contract. New Specs imported through Git begin as drafts; existing Specs retain their state when reindexed.
 
-Save destinations in **Project settings → Environments**. Production is the default and uses the project URL. Other environments can override a check's credential profile with another profile saved in the same project. An override explicitly authorizes the selected profile at that environment's base origin; otherwise the original profile's allowed origins still apply. One-off preview URLs must be allowlisted separately for navigation and credential use. Run results retain their environment configuration for retries and investigation.
+Save destinations in **Project settings → Environments**. Production is the default and uses the project URL. Other environments can override a Spec's credential profile with another profile saved in the same project. An override explicitly authorizes the selected profile at that environment's base origin; otherwise the original profile's allowed origins still apply. One-off preview URLs must be allowlisted separately for navigation and credential use. Run results retain their environment configuration for retries and investigation.
 
-## API checks
+## API Specs
 
-API-only checks use `request` without a browser page:
+API-only Specs use `request` without a browser page:
 
 ```ts
 import { test, expect } from "specbook";
@@ -70,4 +70,4 @@ test("Health endpoint responds", async ({ request, step }) => {
 
 The named step must also appear in `spec.yml`. Supported methods are `get`, `post`, `put`, `patch` and `delete`, with literal paths and options. Relative paths use the selected environment; absolute destinations and redirects must stay on allowed origins. Use `secret("profile", "field")` in header values or JSON body fields for saved credentials. Console and network failures, or API request/response excerpts, become bounded redacted evidence. API-only steps do not create screenshots.
 
-When suggesting checks from API documentation, the agent can read a public text, JSON or YAML URL on an allowed origin. Add a separate documentation origin to the environment if needed. The reader does not forward cookies, credentials or redirects.
+When suggesting Specs from API documentation, the agent can read a public text, JSON or YAML URL on an allowed origin. Add a separate documentation origin to the environment if needed. The reader does not forward cookies, credentials or redirects.

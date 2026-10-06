@@ -1719,8 +1719,111 @@ describe("accounts, roles and session security", () => {
 });
 
 describe("selected batch suggestions", () => {
+    test("unfinished selected Specs retry before asking a resumable question while a failed first run finishes generation", { timeout: 30_000 }, async (t) => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { stewardRepository } = await import("../../src/infra/repositories/steward");
+        const { proposeSpecBatch, selectSpecBatch, presentSpecBatch } = await import("../../src/core/jobs/spec-batches");
+        const { startJobWorker, stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { retryStalledJob, MAX_SAFETY_RETRIES } = await import("../../src/core/jobs/retry");
+        const { createChat, openSession, flushSessionFile } = await import("../../src/core/chat/session-store");
+        const { tryReserveChatTurn, releaseChatTurn } = await import("../../src/core/chat/chat-registry");
+        const read = jobsRepository.get.bind(jobsRepository);
+        const log = jobsRepository.log.bind(jobsRepository);
+        let targetId = "";
+        let notifyStopped: () => void = () => undefined;
+        t.mock.method(jobsRepository, "queued", async () => {
+            const row = await read(targetId);
+            return row?.status === "queued" ? [row] : [];
+        });
+        t.mock.method(jobsRepository, "log", async (id: string, action: string, detail = "") => {
+            await log(id, action, detail);
+            if (id === targetId && action === "stopped") notifyStopped();
+        });
+        await stopJobWorker();
+        for (const outcome of ["missing_spec", "missing_run", "failed"] as const) {
+            const projectId = await createProject(`Selected Spec ${outcome}`);
+            await stewardRepository.update(projectId, { paused: true });
+            const feature = await writer.createFeatureInRepo(projectId, null, "Authentication", "");
+            const chat = await createChat(projectId);
+            const item = await proposeSpecBatch(projectId, chat.id, { candidates: [{ title: "Sign-in form", goal: "Show the sign-in form.", feature: feature.title, featureId: feature.id, why: "Every user starts here." }] });
+            const initial = await presentSpecBatch(item);
+            const selected = await selectSpecBatch(item, [initial.candidates[0]!.id]);
+            const candidate = (selected.payload.specBatch as { candidates: { jobId: string; specId: string }[] }).candidates[0]!;
+            targetId = candidate.jobId;
+            const job = (await read(targetId))!;
+            if (outcome !== "missing_spec") {
+                const { spec } = await writer.createSpecInRepo({ projectId, id: candidate.specId, lifecycle: "draft", featureId: feature.id,
+                    title: "Sign-in form", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+                if (outcome === "failed") {
+                    const run = await runsRepository.createRun({ specId: spec.id, commitSha: await repoGit.getHeadSha(projectId), sourceHash: spec.sourceHash, automate: false });
+                    await runsRepository.finishRun(run.id, "failed", 10, "The expected sign-in form was not visible.");
+                }
+            }
+            const session = (await openSession(job.chatId))!;
+            session.appendCustomMessageEntry("result", "The selected Spec is ready.", true);
+            flushSessionFile(session);
+            // Hold the saved response's chat reservation to exercise completion without a provider call.
+            assert.equal(tryReserveChatTurn(job.chatId), true);
+            const executeAttempt = async () => {
+                const stopped = new Promise<void>((resolve) => { notifyStopped = resolve; });
+                await startJobWorker();
+                await stopped;
+                await stopJobWorker();
+            };
+            try {
+                await stewardRepository.update(projectId, { paused: false });
+                await jobsRepository.transition(job.id, "paused", "queued");
+                await executeAttempt();
+                assert.equal((await jobsRepository.inbox(projectId)).some((entry) => entry.jobId === job.id && entry.kind === "note"), false);
+                if (outcome === "failed") {
+                    assert.equal((await read(job.id))?.status, "completed");
+                    assert.equal((await presentSpecBatch((await jobsRepository.item(item.id))!)).candidates[0]!.state, "failed");
+                    assert.equal((await jobsRepository.inbox(projectId)).filter((entry) => entry.jobId === job.id && entry.kind === "question").length, 0);
+                } else {
+                    for (let attempt = 0; attempt < MAX_SAFETY_RETRIES; attempt++) {
+                        const stalled = (await read(job.id))!;
+                        assert.equal(stalled.status, "stalled");
+                        assert.ok(stalled.retryAt && Date.parse(stalled.retryAt) > Date.now());
+                        assert.equal((await presentSpecBatch((await jobsRepository.item(item.id))!)).candidates[0]!.state, "queued");
+                        assert.equal((await jobsRepository.inbox(projectId)).filter((entry) => entry.jobId === job.id && entry.kind === "question").length, 0, "an unfinished model response must retry before asking the human");
+                        await retryStalledJob(stalled);
+                        assert.equal((await read(job.id))?.status, "stalled", "backoff is respected");
+                        await jobsRepository.update(job.id, { retryAt: new Date(Date.now() - 1000).toISOString() });
+                        await retryStalledJob((await read(job.id))!);
+                        assert.equal((await read(job.id))?.status, "queued");
+                        assert.equal((await read(job.id))?.safetyRetries, attempt + 1);
+                        await executeAttempt();
+                    }
+                    const exhausted = (await read(job.id))!;
+                    assert.equal(exhausted.status, "stalled");
+                    assert.equal(exhausted.retryAt, null);
+                    await retryStalledJob(exhausted);
+                    const progress = await presentSpecBatch((await jobsRepository.item(item.id))!);
+                    const questions = (await jobsRepository.inbox(projectId)).filter((entry) => entry.jobId === job.id && entry.kind === "question");
+                    assert.equal((await read(job.id))?.status, "blocked");
+                    assert.equal(progress.candidates[0]!.state, "needs_answer");
+                    assert.equal(questions.length, 1);
+                    const question = questions[0]!;
+                    assert.match(question.title, /Sign-in form/);
+                    assert.match(question.body, outcome === "missing_spec" ? /no saved runnable draft/ : /first result is missing/);
+                    assert.doesNotMatch(question.body, /missing access|credentials/i, "a model ending early does not prove an access problem");
+                    assert.equal(question.payload.sourceItemId, item.id);
+                    assert.ok(await jobsRepository.claimItem(question.id));
+                    await jobsRepository.answer(question, "Open the homepage and inspect the sign-in form.");
+                    assert.equal((await read(job.id))?.status, "queued");
+                    assert.match((await read(job.id))!.pendingMessage, /Open the homepage/);
+                    assert.equal((await jobsRepository.item(question.id))?.status, "answered");
+                }
+            } finally {
+                await stopJobWorker();
+                releaseChatTurn(job.chatId);
+            }
+        }
+    });
+
     test("requires discovery confirmation, validates selection and resumes only selected checks after restart", async () => {
         const { chatsRepository } = await import("../../src/infra/repositories/chats");
+        const { listChats } = await import("../../src/core/chat/session-store");
         const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
@@ -1730,11 +1833,13 @@ describe("selected batch suggestions", () => {
         const revision = await projectContextsRepository.createProjectContextDraft(projectId, { startUrl: "https://app.example.com", goal: "Find useful checks", safetyNotes: [] });
         const chatId = crypto.randomUUID();
         await chatsRepository.insertChat(chatId, projectId, { contextRevisionId: revision.id });
+        assert.deepEqual((await listChats(projectId)).map((chat) => chat.id), [chatId]);
         const input = { candidates: [
             { title: "Sign-in form", goal: "Show the username and password fields.", feature: "Authentication", why: "Users need an entry point." },
             { title: "Catalog", goal: "Display the product catalog.", feature: "Catalog", why: "Users need to find a product." },
         ] };
         const item = await proposeSpecBatch(projectId, chatId, input, { contextRevisionId: revision.id });
+        assert.deepEqual((await listChats(projectId)).map((chat) => chat.id), [chatId], "a discovery conversation stays visible while its internal review stays hidden");
         assert.equal((await proposeSpecBatch(projectId, chatId, input, { contextRevisionId: revision.id })).id, item.id);
         const view = await presentSpecBatch(item);
         assert.equal(view.contextReviewRequired, true);
@@ -1756,6 +1861,7 @@ describe("selected batch suggestions", () => {
         const chatCount = (await chatsRepository.listChatRows(projectId)).length;
         await selectSpecBatch(item, [view.candidates[0]!.id]);
         await recoverSpecBatches();
+        assert.deepEqual((await listChats(projectId)).map((chat) => chat.id), [chatId], "selected generation and restart recovery do not expose internal chats");
         assert.equal((await chatsRepository.listChatRows(projectId)).length, chatCount);
         assert.equal((await jobsRepository.list(projectId)).filter((job) => job.kind === "generate_spec").length, 1);
         await assert.rejects(() => selectSpecBatch(item, [view.candidates[1]!.id]), /already been selected/);
@@ -1763,6 +1869,7 @@ describe("selected batch suggestions", () => {
 
     test("rejects cross-project suggestions and generation outside the selected title and feature", async () => {
         const { chatsRepository } = await import("../../src/infra/repositories/chats");
+        const { listChats } = await import("../../src/core/chat/session-store");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeSpecBatch, selectSpecBatch, presentSpecBatch, selectedSpecInstructions, createSelectedSpec, selectedSpecResult } = await import("../../src/core/jobs/spec-batches");
@@ -1773,10 +1880,13 @@ describe("selected batch suggestions", () => {
         const otherFeature = await writer.createFeatureInRepo(otherId, null, "Other", "");
         const chatId = crypto.randomUUID();
         await chatsRepository.insertChat(chatId, projectId);
+        assert.deepEqual((await listChats(projectId)).map((chat) => chat.id), [chatId]);
         const candidate = { title: "Sign-in form", goal: "Show the sign-in form.", feature: feature.title, featureId: feature.id, why: "Every user starts here." };
         await assert.rejects(() => proposeSpecBatch(otherId, chatId, { candidates: [candidate] }), /conversation belongs/);
         await assert.rejects(() => proposeSpecBatch(projectId, chatId, { candidates: [{ ...candidate, featureId: otherFeature.id }] }), /another project/);
         const item = await proposeSpecBatch(projectId, chatId, { candidates: [candidate] });
+        assert.notEqual((await jobsRepository.get(item.jobId))!.chatId, chatId);
+        assert.deepEqual((await listChats(projectId)).map((chat) => chat.id), [chatId], "human conversations remain in chat history after proposing a batch");
         const initial = await presentSpecBatch(item);
         const selected = await selectSpecBatch(item, [initial.candidates[0]!.id]);
         const choice = (await presentSpecBatch(selected)).candidates[0]!;

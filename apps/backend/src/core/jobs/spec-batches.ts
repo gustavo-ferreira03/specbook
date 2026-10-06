@@ -6,6 +6,7 @@ import { specsRepository } from "../../infra/repositories/specs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { chatsRepository } from "../../infra/repositories/chats";
+import { createChat } from "../chat/session-store";
 import { createProjectScrubber } from "../credentials/scrub";
 import { createFeatureInRepo, createSpecInRepo, validateSpec } from "../repo/writer";
 import { executeSpec } from "../runner/run";
@@ -76,7 +77,8 @@ export async function proposeSpecBatch(projectId: string, chatId: string, input:
         let job = await jobsRepository.forChat(chatId);
         if (job && job.projectId !== projectId) throw new Error("This conversation belongs to another project.");
         if (!job) {
-            job = await jobsRepository.create({ projectId, chatId, trigger: "chat", kind: "review", goal: "Choose Specs to add from this conversation.", limits: jobLimitsSchema.parse({}), status: "blocked" });
+            const internalChat = await createChat(projectId);
+            job = await jobsRepository.create({ projectId, chatId: internalChat.id, trigger: "chat", kind: "review", goal: "Choose Specs to add from this conversation.", limits: jobLimitsSchema.parse({}), status: "blocked" });
             await jobsRepository.transition(job.id, "blocked", "completed");
         }
         const batch: SpecBatch = { candidates: clean.candidates.map((candidate) => ({ ...candidate, id: crypto.randomUUID() })), sourceChatId: chatId, ...options };
@@ -218,7 +220,7 @@ export async function presentSpecBatch(item: InboxItem) {
         const question = job ? inbox.find((other) => other.jobId === job.id && other.kind === "question" && other.status === "pending") : null;
         const state = !candidate.selected ? "proposed" : run && run.status !== "running" ? run.status === "passed" ? "passed" : "failed"
             : job?.status === "blocked" ? "needs_answer" : job?.status === "running" || run?.status === "running" ? "generating"
-            : ["completed", "cancelled", "stalled"].includes(job?.status ?? "") ? "stopped" : "queued";
+            : ["completed", "cancelled"].includes(job?.status ?? "") || (job?.status === "stalled" && !job.retryAt) ? "stopped" : "queued";
         const error = run?.failReason ?? candidate.error ?? job?.stopReason;
         return { ...candidate, specId: spec?.id, runId: run?.id, lifecycle: spec?.lifecycle, state, questionId: question?.id,
             finishedAt: run && run.status !== "running" ? new Date(Date.parse(run.startedAt) + (run.durationMs ?? 0)).toISOString() : undefined,

@@ -1,4 +1,4 @@
-import { selectedSpecInstructions, recoverSpecBatches } from "./spec-batches";
+import { selectedSpecInstructions, selectedSpecResult, recoverSpecBatches } from "./spec-batches";
 import { jobEnvironment } from "./environment";
 import { cancelStaleTriage, prepareTriageGoal } from "./triage";
 import { closeChatBrowser } from "../browser/sessions";
@@ -81,8 +81,16 @@ async function executeJob(job: Job): Promise<void> {
         const messages = await getChatMessages(job.chatId);
         const last = messages?.filter((message) => message.role === "agent").at(-1)?.content;
         if (current?.status === "running") {
-            if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
+            const selected = job.kind === "generate_spec" ? await selectedSpecResult(job) : null;
+            if (selected?.specId && selected.runId && selected.status !== "running") {
+                await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
+            } else if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
                 await retryInfrastructure(job, last || "The agent service could not complete its response.");
+            } else if (selected?.status === "running") {
+                await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 15_000).toISOString(),
+                    pendingMessage: "The selected draft's first run is still running. Use run_spec to inspect its saved result. Do not create another Spec or start another run." });
+            } else if (selected) {
+                await stallJob(job, selected.specId ? "The draft was saved, but its first result is missing." : "The selected Spec has no saved runnable draft.");
             } else {
                 const body = await scrub(last);
                 const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
