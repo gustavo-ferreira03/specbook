@@ -5,6 +5,7 @@ import { stewardRepository } from "../../infra/repositories/steward";
 import { applyProposal, isImplementationOnly } from "../jobs/proposals";
 import { fixProposalSchema } from "../jobs/schemas";
 import type { ProposalVerification } from "../jobs/verification";
+import { provesExpectedResult } from "../runner/evidence-review";
 import { isAgentPaused } from "../jobs/pause";
 import { recordAgentMetric } from "../jobs/metrics";
 import { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "../runner/validate";
@@ -55,7 +56,7 @@ export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> 
     if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
     const verification = item.payload.verification as ProposalVerification | undefined;
     // A pass that does not show, or does not assert, the expected result proves nothing.
-    if (verification?.status !== "passed" || ["contradicts", "weak"].includes(verification.review?.verdict ?? "")) return false;
+    if (verification?.status !== "passed" || !provesExpectedResult(verification.review)) return false;
     const patch = fixProposalSchema.safeParse(item.payload.params);
     if (!patch.success || !isImplementationOnly(patch.data)) return false;
     const job = await jobsRepository.get(item.jobId);

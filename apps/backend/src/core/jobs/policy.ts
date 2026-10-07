@@ -127,7 +127,7 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                             const verification = ["failure_triage", "regenerate"].includes(job.kind) ? await verifyProposal(job, item, signal) : undefined;
                             if (verification?.status === "passed") await applyVerifiedRepairs(job.projectId);
                             const saved = (await jobsRepository.item(item.id))?.status === "approved";
-                            const unproven = verification?.status === "passed" ? reviewNextStep(verification.review ?? null) : undefined;
+                            const unproven = verification?.status === "passed" ? reviewNextStep(verification.review) : undefined;
                             output = result({ inboxId: item.id, status: verification && (verification.status !== "passed" || unproven) ? "unfinished" : saved ? "saved" : "proposed", verification,
                                 message: unproven ? `This candidate passed but does not prove the expected result. ${unproven} Then call update_spec again.`
                                     : verification && verification.status !== "passed" ? "This candidate did not pass and is not visible for approval. Inspect the failure and keep working on a minimal repair. Do not ask the human to approve unfinished work."

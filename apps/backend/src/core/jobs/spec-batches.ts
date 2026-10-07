@@ -10,7 +10,7 @@ import { createChat } from "../chat/session-store";
 import { createProjectScrubber } from "../credentials/scrub";
 import { createFeatureInRepo, createSpecInRepo, readSpecFiles, updateSpecInRepo, validateSpec } from "../repo/writer";
 import { executeSpec } from "../runner/run";
-import { reviewNextStep, reviewRunEvidence } from "../runner/evidence-review";
+import { provesExpectedResult, reviewNextStep, reviewRunEvidence } from "../runner/evidence-review";
 import { runsDir } from "../paths";
 import path from "node:path";
 import { sanitizeTechnicalDetails } from "./presentation-errors";
@@ -210,7 +210,7 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
         const current = await readSpecFiles(spec);
         const changed = current.testSource !== proposed.testSource || JSON.stringify(current.humanSpec) !== JSON.stringify(proposed.humanSpec);
         const reviews = await Promise.all(runs.map((run) => run.status === "passed" ? reviewRunEvidence(path.join(runsDir, run.id), run) : null));
-        const passed = runs.some((run, index) => run.status === "passed" && !["contradicts", "weak"].includes(reviews[index]?.verdict ?? ""));
+        const passed = runs.some((run, index) => run.status === "passed" && provesExpectedResult(reviews[index]));
         if (changed && !passed) {
             if (await draftFailures(spec.id) >= MAX_DRAFT_RUNS) throw new Error(`This Spec did not pass after ${MAX_DRAFT_RUNS} runs. Stop revising it and report what failed and what you suspect.`);
             ({ spec } = await updateSpecInRepo(spec, { description: proposed.description, humanSpec: proposed.humanSpec, testSource: proposed.testSource }, { checkPolicy: options.checkPolicy }));

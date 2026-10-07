@@ -1,3 +1,5 @@
+import { INSPECT_INSTRUCTION, provesExpectedResult, reviewNextStep } from "../runner/evidence-review";
+import type { ProposalVerification } from "./verification";
 import { selectedSpecInstructions, selectedSpecResult, recoverSpecBatches } from "./spec-batches";
 import { jobEnvironment } from "./environment";
 import { cancelStaleTriage, prepareTriageGoal } from "./triage";
@@ -51,22 +53,23 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
 }
 
 const MAX_NUDGES = 2;
-const INSPECT_DOM = "Reproduce the state on the live page, call inspect_element on the element you assert on, read its HTML, parent chain and computed colors, and use the exact attribute or element where the observed value lives.";
-
-/** Work the agent stopped short of: a draft that still fails, or test drift classified without a fix. */
+/**
+ * Work the agent stopped short of: a new draft that fails or does not prove its expected result, or a
+ * repair (test drift or regeneration) that ended without a fix that passed and proves the expected result.
+ */
 async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof selectedSpecResult>> | null): Promise<string | null> {
     if ((await jobsRepository.actions(job.id)).filter((action) => action.action === "unfinished").length >= MAX_NUDGES) return null;
-    if (selected?.specId && selected.status === "passed" && ["weak", "contradicts"].includes(selected.evidenceReview?.verdict ?? "") && selected.attemptsLeft > 0) {
-        return `The selected Spec passes but does not prove its expected result: ${selected.evidenceReview!.reason} ${INSPECT_DOM} Then call create_spec again with the stronger assertion.`;
+    if (selected?.specId && selected.attemptsLeft > 0 && (selected.status === "failed" || selected.status === "passed" && !provesExpectedResult(selected.evidenceReview))) {
+        return `The selected Spec ${selected.status === "failed" ? "still fails" : "passes but does not prove its expected result"}. Do not stop or ask. ${reviewNextStep(selected.evidenceReview) ?? INSPECT_INSTRUCTION} Then call create_spec again with the corrected Spec.`;
     }
-    if (selected?.specId && selected.status === "failed" && selected.attemptsLeft > 0) {
-        return `The selected Spec still fails${selected.evidenceReview?.verdict === "assertion_wrong" ? " although its evidence shows the expected result" : ""}. Do not stop or ask: ${INSPECT_DOM} Then call create_spec again with the corrected Spec.`;
-    }
-    if (job.kind === "failure_triage" && job.classification === "test_drift"
-        && !(await jobsRepository.inbox(job.projectId)).some((item) => item.jobId === job.id && item.kind === "spec_fix")) {
-        return `You classified this failure as test drift but did not propose a fix. ${INSPECT_DOM} Then call update_spec with the corrected spec.ts. Do not ask for permission.`;
-    }
-    return null;
+    if (!(job.kind === "regenerate" || job.kind === "failure_triage" && job.classification === "test_drift")) return null;
+    const items = (await jobsRepository.inbox(job.projectId)).filter((item) => item.jobId === job.id);
+    if (items.some((item) => item.kind === "bug_report")) return null;
+    const proven = items.some((item) => {
+        const verification = item.payload.verification as ProposalVerification | undefined;
+        return item.kind === "spec_fix" && verification?.status === "passed" && provesExpectedResult(verification.review);
+    });
+    return proven ? null : `The Spec is not repaired yet: no proposed fix passed and proved the expected result. ${INSPECT_INSTRUCTION} Then call update_spec with the corrected spec.ts. Do not ask for permission.`;
 }
 
 async function executeJob(job: Job): Promise<void> {
