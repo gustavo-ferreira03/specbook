@@ -1,5 +1,6 @@
 import { parse } from "@babel/parser";
 import { jobsRepository, type InboxItem } from "../../infra/repositories/jobs";
+import { runsRepository } from "../../infra/repositories/runs";
 import { stewardRepository } from "../../infra/repositories/steward";
 import { applyProposal, isImplementationOnly } from "../jobs/proposals";
 import { fixProposalSchema } from "../jobs/schemas";
@@ -47,7 +48,7 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
 /**
  * A repair the agent may save on its own: it changes only spec.ts (the behavior contract in spec.yml is
  * untouched), it passed a test run, and it cannot hide a real bug — either the Spec had no working
- * implementation to weaken, or a healer fix kept every assertion and only moved action locators.
+ * implementation to weaken (it never passed), or a healer fix kept every assertion and only moved action locators.
  */
 export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> {
     if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
@@ -56,7 +57,8 @@ export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> 
     if (!patch.success || !isImplementationOnly(patch.data)) return false;
     const job = await jobsRepository.get(item.jobId);
     if (job?.kind === "regenerate") return true;
-    return job?.kind === "failure_triage" && job.classification === "test_drift" && isLocatorOnlyFix(item);
+    return job?.kind === "failure_triage" && job.classification === "test_drift"
+        && (isLocatorOnlyFix(item) || !!job.specId && !await runsRepository.hasPassed(job.specId));
 }
 
 /**

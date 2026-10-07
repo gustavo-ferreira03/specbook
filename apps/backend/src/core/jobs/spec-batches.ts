@@ -8,7 +8,7 @@ import { projectContextsRepository } from "../../infra/repositories/project-cont
 import { chatsRepository } from "../../infra/repositories/chats";
 import { createChat } from "../chat/session-store";
 import { createProjectScrubber } from "../credentials/scrub";
-import { createFeatureInRepo, createSpecInRepo, validateSpec } from "../repo/writer";
+import { createFeatureInRepo, createSpecInRepo, readSpecFiles, updateSpecInRepo, validateSpec } from "../repo/writer";
 import { executeSpec } from "../runner/run";
 import { sanitizeTechnicalDetails } from "./presentation-errors";
 import { isAgentPaused } from "./pause";
@@ -97,7 +97,7 @@ async function enqueueSelected(item: InboxItem): Promise<void> {
     const { enqueueJob } = await import("./worker");
     for (const candidate of batchOf(item).candidates.filter((candidate) => candidate.selected)) {
         await enqueueJob(item.projectId, { kind: "generate_spec", trigger: "chat",
-            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and use create_spec once. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId, { sourceChatId: batchOf(item).sourceChatId });
+            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and call create_spec. It saves the Spec and runs it once. If the run fails because the Spec is wrong (a locator, a wait, a wrong assumption about the app), inspect the live page again and call create_spec with the corrected Spec; it can be revised until its first pass, at most 3 runs. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId, { sourceChatId: batchOf(item).sourceChatId });
     }
 }
 
@@ -179,6 +179,8 @@ export async function selectedSpecResult(job: Job) {
     return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null };
 }
 
+const MAX_DRAFT_RUNS = 3;
+
 export async function createSelectedSpec(job: Job, input: unknown, options: { signal?: AbortSignal; checkPolicy?: () => Promise<void>; baseUrl?: string; environment?: RunEnvironment } = {}) {
     const proposed = newSpecProposalSchema.parse(input);
     const { item, candidate } = await selectedCandidate(job);
@@ -187,15 +189,26 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
     if (!validation.ok) throw new Error(validation.error);
     await options.checkPolicy?.();
     let spec = await specsRepository.getSpec(candidate.specId!);
+    let revised = false;
     if (!spec) {
         ({ spec } = await createSpecInRepo({ ...proposed, projectId: job.projectId, id: candidate.specId },
             { commitMessage: `spec-batch:${item.id}:${candidate.id} create "${candidate.title}"`, checkPolicy: options.checkPolicy }));
+    } else if (spec.projectId === job.projectId) {
+        // Until its first pass the new Spec is a draft: revising it cannot weaken anything that worked.
+        const runs = await runsRepository.listRuns(spec.id, { limit: MAX_DRAFT_RUNS });
+        const current = await readSpecFiles(spec);
+        const changed = current.testSource !== proposed.testSource || JSON.stringify(current.humanSpec) !== JSON.stringify(proposed.humanSpec);
+        if (changed && !runs.some((run) => run.status === "passed")) {
+            if (runs.length >= MAX_DRAFT_RUNS) throw new Error(`This Spec did not pass after ${MAX_DRAFT_RUNS} runs. Stop revising it and report what failed and what you suspect.`);
+            ({ spec } = await updateSpecInRepo(spec, { description: proposed.description, humanSpec: proposed.humanSpec, testSource: proposed.testSource }, { checkPolicy: options.checkPolicy }));
+            revised = true;
+        }
     }
     if (spec.projectId !== job.projectId) throw new Error("This selected Spec belongs to another project.");
     await jobsRepository.update(job.id, { specId: spec.id });
     await options.checkPolicy?.();
     const existing = (await runsRepository.listRuns(spec.id, { limit: 1 }))[0];
-    if (existing && existing.status !== "running") {
+    if (existing && existing.status !== "running" && !revised) {
         await updateCandidate(item.id, candidate.id, { runId: existing.id });
         return selectedSpecResult(job);
     }

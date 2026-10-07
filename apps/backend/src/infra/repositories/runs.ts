@@ -59,6 +59,10 @@ class RunsRepository {
             .limit(limit);
     }
 
+    async hasPassed(specId: string): Promise<boolean> {
+        return (await db.select({ id: runs.id }).from(runs).where(and(eq(runs.specId, specId), eq(runs.status, "passed"))).limit(1)).length > 0;
+    }
+
     /** The most recent run of each of the given Specs, keyed by Spec id. */
     async latestRuns(specIds: string[]): Promise<Map<string, Run>> {
         const latest = new Map<string, Run>();

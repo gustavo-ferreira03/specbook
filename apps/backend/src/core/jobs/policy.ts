@@ -19,7 +19,7 @@ import type { RunEnvironment } from "../../infra/db/schema";
  * Bump when the rules that decide what the agent may do on its own change. Questions asked under older rules
  * are reviewed automatically at startup instead of holding their job until a human replies.
  */
-export const AGENT_RULES_VERSION = 2;
+export const AGENT_RULES_VERSION = 3;
 
 export interface TurnPolicy {
     prompt: string;
@@ -81,6 +81,9 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                         abort();
                         return result({ status: "retrying", message: "Specbook will retry its service. No human decision is needed." }, true);
                     }
+                    if (report.kind === "question" && job.kind === "failure_triage" && (await jobsRepository.get(job.id))?.classification === "test_drift") {
+                        throw new Error("Do not ask permission to repair test drift. Call update_spec with the fix; Specbook runs it in isolation and saves or holds it for review on its own.");
+                    }
                     const item = await jobsRepository.addItem({ ...report, body: await scrub(report.body), title: await scrub(report.title), payload: { language: "en", rulesVersion: AGENT_RULES_VERSION }, projectId: job.projectId, jobId: job.id });
                     if (report.kind === "question") {
                         await jobsRepository.transition(job.id, "running", "blocked");
@@ -113,7 +116,7 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                         if (job.kind === "generate_spec" && tool.name === "create_spec") {
                             output = result(await createSelectedSpec(job, params, { signal, checkPolicy: check, baseUrl, environment }));
                         } else if (job.kind === "generate_spec" && ["create_feature", "update_spec", "propose_spec_batch", "start_background_task"].includes(tool.name)) {
-                            throw new Error("Create only the selected Spec using its assigned feature. Do not change existing Specs.");
+                            throw new Error("Create only the selected Spec using its assigned feature. Do not change existing Specs. To revise the selected Spec after a failed run, call create_spec again with the corrected Spec.");
                         } else if (job.kind === "generate_spec" && tool.name === "run_spec") {
                             output = result(await selectedSpecResult(job));
                         } else if (job.kind === "coverage" && ["create_spec", "create_feature"].includes(tool.name)) {
