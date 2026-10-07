@@ -229,6 +229,14 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const ungroupedSpecs = specs.filter((spec) => !knownFeatureIds.has(spec.featureId));
     const sortedChats = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     const pathTab: SidebarTab | null = pathname.startsWith(`/p/${projectId}/chats`) ? "chats" : pathname.startsWith(`/p/${projectId}/specs`) ? "specs" : null;
+
+    /** A tab opens its section: Specs goes to the Spec list, Chats to the latest chat. */
+    function openSection(tab: SidebarTab) {
+        setChosenTab(tab);
+        if (pathTab === tab) return;
+        setDrawerOpen(false);
+        router.push(tab === "specs" ? `/p/${projectId}/specs` : sortedChats[0] ? `/p/${projectId}/chats/${sortedChats[0].id}` : `/p/${projectId}/chats`);
+    }
     const overviewHref = `/p/${projectId}/overview`;
 
     useEffect(() => {
@@ -536,8 +544,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
                 <Tabs value={pathTab ?? chosenTab} onValueChange={(value) => setChosenTab(value as SidebarTab)} className="min-h-0 flex-1">
                     <div className="flex items-center gap-2 px-3 pb-2">
                         <TabsList variant="segmented" className="grid flex-1 grid-cols-2" aria-label="Project content">
-                            <TabsTrigger value="chats" className="h-9 md:h-8"><MessageSquare size={14} /> Chats</TabsTrigger>
-                            <TabsTrigger value="specs" className="h-9 md:h-8"><FileCheck2 size={14} /> Specs</TabsTrigger>
+                            <TabsTrigger value="chats" className="h-9 md:h-8" onClick={() => openSection("chats")}><MessageSquare size={14} /> Chats</TabsTrigger>
+                            <TabsTrigger value="specs" className="h-9 md:h-8" onClick={() => openSection("specs")}><FileCheck2 size={14} /> Specs</TabsTrigger>
                         </TabsList>
                     </div>
                     {renderLoadError()}
