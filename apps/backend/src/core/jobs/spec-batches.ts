@@ -180,12 +180,17 @@ export async function selectedSpecResult(job: Job) {
     const spec = candidate.specId ? await specsRepository.getSpec(candidate.specId) : null;
     const run = candidate.runId ? await runsRepository.getRun(candidate.runId) : spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null;
     const evidenceReview = run && run.status !== "running" ? await reviewRunEvidence(path.join(runsDir, run.id), run) : null;
-    const attemptsLeft = spec ? Math.max(0, MAX_DRAFT_RUNS - (await runsRepository.listRuns(spec.id, { limit: MAX_DRAFT_RUNS })).length) : MAX_DRAFT_RUNS;
+    const attemptsLeft = spec ? Math.max(0, MAX_DRAFT_RUNS - await draftFailures(spec.id)) : MAX_DRAFT_RUNS;
     return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null, evidenceReview, attemptsLeft,
         nextStep: run?.status === "failed" && attemptsLeft > 0 ? reviewNextStep(evidenceReview) ?? "Inspect the failure on the live page and call create_spec again with the corrected Spec." : undefined };
 }
 
 const MAX_DRAFT_RUNS = 3;
+
+/** Real test failures of a draft; runs that never got to test the app (status "error") do not use up an attempt. */
+async function draftFailures(specId: string): Promise<number> {
+    return (await runsRepository.listRuns(specId, { limit: 20 })).filter((run) => run.status === "failed").length;
+}
 
 export async function createSelectedSpec(job: Job, input: unknown, options: { signal?: AbortSignal; checkPolicy?: () => Promise<void>; baseUrl?: string; environment?: RunEnvironment } = {}) {
     const proposed = newSpecProposalSchema.parse(input);
@@ -201,13 +206,13 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
             { commitMessage: `spec-batch:${item.id}:${candidate.id} create "${candidate.title}"`, checkPolicy: options.checkPolicy }));
     } else if (spec.projectId === job.projectId) {
         // Until its first pass the new Spec is a draft: revising it cannot weaken anything that worked.
-        const runs = await runsRepository.listRuns(spec.id, { limit: MAX_DRAFT_RUNS });
+        const runs = await runsRepository.listRuns(spec.id, { limit: 20 });
         const current = await readSpecFiles(spec);
         const changed = current.testSource !== proposed.testSource || JSON.stringify(current.humanSpec) !== JSON.stringify(proposed.humanSpec);
         const reviews = await Promise.all(runs.map((run) => run.status === "passed" ? reviewRunEvidence(path.join(runsDir, run.id), run) : null));
         const passed = runs.some((run, index) => run.status === "passed" && reviews[index]?.verdict !== "contradicts");
         if (changed && !passed) {
-            if (runs.length >= MAX_DRAFT_RUNS) throw new Error(`This Spec did not pass after ${MAX_DRAFT_RUNS} runs. Stop revising it and report what failed and what you suspect.`);
+            if (await draftFailures(spec.id) >= MAX_DRAFT_RUNS) throw new Error(`This Spec did not pass after ${MAX_DRAFT_RUNS} runs. Stop revising it and report what failed and what you suspect.`);
             ({ spec } = await updateSpecInRepo(spec, { description: proposed.description, humanSpec: proposed.humanSpec, testSource: proposed.testSource }, { checkPolicy: options.checkPolicy }));
             revised = true;
         }

@@ -24,7 +24,7 @@ The reason is one or two sentences naming what the evidence shows (for example t
 /** What the agent must do next when the review says the test, not the app, is wrong. */
 export function reviewNextStep(review: EvidenceReview | null): string | undefined {
     if (review?.verdict !== "assertion_wrong" && review?.verdict !== "contradicts") return undefined;
-    return "The test is wrong, not the app. Read the HTML of the asserted element, its parent and its children with browser_evaluate on the live page (for example `(element) => element.parentElement.outerHTML`), find where the observed value really lives, fix the assertion and run again.";
+    return "The test is wrong, not the app. Reproduce the state on the live page, call inspect_element on the asserted element to read its HTML, parent chain and computed colors, fix the assertion to use what it shows and run again.";
 }
 
 /**

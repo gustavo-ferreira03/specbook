@@ -3,7 +3,7 @@ import path from "node:path";
 import { applyVerifiedRepairs } from "./approval";
 import { runsRepository } from "../../infra/repositories/runs";
 import { areSpecsLocked } from "../specs/lifecycle";
-import { jobsRepository } from "../../infra/repositories/jobs";
+import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { chatsRepository } from "../../infra/repositories/chats";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
@@ -214,6 +214,12 @@ const KIND_INSTRUCTIONS = {
     failure_triage: "Investigate the failed Spec and classify its cause without changing expected behavior.",
 } as const;
 
+/** A triage that recognized test drift but left no repair has not handled the failure; it may be retried. */
+function driftWithoutFix(intent: Intent, jobs: Job[], inbox: InboxItem[]): boolean {
+    const job = jobs.find((job) => job.id === intent.jobId);
+    return job?.kind === "failure_triage" && job.classification === "test_drift" && !inbox.some((item) => item.jobId === job.id && item.kind === "spec_fix");
+}
+
 async function dispatchIntent(row: Intent): Promise<void> {
     if (await isAgentPaused(row.projectId)) return;
     const relatedIntents = await stewardRepository.intents(row.projectId);
@@ -250,7 +256,8 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && (item.status === "rejected" || item.payload.ignoredCheck === true)));
     if ((row.source === "event" && row.intent.kind !== "run_specs" && rejected)
         || previous.some((other) => projectJobs.some((job) => job.id === other.jobId && ["queued", "running", "paused", "blocked", "stalled"].includes(job.status)))
-        || (row.source === "event" && row.intent.kind !== "run_specs" && previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000))) {
+        || (row.source === "event" && row.intent.kind !== "run_specs" && previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000
+            && !driftWithoutFix(other, projectJobs, inbox)))) {
         await stewardRepository.updateIntent(row.id, { status: "ignored", reason: rejected ? "A human rejected this proposal for the current Spec/context version." : "Equivalent work is already active or was handled recently." });
         return;
     }

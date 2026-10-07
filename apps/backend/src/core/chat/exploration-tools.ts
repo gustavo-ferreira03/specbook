@@ -133,8 +133,49 @@ export async function scanPage(options: ExplorationToolOptions, signal?: AbortSi
     return JSON.stringify({ evidenceUrl, evidence: JSON.parse(json) });
 }
 
+const inspectElementSchema = z.object({
+    target: z.string().trim().min(1).max(500).describe("Element reference from the latest browser_snapshot (like e43) or a unique CSS selector (like [data-shape-type='arrow'])"),
+}).strict();
+
+/**
+ * Read-only DOM view of one element: its HTML, its ancestors' opening tags and the computed colors, so an
+ * assertion can use what the page really exposes. Fixed code; form values are removed before anything leaves the page.
+ */
+const INSPECT_ELEMENT = `(element) => {
+    const clean = (node) => {
+        const copy = node.cloneNode(true);
+        for (const field of [copy, ...copy.querySelectorAll("*")]) {
+            field.removeAttribute("value");
+            if (field.matches("input, textarea, select")) field.textContent = "";
+        }
+        return copy;
+    };
+    const openingTag = (node) => clean(node.cloneNode(false)).outerHTML.replace(/<\\/[^>]+>$/, "").slice(0, 600);
+    const ancestors = [];
+    for (let node = element.parentElement; node && ancestors.length < 4; node = node.parentElement) ancestors.push(openingTag(node));
+    const style = getComputedStyle(element);
+    return JSON.stringify({
+        html: clean(element).outerHTML.slice(0, 6000),
+        ancestors,
+        computed: { color: style.color, backgroundColor: style.backgroundColor, fill: style.fill, stroke: style.stroke },
+    });
+}`;
+
 export function createExplorationTools(options: ExplorationToolOptions) {
     return [defineTool({
+        name: "inspect_element", label: "inspect_element",
+        description: "Read one element's HTML, its parent chain and its computed colors on the current project page. Use it before writing any assertion on an attribute, CSS selector or color, since browser_snapshot shows only the accessibility tree. Read-only; form values are removed.",
+        parameters: Type.Unsafe<z.infer<typeof inspectElementSchema>>(inspectElementSchema.toJSONSchema()),
+        async execute(_id, input, signal) {
+            const { target } = inspectElementSchema.parse(input);
+            if (!options.mcp) throw new Error("The agent browser is unavailable.");
+            const active = await getActiveTabUrl(options.mcp, signal);
+            if (!active || new URL(active).origin !== new URL(options.baseUrl).origin) throw new Error("Navigate within the project origin before inspecting elements.");
+            const result = await options.mcp.client.callTool({ name: "browser_evaluate", arguments: { element: "Element to inspect", target, function: INSPECT_ELEMENT } }, undefined, { signal });
+            const value = evaluationResult(result);
+            return { content: [{ type: "text" as const, text: await options.scrub(String(redactUrls(typeof value === "string" ? value : JSON.stringify(value)))) }], details: undefined };
+        },
+    }), defineTool({
         name: "scan_page", label: "scan_page",
         description: "Inspect the current project page for axe accessibility violations, console errors, failed HTTP requests, and broken links. Read-only, same-origin, bounded checks. Use the evidence with precise reproduction steps in an Inbox bug report; confirm findings before reporting them.",
         parameters: Type.Unsafe<z.infer<typeof scanPageSchema>>(scanPageSchema.toJSONSchema()),

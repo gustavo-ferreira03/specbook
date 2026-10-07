@@ -51,7 +51,7 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
 }
 
 const MAX_NUDGES = 2;
-const INSPECT_DOM = "Read the HTML of the element you assert on and of its parent and children with browser_evaluate (for example `(element) => element.parentElement.outerHTML`) on the live page, find where the observed value really lives, and use that exact attribute or element in the assertion.";
+const INSPECT_DOM = "Reproduce the state on the live page, call inspect_element on the element you assert on, read its HTML, parent chain and computed colors, and use the exact attribute or element where the observed value lives.";
 
 /** Work the agent stopped short of: a draft that still fails, or test drift classified without a fix. */
 async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof selectedSpecResult>> | null): Promise<string | null> {
