@@ -9,7 +9,7 @@ import { readSpecRawFiles } from "../repo/manual";
 import { createFeatureInRepo, createSpecInRepo, updateSpecInRepo } from "../repo/writer";
 import { parseSpecYaml } from "../repo/yaml";
 import { executeSpec } from "../runner/run";
-import { reviewRunEvidence } from "../runner/evidence-review";
+import { reviewNextStep, reviewRunEvidence } from "../runner/evidence-review";
 import { runsDir } from "../paths";
 import path from "node:path";
 import { analyzeSpecSource, stepTitlesError } from "../runner/validate";
@@ -218,6 +218,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     });
                     const failedStep = failedStepOf(run);
                     const failReason = run.failReason ? truncate(await scrub(run.failReason), RUN_SPEC_FAIL_REASON_LIMIT) : null;
+                    const evidenceReview = await reviewRunEvidence(path.join(runsDir, run.id), { status: run.status, failReason, failedStep });
                     return text(
                         JSON.stringify({
                             runId: run.id,
@@ -226,7 +227,8 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                             durationMs: run.durationMs,
                             failReason,
                             failedStep: failedStep ? truncate(await scrub(failedStep), 200) : null,
-                            evidenceReview: await reviewRunEvidence(path.join(runsDir, run.id), { status: run.status, failReason, failedStep }),
+                            evidenceReview,
+                            nextStep: reviewNextStep(evidenceReview),
                             persisted: true,
                         }),
                     );

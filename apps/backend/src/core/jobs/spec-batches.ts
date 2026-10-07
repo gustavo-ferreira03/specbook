@@ -10,7 +10,7 @@ import { createChat } from "../chat/session-store";
 import { createProjectScrubber } from "../credentials/scrub";
 import { createFeatureInRepo, createSpecInRepo, readSpecFiles, updateSpecInRepo, validateSpec } from "../repo/writer";
 import { executeSpec } from "../runner/run";
-import { reviewRunEvidence } from "../runner/evidence-review";
+import { reviewNextStep, reviewRunEvidence } from "../runner/evidence-review";
 import { runsDir } from "../paths";
 import path from "node:path";
 import { sanitizeTechnicalDetails } from "./presentation-errors";
@@ -180,7 +180,9 @@ export async function selectedSpecResult(job: Job) {
     const spec = candidate.specId ? await specsRepository.getSpec(candidate.specId) : null;
     const run = candidate.runId ? await runsRepository.getRun(candidate.runId) : spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null;
     const evidenceReview = run && run.status !== "running" ? await reviewRunEvidence(path.join(runsDir, run.id), run) : null;
-    return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null, evidenceReview };
+    const attemptsLeft = spec ? Math.max(0, MAX_DRAFT_RUNS - (await runsRepository.listRuns(spec.id, { limit: MAX_DRAFT_RUNS })).length) : MAX_DRAFT_RUNS;
+    return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null, evidenceReview, attemptsLeft,
+        nextStep: run?.status === "failed" && attemptsLeft > 0 ? reviewNextStep(evidenceReview) ?? "Inspect the failure on the live page and call create_spec again with the corrected Spec." : undefined };
 }
 
 const MAX_DRAFT_RUNS = 3;

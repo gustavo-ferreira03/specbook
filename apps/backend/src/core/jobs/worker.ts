@@ -50,6 +50,22 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
     return (await jobsRepository.get(job.id))!;
 }
 
+const MAX_NUDGES = 2;
+const INSPECT_DOM = "Read the HTML of the element you assert on and of its parent and children with browser_evaluate (for example `(element) => element.parentElement.outerHTML`) on the live page, find where the observed value really lives, and use that exact attribute or element in the assertion.";
+
+/** Work the agent stopped short of: a draft that still fails, or test drift classified without a fix. */
+async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof selectedSpecResult>> | null): Promise<string | null> {
+    if ((await jobsRepository.actions(job.id)).filter((action) => action.action === "unfinished").length >= MAX_NUDGES) return null;
+    if (selected?.specId && selected.status === "failed" && selected.attemptsLeft > 0) {
+        return `The selected Spec still fails${selected.evidenceReview?.verdict === "assertion_wrong" ? " although its evidence shows the expected result" : ""}. Do not stop or ask: ${INSPECT_DOM} Then call create_spec again with the corrected Spec.`;
+    }
+    if (job.kind === "failure_triage" && job.classification === "test_drift"
+        && !(await jobsRepository.inbox(job.projectId)).some((item) => item.jobId === job.id && item.kind === "spec_fix")) {
+        return `You classified this failure as test drift but did not propose a fix. ${INSPECT_DOM} Then call update_spec with the corrected spec.ts. Do not ask for permission.`;
+    }
+    return null;
+}
+
 async function executeJob(job: Job): Promise<void> {
     const started = Date.now();
     const heartbeat = setInterval(() => void jobsRepository.heartbeat(job.id, job.startedAt!)
@@ -87,7 +103,11 @@ async function executeJob(job: Job): Promise<void> {
         const last = messages?.filter((message) => message.role === "agent").at(-1)?.content;
         if (current?.status === "running") {
             const selected = job.kind === "generate_spec" ? await selectedSpecResult(job) : null;
-            if (selected?.specId && selected.runId && selected.status !== "running") {
+            const unfinished = await unfinishedWork(current, selected);
+            if (unfinished) {
+                await jobsRepository.log(job.id, "unfinished", unfinished);
+                await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date().toISOString(), pendingMessage: unfinished });
+            } else if (selected?.specId && selected.runId && selected.status !== "running") {
                 await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
             } else if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
                 await retryInfrastructure(job, last || "The agent service could not complete its response.");

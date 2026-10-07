@@ -21,6 +21,12 @@ Answer with one JSON object {"verdict": ..., "reason": ...} and nothing else. Ve
 - "unclear": the evidence is not enough to decide.
 The reason is one or two sentences naming what the evidence shows (for example the observed attribute value or on-screen state).`;
 
+/** What the agent must do next when the review says the test, not the app, is wrong. */
+export function reviewNextStep(review: EvidenceReview | null): string | undefined {
+    if (review?.verdict !== "assertion_wrong" && review?.verdict !== "contradicts") return undefined;
+    return "The test is wrong, not the app. Read the HTML of the asserted element, its parent and its children with browser_evaluate on the live page (for example `(element) => element.parentElement.outerHTML`), find where the observed value really lives, fix the assertion and run again.";
+}
+
 /**
  * A second opinion from the model on whether a run's evidence agrees with its result, so the agent cannot
  * keep a test that fails on a correct screen or passes on a wrong one. It never changes a run's status,
