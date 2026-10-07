@@ -3,9 +3,6 @@ services:
         image: ${SPECBOOK_IMAGE:-ghcr.io/gustavo-ferreira03/specbook:latest}
         shm_size: "1gb"
         restart: unless-stopped
-        # Publish loopback for a local install; use deploy/docker-compose.caddy.yml
-        # for shared HTTPS access. Model-provider OAuth callbacks stay on loopback
-        # and can be forwarded over SSH from the browser's machine.
         ports:
             - "127.0.0.1:4000:4000"
             - "127.0.0.1:4001:4001"

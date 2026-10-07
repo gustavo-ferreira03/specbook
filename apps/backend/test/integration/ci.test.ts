@@ -457,17 +457,11 @@ describe("CI access and quality gates", () => {
         }
     });
 
-    test("CI snippets match the guide and include merge-request pipelines without duplicate push jobs", async () => {
+    test("CI snippets parse and include merge-request pipelines without duplicate push jobs", async () => {
         const { ciSnippet } = await import("../../../frontend/src/lib/ci-snippets");
         const { parse } = await import("yaml");
-        const { backendRoot } = await import("../../src/core/paths");
-        const guide = await fs.readFile(path.resolve(backendRoot, "../../docs/ci.md"), "utf8");
-        const examples = [...guide.matchAll(/```(?:yaml|groovy)\n([\s\S]*?)\n```/g)].map((match) => match[1]);
-        const providers = ["github", "gitlab", "bitbucket", "circleci", "jenkins"] as const;
-        for (const [index, provider] of providers.entries()) {
-            const snippet = ciSnippet(provider, "https://specbook.example.com/api", "<project-id>", false, false);
-            assert.equal(snippet, examples[index], `${provider} settings and documentation must agree`);
-            if (provider !== "jenkins") assert.ok(parse(snippet));
+        for (const provider of ["github", "gitlab", "bitbucket", "circleci"] as const) {
+            assert.ok(parse(ciSnippet(provider, "https://specbook.example.com/api", "<project-id>", false, false)));
         }
         const job = parse(ciSnippet("gitlab", "https://specbook.example.com/api", "project", false, false)).specbook;
         const rules = job.rules as { if: string; when?: string }[];

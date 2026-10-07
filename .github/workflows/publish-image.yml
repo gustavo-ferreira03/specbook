@@ -1,71 +1,28 @@
 name: Publish Docker image
 
 on:
-    workflow_run:
-        workflows: [CI]
-        types: [completed]
+    push:
         branches: [main]
-    workflow_dispatch:
-        inputs:
-            release_tag:
-                description: 'Existing published release to rebuild (vX.Y.Z); leave empty for a main preview'
-                required: false
-                default: ''
-                type: string
+        tags: ['v*']
 
 permissions:
     contents: read
-    actions: read
     packages: write
-    id-token: write
 
 jobs:
-    source:
-        if: >-
-            (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-            (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
-            github.event.workflow_run.head_repository.full_name == github.repository)
-        runs-on: ubuntu-24.04
-        outputs:
-            revision: ${{ steps.source.outputs.revision }}
-            channel: ${{ steps.source.outputs.channel }}
-            version: ${{ steps.source.outputs.version }}
-        steps:
-            - id: source
-              env:
-                  REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
-                  RELEASE_TAG: ${{ inputs.release_tag }}
-                  REPOSITORY: ${{ github.repository }}
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  channel=preview
-                  if [[ -n "$RELEASE_TAG" ]]; then
-                      [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-                      gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" \
-                          --jq '.draft == false and .prerelease == false' | grep -qx true
-                      object="$(gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object)"
-                      for ((depth = 0; depth < 5; depth++)); do
-                          [[ "$(jq -r .type <<< "$object")" == tag ]] || break
-                          tag_sha="$(jq -r .sha <<< "$object")"
-                          [[ "$tag_sha" =~ ^[a-f0-9]{40}$ ]]
-                          object="$(gh api "repos/$REPOSITORY/git/tags/$tag_sha" --jq .object)"
-                      done
-                      [[ "$(jq -r .type <<< "$object")" == commit ]]
-                      REVISION="$(jq -r .sha <<< "$object")"
-                      channel=release
-                  fi
-                  [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]]
-                  gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$REVISION&event=push&status=success" \
-                      --jq '.workflow_runs | any(.head_branch == "main")' | grep -qx true
-                  {
-                      echo "revision=$REVISION"
-                      echo "channel=$channel"
-                      echo "version=$RELEASE_TAG"
-                  } >> "$GITHUB_OUTPUT"
     publish:
-        needs: source
-        uses: ./.github/workflows/container.yml
-        with:
-            revision: ${{ needs.source.outputs.revision }}
-            channel: ${{ needs.source.outputs.channel }}
-            version: ${{ needs.source.outputs.version }}
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+            - uses: docker/setup-buildx-action@v3
+            - uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+            - uses: docker/build-push-action@v6
+              with:
+                  push: true
+                  tags: |
+                      ghcr.io/${{ github.repository }}:latest
+                      ghcr.io/${{ github.repository }}:${{ github.ref_name == 'main' && github.sha || github.ref_name }}

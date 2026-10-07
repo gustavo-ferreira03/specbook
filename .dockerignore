@@ -3,7 +3,6 @@
 .claude
 .impeccable
 .agents
-docs
 .venv
 **/.venv
 **/node_modules
@@ -18,4 +17,3 @@ apps/backend/storage
 **/*.log
 Dockerfile
 docker-compose.yml
-site
