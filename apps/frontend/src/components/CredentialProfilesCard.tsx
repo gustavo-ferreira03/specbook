@@ -162,7 +162,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                 {profiles.length > 0 && (
                     <ul>
                         {profiles.map((profile) => (
-                            <li key={profile.id} className="group relative flex min-h-16 items-center gap-3 border-b border-line px-4 py-3 transition-colors last:border-0 hover:bg-surface-soft sm:px-5">
+                            <li key={profile.id} className="group relative flex min-h-16 items-center gap-3 border-b border-line px-4 py-3 transition-colors last:border-0 hover:bg-surface-hover sm:px-5">
                                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-hover text-ink-muted">
                                     <KeyRound size={15} aria-hidden="true" />
                                 </span>

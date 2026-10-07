@@ -76,7 +76,7 @@ export function ApiRunEvidence({ evidence }: { evidence: RunEvidence }) {
                     {step.requests.map((request, index) => (
                         <Collapsible key={index} className="group/api overflow-hidden rounded-lg border border-line">
                             <CollapsibleTrigger asChild>
-                                <button type="button" className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left outline-none hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
+                                <button type="button" className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
                                     <span className="shrink-0 font-mono text-meta font-semibold text-ink-muted">{request.method}</span>
                                     <span className="min-w-0 flex-1 break-all text-meta text-ink">{request.url}</span>
                                     <span className="shrink-0 font-mono text-meta text-ink-muted">{request.status ?? "No response"}</span>

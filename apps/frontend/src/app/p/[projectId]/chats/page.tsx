@@ -98,7 +98,7 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
                             <li key={chat.id}>
                                 <Link
                                     href={`/p/${projectId}/chats/${chat.id}`}
-                                    className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+                                    className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
                                 >
                                     <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-hover text-ink-muted" aria-hidden="true">
                                         <MessageSquareText size={14} />

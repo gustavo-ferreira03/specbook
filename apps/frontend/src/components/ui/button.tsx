@@ -17,8 +17,8 @@ const buttonVariants = cva(
                 default: "bg-primary text-primary-foreground shadow-xs hover:bg-primary-hover",
                 primary: "bg-primary text-primary-foreground shadow-xs hover:bg-primary-hover",
                 /** Secondary action with a hairline border. */
-                outline: "border border-line-strong bg-surface text-ink shadow-xs hover:border-line-hover hover:bg-surface-soft",
-                secondary: "border border-line-strong bg-surface text-ink shadow-xs hover:border-line-hover hover:bg-surface-soft",
+                outline: "border border-line-strong bg-surface text-ink shadow-xs hover:border-line-hover hover:bg-surface-hover",
+                secondary: "border border-line-strong bg-surface text-ink shadow-xs hover:border-line-hover hover:bg-surface-hover",
                 /** Quiet filled action (e.g. "Run" inside a list). */
                 subtle: "bg-primary-soft text-ink hover:bg-surface-selected",
                 /** Toolbar / row actions. */
