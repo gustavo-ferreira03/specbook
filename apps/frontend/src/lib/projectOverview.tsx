@@ -1,9 +1,10 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { getOverview, overviewEventsUrl } from "./api";
+import { getOverview } from "./api";
 import { invalidate, onInvalidate } from "./invalidation";
 import type { OverviewResponse, SpecStatus } from "./types";
+import { useVisiblePolling } from "./usePolling";
 
 interface ProjectOverview {
     data: OverviewResponse | null;
@@ -14,7 +15,7 @@ interface ProjectOverview {
 
 const ProjectOverviewContext = createContext<ProjectOverview | null>(null);
 
-/** One overview subscription per project, shared by the Sidebar and the Overview page. */
+/** One overview poll per project, shared by the Sidebar and the Overview page. */
 export function ProjectOverviewProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
     const [state, setState] = useState<{ projectId: string; data: OverviewResponse | null; failed: boolean }>({ projectId, data: null, failed: false });
     const generation = useRef(0);
@@ -39,46 +40,13 @@ export function ProjectOverviewProvider({ projectId, children }: { projectId: st
         }
     }, [projectId, apply]);
 
-    // The server pushes the overview whenever it changes; polling covers the gaps while the stream is down.
+    // Polling, not a stream: every open tab would hold an HTTP/1.1 connection, and with ~6 per origin the
+    // streams starve page navigation. The overview is cheap, and invalidation refreshes it after changes.
     useEffect(() => {
-        let source: EventSource | null = null;
-        let live = false;
-        const open = () => {
-            if (source || document.hidden) return;
-            const current = new EventSource(overviewEventsUrl(projectId));
-            source = current;
-            current.addEventListener("overview", (event) => {
-                live = true;
-                generation.current++;
-                apply(JSON.parse((event as MessageEvent<string>).data) as OverviewResponse);
-            });
-            current.onerror = () => {
-                live = false;
-                if (current.readyState === EventSource.CLOSED && source === current) source = null;
-                void reload();
-            };
-        };
-        const close = () => {
-            source?.close();
-            source = null;
-            live = false;
-        };
-        const handleVisibility = () => document.hidden ? close() : open();
-        const fallback = window.setInterval(() => {
-            if (document.hidden || live) return;
-            void reload();
-            open();
-        }, 5000);
-        if (document.hidden) void reload();
-        open();
-        document.addEventListener("visibilitychange", handleVisibility);
-        return () => {
-            close();
-            window.clearInterval(fallback);
-            document.removeEventListener("visibilitychange", handleVisibility);
-            generation.current++;
-        };
-    }, [projectId, apply, reload]);
+        void reload();
+        return () => { generation.current++; };
+    }, [reload]);
+    useVisiblePolling(() => void reload(), 5000);
 
     useEffect(() => onInvalidate((event) => {
         if (!event.projectId || event.projectId === projectId) void reload();

@@ -449,10 +449,6 @@ export function getOverview(projectId: string, signal?: AbortSignal): Promise<Ov
     return api(apiPath`/projects/${projectId}/overview`, { signal });
 }
 
-export function overviewEventsUrl(projectId: string): string {
-    return `${API_URL}${apiPath`/projects/${projectId}/overview/events`}`;
-}
-
 export function getCoverage(projectId: string, signal?: AbortSignal): Promise<CoverageResponse> {
     return api(apiPath`/projects/${projectId}/coverage`, { signal });
 }
