@@ -88,7 +88,7 @@ function RowAction({ label, tooltip, onClick, disabled, danger, children }: { la
                     size="icon-xs"
                     onClick={onClick}
                     disabled={disabled}
-                    className={`text-ink-subtle ${danger ? "hover:bg-danger-soft hover:text-danger" : "hover:bg-surface-selected hover:text-ink"}`}
+                    className={`text-current opacity-75 hover:opacity-100 ${danger ? "hover:bg-danger-soft hover:text-danger" : "hover:bg-surface-selected hover:text-ink"}`}
                     aria-label={label}
                 >
                     {children}
@@ -348,7 +348,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const rowClass = (selected: boolean) =>
         `group relative flex min-h-10 w-full min-w-0 items-center rounded-md transition-colors duration-150 md:min-h-8 ${
             selected
-                ? "bg-surface-selected text-ink [--row-bg:var(--color-surface-selected)]"
+                ? "bg-primary text-primary-foreground [--row-bg:var(--color-primary)]"
                 : "text-ink-muted [--row-bg:var(--color-sidebar)] hover:bg-surface-hover hover:text-ink hover:[--row-bg:var(--color-surface-hover)] focus-within:bg-surface-hover focus-within:[--row-bg:var(--color-surface-hover)]"
         }`;
     const rowLinkClass = "flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md text-control outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:min-h-8";
@@ -592,8 +592,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
                                     return (
                                         <div key={chat.id} className={rowClass(selected)}>
                                             <Link href={href} aria-current={selected ? "page" : undefined} className={`${rowLinkClass} flex-col items-stretch justify-center gap-0 px-2.5 py-1.5`} title={chat.title}>
-                                                <span className={`block truncate ${selected ? "font-medium text-ink" : "text-ink"}`}>{chat.title}</span>
-                                                <span className={`block truncate text-meta ${selected ? "text-ink-muted" : "text-ink-subtle"}`}>
+                                                <span className={`block truncate ${selected ? "font-medium" : "text-ink"}`}>{chat.title}</span>
+                                                <span className={`block truncate text-meta ${selected ? "opacity-75" : "text-ink-subtle"}`}>
                                                     <RelativeTime value={chat.createdAt} />
                                                 </span>
                                             </Link>
@@ -627,7 +627,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         {canEdit && <Link
                             href={settingsHref}
                             aria-current={onSettings ? "page" : undefined}
-                            className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:h-8 ${onSettings ? "bg-surface-selected font-medium text-ink" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
+                            className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:h-8 ${onSettings ? "bg-primary font-medium text-primary-foreground" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
                         >
                             <Settings size={15} /> Settings
                         </Link>}
