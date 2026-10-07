@@ -13,6 +13,7 @@ import { parseSpecYaml } from "../repo/yaml";
 import { resolveSecretEnv } from "../credentials/profiles";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { runPlaywrightSuite } from "../runner/playwright";
+import { reviewRunEvidence, type EvidenceReview } from "../runner/evidence-review";
 import { withRunSlot } from "../runner/process";
 import { analyzeSpecSource, stepTitlesError } from "../runner/validate";
 import { resolveSecretOriginPolicy } from "../runner/secrets";
@@ -28,6 +29,7 @@ export interface ProposalVerification {
     sourceHash: string;
     baseUrl: string;
     screenshots: string[];
+    review?: EvidenceReview | null;
 }
 
 export function proposalDirectory(item: InboxItem, verificationId: string): string {
@@ -82,6 +84,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         failReason: scrub(outcome.processFailure ?? result?.failReason ?? "") || null, failedStep: result?.failedStep ?? null,
         sourceHash: sourceHashOf(patch.testSource), baseUrl, screenshots: manifest.steps.map((step) => step.file),
     };
+    verification.review = await reviewRunEvidence(directory, verification);
     const current = await jobsRepository.item(item.id);
     if (current?.status !== "pending") throw new Error("Proposal was reviewed during verification");
     await jobsRepository.updateItem(item.id, { payload: { ...current.payload, verification } });

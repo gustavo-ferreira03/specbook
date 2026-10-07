@@ -4,6 +4,7 @@ import { runsRepository } from "../../infra/repositories/runs";
 import { stewardRepository } from "../../infra/repositories/steward";
 import { applyProposal, isImplementationOnly } from "../jobs/proposals";
 import { fixProposalSchema } from "../jobs/schemas";
+import type { ProposalVerification } from "../jobs/verification";
 import { isAgentPaused } from "../jobs/pause";
 import { recordAgentMetric } from "../jobs/metrics";
 import { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "../runner/validate";
@@ -52,7 +53,9 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
  */
 export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> {
     if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
-    if ((item.payload.verification as { status?: string } | undefined)?.status !== "passed") return false;
+    const verification = item.payload.verification as ProposalVerification | undefined;
+    // A pass whose screenshots do not show the expected result proves nothing.
+    if (verification?.status !== "passed" || verification.review?.verdict === "contradicts") return false;
     const patch = fixProposalSchema.safeParse(item.payload.params);
     if (!patch.success || !isImplementationOnly(patch.data)) return false;
     const job = await jobsRepository.get(item.jobId);

@@ -13,6 +13,7 @@ import { triageSchema } from "./schemas";
 import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure } from "./retry";
 import { matchesCurrentSpec } from "./current-run";
+import { reviewRunEvidence } from "../runner/evidence-review";
 
 export class StaleTriageError extends Error {}
 
@@ -39,7 +40,7 @@ export async function prepareTriageGoal(projectId: string, runId?: string) {
     const draft = !await runsRepository.hasPassed(spec.id)
         ? "\nThis Spec has never passed, so its spec.ts is an unproven first draft: a wrong locator, a wrong attribute or a wrong assumption about the app is test drift. Before calling it an application bug, check that the app really contradicts spec.yml and that the draft's own action order did not cause the result (for example, a new shape usually stays selected, so a style chosen next applies to it). Fix the draft's assertions too when they check something the app never exposes, without changing what spec.yml expects."
         : "";
-    return { runId: run.id, specId: spec.id, goal: `Investigate failure in ${spec.title}`, message: `Investigate the failure of Spec "${spec.title}" (${spec.id}), run ${run.id}. Read get_failure_evidence and get_spec, then investigate the application in the browser. Classify with triage_failure before proposing a fix.${draft}\nTest drift (locator or timing): call update_spec with the smallest spec.ts change that restores the SAME behavior and assertions; never ask permission to propose it. update_spec verifies candidates in isolation; a passing verification is required for approval.\nApplication bug: submit a bug report with precise repro steps, observed versus expected behavior and evidence; leave the test untouched.\nEnvironment (unavailable site, expired session, missing credentials): retry if transient, otherwise ask a question through the Inbox and resume after the answer.\nNever change spec.yml or weaken the test to make it pass. Ask the human if the intended behavior must change. Do not claim drift when the app violates the contract. End with an Inbox result.` };
+    return { runId: run.id, specId: spec.id, goal: `Investigate failure in ${spec.title}`, message: `Investigate the failure of Spec "${spec.title}" (${spec.id}), run ${run.id}. Read get_failure_evidence and get_spec, then investigate the application in the browser. Classify with triage_failure before proposing a fix. get_failure_evidence includes evidenceReview, an independent reading of the screenshots against spec.yml; "assertion_wrong" means the screen shows the expected result, so the failure is test drift unless you see the app fail in the browser.${draft}\nTest drift (locator or timing): call update_spec with the smallest spec.ts change that restores the SAME behavior and assertions; never ask permission to propose it. update_spec verifies candidates in isolation; a passing verification is required for approval.\nApplication bug: submit a bug report with precise repro steps, observed versus expected behavior and evidence; leave the test untouched.\nEnvironment (unavailable site, expired session, missing credentials): retry if transient, otherwise ask a question through the Inbox and resume after the answer.\nNever change spec.yml or weaken the test to make it pass. Ask the human if the intended behavior must change. Do not claim drift when the app violates the contract. End with an Inbox result.` };
 }
 
 export function createTriageTools(job: Job, abort: () => void) {
@@ -55,8 +56,9 @@ export function createTriageTools(job: Job, abort: () => void) {
                 if (!run || spec?.projectId !== job.projectId) throw new Error("Failure evidence is no longer available");
                 const directory = path.join(runsDir, run.id);
                 const evidence = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8").catch(() => "{}")) as { steps?: { file: string }[] };
+                const evidenceReview = await reviewRunEvidence(directory, { status: run.status, failReason: run.failReason && await scrub(run.failReason), failedStep: (evidence as { failedStep?: string }).failedStep });
                 const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
-                    { type: "text", text: await scrub(JSON.stringify({ run, evidence, artifactBase: `/runs/${run.id}/artifacts/` })) },
+                    { type: "text", text: await scrub(JSON.stringify({ run, evidence, evidenceReview, artifactBase: `/runs/${run.id}/artifacts/` })) },
                 ];
                 for (const step of (await getSecuritySettings()).sendScreenshotsToModel ? (evidence.steps ?? []).slice(-2) : []) {
                     if (!/^evidence\/step-\d{2,3}\.png$/.test(step.file)) continue;

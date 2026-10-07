@@ -9,6 +9,9 @@ import { readSpecRawFiles } from "../repo/manual";
 import { createFeatureInRepo, createSpecInRepo, updateSpecInRepo } from "../repo/writer";
 import { parseSpecYaml } from "../repo/yaml";
 import { executeSpec } from "../runner/run";
+import { reviewRunEvidence } from "../runner/evidence-review";
+import { runsDir } from "../paths";
+import path from "node:path";
 import { analyzeSpecSource, stepTitlesError } from "../runner/validate";
 import { withSpecLock } from "../specs/lifecycle";
 import { createProjectScrubber } from "../credentials/scrub";
@@ -214,16 +217,16 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                         durationMs: run.durationMs,
                     });
                     const failedStep = failedStepOf(run);
+                    const failReason = run.failReason ? truncate(await scrub(run.failReason), RUN_SPEC_FAIL_REASON_LIMIT) : null;
                     return text(
                         JSON.stringify({
                             runId: run.id,
                             specId: spec.id,
                             status: run.status,
                             durationMs: run.durationMs,
-                            failReason: run.failReason
-                                ? truncate(await scrub(run.failReason), RUN_SPEC_FAIL_REASON_LIMIT)
-                                : null,
+                            failReason,
                             failedStep: failedStep ? truncate(await scrub(failedStep), 200) : null,
+                            evidenceReview: await reviewRunEvidence(path.join(runsDir, run.id), { status: run.status, failReason, failedStep }),
                             persisted: true,
                         }),
                     );

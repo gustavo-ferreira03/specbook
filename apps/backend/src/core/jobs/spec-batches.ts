@@ -10,6 +10,9 @@ import { createChat } from "../chat/session-store";
 import { createProjectScrubber } from "../credentials/scrub";
 import { createFeatureInRepo, createSpecInRepo, readSpecFiles, updateSpecInRepo, validateSpec } from "../repo/writer";
 import { executeSpec } from "../runner/run";
+import { reviewRunEvidence } from "../runner/evidence-review";
+import { runsDir } from "../paths";
+import path from "node:path";
 import { sanitizeTechnicalDetails } from "./presentation-errors";
 import { isAgentPaused } from "./pause";
 import { finishedAt } from "./shared";
@@ -169,14 +172,15 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
         },
     });
     await updateCandidate(item.id, candidate.id, { resolvedFeatureId: feature.id });
-    return `${job.pendingMessage}\nSelected Spec reference: ${item.id}/${candidate.id}. Use featureId ${feature.id} and title ${JSON.stringify(candidate.title)} for create_spec. The selection authorizes this new Spec only. Existing spec.yml contracts remain unchanged. create_spec validates the files, saves the Spec and runs it once automatically; inspect its result rather than running again. If this Spec already exists, use run_spec to retrieve the first result. Use inbox_report to ask for prerequisites.`;
+    return `${job.pendingMessage}\nSelected Spec reference: ${item.id}/${candidate.id}. Use featureId ${feature.id} and title ${JSON.stringify(candidate.title)} for create_spec. The selection authorizes this new Spec only. Existing spec.yml contracts remain unchanged. create_spec validates the files, saves the Spec and runs it once automatically; inspect its result and evidenceReview rather than running again. If the run failed or evidenceReview says the test checks the wrong thing, fix the Spec and call create_spec again with the corrected files. If this Spec already exists, use run_spec to retrieve its latest result. Use inbox_report to ask for prerequisites.`;
 }
 
 export async function selectedSpecResult(job: Job) {
     const { candidate } = await selectedCandidate(job);
     const spec = candidate.specId ? await specsRepository.getSpec(candidate.specId) : null;
     const run = candidate.runId ? await runsRepository.getRun(candidate.runId) : spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null;
-    return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null };
+    const evidenceReview = run && run.status !== "running" ? await reviewRunEvidence(path.join(runsDir, run.id), run) : null;
+    return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null, evidenceReview };
 }
 
 const MAX_DRAFT_RUNS = 3;
@@ -198,7 +202,9 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
         const runs = await runsRepository.listRuns(spec.id, { limit: MAX_DRAFT_RUNS });
         const current = await readSpecFiles(spec);
         const changed = current.testSource !== proposed.testSource || JSON.stringify(current.humanSpec) !== JSON.stringify(proposed.humanSpec);
-        if (changed && !runs.some((run) => run.status === "passed")) {
+        const reviews = await Promise.all(runs.map((run) => run.status === "passed" ? reviewRunEvidence(path.join(runsDir, run.id), run) : null));
+        const passed = runs.some((run, index) => run.status === "passed" && reviews[index]?.verdict !== "contradicts");
+        if (changed && !passed) {
             if (runs.length >= MAX_DRAFT_RUNS) throw new Error(`This Spec did not pass after ${MAX_DRAFT_RUNS} runs. Stop revising it and report what failed and what you suspect.`);
             ({ spec } = await updateSpecInRepo(spec, { description: proposed.description, humanSpec: proposed.humanSpec, testSource: proposed.testSource }, { checkPolicy: options.checkPolicy }));
             revised = true;
