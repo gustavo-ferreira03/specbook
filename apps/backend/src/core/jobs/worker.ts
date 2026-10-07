@@ -56,6 +56,9 @@ const INSPECT_DOM = "Reproduce the state on the live page, call inspect_element 
 /** Work the agent stopped short of: a draft that still fails, or test drift classified without a fix. */
 async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof selectedSpecResult>> | null): Promise<string | null> {
     if ((await jobsRepository.actions(job.id)).filter((action) => action.action === "unfinished").length >= MAX_NUDGES) return null;
+    if (selected?.specId && selected.status === "passed" && ["weak", "contradicts"].includes(selected.evidenceReview?.verdict ?? "") && selected.attemptsLeft > 0) {
+        return `The selected Spec passes but does not prove its expected result: ${selected.evidenceReview!.reason} ${INSPECT_DOM} Then call create_spec again with the stronger assertion.`;
+    }
     if (selected?.specId && selected.status === "failed" && selected.attemptsLeft > 0) {
         return `The selected Spec still fails${selected.evidenceReview?.verdict === "assertion_wrong" ? " although its evidence shows the expected result" : ""}. Do not stop or ask: ${INSPECT_DOM} Then call create_spec again with the corrected Spec.`;
     }

@@ -210,7 +210,7 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
         const current = await readSpecFiles(spec);
         const changed = current.testSource !== proposed.testSource || JSON.stringify(current.humanSpec) !== JSON.stringify(proposed.humanSpec);
         const reviews = await Promise.all(runs.map((run) => run.status === "passed" ? reviewRunEvidence(path.join(runsDir, run.id), run) : null));
-        const passed = runs.some((run, index) => run.status === "passed" && reviews[index]?.verdict !== "contradicts");
+        const passed = runs.some((run, index) => run.status === "passed" && !["contradicts", "weak"].includes(reviews[index]?.verdict ?? ""));
         if (changed && !passed) {
             if (await draftFailures(spec.id) >= MAX_DRAFT_RUNS) throw new Error(`This Spec did not pass after ${MAX_DRAFT_RUNS} runs. Stop revising it and report what failed and what you suspect.`);
             ({ spec } = await updateSpecInRepo(spec, { description: proposed.description, humanSpec: proposed.humanSpec, testSource: proposed.testSource }, { checkPolicy: options.checkPolicy }));

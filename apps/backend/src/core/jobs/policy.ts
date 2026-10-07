@@ -8,6 +8,7 @@ import { createProjectScrubber } from "../credentials/scrub";
 import { proposeMutation } from "./proposals";
 import { createTriageTools } from "./triage";
 import { verifyProposal } from "./verification";
+import { reviewNextStep } from "../runner/evidence-review";
 import { applyVerifiedRepairs } from "../steward/approval";
 import { reportSchema } from "./schemas";
 import { isInfrastructureFailure } from "./presentation-errors";
@@ -126,8 +127,10 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                             const verification = ["failure_triage", "regenerate"].includes(job.kind) ? await verifyProposal(job, item, signal) : undefined;
                             if (verification?.status === "passed") await applyVerifiedRepairs(job.projectId);
                             const saved = (await jobsRepository.item(item.id))?.status === "approved";
-                            output = result({ inboxId: item.id, status: verification && verification.status !== "passed" ? "unfinished" : saved ? "saved" : "proposed", verification,
-                                message: verification && verification.status !== "passed" ? "This candidate did not pass and is not visible for approval. Inspect the failure and keep working on a minimal repair. Do not ask the human to approve unfinished work."
+                            const unproven = verification?.status === "passed" ? reviewNextStep(verification.review ?? null) : undefined;
+                            output = result({ inboxId: item.id, status: verification && (verification.status !== "passed" || unproven) ? "unfinished" : saved ? "saved" : "proposed", verification,
+                                message: unproven ? `This candidate passed but does not prove the expected result. ${unproven} Then call update_spec again.`
+                                    : verification && verification.status !== "passed" ? "This candidate did not pass and is not visible for approval. Inspect the failure and keep working on a minimal repair. Do not ask the human to approve unfinished work."
                                     : saved ? "The verified repair was saved to the project. Report the result in one short sentence and finish." : "Await human approval; no repository files changed." });
                         } else if (tool.name === "run_spec" && job.kind === "failure_triage") {
                             if (z.object({ specId: z.string() }).parse(params).specId !== job.specId) throw new Error("Run the Spec being investigated");

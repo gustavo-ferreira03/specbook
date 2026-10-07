@@ -54,8 +54,8 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
 export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> {
     if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
     const verification = item.payload.verification as ProposalVerification | undefined;
-    // A pass whose screenshots do not show the expected result proves nothing.
-    if (verification?.status !== "passed" || verification.review?.verdict === "contradicts") return false;
+    // A pass that does not show, or does not assert, the expected result proves nothing.
+    if (verification?.status !== "passed" || ["contradicts", "weak"].includes(verification.review?.verdict ?? "")) return false;
     const patch = fixProposalSchema.safeParse(item.payload.params);
     if (!patch.success || !isImplementationOnly(patch.data)) return false;
     const job = await jobsRepository.get(item.jobId);
