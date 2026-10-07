@@ -19,7 +19,7 @@ function TabsList({ className, variant = "underline", ...props }: React.Componen
             data-variant={variant}
             className={cn(
                 "group/tabs flex items-center",
-                variant === "underline" ? "gap-5 overflow-x-auto border-b border-line [scrollbar-width:none]" : "inline-flex gap-0.5 rounded-lg border border-line bg-surface p-0.5",
+                variant === "underline" ? "gap-5 overflow-x-auto border-b border-line [scrollbar-width:none]" : "inline-flex gap-0.5 rounded-lg bg-surface-hover p-0.5",
                 className,
             )}
             {...props}
@@ -34,7 +34,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
             className={cn(
                 "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap text-control font-medium text-ink-muted outline-none transition-[color,background-color,border-color,box-shadow] duration-150 hover:text-ink focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45 [&_svg]:shrink-0",
                 "group-data-[variant=underline]/tabs:relative group-data-[variant=underline]/tabs:-mb-px group-data-[variant=underline]/tabs:h-10 group-data-[variant=underline]/tabs:rounded-t-sm group-data-[variant=underline]/tabs:border-b-2 group-data-[variant=underline]/tabs:border-transparent group-data-[variant=underline]/tabs:px-0.5 group-data-[variant=underline]/tabs:data-[state=active]:border-primary group-data-[variant=underline]/tabs:data-[state=active]:text-ink",
-                "group-data-[variant=segmented]/tabs:h-8 group-data-[variant=segmented]/tabs:rounded-md group-data-[variant=segmented]/tabs:px-3 group-data-[variant=segmented]/tabs:data-[state=active]:bg-primary group-data-[variant=segmented]/tabs:data-[state=active]:text-primary-foreground",
+                "group-data-[variant=segmented]/tabs:h-8 group-data-[variant=segmented]/tabs:rounded-md group-data-[variant=segmented]/tabs:px-3 group-data-[variant=segmented]/tabs:data-[state=active]:bg-thumb group-data-[variant=segmented]/tabs:data-[state=active]:text-ink group-data-[variant=segmented]/tabs:data-[state=active]:shadow-xs",
                 className,
             )}
             {...props}

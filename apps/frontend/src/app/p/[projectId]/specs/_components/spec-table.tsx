@@ -88,7 +88,7 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
     const duration = run?.durationMs != null ? formatDuration(run.durationMs) : null;
     const status = useDisplayStatus(spec);
     return (
-        <li className="group/row relative flex items-center gap-3 border-b border-line px-4 py-2.5 transition-colors duration-150 hover:bg-surface-hover sm:gap-4">
+        <li className="group/row relative flex items-center gap-3 border-b border-line px-4 py-2.5 transition-colors duration-150 hover:bg-surface-soft sm:gap-4">
             <span className="hidden w-24 shrink-0 sm:flex">
                 <StatusPill status={status} size="sm" />
             </span>

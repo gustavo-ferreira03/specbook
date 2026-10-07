@@ -753,7 +753,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                             )}
                             <Collapsible open={sourceOpen} onOpenChange={setSourceOpen} className="group/source overflow-hidden rounded-xl border border-line">
                                 <CollapsibleTrigger asChild>
-                                    <button type="button" className="flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
+                                    <button type="button" className="flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none transition-colors hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
                                         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-ink-muted"><FileCode2 size={15} aria-hidden="true" /></span>
                                         <span className="min-w-0 flex-1">
                                             <span className="flex items-center gap-2 text-control font-semibold text-ink">

@@ -21,7 +21,7 @@ export function RunDiagnostics({ evidence }: { evidence: RunEvidence }) {
             {diagnostics.length > 0 && (
                 <Collapsible className="group/diagnostics overflow-hidden rounded-lg border border-line">
                     <CollapsibleTrigger asChild>
-                        <button type="button" className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-control font-medium text-ink outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
+                        <button type="button" className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-control font-medium text-ink outline-none transition-colors hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
                             <Terminal size={14} aria-hidden="true" className="text-ink-muted" />
                             <span className="min-w-0 flex-1">Console and network</span>
                             <span className="tabular text-meta text-ink-subtle">{diagnostics.length}</span>
@@ -47,7 +47,7 @@ export function RunDiagnostics({ evidence }: { evidence: RunEvidence }) {
             {evidence.errorContext && (
                 <Collapsible className="group/context overflow-hidden rounded-lg border border-line">
                     <CollapsibleTrigger asChild>
-                        <button type="button" className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-control font-medium text-ink outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
+                        <button type="button" className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-control font-medium text-ink outline-none transition-colors hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
                             <FileCode2 size={14} aria-hidden="true" className="text-ink-muted" />
                             <span className="min-w-0 flex-1">Failure context</span>
                             <ChevronDown size={13} aria-hidden="true" className="text-ink-subtle transition-transform group-data-[state=open]/context:rotate-180 motion-reduce:transition-none" />
