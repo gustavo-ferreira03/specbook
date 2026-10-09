@@ -80,11 +80,11 @@ function healthStatus(health: OverviewResponse["summary"]["specHealth"]) {
     return "not_checked";
 }
 
-function ProjectHealth({ summary }: { summary: OverviewResponse["summary"] }) {
+function ProjectHealth({ summary, actions }: { summary: OverviewResponse["summary"]; actions?: React.ReactNode }) {
     return <section aria-label="Project health" className="border-b border-line pb-5">
-        <div className="flex items-start gap-2.5">
+        <div className="flex flex-wrap items-start gap-2.5">
             <StatusDot status={healthStatus(summary.specHealth)} className="mt-1" />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
                 <p className="text-body font-medium text-ink">{summary.verdict}</p>
                 <p className="mt-1 text-meta text-ink-subtle">
                     {summary.lastCheckedAt ? <><RelativeTime value={summary.lastCheckedAt} prefix="Last checked" /> · </> : null}
@@ -93,6 +93,7 @@ function ProjectHealth({ summary }: { summary: OverviewResponse["summary"] }) {
                     {summary.nextCheckAt && <>Next scheduled run <time dateTime={summary.nextCheckAt}>{formatDateTime(summary.nextCheckAt)}</time></>}
                 </p>
             </div>
+            {actions && <div className="flex shrink-0 flex-wrap items-center gap-1">{actions}</div>}
         </div>
         {summary.systemHealth && <Alert variant="warning" role="status" className="mt-4">
             <AlertDescription>{summary.systemHealth.message}</AlertDescription>
@@ -219,17 +220,16 @@ export default function OverviewPage({ params }: { params: Promise<{ projectId: 
 
     return <div className="flex min-h-full flex-col bg-surface">
         <PageHeader title="Overview" width="data"
-            description={data?.summary.globallyPaused ? "Specbook is paused across all projects." : data?.summary.paused ? "Specbook is paused for this project." : undefined}
-            actions={data && canEdit && <>
-                <BusyButton busy={requestingTask === "explore"} icon={ScanSearch} disabled={requestingTask !== null} onClick={() => void requestTask("explore")}>Explore app</BusyButton>
-                {data.summary.globallyPaused
-                    ? isAdmin && <Button asChild variant="ghost" size="sm"><Link href="/settings?tab=agent#agent-pause-heading"><Play size={14} /> Resume in settings</Link></Button>
-                    : <BusyButton busy={savingPause} icon={data.summary.paused ? Play : Pause} variant="ghost" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</BusyButton>}
-            </>} />
+            description={data?.summary.globallyPaused ? "Specbook is paused across all projects." : data?.summary.paused ? "Specbook is paused for this project." : undefined} />
         <PageContainer width="data" innerClassName="space-y-7">
             {failed && data && <Alert variant="danger" role="alert" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{LOAD_ERROR}</AlertDescription><Button variant="outline" size="sm" onClick={tryAgain}><RefreshCw size={13} /> Try again</Button></Alert>}
             {failed && !data ? <EmptyState role="alert" tone="danger" icon={AlertCircle} title="Overview could not load" description={LOAD_ERROR} action={<Button onClick={tryAgain}><RefreshCw size={14} /> Try again</Button>} /> : !data ? <div className="space-y-6" role="status" aria-busy="true" aria-label="Loading Overview"><Skeleton className="h-14 w-full" />{[0, 1, 2].map((row) => <Skeleton key={row} className="h-11 w-full" />)}</div> : <>
-                {!emptyProject && <ProjectHealth summary={data.summary} />}
+                {!emptyProject && <ProjectHealth summary={data.summary} actions={canEdit && <>
+                <BusyButton busy={requestingTask === "explore"} icon={ScanSearch} variant="ghost" disabled={requestingTask !== null} onClick={() => void requestTask("explore")}>Explore app</BusyButton>
+                {data.summary.globallyPaused
+                    ? isAdmin && <Button asChild variant="ghost" size="sm"><Link href="/settings?tab=agent#agent-pause-heading"><Play size={14} /> Resume in settings</Link></Button>
+                    : <BusyButton busy={savingPause} icon={data.summary.paused ? Play : Pause} variant="ghost" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</BusyButton>}
+</>} />}
                 {feedback && <InlineFeedback feedback={feedback} />}
                 {data.needsYou.length > 0 && <NeedsYou items={data.needsYou} onOpen={open} />}
                 {selectedSpecs.length > 0 && <SelectedSpecs items={selectedSpecs} onOpen={open} />}

@@ -6,6 +6,7 @@ import { AlertCircle, ArrowUp, LoaderCircle, MessageSquareText, Settings2, Spark
 import { useAuth } from "@/components/AuthProvider";
 import { ChatSettingsDialog } from "@/components/ChatSettingsDialog";
 import { EmptyState } from "@/components/EmptyState";
+import { SpecGrid } from "@/components/SpecGrid";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -86,11 +87,12 @@ function NewChatContent({ projectId }: { projectId: string }) {
             <PageHeader title="New chat" breadcrumbs={[{ label: "Chats", href: `/p/${projectId}/chats` }]} width="chat" className="pt-3 pb-3 md:pt-5 md:pb-4" />
             <ScrollArea className="min-h-0 flex-1">
                 <div className="px-4 pt-6 pb-10 md:px-8 md:pt-8">
-                    <section className="mx-auto w-full max-w-chat pt-2 pb-8 md:pt-6" aria-labelledby="chat-intro">
-                        <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface" aria-hidden="true">
+                    <section className="relative isolate mx-auto w-full max-w-chat pt-2 pb-8 md:pt-6" aria-labelledby="chat-intro">
+                        <SpecGrid fade={false} className="spec-grid-halo -inset-x-24 -inset-y-10 -z-10" />
+                        <span className="flex size-11 items-center justify-center rounded-md border border-line-strong bg-surface" aria-hidden="true">
                             <LogoMark className="size-5 dark:invert" />
                         </span>
-                        <h2 id="chat-intro" className="mt-4 text-title text-ink text-balance">What should this application do?</h2>
+                        <h2 id="chat-intro" className="mt-5 text-display font-[650] text-ink text-balance">What should this application do?</h2>
                         <p className="mt-2 max-w-[60ch] text-body text-ink-muted">
                             Describe a flow or point the agent to an area of the application. It will browse, clarify the behavior, and save the verified result as a Spec.
                         </p>

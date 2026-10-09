@@ -928,7 +928,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 breadcrumbs={[{ label: discovery ? "Project discovery" : "Chats", href: discovery ? `/p/${projectId}` : chatsHref }]}
                 width={browserBeside ? "full" : "chat"}
                 className="pt-3 pb-3 md:pt-5 md:pb-4"
-                actions={canEdit && <Button variant="ghost" size="sm" onClick={() => setSettingsTab("credentials")}><Settings2 size={14} />Chat settings</Button>}
+               
             />
 
             {discovery && revisionInfo && (
@@ -1092,6 +1092,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                                                   : "Enter to send · Shift+Enter for a new line"}
                                         </span>
                                     </p>
+                                    {canEdit && <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-meta text-ink-subtle" onClick={() => setSettingsTab("credentials")}><Settings2 size={13} /> Settings</Button>}
                                     {state.busy && (
                                         <Button
                                             type="button"

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
+import { SpecGrid } from "@/components/SpecGrid";
 import { cn } from "@/lib/utils";
 
 export type PageWidth = "reading" | "chat" | "data" | "full";
@@ -23,6 +24,8 @@ export function PageHeader({
     meta,
     actions,
     titleAdornment,
+    kicker,
+    size = "default",
     width = "full",
     bordered = true,
     className,
@@ -33,13 +36,16 @@ export function PageHeader({
     meta?: React.ReactNode;
     actions?: React.ReactNode;
     titleAdornment?: React.ReactNode;
+    kicker?: React.ReactNode;
+    size?: "default" | "document";
     width?: PageWidth;
     bordered?: boolean;
     className?: string;
 }) {
     const crumbs = breadcrumbs ?? [];
     return (
-        <header className={cn("shrink-0 bg-surface px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5", bordered && "border-b border-line", className)}>
+        <header className={cn("relative isolate shrink-0 overflow-hidden bg-surface px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5", size === "document" && "md:pt-8 md:pb-7", bordered && "border-b border-line", className)}>
+            <SpecGrid fade={false} className="spec-grid-header -z-10" />
             <div className={cn("mx-auto w-full", widthClasses[width])}>
                 {crumbs.length > 0 && (
                     <nav aria-label="Breadcrumb" className="mb-1.5">
@@ -59,14 +65,15 @@ export function PageHeader({
                 )}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                     <div className="min-w-0 flex-1">
+                        {kicker && <p className="mb-1.5 truncate font-mono text-meta text-ink-muted">{kicker}</p>}
                         <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-                            <h1 className="min-w-0 text-title break-words text-ink">{title}</h1>
+                            <h1 className={cn("min-w-0 break-words text-ink font-[650]", size === "document" ? "text-display" : "text-title")}>{title}</h1>
                             {titleAdornment}
                         </div>
-                        {description && <p className="mt-0.5 max-w-[70ch] text-body text-ink-muted">{description}</p>}
+                        {description && <p className={cn("max-w-[70ch] text-body text-ink-muted", size === "document" ? "mt-2" : "mt-0.5")}>{description}</p>}
                         {meta && <div className="mt-1 text-meta text-ink-muted">{meta}</div>}
                     </div>
-                    {actions && <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
+                    {actions && <div className={cn("flex shrink-0 flex-wrap items-center gap-2 sm:justify-end", kicker ? (size === "document" ? "sm:pt-7" : "sm:pt-6") : size === "document" && "sm:pt-1")}>{actions}</div>}
                 </div>
             </div>
         </header>

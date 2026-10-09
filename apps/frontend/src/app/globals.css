@@ -528,6 +528,14 @@ summary:focus-visible,
     --grid-spot: color-mix(in oklch, var(--panel-fg) 55%, transparent);
 }
 
+.spec-grid-halo {
+    mask-image: radial-gradient(ellipse 60% 70% at 30% 40%, black 0%, transparent 72%);
+}
+
+.spec-grid-header {
+    mask-image: linear-gradient(to right, transparent 35%, black 100%);
+}
+
 .spec-grid-fade {
     mask-image: radial-gradient(ellipse 460px 380px at 50% 50%, transparent 35%, black 100%);
 }

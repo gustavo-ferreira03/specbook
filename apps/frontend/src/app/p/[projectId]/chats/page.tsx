@@ -45,7 +45,7 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
     }, [projectId, refreshKey]);
 
     const newChatButton = canEdit && (
-        <Button asChild>
+        <Button asChild size="sm">
             <Link href={newChatHref}><Plus size={14} /> New chat</Link>
         </Button>
     );
@@ -54,7 +54,6 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
         <div className="flex min-h-full flex-col bg-surface">
             <PageHeader
                 title="Chats"
-                actions={chats && chats.length > 0 ? newChatButton : undefined}
                 width="chat"
             />
             {error && !chats ? (
@@ -93,6 +92,10 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
                 </div>
             ) : (
                 <PageContainer width="chat">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="tabular text-meta text-ink-muted">{chats.length} {chats.length === 1 ? "conversation" : "conversations"}</p>
+                        {newChatButton}
+                    </div>
                     <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line" aria-label="Chats">
                         {chats.map((chat) => (
                             <li key={chat.id}>

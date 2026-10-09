@@ -125,6 +125,9 @@ function InvalidReason({ reason, testSource }: { reason: string; testSource: str
     );
 }
 
+const sealBorder: Record<string, string> = { passed: "border-success/45", failed: "border-danger/45", error: "border-danger/45", invalid: "border-invalid/45", running: "border-line-strong", unverified: "border-line-strong" };
+const sealFill: Record<string, string> = { passed: "bg-success", failed: "bg-danger", error: "bg-danger", invalid: "bg-invalid", running: "bg-ink", unverified: "bg-ink-subtle" };
+
 function VerificationBanner({
     projectId,
     detail: specDetail,
@@ -133,6 +136,7 @@ function VerificationBanner({
     latestEvidence,
     running,
     environment,
+    actions,
 }: {
     projectId: string;
     detail: SpecDetail;
@@ -141,6 +145,7 @@ function VerificationBanner({
     latestEvidence: LoadedRunEvidence | undefined;
     running: boolean;
     environment: string;
+    actions?: React.ReactNode;
 }) {
     const { canEdit } = useAuth();
     const displayStatus = useDisplayStatus(spec);
@@ -201,15 +206,16 @@ function VerificationBanner({
     const meta = statusMeta(status);
     const Icon = meta.icon;
     return (
-        <section aria-label="Run status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className="flex gap-3.5 rounded-xl border border-line bg-surface p-4">
-            <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full", meta.soft, meta.text)}>
-                <Icon size={17} strokeWidth={2.25} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
+        <section aria-label="Run status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className={cn("flex flex-wrap gap-4 rounded-xl border bg-surface p-4 sm:flex-nowrap", body ? "items-start" : "items-center", sealBorder[status] ?? "border-line-strong")}>
+            <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-md text-surface", sealFill[status] ?? "bg-ink-subtle")}>
+                <Icon size={19} strokeWidth={2.5} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
             </span>
             <div className="min-w-0 flex-1">
-                <p className="pt-0.5 text-body font-semibold text-ink">{headline}</p>
+                <p className="text-section text-ink">{headline}</p>
                 {detail && <div className="mt-0.5 text-control text-ink-muted">{detail}</div>}
                 {body}
             </div>
+            {actions && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">{actions}</div>}
         </section>
     );
 }
@@ -656,21 +662,11 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
             <PageHeader
                 title={spec.title}
                 breadcrumbs={crumbs}
+                kicker={spec.path ? `${spec.path}/spec.yml` : undefined}
+                size="document"
                 width="reading"
                 titleAdornment={latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
                 description={spec.description || undefined}
-                actions={
-                    <>
-                        <SpecHistoryDialog specId={specId} />
-                        {canEdit && <><Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
-                            <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
-                        </Button>
-                        <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
-                        <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid"}>
-                            <Play size={12} fill="currentColor" /> {running ? "Running…" : "Run"}
-                        </Button></>}
-                    </>
-                }
             />
             <PageContainer width="reading" className="min-w-0 [overflow-wrap:anywhere] lg:pb-14" innerClassName="space-y-9">
                 {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}{/pending file edits/.test(actionError) && <Link href={`/p/${projectId}/settings?tab=git`} className="mt-2 block font-medium underline underline-offset-2">Review pending edits</Link>}</AlertDescription></Alert>}
@@ -690,11 +686,22 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                     latestEvidence={latestRun ? evidence[latestRun.id] : undefined}
                     running={running}
                     environment={environment}
+                    actions={canEdit && spec.status !== "invalid" && <>
+                        <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
+                        <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid"}>
+                            <Play size={12} fill="currentColor" /> {running ? "Running…" : latestRun ? "Run again" : "Run"}
+                        </Button>
+                    </>}
                 />
                 </div>
 
                 <section aria-labelledby="specification-heading">
-                    <SectionHeader id="specification-heading" title={editing ? "Edit specification" : "Specification"} className="mb-4" />
+                    <SectionHeader id="specification-heading" title={editing ? "Edit specification" : "Specification"} className="mb-4" actions={<>
+                        <SpecHistoryDialog specId={specId} />
+                        {canEdit && <Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
+                            <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
+                        </Button>}
+                    </>} />
                     {editing && content ? (
                         <form className="space-y-6" onSubmit={(event) => { event.preventDefault(); void saveFiles(); }}>
                             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-line bg-surface-soft px-3.5 py-2.5">

@@ -187,15 +187,9 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
     const runnableCount = specs.filter((spec) => spec.status !== "invalid").length;
     const filterCount = (value: StatusFilter) => value === "all" ? specs.length : counts[value] ?? 0;
 
-    return (
-        <div className="flex min-h-full flex-col bg-surface">
-            <PageHeader
-                title="Specs"
-                width="data"
-                actions={canEdit &&
-                    <>
-                        {createActions}
-                        <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={isRunning} />
+    const runControls = (
+        <>
+            <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={isRunning} />
                         <div className="group/split flex items-center">
                             <Button type="button" size="sm" className="rounded-r-none border-r-0 group-hover/split:bg-transparent group-hover/split:text-primary" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>
                                 <RunningIcon running={isRunning} size={13} /> {isRunning ? "Running…" : "Run all"}
@@ -228,8 +222,14 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </div>
-                    </>
-                }
+        </>
+    );
+
+    return (
+        <div className="flex min-h-full flex-col bg-surface">
+            <PageHeader
+                title="Specs"
+                width="data"
             />
             <PageContainer width="data" innerClassName="space-y-6">
                 {syncWarning && <Alert variant="warning" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
@@ -258,6 +258,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                 );
                             })}
                         </div>
+                        <div className="flex flex-wrap items-center gap-2">
                         <div className="relative sm:w-64">
                             <Search size={14} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-subtle" />
                             <Input
@@ -273,6 +274,8 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                     <X size={13} />
                                 </button>
                             )}
+                        </div>
+                        {canEdit && runControls}
                         </div>
                     </div>
 
@@ -297,9 +300,10 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                             onRunGroup={(group) => handleRun(group.specs, `Run ${typeof group.title === "string" ? group.title : "feature"}`)}
                         />
                     )}
-                    {filtering && visibleCount > 0 && (
-                        <p className="text-meta text-ink-subtle" aria-live="polite">Showing {plural(visibleCount, "Spec")} of {formatNumber(specs.length)}.</p>
-                    )}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        {filtering && visibleCount > 0 ? <p className="text-meta text-ink-subtle" aria-live="polite">Showing {plural(visibleCount, "Spec")} of {formatNumber(specs.length)}.</p> : <span />}
+                        {canEdit && createActions && <div className="flex items-center gap-2">{createActions}</div>}
+                    </div>
                 </div>
             </PageContainer>
             <SpecRunDialog

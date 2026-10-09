@@ -139,6 +139,9 @@ Flat. Surfaces are separated by hairlines and spacing. Shadows exist only for th
 - **Access screens (login, invitation):** a 360px form column with labels above full-width fields, and on wide screens a graphite panel typesetting a sample Spec whose steps check off once on load. Behind the form sits the spec grid: engineering-paper dots that fade around the form and light up under the pointer. The panel stays dark in both themes (graphite in light, deeper charcoal in dark).
 - **Moments:** a status icon stamps in once when a run finishes while you watch (running to passed, failed, error or invalid), never on page load. The 404 page is a failed Spec: the requested path, the step that failed, expected versus actual, and "Failed · 404".
 
+- **Actions live next to what they act on.** Page headers carry only the title (and, for a Spec, its file path); they hold no toolbar. Run and environment sit in the Spec's run seal; Versions and Edit in the Specification section; Run all, search and filters in the list toolbar; New Spec and New feature at the end of the list; agent Explore and Pause in the agent status line; chat settings in the composer footer; New chat at the top of the chat list.
+- **Run seal:** status-coloured border, solid status square with the icon, section-size headline, contents centred when compact and top-aligned when failure details follow.
+
 ## 6. Do's and Don'ts
 
 - Do use tokens from `apps/frontend/src/app/globals.css` only. Never hard-code colours.

@@ -45,13 +45,15 @@ function SettingsContent() {
 
     if (!canEdit) return <EmptyState title="Project settings are read-only" description="Your viewer account can read Specs, run results and evidence. Ask an editor to change project settings." />;
     return <div className="flex min-h-full flex-col bg-surface">
-        <PageHeader title="Project settings" width="reading" bordered={false} className="pb-2 md:pb-3"
-            actions={isAdmin && <Button asChild variant="ghost"><Link href="/settings"><Settings size={14} /> Instance settings</Link></Button>} />
+        <PageHeader title="Project settings" width="reading" bordered={false} className="pb-2 md:pb-3" />
         <Tabs value={activeTab} onValueChange={selectTab} className="flex-1">
             <div className="border-b border-line bg-surface px-4 md:px-8">
-                <TabsList aria-label="Project settings sections" className="mx-auto w-full max-w-reading border-b-0">
-                    {TAB_LABELS.map(([value, label]) => <TabsTrigger key={value} value={value}>{label}</TabsTrigger>)}
-                </TabsList>
+                <div className="mx-auto flex w-full max-w-reading items-center justify-between gap-4">
+                    <TabsList aria-label="Project settings sections" className="min-w-0 border-b-0">
+                        {TAB_LABELS.map(([value, label]) => <TabsTrigger key={value} value={value}>{label}</TabsTrigger>)}
+                    </TabsList>
+                    {isAdmin && <Link href="/settings" className="flex shrink-0 items-center gap-1.5 text-control text-ink-muted underline-offset-4 hover:text-ink hover:underline"><Settings size={13} /> Instance settings</Link>}
+                </div>
             </div>
             <PageContainer width="reading" className="pb-16">
                 <TabsContent value="general"><ProjectSettingsCard projectId={projectId}><EnvironmentsSettingsCard projectId={projectId} /><CredentialProfilesCard projectId={projectId} /></ProjectSettingsCard></TabsContent>

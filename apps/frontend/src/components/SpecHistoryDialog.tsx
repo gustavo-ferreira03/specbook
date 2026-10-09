@@ -83,8 +83,8 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button type="button" variant="outline" size="sm">
-                    <History size={13} /> History
+                <Button type="button" variant="ghost" size="sm">
+                    <History size={13} /> Versions
                 </Button>
             </DialogTrigger>
             <DialogContent className="flex h-[min(720px,calc(100dvh-24px))] max-w-[920px] flex-col gap-0 overflow-hidden p-0 sm:p-0">

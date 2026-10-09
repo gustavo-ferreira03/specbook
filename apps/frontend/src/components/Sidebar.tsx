@@ -547,7 +547,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
 
                     <TabsContent value="specs" className="data-[state=active]:flex data-[state=active]:flex-col">
                         <div className="flex h-9 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
-                            <Link href={`/p/${projectId}/specs`} onClick={() => setDrawerOpen(false)} className="text-meta font-medium text-ink-subtle hover:text-ink">All Specs</Link>
+                            <Link href={`/p/${projectId}/specs`} onClick={() => setDrawerOpen(false)} className="font-mono text-meta text-ink-subtle hover:text-ink">All Specs</Link>
                             {batchRunning && (
                                 <Button type="button" variant="ghost" size="sm" onClick={() => runBatch.setOpen(true)} className="h-7 gap-1 px-2 text-meta text-ink-muted">
                                     <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" /> View run
@@ -566,7 +566,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
 
                     <TabsContent value="chats" className="data-[state=active]:flex data-[state=active]:flex-col">
                         <div className="flex h-9 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
-                            <Link href={`/p/${projectId}/chats`} onClick={() => setDrawerOpen(false)} className="text-meta font-medium text-ink-subtle hover:text-ink">All chats</Link>
+                            <Link href={`/p/${projectId}/chats`} onClick={() => setDrawerOpen(false)} className="font-mono text-meta text-ink-subtle hover:text-ink">All chats</Link>
                             {canEdit && (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
