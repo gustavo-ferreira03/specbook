@@ -67,8 +67,6 @@ export async function collectProjectSignals(project: Project, previous: ProjectO
         const changed = previous.specs !== undefined && previous.specs[spec.id] !== hash;
         const generation = (previous.specGenerations?.[spec.id] ?? 0) + (changed ? 1 : 0);
         generations[spec.id] = generation;
-        // A Spec that cannot run is something to repair. The key is tied to this exact version, so each broken
-        // version is handled once, and a repair that changes the files yields a new signal only if it is still broken.
         if (spec.status === "invalid") {
             await signal("invalid_spec", `invalid:${spec.id}:${hash}`, `“${spec.title}” cannot run`, spec.invalidReason ?? "The Spec files could not be read.", { specIds: [spec.id], sourceHash: spec.sourceHash, markdownHash: spec.markdownHash });
         }

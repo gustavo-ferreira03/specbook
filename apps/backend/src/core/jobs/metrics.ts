@@ -18,7 +18,6 @@ export interface AgentMetricDetails {
 
 let writes: Promise<void> = Promise.resolve();
 
-/** Evaluation identifiers and outcomes only; never prompts, errors, URLs or credentials. */
 export async function recordAgentMetric(job: Job, event: string, details: AgentMetricDetails = {}): Promise<void> {
     const record = {
         schemaVersion: 1, eventId: crypto.randomUUID(), at: new Date().toISOString(), event,

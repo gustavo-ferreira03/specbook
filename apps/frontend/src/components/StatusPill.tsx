@@ -2,10 +2,6 @@ import { Badge } from "@/components/ui/badge";
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
-/**
- * Status as icon + text on a soft tinted background. `kind="run"` uses run wording
- * ("Failed") instead of Spec wording ("Failing").
- */
 export function StatusPill({ status, kind = "spec", size = "default", className }: { status: string; kind?: "spec" | "run"; size?: "default" | "sm"; className?: string }) {
     const meta = statusMeta(status);
     const Icon = meta.icon;

@@ -55,7 +55,6 @@ export function createChatsRouter(): Hono {
         const id = c.req.param("id");
         const [row, view] = await Promise.all([chatsRepository.getChatRow(id), getChatView(id)]);
         if (!row || !view) throw new HTTPException(404, { message: "Chat not found" });
-        // Runs the browser health check (it never closes a browser while a turn is active).
         const browser = await getChatBrowser(id);
         const revision = row.contextRevisionId
             ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
@@ -97,7 +96,6 @@ export function createChatsRouter(): Hono {
                     })
                     .catch(() => undefined);
             const unsubscribe = subscribeToChatUpdates(id, notify);
-            // SSE comment lines keep proxies and the browser from dropping an idle stream.
             const heartbeat = setInterval(() => void stream.write(":ping\n\n").catch(() => undefined), SSE_HEARTBEAT_MS);
             stream.onAbort(() => {
                 clearInterval(heartbeat);

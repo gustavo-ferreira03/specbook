@@ -3,8 +3,6 @@ import type { ProjectContextRevisionRow } from "../../infra/repositories/project
 import type { Project } from "../../infra/repositories/projects";
 import { projectContextJsonSchema } from "./context-tools";
 
-// Resolved next to this module in dev (src/core/chat/prompts/) and next to the bundle in
-// production (dist/prompts/, copied by the build script).
 const promptsDir = new URL("./prompts/", import.meta.url);
 
 function loadPrompt(name: string): string {

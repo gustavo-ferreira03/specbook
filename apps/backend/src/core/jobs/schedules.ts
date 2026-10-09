@@ -35,7 +35,6 @@ function cronField(source: string, min: number, max: number, sunday = false): Cr
     return { values, wildcard: source.includes("*") };
 }
 
-/** Five numeric cron fields, evaluated in UTC. Missed occurrences are coalesced by the monitor. */
 export function nextCronAt(cron: string, after = new Date()): string {
     if (cron.length > 120) throw new Error("Cron expression is too long");
     const fields = cron.trim().split(/\s+/);

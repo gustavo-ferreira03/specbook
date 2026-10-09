@@ -37,20 +37,12 @@ export function extractText(message: AgentMessage | undefined): string {
         .join("");
 }
 
-/**
- * Writes the whole session file now, including a chat without messages.
- * SessionManager offers no public flush, so Specbook relies on the library's
- * private `_rewriteFile` here (checked against @earendil-works/pi-coding-agent
- * 1.0.4). Keep every use of the private API behind this wrapper.
- */
 export function flushSessionFile(sessionManager: SessionManager): void {
     const writable = sessionManager as unknown as { _rewriteFile(): void; flushed: boolean };
     writable._rewriteFile();
     writable.flushed = true;
 }
 
-// Chat id -> session file path. Session files are named "<timestamp>_<id>.jsonl", so a
-// cache miss is resolved with a directory listing instead of parsing every session file.
 const sessionPaths = new Map<string, string>();
 const titles = new Map<string, { mtimeMs: number; size: number; title: string }>();
 
@@ -79,7 +71,6 @@ async function resolveSessionPath(id: string): Promise<string | null> {
     const found = sessionPaths.get(id);
     if (found && (await fileExists(found))) return found;
     sessionPaths.delete(id);
-    // Fallback for session files that do not follow the naming convention.
     const info = (await SessionManager.list(cwd, sessionsDir)).find((session) => session.id === id);
     if (!info) return null;
     sessionPaths.set(id, info.path);
@@ -107,7 +98,6 @@ function sessionTitle(sessionManager: SessionManager): string {
     return DEFAULT_TITLE;
 }
 
-/** A short, sentence-cased title taken from the first message of a chat. */
 export function chatTitle(text: string): string {
     let title = text.replace(/\s+/g, " ").trim();
     if (title.length > 60) {
@@ -150,10 +140,6 @@ export function appendWarning(sessionManager: SessionManager, message: string): 
     flushSessionFile(sessionManager);
 }
 
-/**
- * Moves the session leaf so the next turn replays `messageId`'s user text. The caller
- * must already hold the chat's turn reservation.
- */
 export async function branchSessionForTurn(
     id: string,
     messageId: string,
@@ -244,7 +230,6 @@ export async function listChats(
             createdAt: row.createdAt,
         })),
     );
-    // A chat without a title has no messages yet; it is listed once something is said in it.
     return chats.filter((chat) => chat.title !== DEFAULT_TITLE);
 }
 
@@ -282,7 +267,6 @@ export function messagesOf(id: string, sessionManager: SessionManager): ChatMess
     return messages;
 }
 
-/** Tool calls follow the active session branch, including messages with no visible text. */
 export function toolStepsOf(sessionManager: SessionManager): ChatToolStepRecord[] {
     const branch = sessionManager.getBranch();
     const results = new Map<string, number>();
@@ -337,7 +321,6 @@ export async function getChatMessages(id: string): Promise<ChatMessageRecord[] |
     return sessionManager ? messagesOf(id, sessionManager) : null;
 }
 
-/** Title and visible messages of a chat, reading its session file once. */
 export async function getChatView(
     id: string,
 ): Promise<{ title: string; messages: ChatMessageRecord[]; toolSteps: ChatToolStepRecord[] } | null> {

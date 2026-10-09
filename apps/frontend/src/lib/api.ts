@@ -56,7 +56,6 @@ export function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
-/** Builds an API path, encoding every interpolated value: apiPath`/specs/${id}/run`. */
 export function apiPath(strings: TemplateStringsArray, ...values: (string | number)[]): string {
     return strings.reduce((path, part, index) => path + part + (index < values.length ? encodeURIComponent(String(values[index])) : ""), "");
 }
@@ -117,7 +116,6 @@ export function listProjectChats(projectId: string, signal?: AbortSignal): Promi
     return api(apiPath`/projects/${projectId}/chats`, { signal });
 }
 
-/** Creates a chat with its first message; the agent starts replying right away. */
 export function startProjectChat(projectId: string, text: string): Promise<{ chat: { id: string } }> {
     return api(apiPath`/projects/${projectId}/chats`, { method: "POST", body: JSON.stringify({ text }) });
 }
@@ -163,7 +161,6 @@ export function getRunEvidence(runId: string, signal?: AbortSignal): Promise<Run
     return api(apiPath`/runs/${runId}/evidence`, { signal });
 }
 
-/** Reads a small text artifact of a run (such as its spec.ts); null when the run did not keep it. */
 export async function getRunArtifactText(runId: string, file: string, signal?: AbortSignal): Promise<string | null> {
     let response: Response;
     try {

@@ -2,7 +2,6 @@ import http from "node:http";
 import net, { type AddressInfo, type Socket } from "node:net";
 import { httpTarget, resolveTarget, type AddressResolver } from "./targets";
 
-/** Each connection resolves once and connects to that checked IP, including HTTPS tunnels. */
 export async function createRunProxy(privateOrigins: string[], resolver?: AddressResolver) {
     const sockets = new Set<Socket>();
     const track = (socket: Socket) => {

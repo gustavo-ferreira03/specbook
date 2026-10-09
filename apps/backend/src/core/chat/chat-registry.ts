@@ -1,10 +1,6 @@
 import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ChatMessageRecord, ChatToolStepRecord } from "./types";
 
-// In-memory state of chats handled by this process: which chats have a turn running,
-// which are being deleted, the live agent session of each running turn, queued
-// follow-ups and SSE listeners.
-
 export type ChatUpdateEvent =
     | { type: "updated" }
     | { type: "message_start"; afterMessageId: string | null }
@@ -38,11 +34,6 @@ export function isChatDeleting(id: string): boolean {
     return deletingChats.has(id);
 }
 
-/**
- * Synchronously claims the chat for a new turn. Returns false when a turn is already
- * running or the chat is being deleted. The caller must call releaseChatTurn on every
- * path once the claim is no longer needed.
- */
 export function tryReserveChatTurn(id: string): boolean {
     if (busyChats.has(id) || deletingChats.has(id)) return false;
     busyChats.add(id);

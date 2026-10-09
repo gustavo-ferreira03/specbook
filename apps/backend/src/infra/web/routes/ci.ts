@@ -93,7 +93,6 @@ export function createCiRouter(): Hono {
             if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected Specs must belong to this project" });
             specs = specs.filter((spec) => input.specIds!.includes(spec.id));
         }
-        // All/Feature runs include runnable Specs. Explicitly selected invalid Specs report their validation error.
         if (!input.specIds) specs = specs.filter((spec) => spec.status !== "invalid");
         try {
             const batch = await startSpecBatch(projectId, specs.map((spec) => spec.id), "CI run", {

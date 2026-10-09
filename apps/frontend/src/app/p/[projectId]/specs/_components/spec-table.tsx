@@ -16,15 +16,12 @@ import { SPEC_STATUS_ORDER, countStatuses, statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { Feature, Run, SpecSummary } from "@/lib/types";
 
-/** Most recent run per Spec: `undefined` while loading, `null` when the Spec was never run. */
 export type LastRuns = Record<string, Run | null | undefined>;
 
-/** Latest run per Spec, as carried by the project tree. */
 export function lastRunsOf(specs: SpecSummary[]): LastRuns {
     return Object.fromEntries(specs.map((spec) => [spec.id, spec.lastRun ?? null]));
 }
 
-/** Features in tree order (parents before children), each with its path label ("Checkout / Payments"). */
 export function orderFeatures(features: Feature[], rootId: string | null = null): { feature: Feature; label: string; depth: number }[] {
     const byParent = new Map<string | null, Feature[]>();
     const known = new Set(features.map((feature) => feature.id));
@@ -48,7 +45,6 @@ export interface SpecGroup {
     id: string;
     title: React.ReactNode;
     specs: SpecSummary[];
-    /** Shown when the group has no Specs. */
     emptyText?: string;
 }
 
@@ -159,11 +155,6 @@ function GroupHeader({ group, running, onRunGroup }: { group: SpecGroup; running
     );
 }
 
-/**
- * Specs as one bordered table grouped by Feature: an optional column header, a header row per
- * Feature (title, count, problem counts, run action), and one row per Spec with status, title,
- * last run, duration, and a hover/focus run action. Nothing scrolls inside it.
- */
 export function SpecTable({
     projectId,
     groups,
@@ -212,7 +203,6 @@ export function SpecTable({
     );
 }
 
-/** Placeholder with the same shape as SpecTable. */
 export function SpecTableSkeleton({ groups = 3, rows = 3 }: { groups?: number; rows?: number }) {
     return (
         <div className="overflow-hidden rounded-xl border border-line" aria-hidden="true">

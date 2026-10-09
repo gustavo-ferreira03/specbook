@@ -55,8 +55,6 @@ async function intentFingerprint(projectId: string, intent: StewardIntent, sourc
     }
     const context = await projectContextsRepository.getLatestConfirmedProjectContext(projectId);
     const targets = specs.filter((spec) => !intent.specIds?.length || intent.specIds.includes(spec.id)).map((spec) => [spec.id, spec.sourceHash, spec.markdownHash]).sort();
-    // A repair is about one Spec version, whoever asked: a human's rejection or "ignore" then also stops
-    // automatic repairs of that same version, until the Spec files change.
     if (intent.kind === "regenerate") return fingerprint({ kind: intent.kind, targets });
     return fingerprint({ kind: intent.kind, targets, context: context?.context, baseUrl: intent.baseUrl, environment: intent.environment,
         goal: source === "user" ? intent.goal.replace(/\s+/g, " ").trim().toLowerCase() : undefined,
@@ -85,7 +83,6 @@ export async function recordFailureSignal(projectId: string, runId: string, spec
         body: "Investigate the failed step and evidence to distinguish test drift, an application bug, or an environment problem.", payload: { runId, originalRunId, specIds: [specId] } });
 }
 
-/** The Spec a signal was raised for, if its files are still the version the signal saw. */
 async function signalSpec(signal: ProjectSignal): Promise<Spec | null> {
     const specId = Array.isArray(signal.payload.specIds) ? signal.payload.specIds[0] : null;
     const spec = typeof specId === "string" ? await specsRepository.getSpec(specId) : null;
@@ -114,7 +111,6 @@ async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
     return true;
 }
 
-/** Re-enabling automation evaluates present failures and changes, never the observation backlog. */
 export async function resumeCurrentSignals(projectId: string): Promise<void> {
     await withProjectLock(projectId, async () => {
         for (const signal of await stewardRepository.signals(projectId, null)) {
@@ -199,7 +195,6 @@ export async function recordScheduledPrerequisite(projectId: string, specIds: st
         const signal = (await stewardRepository.signals(projectId, null)).find((row) => row.key === key)!;
         const intent = stewardIntentSchema.parse({ kind: "run_specs", specIds, priority: 70,
             goal: "Run the Specs selected for this scheduled occurrence after its prerequisite is resolved.", reason: "Scheduled run" });
-        // The saved schedule can refer to a deleted check. Keep that selection so a retry cannot silently run a different set.
         const row = await stewardRepository.addIntent({ projectId, key: `signal:${signal.id}`, source: "event", intent, priority: intent.priority, reason: intent.reason,
             fingerprint: fingerprint({ projectId, key, specIds }) });
         await stewardRepository.acknowledge(signal.id, "handled");
@@ -214,7 +209,6 @@ const KIND_INSTRUCTIONS = {
     failure_triage: "Investigate the failed Spec and classify its cause without changing expected behavior.",
 } as const;
 
-/** A triage that recognized test drift but left no repair has not handled the failure; it may be retried. */
 function driftWithoutFix(intent: Intent, jobs: Job[], inbox: InboxItem[]): boolean {
     const job = jobs.find((job) => job.id === intent.jobId);
     return job?.kind === "failure_triage" && job.classification === "test_drift" && !inbox.some((item) => item.jobId === job.id && item.kind === "spec_fix");

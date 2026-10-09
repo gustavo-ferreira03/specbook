@@ -23,9 +23,7 @@ export interface RunBatchController {
     items: SpecBatchItem[];
     running: boolean;
     reportUrl: string | null;
-    /** Terminal problem: the run could not start or stopped being tracked. */
     error: string;
-    /** Transient problem while polling; the hook keeps retrying. */
     warning: string;
     environment: RunBatch["environment"] | null;
     start: (title: string, targets: RunBatchTarget[], environment?: string) => Promise<void>;
@@ -60,11 +58,6 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
     });
 }
 
-/**
- * Starts a run batch and follows it until it settles. Shared by the Sidebar, the Specs dashboard
- * and the feature page so every entry point reports start failures, survives transient polling
- * failures with backoff, stops following on unmount, and gives up after a maximum duration.
- */
 export function useRunBatch(projectId: string, options: { onProgress?: (batch: RunBatch) => void } = {}): RunBatchController {
     const [open, setOpen] = useState(false);
     const [title, setTitle] = useState("Run Specs");
@@ -123,7 +116,6 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
             apply(batch);
             const deadline = Date.now() + MAX_BATCH_DURATION_MS;
             let failures = 0;
-            // Fetch at least once so a batch that settled immediately still gets its report link.
             for (;;) {
                 if (Date.now() > deadline) {
                     markUnknown();

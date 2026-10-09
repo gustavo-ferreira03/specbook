@@ -40,7 +40,6 @@ export interface BrowserToolPolicy {
     beforeCall?: (toolName: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<void>;
     afterCall?: (toolName: string, args: Record<string, unknown>, result: string, signal?: AbortSignal) => Promise<void>;
     sanitizeResult?: (text: string) => Promise<string> | string;
-    /** Screenshots reach the model only when this resolves to true. */
     sendScreenshots?: () => Promise<boolean>;
 }
 
@@ -112,7 +111,6 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string;
     };
     const configPath = path.join(opts.workDir, "mcp-config.json");
     await fs.writeFile(configPath, JSON.stringify(config), "utf8");
-    // Only an allowlisted environment reaches the browser process (no LLM keys or other backend secrets).
     const env = minimalChildEnv({
         DISPLAY: opts.display,
         XDG_SESSION_TYPE: "x11",
@@ -240,7 +238,6 @@ export function bridgeBrowserTools(
                 async execute(_id, params, signal) {
                     signal?.throwIfAborted();
                     const args = (params ?? {}) as Record<string, unknown>;
-                    // A named screenshot is only written to disk; without a name it is returned as an image.
                     if (tool.name === "browser_take_screenshot") delete args.filename;
                     const clean = async (value: string) =>
                         policy?.sanitizeResult ? await policy.sanitizeResult(value) : value;

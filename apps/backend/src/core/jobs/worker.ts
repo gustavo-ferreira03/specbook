@@ -53,10 +53,6 @@ export async function enqueueJob(projectId: string, input: unknown = {}, id?: st
 }
 
 const MAX_NUDGES = 2;
-/**
- * Work the agent stopped short of: a new draft that fails or does not prove its expected result, or a
- * repair (test drift or regeneration) that ended without a fix that passed and proves the expected result.
- */
 async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof selectedSpecResult>> | null): Promise<string | null> {
     if ((await jobsRepository.actions(job.id)).filter((action) => action.action === "unfinished").length >= MAX_NUDGES) return null;
     if (selected?.specId && selected.attemptsLeft > 0 && (selected.status === "failed" || selected.status === "passed" && !provesExpectedResult(selected.evidenceReview))) {
@@ -208,7 +204,6 @@ async function recoverProject(projectId: string): Promise<void> {
         if (job.status === "paused") await jobsRepository.transition(job.id, "paused", "queued");
     }
     const questions = (await jobsRepository.inbox(projectId)).filter((item) => item.kind === "question" && item.status === "pending");
-    // Internal service failures belong to automatic recovery, including earlier unanswered reports.
     const infrastructure = new Set(questions.filter((item) => isInfrastructureFailure(`${item.title}\n${item.body}`)));
     for (const item of infrastructure) {
         const job = await jobsRepository.get(item.jobId);
@@ -217,8 +212,6 @@ async function recoverProject(projectId: string): Promise<void> {
         await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, internalRecovery: true } });
     }
     if (paused) return;
-    // A question asked under older agent rules may no longer apply (for example, permission to perform a Spec's own
-    // steps). Close it as outdated and let the job re-check under the current rules; it asks again only if still blocked.
     for (const item of questions) {
         if (infrastructure.has(item) || Number(item.payload.rulesVersion ?? 1) >= AGENT_RULES_VERSION) continue;
         const job = await jobsRepository.get(item.jobId);

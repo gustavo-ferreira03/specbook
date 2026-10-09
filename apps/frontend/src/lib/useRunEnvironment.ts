@@ -26,10 +26,6 @@ function subscribe(onChange: () => void) {
     };
 }
 
-/**
- * The environment runs target in this project. One choice is shared by every page and the sidebar,
- * so the selector shown next to a Run button always matches what the other run actions use.
- */
 export function useRunEnvironment(projectId: string): [string, (environment: string) => void] {
     const environment = useSyncExternalStore(subscribe, () => read(projectId), () => DEFAULT_ENVIRONMENT);
     const setEnvironment = useCallback((next: string) => {
@@ -37,7 +33,6 @@ export function useRunEnvironment(projectId: string): [string, (environment: str
             if (next === DEFAULT_ENVIRONMENT) window.localStorage.removeItem(storageKey(projectId));
             else window.localStorage.setItem(storageKey(projectId), next);
         } catch {
-            // Storage can be unavailable; the event still updates this tab.
         }
         window.dispatchEvent(new Event(CHANGE_EVENT));
     }, [projectId]);

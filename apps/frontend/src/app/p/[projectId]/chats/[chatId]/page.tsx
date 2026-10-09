@@ -46,7 +46,6 @@ import { type ToolStep, TurnActivity, activeToolLabel } from "./tool-activity";
 
 const REMARK_PLUGINS = [remarkGfm];
 
-/** Message typography. Tokens only, so code, tables, and quotes read in both themes. */
 const MARKDOWN_COMPONENTS: Components = {
     p: ({ children }) => <p className="my-3 first:mt-0 last:mb-0">{children}</p>,
     strong: ({ children }) => <strong className="font-semibold text-ink">{children}</strong>,
@@ -105,7 +104,6 @@ function AgentAvatar() {
     );
 }
 
-/** Keeps a stable function identity while always calling the latest implementation. */
 function useStableCallback<Args extends unknown[], Result>(callback: (...args: Args) => Result): (...args: Args) => Result {
     const ref = useRef(callback);
     useEffect(() => {
@@ -114,10 +112,6 @@ function useStableCallback<Args extends unknown[], Result>(callback: (...args: A
     return useCallback((...args: Args) => ref.current(...args), []);
 }
 
-/**
- * Holds the in-flight assistant text outside React state, so a token only re-renders the
- * streaming bubble. Deltas are coalesced into one update per animation frame.
- */
 function createStreamStore() {
     let text = "";
     let pending = "";
@@ -192,7 +186,6 @@ function StreamingBubble({ store, busy, onGrow }: { store: StreamStore; busy: bo
         if (text) onGrow();
     }, [onGrow, text]);
     if (!text || !busy) return null;
-    // Hidden from assistive technology: the persisted message is announced by the log once it lands.
     return (
         <article className="mt-3 flex items-start gap-3" aria-hidden="true">
             <AgentAvatar />
@@ -258,7 +251,6 @@ function MessageActions({
     onRetry: () => void;
 }) {
     const { canEdit } = useAuth();
-    // Revealed on hover and when focus enters the message; always visible on touch screens.
     return (
         <div
             className={cn(
@@ -543,7 +535,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         const onConnected = () => {
             reconnectAttempt = 0;
             setEventsPaused(false);
-            // Events published while disconnected are gone; resync from the persisted state.
             streamStore.reset();
             setSteps([]);
             void refresh();
@@ -618,16 +609,13 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             source.addEventListener("queue_update", onQueueUpdate);
             source.onopen = () => {
                 setEventsPaused(false);
-                // Servers without the `connected` event still need a resync after a reconnect.
                 if (hasOpened) onConnected();
                 hasOpened = true;
             };
             source.onerror = () => {
                 if (!active) return;
-                // While CONNECTING the browser retries on its own; `connected` then triggers a resync.
                 setEventsPaused(true);
                 if (source.readyState !== EventSource.CLOSED) return;
-                // The browser gave up (e.g. the server answered with an error): retry with backoff.
                 source.close();
                 const delay = Math.min(1000 * 2 ** reconnectAttempt, 30_000);
                 reconnectAttempt += 1;
@@ -649,7 +637,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     useEffect(() => {
         const controller = new AbortController();
         let active = true;
-        // The model status only gates the composer; a failed check leaves it enabled.
         getLlmRuntimeStatus()
             .then((status) => active && setModelReady(status.ready))
             .catch(() => active && setModelReady(null));
@@ -873,7 +860,6 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
     const chatsHref = `/p/${projectId}/chats`;
 
     useEffect(() => {
-        // Autosize, including text restored after a failed send.
         const textarea = textareaRef.current;
         if (!textarea) return;
         textarea.style.height = "auto";

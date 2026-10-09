@@ -84,7 +84,6 @@ async function validateStorage(root: string): Promise<void> {
     } finally { client.close(); }
 }
 
-/** Caller holds the storage lock; the snapshot includes committed WAL data without copying a live WAL. */
 export async function backupStorage(archivePath: string): Promise<void> {
     const archive = path.resolve(archivePath);
     if (isInside(path.resolve(storageRoot), archive)) throw new Error("Write backups outside the Specbook storage directory.");
@@ -117,7 +116,6 @@ export async function backupStorage(archivePath: string): Promise<void> {
     }
 }
 
-/** Restores only into an empty directory; malformed archives never overwrite existing data. */
 export async function restoreStorage(archivePath: string): Promise<void> {
     const archive = path.resolve(archivePath);
     const existing = (await fs.readdir(storageRoot)).filter((name) => name !== ".operations.lock");

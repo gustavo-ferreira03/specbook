@@ -13,7 +13,6 @@ function subscribeWide(listener: () => void) {
     return () => query.removeEventListener("change", listener);
 }
 
-/** True on screens wide enough to show the live browser beside the conversation. */
 export function useWideLayout(): boolean {
     return useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE_QUERY).matches, () => false);
 }
@@ -33,11 +32,6 @@ const STATUS_COPY: Record<VncStatus, { label: string; dot: string }> = {
     error: { label: "Disconnected", dot: "bg-danger" },
 };
 
-/**
- * The agent's browser, view-only. `pane` fills the right column on wide screens; `inline` sits in
- * the conversation flow on narrower ones. Only one is mounted at a time, so there is one VNC
- * connection per chat.
- */
 export function LiveBrowser({ sessionId, origin, variant }: { sessionId: string; origin: string; variant: "pane" | "inline" }) {
     const [status, setStatus] = useState<VncStatus>("connecting");
     const copy = STATUS_COPY[status];

@@ -147,7 +147,6 @@ async function finishPreparedSpec(
     const runDir = path.join(runsDir, prepared.run.id);
     await fs.mkdir(runDir, { recursive: true });
     await fs.writeFile(path.join(runDir, "batch.json"), JSON.stringify({ batchId }), "utf8");
-    // A Spec without a result still gets an (empty) evidence manifest.
     if (!(await fs.stat(path.join(runDir, "evidence.json")).catch(() => null))) {
         await fs.writeFile(path.join(runDir, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null }), "utf8");
     }
@@ -416,7 +415,6 @@ export async function markInterruptedBatches(): Promise<void> {
 
 const finishedBatches = new Map<string, { stamp: string; batch: RunBatch }>();
 
-/** Finished batches no longer change, so listings reuse them until their file is rewritten or removed. */
 async function readListedBatch(id: string): Promise<RunBatch | null> {
     const stamp = await fs.stat(path.join(batchDirectory(id), "batch.json")).then((stat) => `${stat.ino}:${stat.mtimeMs}:${stat.size}`).catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") return null;

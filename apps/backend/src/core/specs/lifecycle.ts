@@ -1,6 +1,5 @@
 import { createKeyedLock } from "../operations/keyed-lock";
 
-/** Thrown when a Spec, Feature, chat or project is in use and cannot be changed right now. */
 export class ResourceBusyError extends Error {}
 
 const locks = createKeyedLock();

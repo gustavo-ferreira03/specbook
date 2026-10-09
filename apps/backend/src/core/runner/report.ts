@@ -1,20 +1,16 @@
 import path from "node:path";
 import { FAILED_STEP_ANNOTATION } from "./specbook/guard";
 
-/** Result of the single test in one spec file of a Playwright run. */
 export interface SpecFileResult {
     status: "passed" | "failed" | "error";
     durationMs: number | null;
     failReason: string | null;
-    /** Title of the step() where the test failed (null when passed or unknown). */
     failedStep: string | null;
     attachments: { name: string; path: string; contentType: string }[];
 }
 
 export interface PlaywrightReport {
-    /** Keyed by the spec file name without ".spec.ts" (the run id). */
     files: Map<string, SpecFileResult>;
-    /** Errors outside any test, such as a file that failed to load. */
     errors: string[];
 }
 
@@ -89,7 +85,6 @@ function collect(suites: Json[], files: Map<string, SpecFileResult>, file: strin
             for (const test of records(spec.tests)) {
                 const result = testResult(test);
                 const previous = files.get(key);
-                // A valid spec.ts holds one test; if a file somehow reports more, any failure wins.
                 if (!previous || previous.status === "passed") files.set(key, result);
             }
         }
@@ -97,7 +92,6 @@ function collect(suites: Json[], files: Map<string, SpecFileResult>, file: strin
     }
 }
 
-/** Parses the output of Playwright's JSON reporter. */
 export function parsePlaywrightReport(json: string): PlaywrightReport {
     const data = JSON.parse(json) as Json;
     if (!data || typeof data !== "object" || !Array.isArray(data.suites)) throw new Error("Playwright report has no suites");

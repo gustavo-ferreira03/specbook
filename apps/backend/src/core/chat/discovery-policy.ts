@@ -22,7 +22,6 @@ function withinOrigins(url: string, origins: Set<string>): boolean {
     } catch { return false; }
 }
 
-/** A description supplied by the model is never evidence of what a click will do. */
 export function snapshotClickTarget(snapshot: string, target: unknown): string {
     const ref = typeof target === "string" ? /^(?:aria-ref=)?([a-z]+\d+)$/.exec(target)?.[1] : undefined;
     if (!ref) throw new Error("Click rejected: use an element reference from a fresh browser snapshot, not a selector or description.");
@@ -106,7 +105,6 @@ export function createDiscoveryBrowserPolicy(
     };
 }
 
-/** Keep the browser capabilities visible; enforce autonomous exploration policy at execution. */
 export function createAutonomousBrowserPolicy(startUrl: string, mcp: BrowserMcp, allowedOrigins: string[] = []): BrowserToolPolicy {
     const policy = createDiscoveryBrowserPolicy({ brief: { startUrl } as ProjectContextRevisionRow["brief"] }, mcp, allowedOrigins);
     const allowed = new Set([...DISCOVERY_BROWSER_TOOLS, "browser_console_messages", "browser_network_requests", "browser_take_screenshot"]);

@@ -51,8 +51,6 @@ async function reencryptStoredSecrets(target: Buffer, fallbacks: Buffer[]): Prom
             nextAuth = encryptWithKey(JSON.stringify(parsed), target);
         }
     }
-    // Validate every value before changing anything. Old keys remain available until
-    // both the transaction and the atomic credential-file replacement have completed.
     await runBatch(queries);
     if (nextAuth !== null && nextAuth !== auth) await writeProtectedFile(piAuthPath, nextAuth);
 }

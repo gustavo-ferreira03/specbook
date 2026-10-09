@@ -8,11 +8,6 @@ const MAIN_REF = "refs/heads/main";
 const BARE_TRACKING_REF = "refs/remotes/specbook/main";
 const DEFAULT_MAX_PUSH_BYTES = 200 * 1024 * 1024;
 
-// Specbook only publishes a main branch, and the checkout in
-// storage/repos/<projectId> follows whatever is pushed there. Symbolic links
-// (mode 120000) could point outside the repository once checked out, and
-// gitlinks (mode 160000) reference submodules Specbook cannot serve, so any
-// new commit containing either is rejected.
 const PRE_RECEIVE_HOOK = `#!/bin/sh
 status=0
 while read -r old new ref; do
@@ -37,7 +32,6 @@ done
 exit $status
 `;
 
-/** The checkout and the canonical bare repository are in a state Specbook will not resolve automatically. */
 export class BareStateError extends Error {}
 
 export type BareRelation = "no-bare-head" | "equal" | "checkout-ahead" | "bare-ahead" | "diverged";
@@ -67,7 +61,6 @@ class RepoBare {
         }).env("GIT_TERMINAL_PROMPT", "0");
     }
 
-    /** Cheap check for the request hot path: does the bare repository exist at all? */
     async bareExists(projectId: string): Promise<boolean> {
         return fs
             .stat(path.join(this.getBareRepoDir(projectId), "HEAD"))
@@ -75,14 +68,6 @@ class RepoBare {
             .catch(() => false);
     }
 
-    /**
-     * Creates the canonical bare repository for a project, applies the Git
-     * policy and hook, and reconciles it with the checkout. Meant for project
-     * creation and boot only; callers must hold the project's repo lock (or run
-     * before the server accepts requests). State problems (diverged history,
-     * dirty checkout) are recorded on the project instead of thrown, so boot can
-     * keep indexing the project.
-     */
     async ensureBareRepo(projectId: string, checkoutDir: string): Promise<{ checkoutMoved: boolean }> {
         const dir = this.getBareRepoDir(projectId);
         await fs.mkdir(path.resolve(bareReposDir), { recursive: true });
@@ -107,9 +92,6 @@ class RepoBare {
             .catch(() => null);
     }
 
-    // simple-git resolves when git exits non-zero without writing to stderr, so
-    // "merge-base --is-ancestor" (exit 1, silent) cannot be trusted through it.
-    // The merge base equals the ancestor exactly when it is one.
     private async isAncestor(git: SimpleGit, ancestor: string, descendant: string): Promise<boolean> {
         return git
             .raw(["merge-base", ancestor, descendant])
@@ -117,7 +99,6 @@ class RepoBare {
             .catch(() => false);
     }
 
-    /** Stores the bare/checkout state problem on the project, writing only on change. */
     async recordStateError(projectId: string, message: string | null): Promise<void> {
         try {
             const project = await projectsRepository.getProject(projectId);
@@ -133,11 +114,6 @@ class RepoBare {
         throw new BareStateError(message);
     }
 
-    /**
-     * Compares the checkout's main with the bare's main. The bare's objects are
-     * fetched into the checkout first (a local, cheap fetch) so ancestry can be
-     * checked in a repository that has both histories.
-     */
     async compare(projectId: string, checkoutDir: string): Promise<{
         relation: BareRelation;
         checkoutSha: string;
@@ -155,7 +131,6 @@ class RepoBare {
         return { relation: "diverged", checkoutSha, bareSha };
     }
 
-    /** Reconciles the working checkout and the canonical bare repository without discarding either side. */
     private async reconcile(projectId: string, checkoutDir: string): Promise<boolean> {
         const { relation } = await this.compare(projectId, checkoutDir);
         if (relation === "bare-ahead") return (await this.fastForwardCheckout(projectId, checkoutDir)).moved;
@@ -165,18 +140,13 @@ class RepoBare {
 
     private async applyBarePolicy(projectId: string): Promise<void> {
         const git = this.bareGit(projectId);
-        // Smart HTTP push is disabled by default in git-http-backend.
         await git.addConfig("http.receivepack", "true");
         await git.addConfig("http.uploadpack", "true");
-        // The checkout can only follow the bare repository by fast-forward.
         await git.addConfig("receive.denyNonFastForwards", "true");
         await git.addConfig("receive.denyDeletes", "true");
         await git.addConfig("receive.denyCurrentBranch", "ignore");
         await git.addConfig("receive.fsckObjects", "true");
         await git.addConfig("receive.maxInputSize", String(maxPushBytes()));
-        // receive-pack and fetch run "gc --auto" after writing objects. Its
-        // default prune expiry (two weeks) keeps objects orphaned by a forced
-        // publish long enough that a concurrent client fetch is not affected.
         await git.raw(["config", "--unset-all", "gc.auto"]).catch(() => undefined);
         await git.addConfig("receive.autogc", "true");
         await this.writeHook(projectId, "pre-receive", PRE_RECEIVE_HOOK);
@@ -201,17 +171,9 @@ class RepoBare {
     }
 
     private async copyCheckoutIntoBare(projectId: string, checkoutDir: string): Promise<void> {
-        // A fetch driven from the bare side bypasses receive-pack entirely: the
-        // non-fast-forward policy and the hook apply to external clients, not to
-        // Specbook itself. The "+" is safe because callers checked ancestry.
         await this.bareGit(projectId).raw(["fetch", "--no-tags", checkoutDir, `+${MAIN_REF}:${MAIN_REF}`]);
     }
 
-    /**
-     * Copies the checkout's main branch into the bare repository when that is a
-     * fast-forward. Throws BareStateError (and records it) when the bare holds
-     * commits the checkout does not have.
-     */
     async publish(projectId: string, checkoutDir: string): Promise<void> {
         const { relation } = await this.compare(projectId, checkoutDir);
         if (relation === "bare-ahead") {
@@ -237,12 +199,6 @@ class RepoBare {
             .catch(() => null);
     }
 
-    /**
-     * Moves the checkout forward to whatever a client pushed. Only ever a
-     * fast-forward: a diverged history or a dirty checkout is recorded on the
-     * project and thrown instead of discarding work. Returns moved=false when
-     * the checkout already contains the bare's main.
-     */
     async fastForwardCheckout(projectId: string, checkoutDir: string): Promise<{ moved: boolean; sha: string | null }> {
         const { relation, bareSha } = await this.compare(projectId, checkoutDir);
         if (relation === "no-bare-head" || relation === "equal" || relation === "checkout-ahead") {
@@ -263,7 +219,6 @@ class RepoBare {
         return { moved: true, sha: bareSha };
     }
 
-    /** Removes ref lock files left by a crashed process. Only safe at boot. */
     async removeStaleLocks(projectId: string): Promise<void> {
         const dir = this.getBareRepoDir(projectId);
         for (const lock of ["HEAD.lock", "config.lock", "packed-refs.lock", path.join("refs", "heads", "main.lock")]) {

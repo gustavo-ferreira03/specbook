@@ -151,7 +151,6 @@ describe("specbook page proxy", () => {
         await assert.rejects(framed.wrapped.getByLabel("Password").fill(createSecret("admin", "password")), /outside the page's main frame/);
         assert.ok(!framed.calls.some((call) => call.method === "fill"));
 
-        // A profile without an entry in the policy may type nowhere.
         const unknown = guarded({}, { SPECBOOK_SECRET_OTHER_PASSWORD: "x1x1x1" });
         await assert.rejects(unknown.wrapped.getByLabel("Password").fill(createSecret("other", "password")), /origin is not allowed/);
         const missing = guarded({}, {});

@@ -2,11 +2,6 @@ import { Check, AlertCircle } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
 
-/**
- * Building blocks shared by the settings tabs: a section (SectionHeader + bordered panel),
- * label-left / control-right rows that stack on mobile, a footer for save actions, and a
- * one-line inline feedback message.
- */
 export function SettingsSection({
     id,
     title,
@@ -59,7 +54,6 @@ export function SettingsRow({
     );
 }
 
-/** Row body without a label column (lists, editors, notices). */
 export function SettingsBlock({ children, className }: { children: React.ReactNode; className?: string }) {
     return <div className={cn("border-b border-line px-4 py-4 last:border-b-0 sm:px-5", className)}>{children}</div>;
 }

@@ -24,17 +24,12 @@ export const MAX_FAILED_STEP_CHARS = 500;
 
 type FinalRunStatus = Exclude<RunStatus, "running">;
 
-/** Run as persisted plus details that only live in memory (not stored in the DB). */
 export type ExecutedRun = Run & { failedStep: string | null };
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Re-validates a Spec's files right before running them: the index may be older than
- * the validator, and the file is executed, so it is never trusted on the index alone.
- */
 export function analyzeForRun(title: string, testSource: string, markdown: string): SpecAnalysis {
     const analysis = analyzeSpecSource(testSource);
     if (!analysis.ok) throw new Error(`Spec "${title}" is invalid: ${analysis.error}`);

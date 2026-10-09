@@ -35,7 +35,6 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
     { value: "passed", label: "Passing" },
 ];
 
-/** Batches that can be started from the Run menu, problems first. */
 const RUN_SUBSETS: { status: SpecStatus; label: string }[] = [
     { status: "failed", label: "Failing" },
     { status: "unverified", label: "Not run" },
@@ -174,7 +173,6 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
             emptyText: "No Specs in this feature yet.",
             hasChildren: features.some((item) => item.parentId === feature.id),
         }))
-        // Hide empty groups while filtering, and structural parents that only hold sub-features.
         .filter((group) => group.specs.length > 0 || (!filtering && !group.hasChildren));
     const orphans = specs.filter((spec) => !knownFeatureIds.has(spec.featureId) && visible(spec));
     if (orphans.length > 0) groups.push({ id: "__orphans__", title: "Without a feature", specs: orphans });

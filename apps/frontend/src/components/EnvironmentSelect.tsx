@@ -35,7 +35,6 @@ export function EnvironmentSelect({ projectId, value, onValueChange, disabled = 
     useEffect(() => {
         if (loaded && !environments.some((environment) => environment.name === value)) onValueChange("Production");
     }, [loaded, environments, value, onValueChange]);
-    // With only Production there is nothing to choose.
     if (!error && environments.length <= 1) return null;
     return (
         <div className={cn("min-w-0", className)}>

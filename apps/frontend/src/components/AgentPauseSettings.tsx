@@ -9,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, isAbortError } from "@/lib/api";
 import { invalidate } from "@/lib/invalidation";
 
-/** Pauses the agent for every project on this server. Project pauses stay separate. */
 export function AgentPauseSettings() {
     const [paused, setPaused] = useState<boolean | null>(null);
     const [loadError, setLoadError] = useState("");

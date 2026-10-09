@@ -41,7 +41,6 @@ export function createGitRouter(): Hono {
             if (checkoutMoved) await reindexProjectUnlocked(project.id);
             return (await issueGitAccessToken(project.id)).token;
         });
-        // The plain token is returned exactly once; only its hash is stored.
         return c.json({ token, remote: await remoteAccessOf(c, await loadProject(project.id)) });
     });
 

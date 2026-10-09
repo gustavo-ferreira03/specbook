@@ -3,23 +3,6 @@ import type * as t from "@babel/types";
 import type { HumanSpec } from "../../infra/db/schema";
 import { isSafeRelativePath, SECRET_NAME_PATTERN, secretEnvName } from "./specbook/guard";
 
-/**
- * Static validation of spec.ts. The file is untrusted (pushed through Git or written
- * by the LLM) and executes in a Node process, so this is an allowlist over the AST:
- * anything that is not explicitly described below is rejected.
- *
- *   import { test, expect } from "specbook";
- *   test("Title", async ({ page, step, secret }) => {
- *       const x = page.getByRole(...);            // optional locator constants
- *       await step("Named step", async () => {
- *           await page.<action>(...);            // allowlisted Page/Locator calls
- *           await expect(<page | locator>).[not.]<matcher>(...);
- *       });
- *   });
- *
- * Arguments are literals only (plus locator constants and secret(...) as fill text).
- */
-
 export type SpecSourceValidation = { ok: true } | { ok: false; error: string };
 
 export interface SecretRef {
@@ -30,10 +13,8 @@ export interface SecretRef {
 
 export interface SpecAnalysis {
     testTitle: string;
-    /** Titles of the step() blocks, in order. */
     steps: string[];
     secretRefs: SecretRef[];
-    /** Offsets of the "specbook" string of the import, replaced when the file runs. */
     importSource: { start: number; end: number };
 }
 
@@ -76,7 +57,6 @@ export const LOCATOR_ACTIONS = [
     "dragTo",
 ];
 const KEYBOARD_ACTIONS = ["press", "type"];
-/** page.mouse methods and how many leading coordinate numbers each takes. */
 const MOUSE_COORDINATES: Record<string, number> = { move: 2, click: 2, dblclick: 2, down: 0, up: 0, wheel: 2 };
 const MOUSE_ACTIONS = Object.keys(MOUSE_COORDINATES);
 const PAGE_MATCHERS = ["toHaveURL", "toHaveTitle", "toMatchAriaSnapshot"];
@@ -120,7 +100,6 @@ function list(values: string[]): string {
     return values.join(", ");
 }
 
-/** A string literal or a template literal without ${...} expressions. */
 function staticString(node: t.Node | null | undefined): string | null {
     if (!node) return null;
     if (node.type === "StringLiteral") return node.value;
@@ -374,7 +353,6 @@ class Validator {
         fail(node, "API bodies and assertion arguments must be literal JSON values; secret() is allowed only in headers and body fields.");
     }
 
-    /** Type of a page/locator/keyboard/mouse expression that is not an action. */
     private chain(node: t.Node): ChainKind {
         if (node.type === "Identifier") {
             if (node.name === "page") {
@@ -499,7 +477,6 @@ class Validator {
         this.actionArgs(kind, method, expression);
     }
 
-    /** "page" / "locator" when the node is expect(target) or expect(target).not. */
     private assertionTarget(node: t.Node): "page" | "locator" | "apiResponse" | "apiValue" | null {
         let target = node;
         if (target.type === "MemberExpression" && !target.computed && target.property.type === "Identifier" && target.property.name === "not") {
@@ -621,7 +598,6 @@ class Validator {
         this.plainArgs(call, 0, 2);
     }
 
-    /** Validates call.arguments[from..] as literal values, with at most `max` arguments in total. */
     private plainArgs(call: t.CallExpression, from: number, max: number): void {
         if (call.arguments.length > max) fail(call, `Too many arguments (at most ${max}).`);
         for (const arg of call.arguments.slice(from)) this.value(arg, { locatorKeys: false, depth: 0 });
@@ -740,7 +716,6 @@ function comparable(title: string): string {
     return title.trim().replace(/\s+/g, " ").replace(/[.;:]+$/, "").toLowerCase();
 }
 
-/** The named-steps rule: step() titles must be the Spec's steps from spec.yml, in order. */
 export function stepTitlesError(stepTitles: string[], humanSteps: string[]): string | null {
     const expected = humanSteps.map((step) => step.trim()).filter(Boolean);
     const numbered = (titles: string[]) => titles.map((title, index) => `${index + 1}. "${title}"`).join(" ");
@@ -758,7 +733,6 @@ export function stepTitlesError(stepTitles: string[], humanSteps: string[]): str
     return `The step() titles in spec.ts must match the steps in spec.yml, in the same order: ${detail} spec.yml steps: ${numbered(expected)}.`;
 }
 
-/** Full validation of a Spec's executable, including the named-steps rule when spec.yml is known. */
 export function validateSpecSource(source: string, humanSpec?: Pick<HumanSpec, "steps"> | null): SpecSourceValidation {
     const result = analyzeSpecSource(source);
     if (!result.ok) return result;
@@ -769,7 +743,6 @@ export function validateSpecSource(source: string, humanSpec?: Pick<HumanSpec, "
     return { ok: true };
 }
 
-/** Env names of the secrets a valid spec.ts types (empty for an invalid source). */
 export function secretEnvRefs(source: string): string[] {
     const result = analyzeSpecSource(source);
     return result.ok ? result.analysis.secretRefs.map((ref) => ref.envName) : [];

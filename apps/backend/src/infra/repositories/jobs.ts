@@ -133,7 +133,6 @@ export const jobsRepository = {
         const job = await this.get(item.jobId);
         if (!job) throw new Error("The investigation no longer exists");
         const deterministic = item.payload.runIntentId === job.id;
-        // changes() ties the Inbox update to the job transition in this transaction.
         const [resumed] = await db.batch([
             db.update(jobs).set({ ...requeuePatch(job, { pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` }),
                 status: deterministic ? "completed" : "queued", updatedAt: now() })
@@ -148,8 +147,6 @@ export const jobsRepository = {
         if (updated) { await recordAgentMetric(updated, "status_changed"); notifyChat(updated); }
     },
     async recover() {
-        // A shutdown clears startedAt in finishExecution but leaves the status "running", so those jobs are
-        // recovered too; otherwise one orphan blocks every other job of its project forever.
         for (const job of await db.select().from(jobs).where(or(isNotNull(jobs.startedAt), eq(jobs.status, "running")))) {
             const interval = job.startedAt ? Date.parse(job.heartbeatAt ?? job.startedAt) - Date.parse(job.startedAt) : 0;
             const activeMs = Number.isFinite(interval) ? Math.max(0, interval) : 0;
@@ -161,8 +158,6 @@ export const jobsRepository = {
                 await this.log(job.id, "recovered", "Backend restarted. Reconcile existing Inbox proposals before continuing; do not repeat browser mutations.");
             }
         }
-        // An approval may have committed before the process stopped. Require a
-        // human to reconcile it rather than silently applying the same change twice.
         await db.update(inboxItems).set({ status: "pending", updatedAt: now() }).where(eq(inboxItems.status, "applying"));
     },
     async cancelProject(projectId: string) {

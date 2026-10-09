@@ -13,22 +13,18 @@ function toDate(value: DateInput): Date {
     return value instanceof Date ? value : new Date(value);
 }
 
-/** "Sep 28, 2026" */
 export function formatDate(value: DateInput): string {
     return dateFormatter.format(toDate(value));
 }
 
-/** "Sep 28" */
 export function formatShortDate(value: DateInput): string {
     return shortDateFormatter.format(toDate(value));
 }
 
-/** "Sep 28, 2026, 3:04 PM" */
 export function formatDateTime(value: DateInput, options: { seconds?: boolean } = {}): string {
     return (options.seconds ? preciseDateTimeFormatter : dateTimeFormatter).format(toDate(value));
 }
 
-/** "03:04 PM" */
 export function formatTime(value: DateInput): string {
     return timeFormatter.format(toDate(value));
 }
@@ -37,7 +33,6 @@ export function formatNumber(value: number): string {
     return numberFormatter.format(value);
 }
 
-/** "1 Spec", "3 Specs" */
 export function countLabel(count: number, noun: string, plural = `${noun}s`): string {
     return `${count} ${count === 1 ? noun : plural}`;
 }
@@ -53,7 +48,6 @@ const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
     ["year", Number.POSITIVE_INFINITY],
 ];
 
-/** "just now", "5 minutes ago", "yesterday", "3 weeks ago"; older than a year falls back to formatDate. */
 export function formatRelative(value: DateInput, now: number = Date.now()): string {
     const date = toDate(value);
     let delta = (date.getTime() - now) / 1000;
@@ -69,7 +63,6 @@ export function formatRelative(value: DateInput, now: number = Date.now()): stri
     return formatDate(date);
 }
 
-/** "850ms", "2.4s", "1m 05s" */
 export function formatDuration(durationMs: number): string {
     if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
     if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;
@@ -78,7 +71,6 @@ export function formatDuration(durationMs: number): string {
     return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
-/** Run environment worth showing: Production is the default, so only other environments are named. */
 export function environmentLabel(name: string | null | undefined): string | undefined {
     return name && name !== "Production" ? name : undefined;
 }

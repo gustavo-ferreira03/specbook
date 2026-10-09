@@ -212,7 +212,6 @@ function normalizedContext(context: ProjectContext): ProjectContext {
     }
 }
 
-/** Compares contexts as they would read back from context.yml, ignoring key order. */
 export function sameProjectContext(left: ProjectContext, right: ProjectContext): boolean {
     return canonicalJson(normalizedContext(left)) === canonicalJson(normalizedContext(right));
 }

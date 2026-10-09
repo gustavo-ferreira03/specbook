@@ -1,7 +1,6 @@
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
-/** Compact status icon for dense rows. Always has an accessible label; pair it with visible text when space allows. */
 export function StatusDot({ status, size = 14, className }: { status: string; size?: number; className?: string }) {
     const meta = statusMeta(status);
     const Icon = meta.icon;

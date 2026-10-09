@@ -44,11 +44,9 @@ function splitLines(raw: string): string[] {
 interface LoadedRunEvidence {
     data: RunEvidence | null;
     error: string;
-    /** True when the run's spec.ts read saved credentials, so no HTML report was kept. */
     usedSecrets?: boolean;
 }
 
-/** Splits "Line L, column C: message" (spec.ts validation) into its location and message. */
 function parseSourceLocation(reason: string): { line: number; column: number; message: string } | null {
     const match = /^Line (\d+), column (\d+): ([\s\S]*)$/.exec(reason);
     if (!match) return null;
@@ -62,7 +60,6 @@ function artifactUrl(runId: string, file: string) {
     return `${API_URL}/runs/${encodeURIComponent(runId)}/artifacts/${path}`;
 }
 
-/** Most recent runs requested with the Spec; older history is not needed on this page. */
 const RUN_HISTORY_LIMIT = 20;
 
 async function loadRunEvidence(runId: string, signal?: AbortSignal): Promise<LoadedRunEvidence> {
@@ -357,8 +354,6 @@ function RunEntry({
 }) {
     const [open, setOpen] = useState(latest);
     const meta = statusMeta(run.status);
-    // Evidence loads lazily: the latest run is requested with the Spec, older runs when expanded.
-    // This also re-requests it when the evidence cache was reset while the entry stayed open.
     useEffect(() => {
         if (open && !loaded && run.status !== "running") onExpand(run.id);
     }, [loaded, onExpand, open, run.id, run.status]);
@@ -458,12 +453,10 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         evidenceRequestsRef.current.add(runId);
         void loadRunEvidence(runId).then((loaded) => {
             setEvidence((current) => ({ ...current, [runId]: loaded }));
-            // A failed load can be retried by collapsing and expanding the run again.
             if (loaded.error) evidenceRequestsRef.current.delete(runId);
         }).catch(() => evidenceRequestsRef.current.delete(runId));
     }, []);
 
-    /** Replaces the detail and loads evidence only for the latest run; older runs load on expand. */
     const showDetail = useCallback((nextDetail: SpecDetail) => {
         evidenceRequestsRef.current = new Set();
         setEvidence({});
@@ -514,7 +507,6 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
         };
     }, [pendingRun, projectId, specId]);
 
-    /** Reloads the Spec after an action; returns null when it no longer exists. */
     async function reloadDetail(): Promise<SpecDetail | null> {
         try {
             const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT });

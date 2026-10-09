@@ -1,8 +1,3 @@
-/**
- * The "specbook" module imported by every spec.ts. The runner rewrites the import to
- * point at this file (or at its bundle, dist/specbook-fixtures.mjs, in production).
- * It only runs inside the Playwright worker of a Spec run.
- */
 import fs from "node:fs/promises";
 import { expect as baseExpect, test as base, type ConsoleMessage, type Page, type Request, type Response } from "@playwright/test";
 import type { RunDiagnostic } from "../evidence.ts";
@@ -56,7 +51,6 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvide
                     requestId: event.requestId, ...(allowed ? {} : { errorReason: "BlockedByClient" }),
                 }).catch(() => undefined);
             });
-            // Playwright routes only the first URL of an HTTP redirect chain.
             await navigation.send("Fetch.enable", { patterns: [{ resourceType: "Document", requestStage: "Request" }] });
         }
         const diagnostics: RunDiagnostic[] = [];
@@ -130,7 +124,6 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvide
                     await fs.writeFile(file, JSON.stringify(requests), "utf8");
                     await testInfo.attach(`${API_STEP_ATTACHMENT_PREFIX}${number}`, { path: file, contentType: "application/json" });
                 }
-                // Evidence: the page as it looks after the step (or where it failed).
                 const file = testInfo.outputPath(`${STEP_ATTACHMENT_PREFIX}${number}.png`);
                 try {
                     if (!real) throw new Error("This step has no browser page");
@@ -145,7 +138,6 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvide
     },
 });
 
-/** Playwright's expect for guarded pages, locators and API response values. */
 export function expect(target: unknown, ...rest: unknown[]) {
     if (rest.length > 0) throw new Error("expect() takes one page, locator or API response value");
     const real = unwrap(target, ["page", "locator", "apiResponse"]);

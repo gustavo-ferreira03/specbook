@@ -25,7 +25,6 @@ async function newProject(): Promise<{ id: string; checkout: string; git: Simple
     return { id: project.id, checkout: repoGit.getRepoDir(project.id), git: repoGit.getProjectGit(project.id) };
 }
 
-/** Commits directly in the checkout, without publishing to the bare repository. */
 async function commitInCheckout(git: SimpleGit, dir: string, file: string, content: string): Promise<string> {
     await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true });
     await fs.writeFile(path.join(dir, file), content);
@@ -34,7 +33,6 @@ async function commitInCheckout(git: SimpleGit, dir: string, file: string, conte
     return (await git.revparse(["HEAD"])).trim();
 }
 
-/** An external Git client: a clone of the bare repository pushing over the file protocol. */
 async function cloneBare(projectId: string): Promise<{ dir: string; git: SimpleGit }> {
     const dir = path.join(tempDir(), "clone");
     await simpleGit().clone(repoBare.getBareRepoDir(projectId), dir);

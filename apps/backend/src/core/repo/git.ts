@@ -6,7 +6,6 @@ import { reposDir } from "../paths";
 import { repoBare } from "./bare";
 import { currentActor, recordAudit } from "../accounts/audit";
 
-// Lock files git leaves behind when the process is killed mid-operation.
 const STALE_CHECKOUT_LOCKS = [
     "index.lock",
     "HEAD.lock",
@@ -65,10 +64,6 @@ class RepoGit {
         await git.raw(["commit", "--allow-empty", "-m", "specbook: init"]);
     }
 
-    /**
-     * Content arrives from Git pushes, so symbolic links are
-     * checked out as plain files holding the link target instead of real links.
-     */
     private async hardenCheckoutConfig(projectId: string): Promise<void> {
         if (this.hardenedCheckouts.has(projectId)) return;
         const git = this.getProjectGit(projectId);
@@ -77,11 +72,6 @@ class RepoGit {
         this.hardenedCheckouts.add(projectId);
     }
 
-    /**
-     * Mirrors the checkout's main branch into the canonical bare repository,
-     * creating it if missing. Callers must hold the repo lock. State problems
-     * are recorded on the project (gitExternalSyncError) and rethrown.
-     */
     async publishToBareUnlocked(projectId: string): Promise<void> {
         const checkoutDir = this.getRepoDir(projectId);
         if (!(await repoBare.bareExists(projectId))) {
@@ -138,11 +128,6 @@ class RepoGit {
         }
     }
 
-    /**
-     * Repairs what a process killed mid-operation leaves behind: a pending
-     * rebase (which makes every write fail) and stale lock files. Only safe when
-     * no git operation runs on this project in this process, i.e. at boot.
-     */
     async recoverInterruptedState(projectId: string): Promise<void> {
         if (this.locks.has(projectId)) {
             throw new Error(`Refusing to recover ${projectId} while a repository operation is running`);
@@ -165,8 +150,6 @@ class RepoGit {
             try {
                 await git.rebase(["--abort"]);
             } catch (error) {
-                // --abort fails when the rebase state is itself incomplete;
-                // --quit drops the state and leaves HEAD where it is.
                 console.error(`[specbook] rebase --abort failed for ${projectId}, falling back to --quit:`, error);
                 await git.rebase(["--quit"]).catch(() => fs.rm(target, { recursive: true, force: true }));
             }
@@ -175,7 +158,6 @@ class RepoGit {
         await this.hardenCheckoutConfig(projectId);
     }
 
-    /** Runs recoverInterruptedState for every project. Call at boot, before reindexing. */
     async recoverAllInterruptedState(): Promise<void> {
         for (const project of await projectsRepository.listProjects()) {
             await this.recoverInterruptedState(project.id).catch((error: unknown) => {

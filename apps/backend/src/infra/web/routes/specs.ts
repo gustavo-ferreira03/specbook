@@ -59,12 +59,10 @@ function mapManualError(error: unknown): never {
 async function specDetail(spec: Spec, runLimit?: number) {
     const feature = await featuresRepository.getFeature(spec.featureId);
     const runs = await runsRepository.listRuns(spec.id, { limit: runLimit });
-    // A symlinked spec file is reported through the spec's invalid status; never serve it.
     const raw = await readSpecRawFiles(spec).catch((error) => {
         if (error instanceof UnsafeRepoPathError) return { yaml: null, testSource: null };
         throw error;
     });
-    // A missing executable should not hide the behavior contract.
     let humanSpec: HumanSpec | null = null;
     if (raw.yaml !== null) {
         try {

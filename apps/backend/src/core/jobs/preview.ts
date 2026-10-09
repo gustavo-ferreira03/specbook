@@ -9,7 +9,6 @@ interface ProposalFile {
     after: string;
 }
 
-/** Render the proposal through the same serializers used by the repository writer. */
 export async function proposalFiles(item: InboxItem): Promise<ProposalFile[]> {
     if (item.kind === "feature") {
         return [{ path: "feature.yml", before: null, after: serializeFeatureYaml(featureProposalSchema.parse(item.payload.params)) }];

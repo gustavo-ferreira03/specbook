@@ -159,7 +159,6 @@ export async function deleteProjectData(id: string): Promise<boolean> {
             ? await db.select({ id: runs.id }).from(runs).where(inArray(runs.specId, projectSpecIds))
             : [];
         const projectSpecs = db.select({ id: specs.id }).from(specs).where(eq(specs.projectId, id));
-        // One atomic batch, children before parents so the foreign keys hold.
         await runBatch([
             db.delete(chatSessions).where(eq(chatSessions.projectId, id)),
             db.delete(credentialProfiles).where(eq(credentialProfiles.projectId, id)),
@@ -170,7 +169,6 @@ export async function deleteProjectData(id: string): Promise<boolean> {
             db.delete(chats).where(eq(chats.projectId, id)),
             db.delete(projects).where(eq(projects.id, id)),
         ]);
-        // Files go last: a failure here leaves stray directories, never a half-deleted project.
         const removal = await Promise.allSettled([
             fs.rm(repoGit.getRepoDir(id), { recursive: true, force: true }),
             repoBare.removeBareRepo(id),

@@ -16,19 +16,10 @@ import { retryInfrastructure, stallJob } from "./retry";
 import { isAgentPaused } from "./pause";
 import type { RunEnvironment } from "../../infra/db/schema";
 
-/**
- * Bump when the rules that decide what the agent may do on its own change. Questions asked under older rules
- * are reviewed automatically at startup instead of holding their job until a human replies.
- */
 export const AGENT_RULES_VERSION = 4;
 
 export interface TurnPolicy {
     prompt: string;
-    /**
-     * "spec": the job performs the steps of a Spec it is repairing, investigating or generating, so the
-     * Spec authorizes them and the project origin policy applies. "explore": unknown territory, so clicks
-     * that may change data and form submissions are held back.
-     */
     browserScope: "spec" | "explore";
     baseUrl?: string;
     environment?: RunEnvironment;
@@ -138,13 +129,11 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                             if (item) output = result(await verifyProposal(job, item, signal));
                             else {
                                 output = await tool.execute(id, params, signal, onUpdate, ctx);
-                                // The investigation now owns this newer failure; otherwise it would supersede itself.
                                 const text = output.content.map((part) => part.type === "text" ? part.text : "").join("");
                                 const rerun = z.object({ runId: z.string(), status: z.string() }).safeParse((() => { try { return JSON.parse(text); } catch { return null; } })());
                                 if (rerun.success && ["failed", "error"].includes(rerun.data.status)) await jobsRepository.update(job.id, { runId: rerun.data.runId });
                             }
                         } else if (tool.name === "request_credential") {
-                            // A login wall is not a question while a saved profile exists and has not been tried in this job.
                             if ((await credentialsRepository.listProfiles(job.projectId)).length > 0
                                 && !(await jobsRepository.actions(job.id)).some((action) => action.action === "fill_secret")) {
                                 throw new Error("Do not ask for access yet: this project has saved credential profiles. Call list_credential_profiles, sign in with fill_secret on the login form, and continue. Call request_credential only if signing in with them fails.");

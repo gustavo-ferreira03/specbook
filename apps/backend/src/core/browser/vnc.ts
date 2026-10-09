@@ -9,7 +9,6 @@ import { minimalChildEnv } from "../runner/process";
 import { browserFailureMessage } from "../jobs/presentation-errors";
 
 export const SCREEN_WIDTH = 1280;
-/** Fits the 1280x720 page viewport below Chromium's ~87px tab strip and toolbar. */
 export const SCREEN_HEIGHT = 810;
 
 export interface VncSession {
@@ -41,8 +40,6 @@ interface SpawnedProcess {
 const sessions = new Map<string, VncSessionRecord>();
 const closing = new Map<string, Promise<void>>();
 
-// Closing the parent's pipe also runs this cleanup after an abrupt backend exit.
-// Only children created by this supervisor are signalled; X server locks are never removed.
 const PROCESS_SUPERVISOR = `
 const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
@@ -128,10 +125,6 @@ async function stopRecord(record: VncSessionRecord): Promise<void> {
     await fs.rm(record.passwordDir, { recursive: true, force: true }).catch(() => undefined);
 }
 
-/**
- * x11vnc reads the password from a private file instead of argv, so it never
- * shows up in `ps`. VNC authentication only uses the first 8 characters.
- */
 async function writePasswordFile(): Promise<{ password: string; dir: string; file: string }> {
     const password = crypto.randomBytes(6).toString("base64url");
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "specbook-vnc-"));
@@ -170,8 +163,6 @@ async function startDisplay(): Promise<{ proc: ChildProcess; display: string }> 
             fs.lstat(file).then(() => true, (error: NodeJS.ErrnoException) => error.code !== "ENOENT"),
         ));
         if (occupied.some(Boolean)) continue;
-        // The X server atomically claims the display. Explicit high candidates also
-        // work when WSLg's socket directory is read-only and only abstract sockets work.
         const xvfb = spawnUntilReady("Xvfb", [`:${number}`, "-displayfd", "3", "-screen", "0", `${SCREEN_WIDTH}x${SCREEN_HEIGHT}x24`, "-nolisten", "tcp"], x11Env(), 3, /^(\d+)\n/m);
         try {
             return { proc: xvfb.proc, display: `:${await xvfb.ready}` };
@@ -194,7 +185,6 @@ export async function startVncStack(): Promise<VncSession> {
         const xvfb = await startDisplay();
         xvfbProc = xvfb.proc;
         const display = xvfb.display;
-        // LibVNCServer's default auto-port loop binds each candidate, avoiding probe/bind races.
         const x11vnc = spawnUntilReady("x11vnc", [
             "-norc", "-display", display, "-localhost", "-passwdfile", secret.file,
             "-quiet", "-forever", "-shared", "-noipv6", "-no6", "-noshm", "-wait", "50", "-nap",
@@ -230,7 +220,6 @@ const RFB_HANDSHAKE_TIMEOUT_MS = 10_000;
 const RFB_SECURITY_NONE = 1;
 const RFB_SECURITY_VNC_AUTH = 2;
 
-/** Buffers a byte stream so a handshake can read exact message sizes. */
 class ByteQueue {
     private chunks: Buffer[] = [];
     private size = 0;
@@ -258,7 +247,6 @@ class ByteQueue {
         });
     }
 
-    /** Returns whatever arrived beyond the handshake. */
     drain(): Buffer {
         const rest = Buffer.concat(this.chunks);
         this.chunks = [];
@@ -294,11 +282,6 @@ function reverseBits(byte: number): number {
     return result;
 }
 
-/**
- * VNC authentication encrypts the challenge with single DES keyed by the
- * bit-reversed password. OpenSSL 3 only ships DES in its legacy provider, but
- * triple DES with three identical keys is exactly single DES.
- */
 function vncAuthResponse(password: string, challenge: Buffer): Buffer {
     const key = Buffer.alloc(8);
     Buffer.from(password, "latin1").copy(key, 0, 0, 8);
@@ -308,7 +291,6 @@ function vncAuthResponse(password: string, challenge: Buffer): Buffer {
     return Buffer.concat([cipher.update(challenge), cipher.final()]);
 }
 
-/** Speaks the RFB client handshake to x11vnc, answering its password challenge. */
 async function authenticateUpstream(socket: net.Socket, queue: ByteQueue, password: string): Promise<void> {
     const server = parseRfbVersion(await queue.read(12));
     if (server.major !== 3 || server.minor < 3) throw new Error("Unsupported RFB server version");
@@ -340,11 +322,6 @@ async function authenticateUpstream(socket: net.Socket, queue: ByteQueue, passwo
     }
 }
 
-/**
- * Presents a password-less RFB server to the browser. The browser is already
- * vetted by the WebSocket Origin check and holds the unguessable session id;
- * the VNC password stays inside the backend.
- */
 async function acceptDownstream(websocket: WebSocket, queue: ByteQueue): Promise<void> {
     websocket.send(Buffer.from("RFB 003.008\n", "latin1"));
     const client = parseRfbVersion(await queue.read(12));
@@ -366,10 +343,6 @@ function toBuffer(data: Buffer | ArrayBuffer | Buffer[]): Buffer {
     return Buffer.isBuffer(data) ? data : Buffer.from(data);
 }
 
-/**
- * Bridges a browser WebSocket to the session's x11vnc, performing the VNC
- * password handshake on the browser's behalf before piping raw RFB traffic.
- */
 export async function proxyVncSession(id: string, websocket: WebSocket): Promise<void> {
     if (websocket.readyState !== websocket.OPEN) return;
     const record = sessions.get(id);
@@ -432,7 +405,6 @@ export async function proxyVncSession(id: string, websocket: WebSocket): Promise
     } finally {
         clearTimeout(timer);
     }
-    // From ClientInit onward both sides speak plain RFB, so bytes pass through.
     piping = true;
     const pendingUpstream = upstreamQueue.drain();
     const pendingDownstream = downstreamQueue.drain();

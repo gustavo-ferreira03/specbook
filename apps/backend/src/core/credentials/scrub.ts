@@ -8,7 +8,6 @@ function xmlEscaped(value: string, quotes: boolean): string {
     return quotes ? escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;") : escaped;
 }
 
-/** Builds a synchronous scrubber that masks the given secret values and their common encodings. */
 export function createSecretScrubber(values: string[]): (text: string) => string {
     const needles = new Set<string>();
     for (const value of values) {

@@ -10,10 +10,6 @@ const toneClasses: Record<EmptyTone, string> = {
     warning: "bg-warning-soft text-warning-icon",
 };
 
-/**
- * Icon in a soft tinted circle, a one-line title, one line of help, and at most one primary action.
- * `size="compact"` fits inside lists and the sidebar; `default` centers in a page region.
- */
 export function EmptyState({
     icon: Icon,
     title,

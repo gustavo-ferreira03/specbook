@@ -47,7 +47,6 @@ function redactUrls(value: unknown): unknown {
     });
 }
 
-/** The browser executes only this fixed scanner; the agent cannot supply JavaScript or URLs. */
 export async function scanPage(options: ExplorationToolOptions, signal?: AbortSignal): Promise<string> {
     signal?.throwIfAborted();
     if (!options.mcp) throw new Error("The agent browser is unavailable. Ask for help through the Inbox if it cannot be started.");
@@ -137,10 +136,6 @@ const inspectElementSchema = z.object({
     target: z.string().trim().min(1).max(500).describe("Element reference from the latest browser_snapshot (like e43) or a unique CSS selector (like [data-shape-type='arrow'])"),
 }).strict();
 
-/**
- * Read-only DOM view of one element: its HTML, its ancestors' opening tags and the computed colors, so an
- * assertion can use what the page really exposes. Fixed code; form values are removed before anything leaves the page.
- */
 const INSPECT_ELEMENT = `(element) => {
     const clean = (node) => {
         const copy = node.cloneNode(true);

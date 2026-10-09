@@ -8,14 +8,12 @@ import { useVisiblePolling } from "./usePolling";
 
 interface ProjectOverview {
     data: OverviewResponse | null;
-    /** The latest request failed; `data` keeps the last successful response. */
     failed: boolean;
     reload: () => Promise<void>;
 }
 
 const ProjectOverviewContext = createContext<ProjectOverview | null>(null);
 
-/** One overview poll per project, shared by the Sidebar and the Overview page. */
 export function ProjectOverviewProvider({ projectId, children }: { projectId: string; children: React.ReactNode }) {
     const [state, setState] = useState<{ projectId: string; data: OverviewResponse | null; failed: boolean }>({ projectId, data: null, failed: false });
     const generation = useRef(0);
@@ -24,7 +22,6 @@ export function ProjectOverviewProvider({ projectId, children }: { projectId: st
 
     const apply = useCallback((data: OverviewResponse) => {
         setState({ projectId, data, failed: false });
-        // The agent saves and repairs Specs in the background; refresh the Spec tree when the set changes.
         const specs = `${projectId}:${Object.entries(data.specHealth).map(([id, health]) => `${id}=${health.status}`).sort().join(",")}`;
         if (specSet.current && specSet.current !== specs && specSet.current.startsWith(`${projectId}:`)) invalidate({ resource: "tree", projectId });
         specSet.current = specs;
@@ -40,8 +37,6 @@ export function ProjectOverviewProvider({ projectId, children }: { projectId: st
         }
     }, [projectId, apply]);
 
-    // Polling, not a stream: every open tab would hold an HTTP/1.1 connection, and with ~6 per origin the
-    // streams starve page navigation. The overview is cheap, and invalidation refreshes it after changes.
     useEffect(() => {
         void reload();
         return () => { generation.current++; };
@@ -60,7 +55,6 @@ export function ProjectOverviewProvider({ projectId, children }: { projectId: st
     );
 }
 
-/** Status to show for a Spec: "repairing" while the agent fixes a broken one, otherwise its own status. */
 export function useDisplayStatus(spec: { id: string; status: SpecStatus }): SpecStatus | "repairing" {
     const overview = useContext(ProjectOverviewContext);
     return spec.status === "invalid" && overview?.data?.specHealth[spec.id]?.status === "repairing" ? "repairing" : spec.status;

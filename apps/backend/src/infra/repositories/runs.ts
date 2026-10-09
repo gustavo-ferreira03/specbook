@@ -39,7 +39,6 @@ class RunsRepository {
         await db.update(runs).set({ status, durationMs, failReason }).where(eq(runs.id, id));
     }
 
-    /** Newest first. `before` is a run id cursor: only runs older than it are returned. */
     async listRuns(specId: string, options: { limit?: number; before?: string } = {}): Promise<Run[]> {
         const limit = Math.min(Math.max(Math.trunc(options.limit ?? DEFAULT_RUN_LIST_LIMIT), 1), MAX_RUN_LIST_LIMIT);
         let condition = eq(runs.specId, specId);
@@ -63,7 +62,6 @@ class RunsRepository {
         return (await db.select({ id: runs.id }).from(runs).where(and(eq(runs.specId, specId), eq(runs.status, "passed"))).limit(1)).length > 0;
     }
 
-    /** The most recent run of each of the given Specs, keyed by Spec id. */
     async latestRuns(specIds: string[]): Promise<Map<string, Run>> {
         const latest = new Map<string, Run>();
         if (specIds.length === 0) return latest;

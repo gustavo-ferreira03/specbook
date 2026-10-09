@@ -20,10 +20,6 @@ import { cn } from "@/lib/utils";
 
 type TokenConfirmation = "rotate" | "revoke";
 
-/**
- * The one-time token is owned by the parent (settings page) so it survives switching settings
- * tabs, which unmounts this component. It stays visible until the user dismisses it.
- */
 export function GitRemoteAccess({
     projectId,
     oneTimeToken,
@@ -86,7 +82,6 @@ export function GitRemoteAccess({
             window.setTimeout(() => setCopied((current) => current === kind ? null : current), 1800);
             return;
         }
-        // Clipboard access is unavailable (e.g. plain HTTP): select the text for a manual copy.
         setCopied(null);
         setCopyError(kind);
         selectElementText(kind === "url" ? urlRef.current : tokenRef.current);

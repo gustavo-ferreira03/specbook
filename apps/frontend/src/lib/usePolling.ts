@@ -2,12 +2,6 @@
 
 import { useEffect, useRef } from "react";
 
-/**
- * Calls `poll` every `intervalMs` while the document is visible. Polling pauses in background tabs
- * and runs once as soon as the tab becomes visible again. The latest `poll` is always used, so
- * the interval is not restarted when the callback identity changes (e.g. on route changes).
- * The caller is responsible for the initial fetch.
- */
 export function useVisiblePolling(poll: () => void, intervalMs: number): void {
     const pollRef = useRef(poll);
     useEffect(() => {

@@ -187,7 +187,6 @@ export async function selectedSpecResult(job: Job) {
 
 const MAX_DRAFT_RUNS = 3;
 
-/** Real test failures of a draft; runs that never got to test the app (status "error") do not use up an attempt. */
 async function draftFailures(specId: string): Promise<number> {
     return (await runsRepository.listRuns(specId, { limit: 20 })).filter((run) => run.status === "failed").length;
 }
@@ -205,7 +204,6 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
         ({ spec } = await createSpecInRepo({ ...proposed, projectId: job.projectId, id: candidate.specId },
             { commitMessage: `spec-batch:${item.id}:${candidate.id} create "${candidate.title}"`, checkPolicy: options.checkPolicy }));
     } else if (spec.projectId === job.projectId) {
-        // Until its first pass the new Spec is a draft: revising it cannot weaken anything that worked.
         const runs = await runsRepository.listRuns(spec.id, { limit: 20 });
         const current = await readSpecFiles(spec);
         const changed = current.testSource !== proposed.testSource || JSON.stringify(current.humanSpec) !== JSON.stringify(proposed.humanSpec);

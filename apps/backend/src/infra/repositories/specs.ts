@@ -114,7 +114,6 @@ class SpecsRepository {
             .where(eq(specs.id, id));
     }
 
-    /** Statements that delete the specs and their runs; callers check for running runs first. */
     deleteSpecsQueries(ids: string[]): DbQuery[] {
         if (ids.length === 0) return [];
         return [db.delete(runs).where(inArray(runs.specId, ids)), db.delete(specs).where(inArray(specs.id, ids))];
@@ -128,7 +127,6 @@ class SpecsRepository {
             .from(runs)
             .where(eq(runs.specId, id));
         if (runRows.some((run) => run.status === "running")) return { status: "busy" };
-        // Runs only start under the spec lock, which deletion callers hold.
         await runBatch(this.deleteSpecsQueries([id]));
         return { status: "deleted", runIds: runRows.map((run) => run.id) };
     }

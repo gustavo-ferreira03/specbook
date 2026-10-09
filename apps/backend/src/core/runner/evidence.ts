@@ -34,11 +34,9 @@ const apiRequestEvidenceSchema = z.object({
 export type ApiStepEvidence = { number: number; label: string; requests: z.infer<typeof apiRequestEvidenceSchema>[] };
 export type ApiRequestEvidence = z.infer<typeof apiRequestEvidenceSchema>;
 
-/** evidence.json, read by GET /runs/:id/evidence. */
 export interface EvidenceManifest {
     steps: EvidenceStep[];
     video: string | null;
-    /** Title of the step() where the run failed, when known. */
     failedStep: string | null;
     diagnostics?: RunDiagnostic[];
     errorContext?: string;
@@ -66,11 +64,6 @@ async function copyFile(source: string, destination: string): Promise<boolean> {
     }
 }
 
-/**
- * Copies the screenshots the step fixture took (and the failure video) out of the
- * Playwright output into <outputDir>/evidence and writes <outputDir>/evidence.json.
- * Step labels are the step() titles of spec.ts.
- */
 export async function writeRunEvidence(
     outputDir: string,
     status: Exclude<RunStatus, "running">,

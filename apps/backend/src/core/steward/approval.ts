@@ -10,7 +10,6 @@ import { isAgentPaused } from "../jobs/pause";
 import { recordAgentMetric } from "../jobs/metrics";
 import { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "../runner/validate";
 
-/** Only direct action selectors may differ; assertion targets and shared aliases stay exact. */
 export function isLocatorOnlyFix(item: InboxItem): boolean {
     if (item.kind !== "spec_fix" || !item.payload.requiresVerification) return false;
     const patch = fixProposalSchema.safeParse(item.payload.params);
@@ -47,15 +46,9 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
     catch { return false; }
 }
 
-/**
- * A repair the agent may save on its own: it changes only spec.ts (the behavior contract in spec.yml is
- * untouched), it passed a test run, and it cannot hide a real bug — either the Spec had no working
- * implementation to weaken (it never passed), or a healer fix kept every assertion and only moved action locators.
- */
 export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> {
     if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
     const verification = item.payload.verification as ProposalVerification | undefined;
-    // A pass that does not show, or does not assert, the expected result proves nothing.
     if (verification?.status !== "passed" || !provesExpectedResult(verification.review)) return false;
     const patch = fixProposalSchema.safeParse(item.payload.params);
     if (!patch.success || !isImplementationOnly(patch.data)) return false;
@@ -65,10 +58,6 @@ export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> 
         && (isLocatorOnlyFix(item) || !!job.specId && !await runsRepository.hasPassed(job.specId));
 }
 
-/**
- * Saves verified implementation-only repairs so the agent never waits on a human for them. Only the newest
- * proposal per Spec is applied; older pending ones for the same Spec are superseded.
- */
 export async function applyVerifiedRepairs(projectId: string): Promise<void> {
     if (await isAgentPaused(projectId) || (await stewardRepository.get(projectId)).autonomy === "observe") return;
     const pending = (await jobsRepository.inbox(projectId)).filter((item) => item.kind === "spec_fix" && item.status === "pending");
@@ -88,7 +77,6 @@ export async function applyVerifiedRepairs(projectId: string): Promise<void> {
             if (job) await recordAgentMetric(job, "decision", { itemId: item.id, itemKind: item.kind, decision: "approve", actor: "agent" });
             await jobsRepository.log(item.jobId, "auto_approved", "Verified implementation-only repair; the behavior contract is unchanged.");
         } catch {
-            // Stale base or a concurrent edit: leave it for the next pass or for a human.
             await jobsRepository.updateItem(item.id, { status: "pending" });
         }
     }

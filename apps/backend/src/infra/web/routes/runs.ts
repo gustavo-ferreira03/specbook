@@ -12,7 +12,6 @@ import { executeSpec } from "../../../core/runner/run";
 import { MAX_RUN_LIST_LIMIT, runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
 
-/** Run artifacts, including the files of Playwright's HTML report (report/). */
 const CONTENT_TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -32,7 +31,6 @@ const CONTENT_TYPES: Record<string, string> = {
     ".yml": "text/plain; charset=utf-8",
 };
 
-/** Entry page of the Playwright HTML report inside a run or batch directory. */
 export const REPORT_FILE = "report/index.html";
 
 const runListSchema = z.object({
@@ -40,11 +38,6 @@ const runListSchema = z.object({
     before: z.string().uuid().optional(),
 });
 
-/**
- * Artifacts may contain page content from the application under test: never run it with
- * the API origin. The sandbox (without allow-same-origin) gives HTML an opaque origin;
- * allow-scripts is needed because Playwright's HTML report is a script-rendered page.
- */
 function artifactHeaders(type: string): Record<string, string> {
     return {
         "Content-Type": type,
@@ -53,9 +46,6 @@ function artifactHeaders(type: string): Record<string, string> {
     };
 }
 
-// The sandboxed report has an opaque origin, where reading localStorage throws, and
-// Playwright's report reads it while booting. Give HTML artifacts in-memory storage
-// instead of granting allow-same-origin.
 const STORAGE_SHIM = Buffer.from(
     "<script>(function(){function m(){var d={};return{get length(){return Object.keys(d).length},key:function(i){return Object.keys(d)[i]??null},getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}}}}" +
         "[\"localStorage\",\"sessionStorage\"].forEach(function(n){try{window[n].length}catch(e){Object.defineProperty(window,n,{value:m(),configurable:true})}})})()</script>",
@@ -63,7 +53,6 @@ const STORAGE_SHIM = Buffer.from(
 
 function withStorageShim(data: Buffer, type: string): Buffer {
     if (!type.startsWith("text/html")) return data;
-    // Insert right after <head> so the doctype stays first and the page keeps standards mode.
     const head = /<head[^>]*>/i.exec(data.toString("latin1"));
     if (!head) return Buffer.concat([STORAGE_SHIM, data]);
     const at = head.index + head[0].length;

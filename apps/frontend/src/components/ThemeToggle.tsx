@@ -5,10 +5,6 @@ import { resolveTheme, setThemePreference, useThemePreference } from "@/lib/them
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-/**
- * Single discreet button that flips between light and dark. Until the user picks one, the system theme applies.
- * Both icons render and CSS picks one from the `dark` class, so server and client markup always match.
- */
 export function ThemeToggle({ className }: { className?: string }) {
     const preference = useThemePreference();
 

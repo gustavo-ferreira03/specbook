@@ -1,11 +1,3 @@
-// Public entry point of the chat core. The implementation is split into:
-// - prompts.ts: system prompt templates and their assembly
-// - discovery-policy.ts: browser tool policy for read-only discovery chats
-// - chat-registry.ts: in-memory turn reservations, active sessions, queues and SSE listeners
-// - session-store.ts: session files (path cache, titles, messages, branching, create/delete)
-// - turn-runner.ts: running one agent turn
-// - metrics.ts: per-turn evaluation metrics (JSONL)
-
 export {
     abortChatTurn,
     beginChatDeletion,

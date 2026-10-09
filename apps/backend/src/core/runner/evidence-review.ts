@@ -24,23 +24,16 @@ The reason is one or two sentences naming what the evidence shows (for example t
 
 export const INSPECT_INSTRUCTION = "Reproduce the state on the live page, call inspect_element on the element that shows the expected result, and assert the exact attribute, text or state it exposes.";
 
-/** False when a passing run does not show (contradicts) or does not assert (weak) its expected result. */
 export function provesExpectedResult(review: EvidenceReview | null | undefined): boolean {
     return review?.verdict !== "weak" && review?.verdict !== "contradicts";
 }
 
-/** What the agent must do next when the review says the test, not the app, is wrong. */
 export function reviewNextStep(review: EvidenceReview | null | undefined): string | undefined {
     if (review?.verdict === "weak") return `The test does not prove the whole expected result: ${review.reason} ${INSPECT_INSTRUCTION} Add that assertion and run again.`;
     if (review?.verdict !== "assertion_wrong" && review?.verdict !== "contradicts") return undefined;
     return `The test is wrong, not the app. ${INSPECT_INSTRUCTION} Fix the assertion and run again.`;
 }
 
-/**
- * A second opinion from the model on whether a run's evidence agrees with its result, so the agent cannot
- * keep a test that fails on a correct screen or passes on a wrong one. It never changes a run's status,
- * and returns null when no model is ready or the review fails. Cached next to the evidence it read.
- */
 export async function reviewRunEvidence(directory: string, outcome: { status: string; failReason?: string | null; failedStep?: string | null }): Promise<EvidenceReview | null> {
     const cache = path.join(directory, "review.json");
     const cached = verdictSchema.safeParse(JSON.parse(await fs.readFile(cache, "utf8").catch(() => "null")));

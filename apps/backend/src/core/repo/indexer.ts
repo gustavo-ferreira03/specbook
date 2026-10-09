@@ -68,7 +68,6 @@ async function isDirectory(target: string): Promise<boolean> {
     }
 }
 
-/** Reads a repo file, reporting a symlink (or other unsafe path) instead of throwing. */
 async function readRepoEntry(root: string, relative: string): Promise<{ content: string | null; unsafe: string | null }> {
     try {
         return { content: await readOptionalRepoFile(root, path.join(root, relative)), unsafe: null };
@@ -83,7 +82,6 @@ async function readRepoEntry(root: string, relative: string): Promise<{ content:
 async function walk(root: string, relative: string, dirs: string[], found: FoundSpec[]): Promise<void> {
     const entries = await fs.readdir(path.join(root, relative), { withFileTypes: true });
     for (const entry of entries) {
-        // Dirent.isDirectory() is false for symlinks, so linked directories are never followed.
         if (!entry.isDirectory()) continue;
         const entryRelative = `${relative}/${entry.name}`;
         const specYaml = await readRepoEntry(root, specYamlFile(entryRelative));
@@ -178,9 +176,6 @@ function planSpecs(found: FoundSpec[], featuresByPath: Map<string, Feature>, exi
         });
     }
 
-    // A Spec that vanished from one path while identical content appeared at
-    // another was moved (a Feature renamed through a Git push):
-    // keep its row, runs and status instead of recreating it.
     for (const entry of planned) {
         if (entry.existing || !entry.sourceHash || !entry.markdownHash) continue;
         const moved = existingSpecs.find(
@@ -231,7 +226,6 @@ function planSpecs(found: FoundSpec[], featuresByPath: Map<string, Feature>, exi
         ) {
             entry.status = existing.status;
             entry.invalidReason = existing.invalidReason;
-            // Validation is cheap and in-process: re-check in case the rules changed.
             entry.needsValidation = true;
         } else {
             entry.needsValidation = true;
@@ -240,7 +234,6 @@ function planSpecs(found: FoundSpec[], featuresByPath: Map<string, Feature>, exi
     return planned;
 }
 
-/** In-process AST validation of spec.ts against its spec.yml steps; no subprocess involved. */
 function validatePlanned(planned: PlannedSpec[]): void {
     for (const entry of planned) {
         if (!entry.needsValidation) continue;
@@ -330,11 +323,6 @@ export async function reindexProject(
     return repoGit.withRepoLock(projectId, () => reindexProjectUnlocked(projectId, options));
 }
 
-/**
- * Reconciles the DB with the working tree. Reading the files and validating
- * spec.ts happen first; every DB write is then applied in one atomic
- * batch, so a failure never leaves the index half-updated.
- */
 export async function reindexProjectUnlocked(
     projectId: string,
     options: { allowDirty?: boolean } = {},
@@ -391,8 +379,6 @@ export async function reindexProjectUnlocked(
               .from(runs)
               .where(inArray(runs.specId, unseenSpecs.map((spec) => spec.id)))
         : [];
-    // A Spec whose run is still executing stays until the next reindex, and so
-    // does its Feature chain.
     const busySpecIds = new Set(unseenRuns.filter((run) => run.status === "running").map((run) => run.specId));
     const removedSpecIds = unseenSpecs.filter((spec) => !busySpecIds.has(spec.id)).map((spec) => spec.id);
     const removedRunIds = unseenRuns.filter((run) => !busySpecIds.has(run.specId)).map((run) => run.id);

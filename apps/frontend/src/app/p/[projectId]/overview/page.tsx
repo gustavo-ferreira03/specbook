@@ -66,7 +66,6 @@ function RunOutcome({ run }: { run: RecentRun }) {
 }
 
 function runCounts(run: RecentRun) {
-    // A single Spec's outcome is already the row icon; counts only add information for batches.
     if (run.counts.passed + run.counts.failed + run.counts.flaky + run.counts.running <= 1) return "";
     return `${run.counts.passed} passed · ${run.counts.failed} failed${run.counts.flaky ? ` · ${run.counts.flaky} flaky` : ""}${run.counts.running ? ` · ${run.counts.running} running` : ""}`;
 }

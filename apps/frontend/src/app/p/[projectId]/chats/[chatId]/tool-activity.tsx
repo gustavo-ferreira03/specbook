@@ -80,14 +80,12 @@ export function toolCopy(toolName: string): ToolCopy {
     return { done: label, active: `Using ${label.toLowerCase()}`, icon: Wrench };
 }
 
-/** "Opening page", used by the status line while a tool runs. */
 export function activeToolLabel(toolName: string): string {
     return toolCopy(toolName).active;
 }
 
 const VISIBLE_STEPS = 4;
 
-/** Consecutive tool calls appear between the messages that preceded and followed them. */
 export function TurnActivity({ steps, busy }: { steps: ToolStep[]; busy: boolean }) {
     const [expanded, setExpanded] = useState(false);
     if (steps.length === 0) return null;

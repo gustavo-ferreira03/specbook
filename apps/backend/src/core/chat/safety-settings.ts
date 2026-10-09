@@ -10,7 +10,6 @@ let generation = 0;
 
 export async function getSecuritySettings(): Promise<SecuritySettings> {
     const started = generation;
-    // Not strict: rows saved before a setting was retired still carry it.
     const stored = storedSecuritySettingsSchema.parse(await settingsRepository.getSecuritySettings() ?? {});
     if (started === generation) current = stored;
     return current;
@@ -28,7 +27,6 @@ export async function agentSettings(): Promise<SettingsManager> {
     await getSecuritySettings();
     const settings = SettingsManager.inMemory();
     settings.setCacheWarmingMode("off");
-    // The SDK checks this for every provider request, including restored image history.
     settings.getBlockImages = () => !current.sendScreenshotsToModel;
     return settings;
 }

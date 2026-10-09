@@ -1,15 +1,9 @@
-/**
- * Copies text to the clipboard. `navigator.clipboard` only exists in secure contexts, and
- * self-hosted Specbook is often served over plain HTTP, so fall back to a hidden textarea
- * and `document.execCommand("copy")`. Resolves to false when both paths fail.
- */
 export async function copyText(text: string): Promise<boolean> {
     if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
         try {
             await navigator.clipboard.writeText(text);
             return true;
         } catch {
-            // Fall through to the legacy path (e.g. permission denied).
         }
     }
     if (typeof document === "undefined") return false;
@@ -35,7 +29,6 @@ export async function copyText(text: string): Promise<boolean> {
     }
 }
 
-/** Selects the text content of an element so the user can copy it manually. */
 export function selectElementText(element: HTMLElement | null): void {
     if (!element) return;
     const selection = window.getSelection();

@@ -13,7 +13,6 @@ import { featureProposalSchema, fixProposalSchema, newSpecProposalSchema } from 
 
 type FixProposal = z.infer<typeof fixProposalSchema>;
 
-/** Changes only spec.ts: the spec.yml behavior contract, title and description stay as they are. */
 export function isImplementationOnly(patch: FixProposal): patch is FixProposal & { testSource: string } {
     return Boolean(patch.testSource) && !patch.humanSpec && patch.title === undefined && patch.description === undefined;
 }
@@ -82,7 +81,6 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
 
 export async function applyProposal(item: InboxItem, checkPolicy?: () => Promise<void>): Promise<string> {
     const marker = `inbox:${item.id}`;
-    // Makes approval replay safe if the commit succeeded before the DB update.
     const git = repoGit.getProjectGit(item.projectId);
     const previous = await git.raw(["log", "--format=%H", "--fixed-strings", `--grep=${marker}`, "-1"]);
     if (previous.trim()) return previous.trim();

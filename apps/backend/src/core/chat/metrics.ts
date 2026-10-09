@@ -5,10 +5,6 @@ import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { storageRoot } from "../paths";
 import { withFileQueue } from "../operations/file-queue";
 
-// Per-turn evaluation metrics, appended as JSONL to <storageRoot>/metrics/chat-turns.jsonl.
-// Records hold identifiers, counters, timings and token usage only: never message
-// content, tool arguments, failure messages or credential values.
-
 export const metricsDir = path.join(storageRoot, "metrics");
 export const chatTurnMetricsPath = path.join(metricsDir, "chat-turns.jsonl");
 
@@ -20,16 +16,13 @@ export interface RunSpecOutcome {
     runId: string | null;
     status: string;
     durationMs: number | null;
-    /** 1-based index of this run_spec call among all run_spec calls in the chat. */
     chatAttempt: number;
-    /** 1-based index of this run_spec call for the same Spec in the chat. */
     specAttempt: number;
 }
 
 export interface ValidatorRejection {
     tool: "create_spec" | "update_spec";
     specId: string | null;
-    /** named_steps: step() titles differ from humanSpec.steps; source_validation: the spec.ts allowlist check failed. */
     rule: "named_steps" | "source_validation";
 }
 
@@ -46,10 +39,8 @@ export interface ChatTurnMetrics {
     endedAt: string | null;
     durationMs: number | null;
     outcome: TurnOutcome;
-    /** Machine-readable reason for error/rejected outcomes, never a free-form message. */
     errorKind: string | null;
     browserAvailable: boolean;
-    /** User messages sent to the model this turn (the prompt plus follow-ups/steering). */
     userMessages: number;
     autoRetries: number;
     assistantMessages: number;
@@ -81,7 +72,6 @@ function increment(counter: Record<string, number>, key: string): void {
     counter[key] = (counter[key] ?? 0) + 1;
 }
 
-/** Counts run_spec calls already present in the chat's session, across all branches. */
 function previousRunSpecCalls(sessionManager: SessionManager | null): { total: number; bySpec: Map<string, number> } {
     const bySpec = new Map<string, number>();
     let total = 0;
@@ -138,7 +128,6 @@ export class TurnMetricsRecorder {
         };
     }
 
-    /** Seeds run_spec attempt counters from the run_spec calls already in the session. */
     seedFromSession(sessionManager: SessionManager | null): void {
         try {
             const previous = previousRunSpecCalls(sessionManager);
@@ -148,7 +137,6 @@ export class TurnMetricsRecorder {
     }
 
     fail(outcome: Exclude<TurnOutcome, "completed">, errorKind: string | null = null): void {
-        // Keep the first failure; later ones are usually consequences of it.
         if (this.record.outcome !== "completed") return;
         this.record.outcome = outcome;
         this.record.errorKind = errorKind;
@@ -210,7 +198,6 @@ export class TurnMetricsRecorder {
         this.record.validatorRejections.push(rejection);
     }
 
-    /** Appends the record once. Never throws: metrics must not break a turn. */
     async finish(): Promise<void> {
         if (this.finished) return;
         this.finished = true;

@@ -96,7 +96,6 @@ export function ApiRunEvidence({ evidence }: { evidence: RunEvidence }) {
     );
 }
 
-/** Run statuses use the shared StatusPill; batch-only states (queued, skipped, unknown) are neutral. */
 function BatchStatus({ status }: { status: SpecBatchStatus }) {
     if (status === "passed" || status === "failed" || status === "error" || status === "running") return <StatusPill status={status} kind="run" size="sm" />;
     const Icon = status === "skipped" ? Minus : status === "unknown" ? CircleHelp : Clock3;

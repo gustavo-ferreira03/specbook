@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
 
-/** Heading for a region inside a page: title (+ optional count and one-line description) with actions on the right. */
 export function SectionHeader({
     title,
     description,

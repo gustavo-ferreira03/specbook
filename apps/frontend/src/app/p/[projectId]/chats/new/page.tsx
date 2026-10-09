@@ -44,7 +44,6 @@ function NewChatContent({ projectId }: { projectId: string }) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
-        // The model status only gates the composer; a failed check leaves it enabled.
         const check = () => getLlmRuntimeStatus().then((status) => setModelReady(status.ready)).catch(() => setModelReady(null));
         check();
         return onInvalidate((event) => {

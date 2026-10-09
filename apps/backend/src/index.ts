@@ -26,8 +26,6 @@ import {
     isAllowedWebsocketOrigin,
 } from "./infra/web/security";
 
-// Log before anything else can fail. An uncaught exception leaves the process
-// in an unknown state, so exit and let Docker's restart policy recover it.
 process.on("unhandledRejection", (reason) => {
     logger.error("unhandled promise rejection", { error: reason });
 });
@@ -42,14 +40,10 @@ const app = createApp();
 const allowedOrigins = buildAllowedOrigins();
 const hostAllowlist = buildHostAllowlist(port);
 
-// ---- Boot sequence --------------------------------------------------------
-// Order matters: schema first, then repository repair, then state that reads
-// the repositories. Wire new boot steps here, before the server starts.
 const releaseStorage = await acquireStorageLock();
 await runMigrations();
 await migrateSecrets();
 await repoGit.recoverAllInterruptedState();
-// reindexAllProjects also applies the bare repository policy to every project.
 await runsRepository.markInterruptedRuns();
 await markInterruptedBatches();
 await reindexAllProjects();
@@ -59,7 +53,6 @@ startFailureMonitor();
 startScheduleMonitor();
 startSteward();
 startRetentionMonitor();
-// ---------------------------------------------------------------------------
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
     logger.info("backend listening", { hostname, port });
 });
@@ -98,7 +91,6 @@ server.on("upgrade", (request, socket, head) => {
             const expiry = setTimeout(() => websocket.close(1008, "Session expired"), Math.max(0, Date.parse(authenticated.session.expiresAt) - Date.now()));
             expiry.unref();
             websocket.once("close", () => { clearTimeout(expiry); authEvents.off("user", closeUser); authEvents.off("session", closeSession); });
-            // Recheck after subscribing so a permission change during the upgrade cannot be missed.
             void sessionFromHeaders(headers).then((current) => {
                 if (!current || current.user.role === "viewer") websocket.close(1008, "Sign in with permission to use the browser");
                 else wss.emit("connection", websocket, request);
@@ -118,7 +110,6 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
         process.exit(1);
     }, 10_000);
     timer.unref();
-    // Stop accepting first, then tear down the work that is still running.
     const closed = new Promise<void>((resolve) => server.close(() => resolve()));
     for (const client of wss.clients) client.terminate();
     wss.close();
@@ -129,7 +120,6 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     await stopJobWorker();
     stopActiveRunProcesses();
     await closeAllChatBrowsers().catch((error: unknown) => logger.error("closing browsers failed", { error }));
-    // Open SSE streams would otherwise hold server.close() until the timeout.
     if ("closeAllConnections" in server) server.closeAllConnections();
     await closed;
     await releaseStorage();

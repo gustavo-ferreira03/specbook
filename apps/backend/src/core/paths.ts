@@ -4,8 +4,6 @@ import { fileURLToPath } from "node:url";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
-// src/core/paths.ts in development, dist/index.js once bundled: walk up to the
-// directory that holds the backend package.json instead of assuming a depth.
 function findBackendRoot(start: string): string {
     let current = start;
     while (!existsSync(path.join(current, "package.json"))) {

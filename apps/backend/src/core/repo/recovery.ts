@@ -33,7 +33,6 @@ async function operationInProgress(projectId: string): Promise<boolean> {
     })))).some(Boolean);
 }
 
-/** Call under the repo lock. Never saves changes that have not been reviewed. */
 export async function prepareRunRepositoryUnlocked(projectId: string): Promise<void> {
     try {
         if (await operationInProgress(projectId)) throw new RepositoryRecoveryError("Project files are being updated. Try again after the update finishes, or check Project settings → Git.");

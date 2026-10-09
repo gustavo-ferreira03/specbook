@@ -18,15 +18,10 @@ export const REQUEST_HEADER = "X-Specbook-Request";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const DEFAULT_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
 
-/**
- * Git Smart HTTP and CI authenticate every request with a project token, so neither
- * DNS rebinding nor cross-site form posts can use it without that secret.
- */
 function isGitHttpPath(pathname: string): boolean {
     return pathname.startsWith("/git/");
 }
 
-/** Rejects requests whose Host header is not ours, which defeats DNS rebinding. */
 export function hostGuard(allowlist: HostAllowlist): MiddlewareHandler {
     return async (c, next) => {
         const pathname = c.req.path;
@@ -40,10 +35,6 @@ export function hostGuard(allowlist: HostAllowlist): MiddlewareHandler {
     };
 }
 
-/**
- * Requires a custom header on state-changing requests. Browsers cannot attach
- * it cross-origin without a CORS preflight, which only our frontend passes.
- */
 export function csrfGuard(): MiddlewareHandler {
     return async (c, next) => {
         if (SAFE_METHODS.has(c.req.method) || isGitHttpPath(c.req.path) || c.req.path.startsWith("/ci/")) return next();
@@ -54,7 +45,6 @@ export function csrfGuard(): MiddlewareHandler {
     };
 }
 
-/** Caps request bodies for the JSON API; Git Smart HTTP enforces its own limits. */
 export function jsonBodyLimit(maxSize = DEFAULT_BODY_LIMIT_BYTES): MiddlewareHandler {
     const limiter = bodyLimit({
         maxSize,
@@ -63,7 +53,6 @@ export function jsonBodyLimit(maxSize = DEFAULT_BODY_LIMIT_BYTES): MiddlewareHan
     return async (c, next) => (isGitHttpPath(c.req.path) ? next() : limiter(c, next));
 }
 
-/** One structured log line per request. */
 export function requestLogger(): MiddlewareHandler {
     return async (c, next) => {
         const started = performance.now();

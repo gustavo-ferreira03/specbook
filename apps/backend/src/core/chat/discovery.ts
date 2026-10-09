@@ -15,7 +15,6 @@ export const DEFAULT_DISCOVERY_GOAL =
 const BEGIN_DISCOVERY =
     "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes, then propose the project context.";
 
-/** Callers hold the project's draft lock and have checked that no draft is active. */
 async function startDiscoveryLocked(
     projectId: string,
     brief: DiscoveryBrief,
@@ -33,7 +32,6 @@ async function startDiscoveryLocked(
     return { revision: (await projectContextsRepository.getProjectContextRevision(revision.id)) ?? revision, chat };
 }
 
-/** Starts a discovery chat, unless the project already has one in progress. */
 export function startContextDiscovery(
     projectId: string,
     brief: DiscoveryBrief,
@@ -44,10 +42,6 @@ export function startContextDiscovery(
     });
 }
 
-/**
- * Explores a project that has no context yet once a model is ready. Returns the discovery chat id;
- * a failure is logged and never fails the caller.
- */
 export async function discoverProjectContext(projectId: string): Promise<string | null> {
     try {
         if (!(await configuredModel()).ready || (await isAgentPaused(projectId))) return null;
@@ -65,10 +59,6 @@ export async function discoverProjectContext(projectId: string): Promise<string 
 
 let pendingDiscovery: Promise<void> | null = null;
 
-/**
- * Explores every project still without context, one at a time (each discovery drives a browser and the
- * model), for example when a model becomes ready or the backend starts.
- */
 export function discoverPendingProjectContexts(): void {
     if (pendingDiscovery) return;
     pendingDiscovery = (async () => {
@@ -93,7 +83,6 @@ export function contextProposalProblem(context: ProjectContext): string | null {
     return null;
 }
 
-/** Confirms a discovery draft once it holds a complete proposal; an incomplete draft stays as is. */
 export async function confirmDiscoveredContext(revisionId: string): Promise<void> {
     const initial = await projectContextsRepository.getProjectContextRevision(revisionId);
     if (!initial) return;

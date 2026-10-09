@@ -2,10 +2,6 @@ import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-// Project repositories accept content from Git pushes, so any
-// path inside them may be a symlink planted to reach files outside the repo.
-// Every read or write of repo content goes through these helpers.
-
 export class UnsafeRepoPathError extends Error {}
 
 function assertInside(root: string, target: string): void {
@@ -15,7 +11,6 @@ function assertInside(root: string, target: string): void {
     }
 }
 
-// Rejects the target if it or any parent directory below root is a symlink.
 async function assertNoSymlinks(root: string, target: string): Promise<void> {
     const resolvedRoot = path.resolve(root);
     const resolvedTarget = path.resolve(target);

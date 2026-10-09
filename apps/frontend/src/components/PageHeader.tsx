@@ -16,11 +16,6 @@ export interface Crumb {
     href?: string;
 }
 
-/**
- * The single header of a route: breadcrumb (ancestors only, never the current page), title,
- * optional meta line, and actions on the right. Use the same `width` as the PageContainer below it
- * so the header and content share a left edge.
- */
 export function PageHeader({
     title,
     breadcrumbs,
@@ -37,7 +32,6 @@ export function PageHeader({
     description?: React.ReactNode;
     meta?: React.ReactNode;
     actions?: React.ReactNode;
-    /** Inline element after the title, e.g. a StatusPill. */
     titleAdornment?: React.ReactNode;
     width?: PageWidth;
     bordered?: boolean;
@@ -79,7 +73,6 @@ export function PageHeader({
     );
 }
 
-/** Content region under a PageHeader: gutters, vertical rhythm, and a centered measure. */
 export function PageContainer({ width = "data", className, innerClassName, children }: { width?: PageWidth; className?: string; innerClassName?: string; children: React.ReactNode }) {
     return (
         <div className={cn("px-4 py-6 md:px-8 md:py-8", className)}>

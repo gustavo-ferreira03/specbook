@@ -8,10 +8,6 @@ function Tabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive
     return <TabsPrimitive.Root data-slot="tabs" className={cn("flex flex-col", className)} {...props} />;
 }
 
-/**
- * `underline` (default): page-level tabs with an primary (ink) indicator under the active tab.
- * `segmented`: compact switch inside a tinted track.
- */
 function TabsList({ className, variant = "underline", ...props }: React.ComponentProps<typeof TabsPrimitive.List> & { variant?: "underline" | "segmented" }) {
     return (
         <TabsPrimitive.List

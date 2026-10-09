@@ -39,7 +39,6 @@ export function setThemePreference(preference: ThemePreference) {
         if (preference === "system") window.localStorage.removeItem(THEME_STORAGE_KEY);
         else window.localStorage.setItem(THEME_STORAGE_KEY, preference);
     } catch {
-        // Storage can be unavailable (private mode, blocked site data). The choice still applies to this tab.
     }
     applyTheme(preference);
     window.dispatchEvent(new Event(THEME_EVENT));
@@ -66,7 +65,6 @@ function subscribe(onChange: () => void) {
     };
 }
 
-/** Current theme preference; "system" during server rendering. */
 export function useThemePreference(): ThemePreference {
     return useSyncExternalStore(subscribe, readPreference, () => "system");
 }

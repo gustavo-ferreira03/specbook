@@ -31,16 +31,11 @@ function truncate(value: string, limit: number): string {
     return value.length > limit ? `${value.slice(0, limit)}... (truncated)` : value;
 }
 
-/** The failed step title is not stored in the Run row; executeSpec returns it in memory. */
 function failedStepOf(run: object): string | null {
     const { failedStep } = run as { failedStep?: unknown };
     return typeof failedStep === "string" && failedStep.trim() ? failedStep.trim() : null;
 }
 
-/**
- * The tools validate spec.ts themselves so they can report the rejection (with the
- * line and the rule) to the agent instead of storing an invalid Spec.
- */
 function sourceRejection(testSource: string, steps: string[]): { rule: ValidatorRejection["rule"]; error: string } | null {
     const analysis = analyzeSpecSource(testSource);
     if (!analysis.ok) return { rule: "source_validation", error: analysis.error };

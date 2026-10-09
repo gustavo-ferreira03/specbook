@@ -7,8 +7,6 @@ import { after, before, describe, test } from "node:test";
 import { Hono } from "hono";
 import { useTempStorage } from "../helpers/storage";
 
-/** executeSpec and the runs API against a real browser; skipped without Chromium for @playwright/test. */
-
 useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
 const { environmentsRepository } = await import("../../src/infra/repositories/environments");
@@ -317,7 +315,6 @@ describe("proposal verification", { skip: available ? false : "Chromium is not i
         assert.equal(await repoGit.getHeadSha(project.id), head);
         assert.equal((await specsRepository.getSpec(spec.id))?.status, "unverified");
         assert.equal(await fs.readFile(path.join(directory, "spec.ts"), "utf8"), VALID_SPEC);
-        // Approval of another Spec must not stale an independent proposal.
         await writer.createFeatureInRepo(project.id, null, "Unrelated", "");
         await applyProposal((await jobsRepository.item(proposal.id))!);
         assert.equal(await fs.readFile(path.join(directory, "spec.yml"), "utf8"), yaml);
@@ -455,7 +452,6 @@ describe("scheduled runs", () => {
             assert.equal((await jobsRepository.item(question.id))?.status, "pending");
             assert.deepEqual(await runsRepository.listRuns(spec.id), []);
 
-            // Later settings must not replace the occurrence's selection or healer policy.
             await updateAutomation(project.id, { specIds: [unselected.id], healFailures: true });
             await stewardRepository.update(project.id, { paused: false });
             await Promise.all([processProjectSteward(project.id, false), processProjectSteward(project.id, false)]);
@@ -557,7 +553,6 @@ describe("scheduled runs", () => {
             await processSchedules(new Date(at.getTime() + 13_000));
             assert.equal(messages.filter((message) => message.status === "passed").length, 1, "polling does not duplicate events");
 
-            // Boot marks interrupted batches first; the scheduler then observes the persisted terminal status.
             const interrupted = { ...(await getRunBatch(batch.id))!, id: crypto.randomUUID(), status: "running" };
             const directory = getRunBatchDirectory(interrupted.id);
             await fs.mkdir(directory, { recursive: true });
@@ -972,7 +967,6 @@ describe("autonomous pause and decisions", () => {
             await log(id, action, detail);
             if (id === job.id && action === "stopped") notifyStopped();
         });
-        // The completed response is already saved; hold its chat reservation to avoid another provider call.
         assert.equal(tryReserveChatTurn(chat.id), true);
         try {
             await startJobWorker();

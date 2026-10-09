@@ -1,23 +1,8 @@
 import type { ApiRequestEvidence } from "../evidence";
 export type { ApiRequestEvidence } from "../evidence";
 
-/**
- * Runtime half of the "specbook" test module. It runs inside the Playwright worker
- * that executes pushed or LLM-written Spec code, so it imports nothing from the
- * backend: everything it needs arrives through SPECBOOK_RUNTIME and the secret
- * environment variables of the run.
- *
- * The static validator (core/runner/validate.ts) is the primary defense. This module
- * is the second line: the objects a Spec can reach expose only allowlisted methods,
- * never return raw Playwright objects (a Response, a Frame, a BrowserContext...), keep
- * navigation on the project origin, and type a secret only into the main frame of a
- * page whose origin the credential profile allows.
- */
-
 export interface SecretOriginPolicy {
-    /** Origins allowed when a secret has no profile-specific entry (the project origin). */
     defaultOrigins: string[];
-    /** Allowed origins per secret env name (e.g. SPECBOOK_SECRET_ADMIN_PASSWORD). */
     byRef: Record<string, string[]>;
 }
 
@@ -39,7 +24,6 @@ function envSegment(name: string): string {
     return name.toUpperCase().replace(/-/g, "_");
 }
 
-/** Environment variable that carries a credential field's value during a run. */
 export function secretEnvName(profileName: string, fieldKey: string): string {
     return `SPECBOOK_SECRET_${envSegment(profileName)}_${envSegment(fieldKey)}`;
 }
@@ -60,16 +44,6 @@ export function parseRuntime(raw: string | undefined): SpecbookRuntime {
     };
 }
 
-// ---- code generation -------------------------------------------------------------
-
-/**
- * Removes the `constructor` link from every kind of function, so a Spec that reached
- * any function value still cannot turn a string into code with
- * `fn.constructor("...")`. The global Function/eval stay available to Playwright
- * itself; Spec code cannot name them (the validator allows no free identifiers).
- * Node's --disallow-code-generation-from-strings would be stronger, but Playwright
- * needs eval to load modules and to run locators.
- */
 export function hardenFunctionConstructors(): void {
     const blocked = () => {
         throw new Error("Code generation is not available to Specs");
@@ -85,11 +59,8 @@ export function hardenFunctionConstructors(): void {
     }
 }
 
-// ---- secrets -------------------------------------------------------------------
-
 const secretRefs = new WeakMap<object, { envName: string; label: string }>();
 
-/** Opaque handle returned by secret(): it carries no value, only which field to type. */
 export function createSecret(profile: unknown, field: unknown): object {
     if (typeof profile !== "string" || typeof field !== "string" || !SECRET_NAME_PATTERN.test(profile) || !SECRET_NAME_PATTERN.test(field)) {
         throw new Error('secret() takes a profile name and a field key, like secret("admin", "password")');
@@ -103,8 +74,6 @@ export function createSecret(profile: unknown, field: unknown): object {
 export function isSecret(value: unknown): boolean {
     return typeof value === "object" && value !== null && secretRefs.has(value);
 }
-
-// ---- minimal structural types of the Playwright objects we wrap --------------------
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type AnyFn = (...args: any[]) => any;
@@ -134,7 +103,6 @@ export interface RawRequest {
 type WrapperKind = "page" | "locator" | "keyboard" | "mouse" | "apiResponse" | "request";
 const originals = new WeakMap<object, { kind: WrapperKind; original: object }>();
 
-/** The real Playwright object behind a wrapper, for expect() and fixture internals. */
 export function unwrap<T = unknown>(value: unknown, kinds: WrapperKind[] = ["page", "locator", "keyboard"]): T | undefined {
     if (typeof value !== "object" || value === null) return undefined;
     const entry = originals.get(value);
@@ -176,7 +144,6 @@ const LOCATOR_ACTIONS = [
 
 export interface GuardOptions {
     runtime: SpecbookRuntime;
-    /** Reads a secret value by env name (process.env in the worker). */
     readSecret: (envName: string) => string | undefined;
 }
 
@@ -184,7 +151,6 @@ function isPlainValue(value: unknown): boolean {
     return value === null || ["string", "number", "boolean", "undefined"].includes(typeof value) || value instanceof RegExp;
 }
 
-/** Copies a literal argument, replacing wrapped locators by the real ones and rejecting anything else. */
 function sanitize(value: unknown, depth = 0): unknown {
     if (isPlainValue(value)) return value;
     if (depth > 3) throw new Error("Argument is nested too deeply");
@@ -213,7 +179,6 @@ function assertSelector(selector: unknown): void {
     if (selector.includes("internal:")) throw new Error('Selectors may not use Playwright "internal:" engines');
 }
 
-/** A path below the base URL: starts with one "/", no backslashes or control characters. */
 export function isSafeRelativePath(value: unknown): value is string {
     return typeof value === "string" && /^\/(?!\/)[^\\\u0000-\u001f]*$/.test(value);
 }
@@ -246,7 +211,6 @@ export function createGuard(options: GuardOptions) {
         if (!allowedOriginsFor(envName).includes(origin)) throw new Error(SECRET_ORIGIN_ERROR);
     }
 
-    /** Resolves a fill/type argument, checking origin and frame before a secret is revealed. */
     async function textArgument(page: RawPage, value: unknown, target: RawLocator | null): Promise<string> {
         if (typeof value === "string") return value;
         if (!isSecret(value)) throw new Error("Text must be a string literal or secret(...)");
@@ -268,7 +232,6 @@ export function createGuard(options: GuardOptions) {
             });
             if (intoFrame) throw new Error("Refusing to type a secret into an element outside the page's main frame.");
         }
-        // The page may have navigated while the element was located.
         assertPageOrigin(page, envName);
         return secret;
     }
@@ -325,7 +288,6 @@ export function createGuard(options: GuardOptions) {
             if (!isSafeRelativePath(target)) {
                 throw new Error('page.goto() takes a path starting with "/"; the project base URL is added automatically.');
             }
-            // Like ${BASE_URL}/path: the path is appended to the base URL, keeping its path prefix.
             const url = new URL(`${baseOrigin}${basePath}${target}`);
             if (url.origin !== baseOrigin) throw new Error("page.goto() must stay on the project origin.");
             await page.goto(url.href, sanitize(gotoOptions));

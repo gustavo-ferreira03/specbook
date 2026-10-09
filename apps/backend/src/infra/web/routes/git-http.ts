@@ -40,12 +40,6 @@ function trustProxy(): boolean {
     return value === "1" || value === "true";
 }
 
-/**
- * The public base URL clients should clone from. Forwarded headers are only
- * honoured when TRUST_PROXY says a reverse proxy sets them; otherwise any
- * client could choose the URL shown to users. Without them the request's own
- * host is used.
- */
 export function publicGitOrigin(c: Context): string {
     const configured = process.env.SPECBOOK_PUBLIC_API_URL;
     if (configured) return configured.replace(/\/$/, "");
@@ -155,11 +149,9 @@ function buildEnv(request: BackendRequest): NodeJS.ProcessEnv {
         PATH: process.env.PATH,
         GIT_PROJECT_ROOT: path.resolve(bareReposDir),
         GIT_HTTP_EXPORT_ALL: "1",
-        // PATH_INFO is rebuilt from validated parts, never from the raw URL.
         PATH_INFO: `/${request.projectId}.git/${request.endpoint}`,
         REQUEST_METHOD: request.method,
         QUERY_STRING: request.query,
-        // git-http-backend only serves receive-pack to an authenticated user.
         REMOTE_USER: "specbook",
         REMOTE_ADDR: "127.0.0.1",
         GIT_CONFIG_GLOBAL: "/dev/null",
@@ -169,7 +161,6 @@ function buildEnv(request: BackendRequest): NodeJS.ProcessEnv {
     if (request.contentType) env.CONTENT_TYPE = request.contentType;
     if (request.contentEncoding) env.HTTP_CONTENT_ENCODING = request.contentEncoding;
     if (request.gitProtocol) env.GIT_PROTOCOL = request.gitProtocol;
-    // A chunked body has no length; http-backend then reads stdin until EOF.
     if (!request.chunked && request.contentLength) env.CONTENT_LENGTH = request.contentLength;
     return env;
 }
@@ -186,15 +177,11 @@ function spawnBackend(request: BackendRequest) {
         stderr = (stderr + chunk).slice(-4096);
     });
 
-    // A spawn failure (e.g. git missing) is emitted as 'error'; without a
-    // listener it would crash the process. stdout then ends and callers fail.
     child.once("error", (error) => {
         console.error(`[specbook] git-http-backend could not run for ${request.projectId}:`, error);
     });
     child.stdin.on("error", () => undefined);
     if (request.body) {
-        // A client abort errors the request stream; pipeline surfaces that
-        // instead of an unhandled 'error', and the backend is stopped.
         pipeline(Readable.fromWeb(request.body as Parameters<typeof Readable.fromWeb>[0]), child.stdin).catch(() => {
             child.kill("SIGKILL");
         });
@@ -205,7 +192,6 @@ function spawnBackend(request: BackendRequest) {
     return { child, readStderr: () => stderr };
 }
 
-/** Streams the backend's output. Used for clone and fetch, whose payloads are unbounded. */
 async function streamBackend(request: BackendRequest): Promise<Response> {
     const { child, readStderr } = spawnBackend(request);
     try {
@@ -219,7 +205,6 @@ async function streamBackend(request: BackendRequest): Promise<Response> {
     }
 }
 
-/** Buffers the backend's output so the repository lock can be held until the push settles. */
 async function runBackendBuffered(request: BackendRequest): Promise<{ head: CgiHead; body: Buffer }> {
     const { child, readStderr } = spawnBackend(request);
     const head = await readCgiHead(child.stdout).catch((error: unknown) => {
@@ -231,22 +216,14 @@ async function runBackendBuffered(request: BackendRequest): Promise<{ head: CgiH
     return { head, body: Buffer.concat(chunks) };
 }
 
-/**
- * Publishes anything the instance has not committed yet, so a client pushing on
- * top of the advertised refs is pushing on top of the real project state.
- */
 async function alignBareWithCheckoutUnlocked(projectId: string): Promise<void> {
     const status = await repoGit.getProjectGit(projectId).status();
     if (status.conflicted.length > 0) throw new Error("conflict");
-    // First catch up with pushes the checkout has not followed yet (a failed
-    // followExternalPush). Throws, and records, when that is not a clean
-    // fast-forward, so a stale bare is surfaced instead of served silently.
     const { moved } = await repoBare.fastForwardCheckout(projectId, repoGit.getRepoDir(projectId));
     if (moved) {
         await reindexProjectUnlocked(projectId);
     }
     if (!status.isClean()) await repoGit.commitAll(projectId, "specbook: import working tree changes");
-    // commitAll only logs publish failures; this one must fail the request.
     await repoGit.publishToBareUnlocked(projectId);
 }
 
@@ -266,16 +243,12 @@ function stateErrorResponse(error: unknown): Response | null {
     return null;
 }
 
-/** Applies whatever a client just pushed to the working checkout and the index. */
 async function followExternalPush(projectId: string): Promise<void> {
     try {
-        // fastForwardCheckout records and clears gitExternalSyncError itself.
         const { moved } = await repoBare.fastForwardCheckout(projectId, repoGit.getRepoDir(projectId));
         if (!moved) return;
         await reindexProjectUnlocked(projectId);
     } catch (error) {
-        // The push itself succeeded and must not be rolled back; surface the
-        // follow-up failure instead so the project can be repaired.
         const message = error instanceof Error ? error.message : String(error);
         console.error(`[specbook] following an external push for ${projectId} failed:`, message);
         await projectsRepository
@@ -298,8 +271,6 @@ export function createGitHttpRouter(): Hono {
         const service = url.searchParams.get("service");
         if (endpoint === "info/refs") {
             if (c.req.method !== "GET") return c.text("Method not allowed\n", 405);
-            // Only the smart protocol is served; the dumb one would expose the
-            // repository over plain file reads.
             if (!service || !SERVICES.has(service)) return c.text("Smart HTTP is required\n", 403);
         } else if (c.req.method !== "POST") {
             return c.text("Method not allowed\n", 405);
@@ -315,8 +286,6 @@ export function createGitHttpRouter(): Hono {
             console.error(`[specbook] git http lookup failed for ${projectId}:`, error);
             return c.text("Git backend failed\n", 500);
         }
-        // An unknown project answers exactly like a wrong token, so the endpoint
-        // does not disclose which project ids exist.
         if (!project || !verifyGitAccessToken(project, credentials.password)) return unauthorized();
         await noteGitAccessTokenUse(projectId).catch((error: unknown) => console.error(error));
 
@@ -334,8 +303,6 @@ export function createGitHttpRouter(): Hono {
         };
 
         try {
-            // Hot path: only a cheap existence check. Policy and hook are
-            // applied when the bare is created and at boot, under the lock.
             if (!(await repoBare.bareExists(projectId))) {
                 await repoGit.withRepoLock(projectId, async () => {
                     await repoGit.ensureProjectRepo(projectId, { create: true });
@@ -350,8 +317,6 @@ export function createGitHttpRouter(): Hono {
         }
 
         if (endpoint !== "git-receive-pack") {
-            // Advertising refs is the first request of every clone and fetch, so
-            // it is the point where the bare repository is refreshed.
             if (endpoint === "info/refs") {
                 try {
                     await repoGit.withRepoLock(projectId, () => alignBareWithCheckoutUnlocked(projectId));
@@ -365,8 +330,6 @@ export function createGitHttpRouter(): Hono {
             return streamBackend(request);
         }
 
-        // A push runs alone: the lock is held from the pre-flight publish until
-        // the checkout has followed the new commits.
         return repoGit.withRepoLock(projectId, async () => {
             try {
                 await alignBareWithCheckoutUnlocked(projectId);

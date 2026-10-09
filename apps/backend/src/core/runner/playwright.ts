@@ -15,21 +15,16 @@ import type { SpecAnalysis } from "./validate";
 
 const require = createRequire(import.meta.url);
 
-/** Per-test timeout inside Playwright; the process timeout of the caller bounds the whole run. */
 const TEST_TIMEOUT_MS = 100_000;
 const EXPECT_TIMEOUT_MS = 5_000;
 const ACTION_TIMEOUT_MS = 15_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
-/** Also the agent browser's viewport, so coordinates it uses replay identically. */
 export const SPEC_VIEWPORT = { width: 1280, height: 720 };
 
 export interface SuiteSpec {
-    /** Run id: names the test file (tests/<key>.spec.ts) and the result. */
     key: string;
-    /** Validated spec.ts source. */
     source: string;
     analysis: SpecAnalysis;
-    /** runs/<runId>: receives evidence/ and evidence.json. */
     outputDir: string;
 }
 
@@ -42,9 +37,7 @@ export interface SuiteSpecResult {
 
 export interface SuiteOutcome {
     results: Map<string, SuiteSpecResult>;
-    /** Set when Playwright itself failed (timeout, crash, no report). */
     processFailure: string | null;
-    /** True when <directory>/report/index.html was kept. */
     reportAvailable: boolean;
 }
 
@@ -52,7 +45,6 @@ export interface SuiteOptions {
     projectId?: string;
     environment?: RunEnvironment;
     signal?: AbortSignal;
-    /** Directory of this execution: work/, report/ and results.json are created here. */
     directory: string;
     baseUrl: string;
     specs: SuiteSpec[];
@@ -66,10 +58,6 @@ function playwrightCli(): string {
     return require.resolve("@playwright/test/cli");
 }
 
-/**
- * The file that implements the "specbook" module: the bundle next to dist/index.js in
- * production, the TypeScript source when the backend runs from src/ (dev and tests).
- */
 export function specbookModulePath(): string {
     const candidates = [
         new URL("./specbook-fixtures.mjs", import.meta.url),
@@ -80,7 +68,6 @@ export function specbookModulePath(): string {
     return found;
 }
 
-/** The spec.ts source with its "specbook" import pointing at the real module. */
 export function executableSource(source: string, analysis: SpecAnalysis, modulePath: string): string {
     const { start, end } = analysis.importSource;
     return `${source.slice(0, start)}${JSON.stringify(modulePath)}${source.slice(end)}`;
@@ -96,7 +83,6 @@ function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyS
     const plain = options.specs.filter((spec) => spec.analysis.secretRefs.length === 0).map(file);
     const secret = options.specs.filter((spec) => spec.analysis.secretRefs.length > 0).map(file);
     const projects = [
-        // Traces and videos can expose credentials, so Specs that type secrets record neither.
         plain.length ? { name: "specbook", testMatch: plain, use: { trace: "retain-on-failure" } } : null,
         secret.length ? { name: "specbook-secrets", testMatch: secret, use: { trace: "off", video: "off" } } : null,
     ].filter(Boolean);
@@ -138,7 +124,6 @@ async function writeWorkDir(workDir: string, options: SuiteOptions, withHtmlRepo
     const modulePath = specbookModulePath();
     await fs.mkdir(path.join(workDir, "tests"), { recursive: true });
     await Promise.all([
-        // Pin module format and TypeScript settings so nothing is inherited from parent directories.
         fs.writeFile(path.join(workDir, "package.json"), JSON.stringify({ private: true, type: "module" }), "utf8"),
         fs.writeFile(path.join(workDir, "tsconfig.json"), JSON.stringify({ compilerOptions: {} }), "utf8"),
         fs.writeFile(
@@ -156,18 +141,11 @@ function statusOf(result: SpecFileResult): Exclude<RunStatus, "running"> {
     return result.status;
 }
 
-/**
- * Runs the given Specs in one Playwright Test invocation (one worker, headless
- * Chromium) and stores each Spec's evidence in its outputDir. Callers hold the spec
- * locks and a run slot. Secrets reach only this child process, through env vars.
- */
 export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOutcome> {
     const directory = options.directory;
     const workDir = path.join(directory, "work");
     const reportDir = path.join(directory, "report");
     const usesSecrets = options.specs.some((spec) => spec.analysis.secretRefs.length > 0);
-    // The HTML report embeds every Playwright API step, including typed values, in a
-    // compressed archive the scrubber cannot read: it is only produced without secrets.
     const withHtmlReport = !usesSecrets;
     await fs.rm(workDir, { recursive: true, force: true });
     await fs.rm(reportDir, { recursive: true, force: true });
@@ -195,7 +173,6 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
         const rawReport = await fs.readFile(path.join(workDir, "results.json"), "utf8").catch(() => null);
         const report = rawReport === null ? null : options.scrub(rawReport);
         if (report !== null) await fs.writeFile(path.join(directory, "results.json"), report, "utf8");
-        // A secret value that surfaced in the results may also be inside the report.
         if (report !== null && rawReport !== report) await fs.rm(reportDir, { recursive: true, force: true });
 
         if (processResult.timedOut) processFailure = `Run timed out after ${Math.round(options.timeoutMs / 1000)}s`;
@@ -243,7 +220,6 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
         reportAvailable = withHtmlReport && existsSync(path.join(reportDir, "index.html"));
     } finally {
         await proxy?.close();
-        // test-results holds traces, error contexts and copies of the attachments.
         await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }
     return { results, processFailure, reportAvailable };

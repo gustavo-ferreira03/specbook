@@ -34,7 +34,6 @@ function write(level: LogLevel, message: string, fields?: LogFields): void {
     (level === "error" || level === "warn" ? process.stderr : process.stdout).write(`${line}\n`);
 }
 
-/** Minimal JSON-lines logger; the threshold comes from `LOG_LEVEL` (debug, info, warn, error, silent). */
 export const logger = {
     debug: (message: string, fields?: LogFields) => write("debug", message, fields),
     info: (message: string, fields?: LogFields) => write("info", message, fields),

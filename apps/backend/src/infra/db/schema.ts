@@ -115,7 +115,6 @@ export const specs = sqliteTable(
         createdAt: text("created_at").notNull(),
         updatedAt: text("updated_at").notNull(),
     },
-    // The unique (project_id, path) index also serves lookups by project_id alone.
     (table) => [uniqueIndex("specs_project_path_unique").on(table.projectId, table.path)],
 );
 

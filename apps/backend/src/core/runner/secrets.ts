@@ -5,10 +5,6 @@ import { secretEnvName, type SecretOriginPolicy } from "./specbook/guard";
 
 export type { SecretOriginPolicy } from "./specbook/guard";
 
-/**
- * Origins a secret may reach: Production by default, or the selected environment
- * when a profile is explicitly overridden, plus that profile's allowed origins.
- */
 export async function resolveSecretOriginPolicy(
     projectId: string,
     refs: string[],

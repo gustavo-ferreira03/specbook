@@ -63,11 +63,9 @@ export interface SpecSummary {
     featureId: string;
     title: string;
     status: SpecStatus;
-    /** Most recent run, or null when the Spec was never run. */
     lastRun: Run | null;
 }
 
-/** Response of GET /projects/:id/tree, shared by the Sidebar and the Specs screens. */
 export interface ProjectTree {
     features: Feature[];
     specs: SpecSummary[];
@@ -218,7 +216,6 @@ export interface RunEvidence {
     expectedResult: string;
     steps: { number: number; label: string; file: string }[];
     video: string | null;
-    /** Title of the step() that failed, when the run failed inside one. */
     failedStep: string | null;
     diagnostics?: { kind: "console" | "pageerror" | "requestfailed" | "response"; message: string; url?: string; method?: string; status?: number }[];
     errorContext?: string;

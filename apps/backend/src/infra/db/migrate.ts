@@ -6,7 +6,6 @@ import { db, initializeDatabase } from "./client";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
-// src/infra/db/migrate.ts in development (tsx) and dist/index.js once bundled.
 function migrationsFolder(): string {
     const candidates = [
         process.env.SPECBOOK_MIGRATIONS_DIR,

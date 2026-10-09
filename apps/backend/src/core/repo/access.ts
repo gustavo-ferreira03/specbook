@@ -21,7 +21,6 @@ export function accessTokenInfoOf(project: Project): GitAccessTokenInfo {
     };
 }
 
-/** Creates a token, replacing any previous one. The plain value is returned once. */
 export async function issueGitAccessToken(projectId: string): Promise<{ token: string; info: GitAccessTokenInfo }> {
     const { token, hash, prefix } = issuePrefixedToken("sbk_");
     const createdAt = new Date().toISOString();
@@ -39,7 +38,6 @@ export function verifyGitAccessToken(project: Project, candidate: string): boole
     return project.gitAccessTokenHash ? verifyTokenHash(project.gitAccessTokenHash, candidate) : false;
 }
 
-/** Records token usage at most once a minute; a single clone issues several requests. */
 export async function noteGitAccessTokenUse(projectId: string): Promise<void> {
     const now = Date.now();
     const previous = lastTouched.get(projectId) ?? 0;

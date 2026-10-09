@@ -29,7 +29,6 @@ export function fileDiff(before: string, after: string) {
         if (kind !== "removed") afterLine++;
     };
     oldLines.slice(0, prefix).forEach((line) => add("context", line));
-    // Bound memory for unusually large replacements; unchanged edges still stay context.
     if (!left.length || !right.length || left.length + right.length > 4000 || left.length * right.length > 1_000_000) {
         left.forEach((line) => add("removed", line));
         right.forEach((line) => add("added", line));

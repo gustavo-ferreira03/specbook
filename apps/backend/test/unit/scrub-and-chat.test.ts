@@ -3,7 +3,6 @@ import { describe, test } from "node:test";
 import type { BrowserMcp } from "../../src/core/browser/mcp";
 import { useTempStorage } from "../helpers/storage";
 
-// scrub.ts reaches the DB through the credential profiles module.
 useTempStorage();
 const { createSecretScrubber } = await import("../../src/core/credentials/scrub");
 const registry = await import("../../src/core/chat/chat-registry");

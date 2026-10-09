@@ -4,7 +4,6 @@ import { httpTarget, resolveTarget, type AddressResolver } from "./targets";
 
 const MAX_DOCUMENTATION_BYTES = 131_072;
 
-/** Read public documentation without cookies, redirects or a second DNS lookup. */
 export async function readApiDocumentation(value: string, options: { origins: string[]; allowPrivate: boolean; signal?: AbortSignal; resolver?: AddressResolver }) {
     options.signal?.throwIfAborted();
     const url = httpTarget(value);

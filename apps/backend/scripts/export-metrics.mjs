@@ -1,12 +1,4 @@
 #!/usr/bin/env node
-// Converts the chat turn metrics JSONL (<storage>/metrics/chat-turns.jsonl) to CSV.
-//
-// Usage:
-//   node scripts/export-metrics.mjs [input.jsonl] [--runs | --agent] [--out file.csv]
-//
-// Default output: one row per turn. With --runs: one row per run_spec call.
-// Input defaults to $SPECBOOK_STORAGE_DIR/metrics/chat-turns.jsonl, or
-// apps/backend/storage/metrics/chat-turns.jsonl when the variable is not set.
 
 import fs from "node:fs";
 import path from "node:path";

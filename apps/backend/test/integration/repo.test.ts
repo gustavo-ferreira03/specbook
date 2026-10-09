@@ -1040,7 +1040,6 @@ describe("project steward", () => {
             await specsRepository.updateSpecRecord(spec.id, { sourceHash: version === "a" ? originalHash : "changed-source" });
             const persisted = (await stewardRepository.get(projectId)).observation;
             observation = await collectProjectSignals(project, persisted, at);
-            // Simulate the process stopping after signal INSERT, before saving its observation.
             const replay = await collectProjectSignals(project, persisted, at + 1000);
             assert.deepEqual(replay.specGenerations, observation.specGenerations);
             assert.equal(replay.deployment?.generation, observation.deployment?.generation);
@@ -1108,7 +1107,6 @@ describe("project steward", () => {
         assert.equal(resumed.sourceChatId, chat.id, "access questions and retries stay in the original conversation");
         assert.equal(resumed.intent.baseUrl, "https://preview.example.com");
         assert.deepEqual(resumed.intent.specIds, [spec.id]);
-        // The access signal did not actually add the profile: retry asks the exact prerequisite again, then waits.
         for (let i = 0; i < 3; i++) await processProjectSteward(projectId, false);
         assert.equal((await jobsRepository.get(resumed.id))?.status, "blocked");
         assert.equal((await jobsRepository.list(projectId)).length, 2);
@@ -1570,7 +1568,6 @@ describe("existing checks baseline", () => {
             assert.equal(Object.keys((await stewardRepository.get(projectId)).observation.specs ?? {}).length, 80);
             const signals = await stewardRepository.signals(projectId);
             const intents = await stewardRepository.intents(projectId);
-            // Existing Specs are a baseline, never re-run; broken ones are things to repair, one repair per Spec version.
             assert.equal(signals.length, invalid ? 80 : 0);
             assert.ok(signals.every((signal) => signal.kind === "invalid_spec"));
             assert.equal(intents.length, invalid ? 80 : 0);
@@ -1983,7 +1980,6 @@ describe("selected batch suggestions", () => {
             const session = (await openSession(job.chatId))!;
             session.appendCustomMessageEntry("result", "The selected Spec is ready.", true);
             flushSessionFile(session);
-            // Hold the saved response's chat reservation to exercise completion without a provider call.
             assert.equal(tryReserveChatTurn(job.chatId), true);
             const executeAttempt = async () => {
                 const stopped = new Promise<void>((resolve) => { notifyStopped = resolve; });

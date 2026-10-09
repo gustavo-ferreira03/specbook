@@ -5,7 +5,6 @@ import { Slot } from "radix-ui";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-/** Shared focus recipe: 2px ink ring, 2px offset in the surrounding surface color. */
 export const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface";
 
 const buttonVariants = cva(
@@ -13,19 +12,13 @@ const buttonVariants = cva(
     {
         variants: {
             variant: {
-                /** Primary action (near-black; near-white in dark): one per view. */
                 default: "bg-primary text-primary-foreground shadow-xs hover:bg-primary-hover",
                 primary: "bg-primary text-primary-foreground shadow-xs hover:bg-primary-hover",
-                /** Secondary action with a hairline border. */
                 outline: "border border-line-strong bg-surface text-ink shadow-xs hover:border-line-hover hover:bg-surface-soft",
                 secondary: "border border-line-strong bg-surface text-ink shadow-xs hover:border-line-hover hover:bg-surface-soft",
-                /** Quiet filled action (e.g. "Run" inside a list). */
                 subtle: "bg-primary-soft text-ink hover:bg-surface-selected",
-                /** Toolbar / row actions. */
                 ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink",
-                /** Confirm destructive action (dialogs). */
                 destructive: "bg-danger-solid text-danger-solid-foreground shadow-xs hover:bg-danger-solid-hover",
-                /** Destructive entry point that should not shout (settings, headers). */
                 "destructive-soft": "bg-danger-soft text-danger hover:bg-danger-soft-hover",
                 link: "h-auto px-0 text-ink underline-offset-4 hover:underline",
             },

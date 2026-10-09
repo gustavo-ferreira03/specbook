@@ -27,7 +27,6 @@ test("Sign in with valid credentials", async ({ page, step, secret }) => {
 });
 `;
 
-/** A spec whose single step contains the given statements. */
 function spec(body: string, fixtures = "page, step, secret", header = 'import { test, expect } from "specbook";'): string {
     return `${header}\ntest("T", async ({ ${fixtures} }) => {\n    await step("S", async () => {\n        ${body}\n    });\n});\n`;
 }

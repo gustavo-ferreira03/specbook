@@ -4,7 +4,6 @@ import { useSyncExternalStore } from "react";
 import { formatDateTime, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-// One shared minute ticker for every RelativeTime on the page.
 const listeners = new Set<() => void>();
 let timer: number | null = null;
 let now = Date.now();
@@ -27,7 +26,6 @@ function subscribe(listener: () => void) {
     };
 }
 
-/** "5 minutes ago", with the absolute date and time in the tooltip and `dateTime` attribute. */
 export function RelativeTime({ value, prefix, className }: { value: string | number | Date; prefix?: string; className?: string }) {
     const current = useSyncExternalStore(subscribe, () => now, () => now);
     const date = value instanceof Date ? value : new Date(value);

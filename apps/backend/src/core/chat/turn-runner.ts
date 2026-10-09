@@ -81,20 +81,11 @@ async function createResourceLoader(promptText: string): Promise<DefaultResource
     return loader;
 }
 
-/**
- * Reserves the chat synchronously and starts a turn in the background.
- * Throws ChatBusyError when a turn is already running or the chat is being deleted.
- */
 export function startChatTurn(id: string, userText: string): void {
     if (!tryReserveChatTurn(id)) throw new ChatBusyError("The agent is still replying");
     void runReservedChatTurn(id, userText, undefined, "message").catch(console.error);
 }
 
-/**
- * Reserves the chat synchronously, moves the session leaf to replay `messageId` (edited
- * or retried) and starts the turn in the background. The reservation is released if the
- * branch cannot be prepared.
- */
 export async function startBranchedChatTurn(
     id: string,
     messageId: string,
@@ -113,7 +104,6 @@ export async function startBranchedChatTurn(
     void runReservedChatTurn(id, branch.text, branch.sessionManager, trigger).catch(console.error);
 }
 
-/** Moves the session leaf for a replayed turn. Rejects while a turn is running. */
 export async function branchChatForTurn(
     id: string,
     messageId: string,
@@ -127,7 +117,6 @@ export async function branchChatForTurn(
     }
 }
 
-/** Runs a turn if the chat is free; silently returns when it is busy or being deleted. */
 export async function runChatTurn(
     id: string,
     userText: string,
@@ -154,7 +143,6 @@ interface SessionEventValue {
     errorMessage?: string;
 }
 
-/** Runs a turn for a chat whose reservation the caller already holds; always releases it. */
 async function runReservedChatTurn(
     id: string,
     userText: string,
@@ -382,7 +370,6 @@ async function runReservedChatTurn(
             if (value.type === "message_end") {
                 const message = value.message;
                 const afterMessageId = messageAnchor;
-                // PI appends the message after notifying listeners; publish its stable entry id afterwards.
                 queueMicrotask(() => {
                     const entry = manager.getBranch().find((entry) => entry.type === "message" && entry.message === message);
                     const record = entry ? messagesOf(id, manager).find((record) => record.id === entry.id) : undefined;

@@ -52,8 +52,6 @@ async function removeVideos(directory: string, cutoff: number): Promise<number> 
         }
     }
     if (removed && path.basename(directory) === "report") {
-        // Playwright embeds attachment links in its report archive. Expire the report
-        // together with its video rather than leaving a downloadable broken report.
         await fs.rm(directory, { recursive: true, force: true });
     } else if (removed) {
         const manifestPath = path.join(directory, "evidence.json");
@@ -112,8 +110,6 @@ async function clean(settings: RetentionSettings, now: number): Promise<Retentio
         if (count <= settings.runsPerSpec || Date.parse(run.startedAt) >= now - settings.runDays * DAY_MS
             || run.status === "running" || run.automationPending || protectedIds.has(run.id)) kept.add(run.id);
     }
-    // Keep retry pairs and complete retained batches, so CI can still calculate
-    // quality gates from their original attempts rather than missing run records.
     let changed = true;
     while (changed) {
         changed = false;

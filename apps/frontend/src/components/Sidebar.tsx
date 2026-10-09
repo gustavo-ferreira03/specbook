@@ -188,7 +188,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
         const { signal } = controller;
         try {
             const [health, llm] = await Promise.all([getHealth(signal), getLlmRuntimeStatus()]);
-            // Only a model that was set up and stopped working needs attention here; the composer covers a missing one.
             if (!signal.aborted) setRuntime(!health.ok ? "offline" : !llm.ready && llm.provider && llm.model ? "setup" : "online");
         } catch (error) {
             if (!signal.aborted && !isAbortError(error)) setRuntime("offline");
@@ -230,7 +229,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const sortedChats = chats.toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     const pathTab: SidebarTab | null = pathname.startsWith(`/p/${projectId}/chats`) ? "chats" : pathname.startsWith(`/p/${projectId}/specs`) ? "specs" : null;
 
-    /** A tab opens its section: Specs goes to the Spec list, Chats to the latest chat. */
     function openSection(tab: SidebarTab) {
         setChosenTab(tab);
         if (pathTab === tab) return;
@@ -341,8 +339,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
         void runBatch.start(title, selectedSpecs.map((spec) => ({ id: spec.id, title: spec.title })), environment);
     }
 
-    // Row actions are revealed on hover and whenever focus is inside the row, so they stay
-    // reachable by keyboard; on touch screens (no hover) they are always visible.
     const rowActionsClass = !canEdit ? "hidden" :
         "flex shrink-0 items-center gap-0.5 pr-1 [@media(hover:hover)]:invisible [@media(hover:hover)]:absolute [@media(hover:hover)]:inset-y-0 [@media(hover:hover)]:right-0 [@media(hover:hover)]:bg-linear-to-l [@media(hover:hover)]:from-(--row-bg) [@media(hover:hover)]:from-65% [@media(hover:hover)]:to-transparent [@media(hover:hover)]:pl-7 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-focus-within:visible";
     const rowClass = (selected: boolean) =>
@@ -436,7 +432,6 @@ export function Sidebar({ projectId }: { projectId: string }) {
         );
     }
 
-    // Only problems the user can act on get a row; a healthy runtime stays silent.
     const runtimeCopy = runtime === "setup"
         ? ["Model unavailable", isAdmin ? "Reconnect the provider" : "Ask an administrator"]
         : runtime === "offline" ? ["Runtime unavailable", "Backend is not responding"] : null;

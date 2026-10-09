@@ -116,8 +116,6 @@ class FeaturesRepository {
                   .where(inArray(runs.specId, specIds))
             : [];
         if (runRows.some((run) => run.status === "running")) return { status: "busy" };
-        // A spec added to one of these features after the reads above violates the
-        // specs -> features foreign key and rolls the batch back.
         await runBatch([
             ...(specIds.length
                 ? [db.delete(runs).where(inArray(runs.specId, specIds)), db.delete(specs).where(inArray(specs.id, specIds))]

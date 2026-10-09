@@ -65,7 +65,6 @@ async function implementation(spec: Spec): Promise<Implementation> {
     if (spec.status === "invalid") return { valid: false, routes: [] };
     const root = repoGit.getRepoDir(spec.projectId);
     try {
-        // The files are read on every call so edits on disk and unsafe links are still noticed; only the parse is reused.
         const [source, yaml] = await Promise.all([readRepoFile(root, path.resolve(root, specTestFile(spec.path))), readRepoFile(root, path.resolve(root, specYamlFile(spec.path)))]);
         if (sourceHashOf(source) !== spec.sourceHash || markdownHashOf(yaml) !== spec.markdownHash) return { valid: false, routes: [] };
         const cached = analyses.get(spec.id);

@@ -34,8 +34,6 @@ export async function removeInactiveBrowserData(chatId: string, before: number):
 function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
     clearTimeout(browser.idleTimer);
     browser.idleTimer = setTimeout(() => {
-        // A turn may think or run Specs for a long time without browser tool calls.
-        // Keep the browser while it is active and re-check after another idle period.
         if (isChatBusy(chatId) || browser.activeTools.size > 0 || hasVncViewers(browser.vnc.id)) touchChatBrowser(chatId, browser);
         else void closeChatBrowser(chatId);
     }, BROWSER_IDLE_MS);
@@ -46,8 +44,6 @@ export async function getChatBrowser(chatId: string): Promise<ChatBrowser | null
     if (deletingChats.has(chatId)) return null;
     const browser = browsers.get(chatId);
     if (!browser) return null;
-    // Never close a browser from a status read while its chat turn is running: the turn
-    // owns it and recovers from a dead browser itself (ensureBrowser/getOrCreateChatBrowser).
     const turnActive = isChatBusy(chatId);
     if (!getVncSession(browser.vnc.id)) {
         if (!turnActive) void closeChatBrowser(chatId);

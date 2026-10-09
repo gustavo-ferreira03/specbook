@@ -1,4 +1,3 @@
-/** Runs work one at a time per key; a key is forgotten once its last queued work settles. */
 export function createKeyedLock() {
     const queues = new Map<string, Promise<unknown>>();
     return {

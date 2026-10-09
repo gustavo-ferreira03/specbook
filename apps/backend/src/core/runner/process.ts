@@ -44,13 +44,6 @@ export interface ProcessResult {
 
 const activeProcesses = new Set<ChildProcess>();
 
-/**
- * Minimal environment for child processes that run specs or drive a browser.
- * The backend environment (LLM API keys, tokens, ...) is never inherited as a whole.
- * NODE_OPTIONS and NODE_PATH are not inherited, so nothing can preload code into a
- * Spec run. The directory of the running Node binary is prepended to PATH so child
- * tools resolve the same Node without version-manager shims.
- */
 export function minimalChildEnv(extra: Record<string, string | undefined> = {}): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -83,11 +76,6 @@ export function stopActiveProcesses(): void {
     for (const proc of activeProcesses) terminateProcessTree(proc);
 }
 
-/**
- * Runs a Node CLI script (such as Playwright Test's cli.js) with the current Node
- * binary, the minimal environment, a bounded tail-only output buffer and a timeout
- * that kills the whole process tree.
- */
 export function runNodeCli(
     script: string,
     args: string[],
@@ -148,11 +136,6 @@ function maxConcurrentRuns(): number {
 let runningSlots = 0;
 const slotQueue: { resume: () => void; signal?: AbortSignal; abort: () => void }[] = [];
 
-/**
- * Global limit on concurrent browser-driving Spec executions (single runs and batches).
- * Lock ordering: callers acquire their spec lock(s) first and a slot second. A slot holder
- * only waits for its own Playwright process, never for spec locks, so the two cannot deadlock.
- */
 export async function withRunSlot<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     signal?.throwIfAborted();
     if (runningSlots >= maxConcurrentRuns()) {

@@ -2,9 +2,6 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-// Playwright MCP (the agent's visible browser) and Playwright Test (Spec runs) each pin
-// their own Playwright release and therefore their own Chromium build, so both are
-// installed. They share PLAYWRIGHT_BROWSERS_PATH, so a common revision is downloaded once.
 const require = createRequire(import.meta.url);
 const mcpRequire = createRequire(require.resolve("@playwright/mcp/package.json"));
 const clis = [

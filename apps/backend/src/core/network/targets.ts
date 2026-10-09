@@ -23,7 +23,6 @@ export function isPrivateAddress(address: string): boolean {
         }
         const [first, second = "0"] = address.toLowerCase().split(":");
         const prefix = parseInt(first!, 16);
-        // Only global unicast, excluding translation/tunnelling and reserved ranges.
         return !(prefix >= 0x2000 && prefix <= 0x3fff)
             || prefix === 0x2001 && parseInt(second, 16) < 0x200 || prefix === 0x2001 && parseInt(second, 16) === 0xdb8
             || prefix === 0x2002 || prefix === 0x3fff;

@@ -49,7 +49,6 @@ export async function projectOverview(projectId: string) {
     const specsById = new Map(specs.map((spec) => [spec.id, spec]));
     const runLists = new Map(await Promise.all(specs.map(async (spec) => [spec.id, await runsRepository.listRuns(spec.id, { limit: 20 })] as const)));
     const allRuns = new Map([...runLists.values()].flat().map((run) => [run.id, run]));
-    // A retry is newer than its original, so the loaded lists already hold the retry of every loaded run.
     const retries = new Map<string, Run>();
     for (const run of [...allRuns.values()].reverse()) if (run.retryOf && !retries.has(run.retryOf)) retries.set(run.retryOf, run);
     const retryFor = async (run: Run) => !needsRetry(run) ? null : allRuns.has(run.id) ? retries.get(run.id) ?? null : runsRepository.retryFor(run.id);
@@ -59,7 +58,6 @@ export async function projectOverview(projectId: string) {
     })));
     const specHealth: Record<string, SpecHealth> = {};
     const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, passing: 0, failing: 0, flaky: 0, not_checked: 0, running: 0, repairing: 0, invalid: 0 };
-    // A broken Spec the agent is already fixing is not something for the user to act on.
     const repairing = new Set(jobs.filter((job) => job.kind === "regenerate" && job.specId && ["queued", "running"].includes(job.status)).map((job) => job.specId));
     for (const spec of specs) {
         const current = currentRuns.get(spec.id);

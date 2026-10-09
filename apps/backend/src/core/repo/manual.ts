@@ -23,7 +23,6 @@ export async function readSpecRawFiles(
     return { yaml, testSource };
 }
 
-/** A minimal valid spec.ts whose single step matches the template's spec.yml. */
 export function manualSpecTemplate(title: string): { testSource: string; steps: string[] } {
     const step = "Open the application";
     const testSource = [

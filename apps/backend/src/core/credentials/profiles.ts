@@ -36,7 +36,6 @@ export interface SecretValue {
     value: string;
 }
 
-// Shared with the "specbook" test module, which reads the value from this env name.
 export { secretEnvName };
 
 function assertValidName(kind: string, value: string): void {

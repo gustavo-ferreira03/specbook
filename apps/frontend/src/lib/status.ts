@@ -5,15 +5,11 @@ export type AnyStatus = SpecStatus | RunStatus | SpecHealth["status"];
 export type StatusTone = "success" | "danger" | "warning" | "invalid" | "neutral" | "running";
 
 export interface StatusMeta {
-    /** Label for the current state of a Spec ("Failing", "Not run"). */
     label: string;
-    /** Label for a single verification run ("Failed"). */
     runLabel: string;
-    /** One-line explanation, used in tooltips and legends. */
     description: string;
     tone: StatusTone;
     icon: LucideIcon;
-    /** Tailwind classes for the text/icon color, soft background, and chart fill. */
     text: string;
     soft: string;
     chart: string;
@@ -28,8 +24,6 @@ const TONES: Record<StatusTone, Pick<StatusMeta, "text" | "soft" | "chart">> = {
     running: { text: "text-running", soft: "bg-running-soft", chart: "bg-running-chart" },
 };
 
-// One vocabulary for both spec states and health states: "Passing"/"Failing" describe a Spec now,
-// "Passed"/"Failed" describe a single run.
 const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "soft" | "chart">> = {
     passed: { label: "Passing", runLabel: "Passed", description: "The last run passed.", tone: "success", icon: Check },
     failed: { label: "Failing", runLabel: "Failed", description: "The last run failed.", tone: "danger", icon: X },
@@ -51,7 +45,6 @@ export function statusMeta(status: string): StatusMeta {
     return { ...base, ...TONES[base.tone] };
 }
 
-/** Display order for summaries: problems first, then not run, then passing. */
 export const SPEC_STATUS_ORDER: SpecStatus[] = ["failed", "invalid", "unverified", "passed"];
 
 export type StatusCounts = Partial<Record<SpecStatus, number>>;

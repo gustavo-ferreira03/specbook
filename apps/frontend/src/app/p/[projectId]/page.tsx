@@ -172,7 +172,6 @@ function AreaCoverage({ projectId, area }: { projectId: string; area: CoverageAr
     );
 }
 
-/** This page exists to show the context, so it is always shown in full. */
 function ConfirmedContextSummary({ projectId, context, coverage }: { projectId: string; context: ProjectContext; coverage?: CoverageResponse | null }) {
     const areas = new Map(coverage?.areas.map((area) => [area.name, area]));
     return (

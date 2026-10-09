@@ -10,11 +10,6 @@ import { runPlaywrightSuite, type SuiteSpec } from "../../src/core/runner/playwr
 import { analyzeSpecSource } from "../../src/core/runner/validate";
 import { tempDir } from "../helpers/storage";
 
-/**
- * Runs real Specs through Playwright Test against a tiny local site. Skipped when the
- * Chromium build of @playwright/test is not installed (pnpm --filter backend browser:install).
- */
-
 const SECRET = "correct-horse-battery";
 
 async function chromiumAvailable(): Promise<boolean> {
@@ -438,7 +433,6 @@ describe("agent browser policy (real MCP)", { skip: process.env.SPECBOOK_TEST_VN
             assert.match(await readBrowserSnapshot(mcp), /Opened/);
             assert.ok(!explorationRequests.some((entry) => entry.includes("unsafe-action")));
 
-            // Exercise the network guard directly, bypassing the tool's URL check.
             await mcp.navigate(`${origin(app)}/policy-redirect`);
             await mcp.navigate(`${origin(evil)}/policy-offsite`);
             await mcp.navigate(`${origin(app)}/policy`);

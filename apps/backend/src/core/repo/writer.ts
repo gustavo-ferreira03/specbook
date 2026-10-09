@@ -21,7 +21,6 @@ import {
 
 export type SpecValidation = SpecSourceValidation;
 
-/** Hash of a Spec's executable (spec.ts); stored as sourceHash on Specs and Runs. */
 export function sourceHashOf(source: string): string {
     return crypto.createHash("sha256").update(source).digest("hex");
 }
@@ -80,25 +79,16 @@ function movedPath(candidate: string, from: string, to: string): string {
     return `${to}${candidate.slice(from.length)}`;
 }
 
-/** The allowlist check of spec.ts plus the named-steps rule; the same validation the indexer applies. */
 export function validateSpec(source: string, humanSpec: HumanSpec | null): SpecValidation {
     return validateSpecSource(source, humanSpec);
 }
 
-// Discards everything a failed mutation left in the working tree. Only called
-// after assertRepoWritableUnlocked proved the tree was clean, under the repo lock.
 async function rollbackWorkingTree(projectId: string): Promise<void> {
     const git = repoGit.getProjectGit(projectId);
     await git.raw(["reset", "--hard", "--quiet", "HEAD"]);
     await git.raw(["clean", "-fd", "--quiet"]);
 }
 
-/**
- * Shared path for every Specbook-initiated repository mutation. Must run under
- * the repo lock. `work` writes files and the matching DB rows; if it throws, the
- * working tree is restored so disk and DB never disagree. The commit happens only
- * after the DB write succeeded.
- */
 export interface RepoMutationOptions {
     expectedHead?: string;
     expectedSpec?: { yaml: string; testSource: string | null };
@@ -155,7 +145,6 @@ export async function createFeatureInRepo(
     });
 }
 
-/** Gives every area of a confirmed context a feature with the same title. Existing features are never renamed or removed. */
 export async function createAreaFeatures(projectId: string, context: ProjectContext): Promise<void> {
     const titles = new Set((await featuresRepository.listFeatures(projectId)).map((feature) => feature.title.trim().toLowerCase()));
     for (const area of context.areas) {
@@ -222,8 +211,6 @@ export async function updateFeatureInRepo(
     feature: Feature,
     patch: { title?: string; description?: string },
 ): Promise<Feature> {
-    // A rename moves every descendant Spec directory, so no run or edit may be
-    // reading those paths while it happens.
     const descendantSpecIds =
         patch.title === undefined
             ? []
@@ -260,8 +247,6 @@ export async function updateFeatureInRepo(
                 await writeFile(feature.projectId, featureYamlFile(featurePath), serializeFeatureYaml({ title, description }));
                 const queries = [featuresRepository.updateFeatureQuery(current.id, { title, description, path: featurePath })];
                 if (featurePath !== current.path) {
-                    // Spec directories live inside their Feature directory, so both
-                    // trees share the renamed prefix.
                     for (const child of await featuresRepository.listFeatures(feature.projectId)) {
                         if (!isUnder(child.path, current.path)) continue;
                         queries.push(
@@ -310,11 +295,6 @@ export interface SpecPatchInput {
     testSource?: string;
 }
 
-/**
- * Writes a Spec's files, validates the resulting spec.ts against the resulting
- * spec.yml and records the matching status. The caller must hold the Spec lock (see
- * updateSpecWithLock).
- */
 export async function updateSpecInRepo(
     spec: Spec,
     patch: SpecPatchInput,
@@ -386,7 +366,6 @@ export async function updateSpecInRepo(
     });
 }
 
-/** The UI's Spec edit path: takes the Spec lock, then behaves like updateSpecInRepo. */
 export async function updateSpecWithLock(
     specId: string,
     patch: SpecPatchInput,
@@ -414,11 +393,6 @@ export async function deleteFeatureDirectory(projectId: string, featurePath: str
     });
 }
 
-/**
- * Writes context.yml and, when `confirmRevisionId` is given, confirms that draft
- * revision under the same repo lock, so a concurrent reindex never sees the new
- * file without the confirmed revision and records a duplicate.
- */
 export async function writeContextToRepo(
     projectId: string,
     context: ProjectContext,

@@ -12,7 +12,6 @@ export async function postWebhook(value: string, payload: Record<string, unknown
             headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
             lookup: (_hostname, lookupOptions, callback) => lookupOptions.all ? callback(null, [address]) : callback(null, address.address, address.family),
         }, (response) => {
-            // Never follow redirects, which could change the destination or expose the payload.
             resolve(response.statusCode ?? 502);
             response.destroy();
         });

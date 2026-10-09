@@ -14,7 +14,6 @@ function parseHost(value: string): URL | null {
     } catch { return null; }
 }
 
-/** Literal addresses cannot be rebound through DNS and support arbitrary published ports. */
 export function buildHostAllowlist(_port: number, env: NodeJS.ProcessEnv = process.env): HostAllowlist {
     const allowlist: HostAllowlist = { any: false, exact: new Set(), anyPort: new Set(["localhost"]) };
     for (const value of [env.FRONTEND_ORIGIN, env.SPECBOOK_PUBLIC_API_URL, env.SPECBOOK_BACKEND_URL]) {
@@ -48,7 +47,6 @@ export function matchesOriginHost(origin: string, host: string): boolean {
     } catch { return false; }
 }
 
-/** The bundled frontend removes incoming forwarding headers and supplies these after validation. */
 export function frontendProxyOrigin(headers: Headers, allowlist: HostAllowlist): string | null {
     if (headers.get("x-specbook-proxy") !== "1") return null;
     const host = headers.get("x-forwarded-host") ?? "";
