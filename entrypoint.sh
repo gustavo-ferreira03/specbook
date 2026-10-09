@@ -4,9 +4,6 @@ set -euo pipefail
 storage="${SPECBOOK_STORAGE_DIR:-/app/apps/backend/storage}"
 app_user="node"
 
-# Started as root (the image default): make the storage volume writable for the
-# unprivileged user, then re-run this script as that user. Volumes created by
-# earlier root-only images are owned by root, so ownership is fixed once here.
 if [[ "$(id -u)" == "0" ]]; then
     mkdir -p "$storage"
     uid="$(id -u "$app_user")"
@@ -32,7 +29,6 @@ stop_processes() {
 
 on_signal() {
     stop_processes
-    # A requested stop is a clean exit, not a failure.
     exit 0
 }
 
@@ -41,7 +37,6 @@ trap on_signal TERM INT
 
 export SPECBOOK_BACKEND_URL="${SPECBOOK_BACKEND_URL:-http://127.0.0.1:${PORT:-4000}}"
 
-# The backend applies database migrations itself before it starts listening.
 cd /app/apps/backend
 node dist/index.js &
 backend=$!

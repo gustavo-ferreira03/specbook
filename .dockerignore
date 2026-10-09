@@ -17,3 +17,8 @@ apps/backend/storage
 **/*.log
 Dockerfile
 docker-compose.yml
+docs
+site
+**/.playwright-mcp
+.playwright-cli
+.codex-task-*

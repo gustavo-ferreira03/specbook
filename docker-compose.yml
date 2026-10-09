@@ -9,20 +9,12 @@ services:
             - "127.0.0.1:1455:1455"
             - "127.0.0.1:53692:53692"
         environment:
-            HOST: 0.0.0.0
             FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-}
-            SPECBOOK_BACKEND_URL: http://127.0.0.1:4000
-            PI_OAUTH_CALLBACK_HOST: 0.0.0.0
             SPECBOOK_ALLOWED_HOSTS: ${SPECBOOK_ALLOWED_HOSTS:-}
+            PI_OAUTH_CALLBACK_HOST: 0.0.0.0
             LOG_LEVEL: ${LOG_LEVEL:-info}
         volumes:
             - specbook-storage:/app/apps/backend/storage
-        healthcheck:
-            test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:4000/health"]
-            interval: 30s
-            timeout: 5s
-            retries: 3
-            start_period: 60s
 
 volumes:
     specbook-storage:
