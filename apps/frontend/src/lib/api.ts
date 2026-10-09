@@ -404,7 +404,7 @@ export function listCredentialProfiles(projectId: string): Promise<{ profiles: C
 
 export function createCredentialProfile(
     projectId: string,
-    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[] },
+    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
 ): Promise<{ profile: CredentialProfile }> {
     return api(`/projects/${encodeURIComponent(projectId)}/credentials`, {
         method: "POST",
@@ -414,7 +414,7 @@ export function createCredentialProfile(
 
 export function updateCredentialProfile(
     profileId: string,
-    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[] },
+    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
 ): Promise<{ profile: CredentialProfile }> {
     return api(`/credentials/${encodeURIComponent(profileId)}`, {
         method: "PUT",

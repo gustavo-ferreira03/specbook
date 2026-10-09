@@ -1,3 +1,4 @@
+import { acceptCiTrigger, CiRequestError, startCiRun } from "../../../core/ci/runs";
 import { access } from "../access";
 import { loadProject } from "../load-project";
 import { publicFrontendOrigin } from "../security";
@@ -9,19 +10,12 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { authenticateCiToken, ciTokenInfo, issueCiToken } from "../../../core/ci/tokens";
 import { ciRunSchema, ciResultQuerySchema, deploySchema } from "../../../core/ci/schemas";
-import { ciResult, junitResult, knownBugSpecIds, markdownResult } from "../../../core/ci/results";
-import { resolveRunEnvironment } from "../../../core/environments";
+import { ciResult, junitResult, markdownResult } from "../../../core/ci/results";
 import { environmentsRepository } from "../../repositories/environments";
-import { projectRunPolicy } from "../../../core/ci/targets";
-import { NetworkTargetError } from "../../../core/network/targets";
 import { backendRoot } from "../../../core/paths";
-import { ResourceBusyError } from "../../../core/specs/lifecycle";
-import { getRunBatch, listCiBatches, startSpecBatch } from "../../../core/runner/batch";
+import { getRunBatch, listCiBatches } from "../../../core/runner/batch";
 import { ciRepository } from "../../repositories/ci";
-import { featuresRepository } from "../../repositories/features";
-import { specsRepository } from "../../repositories/specs";
 import { stewardRepository } from "../../repositories/steward";
-import { tokenHash } from "../../../core/accounts/tokens";
 import { fingerprint } from "../../../core/steward/signals";
 
 async function authenticate(c: Context, projectId: string) {
@@ -36,17 +30,16 @@ const projectAuth: MiddlewareHandler = async (c, next) => {
     await next();
 };
 
+function ciError(c: Context, error: unknown): never {
+    if (error instanceof CiRequestError) {
+        if (error.retryAfter) c.header("Retry-After", String(error.retryAfter));
+        throw new HTTPException(error.status, { message: error.message });
+    }
+    throw error;
+}
+
 async function acceptTrigger(c: Context, projectId: string, target?: string, name?: string) {
-    if (!await ciRepository.consumeRequest(projectId, tokenHash(c.req.header("authorization")!.slice("Bearer ".length)))) {
-        c.header("Retry-After", String(60 - Math.floor(Date.now() / 1000) % 60));
-        throw new HTTPException(429, { message: "CI trigger limit reached. Retry after the current minute." });
-    }
-    const project = await loadProject(projectId);
-    try { const environment = await resolveRunEnvironment(projectId, name, target); await projectRunPolicy(project, environment.baseUrl, undefined, environment); return environment; }
-    catch (error) {
-        if (error instanceof NetworkTargetError) throw new HTTPException(400, { message: error.message });
-        throw error;
-    }
+    return acceptCiTrigger(projectId, c.req.header("authorization")!, target, name).catch((error) => ciError(c, error));
 }
 
 export function createCiSettingsRouter(): Hono {
@@ -81,31 +74,9 @@ export function createCiRouter(): Hono {
     router.post("/ci/projects/:id/runs", access("ci-token"), projectAuth, zValidator("json", ciRunSchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
-        const environment = await acceptTrigger(c, projectId, input.baseUrl, input.environment);
-        let specs = await specsRepository.listSpecs(projectId);
-        if (input.featureId) {
-            const feature = await featuresRepository.getFeature(input.featureId);
-            if (!feature || feature.projectId !== projectId) throw new HTTPException(400, { message: "Feature not found in this project" });
-            const selected = new Set(await featuresRepository.getFeatureDeletionSpecIds(feature.id));
-            specs = specs.filter((spec) => selected.has(spec.id));
-        }
-        if (input.specIds) {
-            if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) throw new HTTPException(400, { message: "Selected Specs must belong to this project" });
-            specs = specs.filter((spec) => input.specIds!.includes(spec.id));
-        }
-        if (!input.specIds) specs = specs.filter((spec) => spec.status !== "invalid");
-        try {
-            const batch = await startSpecBatch(projectId, specs.map((spec) => spec.id), "CI run", {
-                trigger: "ci",
-                environment,
-                rejectIfBusy: true,
-                ci: { commitSha: input.commitSha, ref: input.ref, buildUrl: input.buildUrl, qualityGate: input.qualityGate, knownBugSpecIds: await knownBugSpecIds(projectId) },
-            });
-            c.header("Location", `/ci/runs/${batch.id}`);
-            return c.json(await ciResult(batch, publicFrontendOrigin(c)), 202);
-        } catch (error) {
-            throw new HTTPException(error instanceof ResourceBusyError ? 409 : 400, { message: error instanceof Error ? error.message : String(error) });
-        }
+        const batch = await startCiRun(projectId, c.req.header("authorization")!, input).catch((error) => ciError(c, error));
+        c.header("Location", `/ci/runs/${batch.id}`);
+        return c.json(await ciResult(batch, publicFrontendOrigin(c)), 202);
     });
     router.get("/ci/runs/:batchId", access("ci-token"), async (c) => {
         if (!c.req.header("authorization")) throw new HTTPException(401, { message: "A valid project CI bearer token is required" });

@@ -182,6 +182,8 @@ export interface ChatContextRevision {
 }
 
 export interface Chat {
+    source?: "mcp" | null;
+    sourceClient?: string | null;
     id: string;
     title: string;
     createdAt: string;
@@ -189,11 +191,15 @@ export interface Chat {
 
 export interface ChatCredentialRequest {
     id: string;
+    kind: "login" | "code" | "fields";
+    origin: string | null;
     profileName: string;
     fields: { key: string; label?: string }[];
 }
 
 export interface ChatState {
+    source?: "mcp" | null;
+    sourceClient?: string | null;
     title: string;
     messages: ChatMessage[];
     toolSteps: ChatToolStep[];
@@ -304,6 +310,7 @@ export interface CredentialFieldPublic {
 export interface CredentialProfile {
     id: string;
     name: string;
+    identifier: string | null;
     allowedOrigins: string[];
     fields: CredentialFieldPublic[];
     createdAt: string;

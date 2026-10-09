@@ -105,6 +105,7 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
                                     </span>
                                     <span className="min-w-0 flex-1">
                                         <span className="block truncate text-body font-medium text-ink">{chat.title}</span>
+                                        {chat.source === "mcp" && <span className="block truncate text-meta text-ink-muted">via {chat.sourceClient || "External agent"}</span>}
                                         <RelativeTime value={chat.createdAt} prefix="Started" className="block text-meta text-ink-subtle" />
                                     </span>
                                     <ChevronRight size={15} className="shrink-0 text-ink-disabled transition-colors group-hover:text-ink-muted" aria-hidden="true" />

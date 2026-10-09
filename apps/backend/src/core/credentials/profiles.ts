@@ -21,9 +21,12 @@ export interface PublicCredentialField {
     hasValue: boolean;
 }
 
+export const IDENTIFIER_FIELD = "username";
+
 export interface PublicCredentialProfile {
     id: string;
     name: string;
+    identifier: string | null;
     allowedOrigins: string[];
     fields: PublicCredentialField[];
     createdAt: string;
@@ -81,19 +84,21 @@ async function assertNoEnvCollision(
     profileName: string,
     fields: CredentialField[],
     ignoreProfileId?: string,
+    identifier?: string | null,
 ): Promise<void> {
-    const names = new Set(fields.map((field) => secretEnvName(profileName, field.key)));
-    if (names.size !== fields.length) {
+    const keys = [...fields.map((field) => field.key), ...(identifier ? [IDENTIFIER_FIELD] : [])];
+    const names = new Set(keys.map((key) => secretEnvName(profileName, key)));
+    if (names.size !== keys.length) {
         throw new Error("Two fields map to the same environment name; rename one.");
     }
     for (const row of await credentialsRepository.listProfiles(projectId)) {
         if (row.id === ignoreProfileId) continue;
         if (row.name === profileName) throw new Error(`A profile named "${profileName}" already exists.`);
-        for (const field of row.fields) {
-            const envName = secretEnvName(row.name, field.key);
+        for (const key of [...row.fields.map((field) => field.key), ...(row.identifier ? [IDENTIFIER_FIELD] : [])]) {
+            const envName = secretEnvName(row.name, key);
             if (names.has(envName)) {
                 throw new Error(
-                    `Secret env name ${envName} collides with existing profile ${row.name}.${field.key}; rename the profile or field.`,
+                    `Secret env name ${envName} collides with existing profile ${row.name}.${key}; rename the profile or field.`,
                 );
             }
         }
@@ -104,6 +109,7 @@ export function publicProfile(row: CredentialProfileRow): PublicCredentialProfil
     return {
         id: row.id,
         name: row.name,
+        identifier: row.identifier,
         allowedOrigins: row.allowedOrigins,
         createdAt: row.createdAt,
         fields: row.fields.map((field) => ({ key: field.key, hasValue: field.value !== "" })),
@@ -112,13 +118,14 @@ export function publicProfile(row: CredentialProfileRow): PublicCredentialProfil
 
 export async function createProfile(
     projectId: string,
-    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[] },
+    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
 ): Promise<PublicCredentialProfile> {
     assertValidName("profile name", input.name);
     const allowedOrigins = input.allowedOrigins ?? [];
     assertValidOrigins(allowedOrigins);
     const fields = buildFields(input.fields);
-    await assertNoEnvCollision(projectId, input.name, fields);
+    const identifier = input.identifier?.trim() || null;
+    await assertNoEnvCollision(projectId, input.name, fields, undefined, identifier);
     const now = new Date().toISOString();
     const row: CredentialProfileRow = {
         id: crypto.randomUUID(),
@@ -126,6 +133,7 @@ export async function createProfile(
         name: input.name,
         allowedOrigins,
         fields,
+        identifier,
         createdAt: now,
         updatedAt: now,
     };
@@ -135,13 +143,14 @@ export async function createProfile(
 
 export async function updateProfile(
     row: CredentialProfileRow,
-    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[] },
+    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
 ): Promise<PublicCredentialProfile> {
     const allowedOrigins = input.allowedOrigins ?? row.allowedOrigins;
     assertValidOrigins(allowedOrigins);
     const fields = buildFields(input.fields, row.fields);
-    await assertNoEnvCollision(row.projectId, row.name, fields, row.id);
-    const patch = { allowedOrigins, fields, updatedAt: new Date().toISOString() };
+    const identifier = input.identifier === undefined ? row.identifier : input.identifier?.trim() || null;
+    await assertNoEnvCollision(row.projectId, row.name, fields, row.id, identifier);
+    const patch = { allowedOrigins, fields, identifier, updatedAt: new Date().toISOString() };
     await credentialsRepository.updateProfile(row.id, patch);
     return publicProfile({ ...row, ...patch });
 }
@@ -162,10 +171,10 @@ export async function getProfileByName(
     return (await credentialsRepository.listProfiles(projectId)).find((row) => row.name === name) ?? null;
 }
 
-export async function listSecretValues(projectId: string): Promise<SecretValue[]> {
+export async function listSecretValues(projectId: string, options: { identifiers?: boolean } = {}): Promise<SecretValue[]> {
     const rows = await credentialsRepository.listProfiles(projectId);
-    return rows.flatMap((row) =>
-        row.fields
+    return rows.flatMap((row) => [
+        ...row.fields
             .filter((field) => field.value !== "")
             .map((field) => ({
                 profile: row.name,
@@ -173,7 +182,10 @@ export async function listSecretValues(projectId: string): Promise<SecretValue[]
                 envName: secretEnvName(row.name, field.key),
                 value: decryptSecret(field.value),
             })),
-    );
+        ...(options.identifiers && row.identifier
+            ? [{ profile: row.name, field: IDENTIFIER_FIELD, envName: secretEnvName(row.name, IDENTIFIER_FIELD), value: row.identifier }]
+            : []),
+    ]);
 }
 
 export async function resolveSecretEnv(
@@ -182,7 +194,7 @@ export async function resolveSecretEnv(
     overrides: Record<string, string> = {},
 ): Promise<{ env: Record<string, string>; missing: string[] }> {
     if (refs.length === 0) return { env: {}, missing: [] };
-    const byEnvName = new Map((await listSecretValues(projectId)).map((secret) => [secret.envName, secret.value]));
+    const byEnvName = new Map((await listSecretValues(projectId, { identifiers: true })).map((secret) => [secret.envName, secret.value]));
     const profiles = await credentialsRepository.listProfiles(projectId);
     for (const [sourceName, targetId] of Object.entries(overrides)) {
         const source = profiles.find((profile) => profile.name === sourceName);
@@ -192,6 +204,11 @@ export async function resolveSecretEnv(
             byEnvName.delete(envName);
             const value = target?.fields.find((item) => item.key === field.key)?.value;
             if (value) byEnvName.set(envName, decryptSecret(value));
+        }
+        if (source?.identifier) {
+            const envName = secretEnvName(sourceName, IDENTIFIER_FIELD);
+            byEnvName.delete(envName);
+            if (target?.identifier) byEnvName.set(envName, target.identifier);
         }
     }
     const env: Record<string, string> = {};

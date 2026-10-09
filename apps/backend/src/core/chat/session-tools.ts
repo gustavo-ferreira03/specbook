@@ -88,7 +88,7 @@ export function createSessionTools(options: SessionToolOptions) {
             name: "resume_session",
             label: "resume_session",
             description:
-                "Restore a previously saved browser session for a credential profile and navigate to the application. Try this before request_credential when a saved session might already exist. The saved session can be stale (expired cookies) — verify you're actually logged in afterward, and fall back to logging in normally if not.",
+                "Restore a previously saved browser session for a credential profile and navigate to the application. Try this before browser_vault_list / browser_vault_save_login when a saved session might already exist. The saved session can be stale (expired cookies) — verify you're actually logged in afterward, and fall back to logging in normally if not.",
             parameters: Type.Unsafe<z.infer<typeof sessionProfileSchema>>(sessionProfileSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();

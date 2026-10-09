@@ -220,15 +220,15 @@ export async function createChat(
 
 export async function listChats(
     projectId: string,
-): Promise<{ id: string; title: string; createdAt: string }[]> {
+): Promise<{ id: string; title: string; createdAt: string; updatedAt: string; source: "mcp" | null; sourceClient: string | null }[]> {
     const jobChatIds = new Set((await jobsRepository.list(projectId)).map((job) => job.chatId));
     const rows = (await chatsRepository.listChatRows(projectId)).filter((row) => !jobChatIds.has(row.id));
     const chats = await Promise.all(
-        rows.map(async (row) => ({
-            id: row.id,
-            title: await cachedTitle(row.id).catch(() => DEFAULT_TITLE),
-            createdAt: row.createdAt,
-        })),
+        rows.map(async (row) => {
+            const title = await cachedTitle(row.id).catch(() => DEFAULT_TITLE);
+            return { id: row.id, title, createdAt: row.createdAt, updatedAt: new Date(titles.get(row.id)?.mtimeMs ?? Date.parse(row.createdAt)).toISOString(),
+                source: row.source, sourceClient: row.sourceClient };
+        }),
     );
     return chats.filter((chat) => chat.title !== DEFAULT_TITLE);
 }

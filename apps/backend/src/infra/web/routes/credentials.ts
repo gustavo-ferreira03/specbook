@@ -3,11 +3,10 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { getPendingCredentialRequest, resolveCredentialRequest } from "../../../core/chat/credential-requests";
+import { submitChatCredentials } from "../../../core/chat/credential-submit";
 import {
     createProfile,
     deleteProfile,
-    getProfileByName,
     listPublicProfiles,
     updateProfile,
 } from "../../../core/credentials/profiles";
@@ -23,11 +22,13 @@ const createSchema = z.object({
     name: z.string().min(1),
     allowedOrigins: z.array(z.string()).optional(),
     fields: z.array(fieldSchema).min(1),
+    identifier: z.string().trim().max(320).nullable().optional(),
 });
 
 const updateSchema = z.object({
     allowedOrigins: z.array(z.string()).optional(),
     fields: z.array(fieldSchema).min(1),
+    identifier: z.string().trim().max(320).nullable().optional(),
 });
 
 const requestResolutionSchema = z.union([
@@ -82,34 +83,7 @@ export function createCredentialsRouter(): Hono {
         async (c) => {
             const chatId = c.req.param("chatId");
             const requestId = c.req.param("requestId");
-            const pending = getPendingCredentialRequest(chatId);
-            if (!pending || pending.id !== requestId) {
-                throw new HTTPException(404, { message: "Credential request not found" });
-            }
-            const body = c.req.valid("json");
-            if (body.action === "dismiss") {
-                resolveCredentialRequest(chatId, requestId, "dismissed");
-                return c.json({ ok: true });
-            }
-            const inputs = pending.fields.map((field) => ({
-                key: field.key,
-                value: body.values[field.key] ?? "",
-            }));
-            if (inputs.some((input) => input.value === "")) {
-                throw new HTTPException(400, { message: "Fill every requested field." });
-            }
-            const existing = await getProfileByName(pending.projectId, pending.profileName);
-            if (existing) {
-                await updateProfile(existing, { allowedOrigins: body.allowedOrigins, fields: inputs }).catch(mapDomainError);
-            } else {
-                await createProfile(pending.projectId, {
-                    name: pending.profileName,
-                    allowedOrigins: body.allowedOrigins,
-                    fields: inputs,
-                }).catch(mapDomainError);
-            }
-            resolveCredentialRequest(chatId, requestId, "saved");
-            return c.json({ ok: true });
+            return c.json(await submitChatCredentials(chatId, requestId, c.req.valid("json")).catch(mapDomainError));
         },
     );
 

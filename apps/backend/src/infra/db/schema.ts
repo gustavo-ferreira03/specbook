@@ -67,6 +67,8 @@ export const projects = sqliteTable("projects", {
     gitAccessTokenCreatedAt: text("git_access_token_created_at"),
     gitAccessTokenLastUsedAt: text("git_access_token_last_used_at"),
     gitExternalSyncError: text("git_external_sync_error"),
+    agentContractPolicy: text("agent_contract_policy").$type<"apply_declared" | "propose_only">().notNull().default("apply_declared"),
+    agentsMayProvideCredentials: integer("agents_may_provide_credentials", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull(),
 });
 
@@ -124,6 +126,8 @@ export const chats = sqliteTable("chats", {
         .notNull()
         .references(() => projects.id),
     contextRevisionId: text("context_revision_id"),
+    source: text("source").$type<"mcp">(),
+    sourceClient: text("source_client"),
     createdAt: text("created_at").notNull(),
 });
 
@@ -177,6 +181,7 @@ export const credentialProfiles = sqliteTable("credential_profiles", {
     name: text("name").notNull(),
     allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull(),
     fields: text("fields", { mode: "json" }).$type<CredentialField[]>().notNull(),
+    identifier: text("identifier"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 });
@@ -389,6 +394,16 @@ export const projectCiTokens = sqliteTable("project_ci_tokens", {
     tokenHash: text("token_hash"),
     tokenPrefix: text("token_prefix"),
     createdAt: text("created_at"),
+    lastUsedAt: text("last_used_at"),
+    requestWindowStartedAt: text("request_window_started_at"),
+    requestCount: integer("request_count").notNull().default(0),
+});
+
+export const projectAgentTokens = sqliteTable("project_agent_tokens", {
+    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    createdAt: text("created_at").notNull(),
     lastUsedAt: text("last_used_at"),
     requestWindowStartedAt: text("request_window_started_at"),
     requestCount: integer("request_count").notNull().default(0),

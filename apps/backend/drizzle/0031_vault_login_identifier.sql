@@ -1,0 +1,1 @@
+ALTER TABLE `credential_profiles` ADD `identifier` text;

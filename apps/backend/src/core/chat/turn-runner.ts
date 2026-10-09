@@ -1,3 +1,4 @@
+import { mcpChatPrompt, mcpChatTools } from "../mcp/policy";
 import path from "node:path";
 import type { TurnPolicy } from "../jobs/policy";
 import {
@@ -270,6 +271,7 @@ async function runReservedChatTurn(
             workDir: chatBrowser?.workDir ?? null,
             scrub,
             notify: () => publishChatUpdate(id),
+            canPrompt: !turnPolicy,
         });
         const sessionTools = createSessionTools({
             projectId: row.projectId,
@@ -313,7 +315,7 @@ async function runReservedChatTurn(
             ? null
             : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
         const resourceLoader = await createResourceLoader(
-            buildSystemPrompt(project, discoveryRevision, confirmedContext) + (turnPolicy?.prompt ?? ""),
+            buildSystemPrompt(project, discoveryRevision, confirmedContext) + (row.source === "mcp" ? mcpChatPrompt(storedProject!) : "") + (turnPolicy?.prompt ?? ""),
         );
         if (consumeAbortRequest(id)) {
             metrics.fail("aborted", "aborted_before_start");
@@ -324,7 +326,7 @@ async function runReservedChatTurn(
             modelRuntime,
             cwd,
             noTools: "builtin",
-            customTools: auditTools(row.projectId, id, turnPolicy ? turnPolicy.tools(customTools) : customTools),
+            customTools: auditTools(row.projectId, id, turnPolicy ? turnPolicy.tools(customTools) : row.source === "mcp" ? mcpChatTools(row.projectId, id, customTools) : customTools),
             resourceLoader,
             sessionManager,
             settingsManager: await agentSettings(),

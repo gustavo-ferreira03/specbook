@@ -218,6 +218,20 @@
       "when": 1791303549242,
       "tag": "0030_curious_ender_wiggin",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1791465797423,
+      "tag": "0031_vault_login_identifier",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1791519397126,
+      "tag": "0032_agent_access_chats",
+      "breakpoints": true
     }
   ]
 }

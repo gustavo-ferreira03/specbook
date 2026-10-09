@@ -174,7 +174,7 @@ function inlineSnapshots(text: string, workDir: string): Promise<string> {
     });
 }
 
-function extractMcpText(result: { content?: unknown }): string {
+export function extractMcpText(result: { content?: unknown }): string {
     const content = Array.isArray(result.content)
         ? (result.content as { type?: string; text?: string }[])
         : [];

@@ -154,3 +154,7 @@ ${Object.entries(env).map(([key, value]) => `    ${key} = '${value.replace(/\\/g
 }`;
     }
 }
+
+export function mcpSnippet(apiUrl: string, projectId: string, token: string | null): string {
+    return `claude mcp add --transport http specbook ${apiUrl.replace(/\/$/, "")}/mcp/projects/${projectId} --header "Authorization: Bearer ${token ?? "<token>"}"`;
+}

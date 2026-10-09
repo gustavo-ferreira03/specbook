@@ -924,6 +924,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
         <div className="flex h-full min-h-0 flex-col bg-surface">
             <PageHeader
                 title={<span className="line-clamp-1 max-sm:text-section" title={state.title}>{state.title}</span>}
+                meta={state.source === "mcp" ? `via ${state.sourceClient || "External agent"}` : undefined}
                 breadcrumbs={[{ label: discovery ? "Project discovery" : "Chats", href: discovery ? `/p/${projectId}` : chatsHref }]}
                 width={browserBeside ? "full" : "chat"}
                 className="pt-3 pb-3 md:pt-5 md:pb-4"

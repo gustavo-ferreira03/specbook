@@ -10,7 +10,7 @@ import { createChat } from "./session-store";
 import { startChatTurn } from "./turn-runner";
 
 export const DEFAULT_DISCOVERY_GOAL =
-    "Autonomously explore the application and map its areas, terminology, roles, business rules, and UI patterns. Record anything inaccessible or unclear as unknowns and ask the user for help only when blocked.";
+    "Autonomously explore the application and map its areas, terminology, roles, business rules, and UI patterns. Log in when the application requires it (request credentials if none exist), and record as unknowns only what stays unclear or unreachable after that.";
 
 const BEGIN_DISCOVERY =
     "Begin the discovery. Follow the saved brief: explore from the start URL within the allowed origin, respect the safety notes, then propose the project context.";

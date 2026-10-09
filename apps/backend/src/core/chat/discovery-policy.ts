@@ -1,5 +1,6 @@
 import { getActiveTabUrl, readBrowserSnapshot, type BrowserMcp, type BrowserToolPolicy } from "../browser/mcp";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
+import { consumeVaultSubmit } from "./credential-tools";
 
 export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([
     "browser_navigate",
@@ -99,6 +100,8 @@ export function createDiscoveryBrowserPolicy(
             if (toolName === "browser_click") {
                 const target = snapshotClickTarget(await readBrowserSnapshot(mcp, signal), args.target ?? args.ref);
                 const match = target.match(DESTRUCTIVE_CLICK_PATTERN);
+                const active = match ? await getActiveTabUrl(mcp, signal) : null;
+                if (match && active && /^button\b/.test(target) && consumeVaultSubmit(mcp, new URL(active).origin)) return;
                 if (match) throw new Error(`Click rejected: the actual ${target} may change application data ("${match[0]}"). Ask the human before proceeding.`);
             }
         },

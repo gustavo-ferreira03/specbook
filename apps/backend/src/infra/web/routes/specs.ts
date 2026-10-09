@@ -1,3 +1,4 @@
+import { specDetail } from "../../../core/specs/detail";
 import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
@@ -5,13 +6,10 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
 import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
-import { parseSpecYaml, YamlParseError } from "../../../core/repo/yaml";
-import type { HumanSpec } from "../../db/schema";
-import { editSpecFiles, readSpecRawFiles } from "../../../core/repo/manual";
+import { YamlParseError } from "../../../core/repo/yaml";
+import { editSpecFiles } from "../../../core/repo/manual";
 import { updateSpecWithLock } from "../../../core/repo/writer";
-import { featuresRepository } from "../../repositories/features";
-import { runsRepository } from "../../repositories/runs";
-import { specsRepository, type Spec } from "../../repositories/specs";
+import { specsRepository } from "../../repositories/specs";
 
 const editFilesSchema = z
     .object({
@@ -56,31 +54,6 @@ function mapManualError(error: unknown): never {
     throw error;
 }
 
-async function specDetail(spec: Spec, runLimit?: number) {
-    const feature = await featuresRepository.getFeature(spec.featureId);
-    const runs = await runsRepository.listRuns(spec.id, { limit: runLimit });
-    const raw = await readSpecRawFiles(spec).catch((error) => {
-        if (error instanceof UnsafeRepoPathError) return { yaml: null, testSource: null };
-        throw error;
-    });
-    let humanSpec: HumanSpec | null = null;
-    if (raw.yaml !== null) {
-        try {
-            humanSpec = parseSpecYaml(raw.yaml).humanSpec;
-        } catch {
-            humanSpec = null;
-        }
-    }
-    const content =
-        raw.yaml !== null || raw.testSource !== null
-            ? {
-                  humanSpec,
-                  testSource: raw.testSource ?? "",
-                  yamlSource: raw.yaml ?? "",
-              }
-            : null;
-    return { spec, feature, content, runs };
-}
 
 export function createSpecsRouter(): Hono {
     const router = new Hono();

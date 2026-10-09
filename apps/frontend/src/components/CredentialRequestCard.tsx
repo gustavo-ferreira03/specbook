@@ -48,6 +48,13 @@ export function CredentialRequestCard({
         }
     }
 
+    const host = request.origin ? new URL(request.origin).host : null;
+    const copy = request.kind === "login"
+        ? { title: `Sign in to ${host}`, note: `Filled only on ${request.origin}. The agent sees the email or username; the password is encrypted and never shown to it or in the conversation.`, submit: "Save and sign in", sending: "Saving…", dismiss: "Not now" }
+        : request.kind === "code"
+            ? { title: `Verification code for ${host}`, note: "Entered on the page only. Never stored and never sent to the conversation or the model.", submit: "Enter code", sending: "Entering…", dismiss: "Dismiss" }
+            : { title: `The agent needs the \u201c${request.profileName}\u201d credential`, note: "Sent to the encrypted store, never into the conversation or the model.", submit: "Save credential", sending: "Saving…", dismiss: "Dismiss" };
+
     return (
         <article className={cn("mt-5 overflow-hidden rounded-xl border border-line-strong bg-surface shadow-xs", !nested && "md:ml-10")} aria-label="Credential request">
             <div className="flex items-start gap-3 border-b border-line bg-surface-soft px-4 py-3">
@@ -55,22 +62,22 @@ export function CredentialRequestCard({
                     <KeyRound size={15} />
                 </span>
                 <div className="min-w-0">
-                    <p className="text-control font-semibold text-ink">
-                        The agent needs the &ldquo;{request.profileName}&rdquo; credential
-                    </p>
+                    <p className="text-control font-semibold text-ink">{copy.title}</p>
                     <p className="mt-0.5 flex items-center gap-1.5 text-meta text-ink-muted">
                         <ShieldCheck size={12} className="shrink-0 text-success" aria-hidden="true" />
-                        Sent to the encrypted store, never into the conversation or the model.
+                        {copy.note}
                     </p>
                 </div>
             </div>
             <form className="space-y-3 p-4" onSubmit={submit}>
-                {request.fields.map((field) => (
+                {request.fields.map((field, index) => (
                     <div key={field.key} className="space-y-1.5">
                         <Label htmlFor={`credential-${field.key}`}>{field.label ?? field.key}</Label>
                         <Input
                             id={`credential-${field.key}`}
-                            type="password"
+                            type={request.kind === "login" && field.key === "username" || request.kind === "code" ? "text" : "password"}
+                            inputMode={request.kind === "code" ? "numeric" : undefined}
+                            autoFocus={index === 0}
                             autoComplete="off"
                             value={values[field.key] ?? ""}
                             onChange={(event) => setValues({ ...values, [field.key]: event.target.value })}
@@ -83,8 +90,8 @@ export function CredentialRequestCard({
                     </p>
                 )}
                 <div className="flex justify-end gap-2 pt-1">
-                    <Button type="button" size="sm" variant="ghost" onClick={() => void dismiss()}>Dismiss</Button>
-                    <Button type="submit" size="sm" disabled={sending}>{sending ? "Saving…" : "Save credential"}</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => void dismiss()}>{copy.dismiss}</Button>
+                    <Button type="submit" size="sm" disabled={sending}>{sending ? copy.sending : copy.submit}</Button>
                 </div>
             </form>
         </article>

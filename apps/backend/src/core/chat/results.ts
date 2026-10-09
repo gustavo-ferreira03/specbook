@@ -12,7 +12,7 @@ import { extractText, openSession, toolStepsOf } from "./session-store";
 
 type Anchor = string | null | undefined;
 const artifactSchema = z.object({ id: z.string().uuid().optional(), inboxId: z.string().uuid().optional(),
-    runId: z.string().uuid().optional(), specId: z.string().uuid().optional(), evidence: z.record(z.string(), z.unknown()).optional() });
+    change: z.enum(["created", "updated"]).optional(), runId: z.string().uuid().optional(), specId: z.string().uuid().optional(), evidence: z.record(z.string(), z.unknown()).optional() });
 const resultTools = new Set(["propose_spec_batch", "start_background_task", "run_spec", "create_spec", "update_spec", "scan_page"]);
 const taskVerbs: Record<string, string> = { coverage: "Find coverage for", explore: "Explore", triage: "Investigate", failure_triage: "Investigate",
     regenerate: "Repair", run_specs: "Run", generate_spec: "Create", review: "Review" };
@@ -50,8 +50,9 @@ async function artifactsForChat(chatId: string) {
     return { artifacts, abandonedBatchIds };
 }
 
-function taskStatus(status: string, paused: boolean): "queued" | "working" | "needs_answer" | "paused" | "completed" | "failed" | "stopped" {
+function taskStatus(status: string, paused: boolean, retryAt?: string | null): "queued" | "working" | "needs_answer" | "paused" | "completed" | "failed" | "stopped" {
     if (status === "blocked") return "needs_answer";
+    if (status === "stalled" && !retryAt) return "failed";
     if (["queued", "pending", "running", "stalled"].includes(status) && paused || status === "paused") return "paused";
     if (["pending", "queued", "stalled"].includes(status)) return "queued";
     if (status === "running") return "working";
@@ -138,14 +139,14 @@ export async function chatResults(chatId: string) {
         const job = jobs.find((job) => job.id === intent.jobId);
         const bug = items.find((item) => item.kind === "bug_report" && item.payload.regressionIntentId === intent.id);
         return { id: intent.id, kind: intent.intent.kind, title: bug ? `Create a regression Spec for “${bug.presentation.title}”` : taskTitle(intent.intent.kind, intent.intent.goal, job?.specId ?? (intent.intent.specIds?.length === 1 ? intent.intent.specIds[0] : undefined)),
-            status: taskStatus(job?.status ?? intent.status, paused), summary: state.clean(intent.status === "failed" || intent.status === "ignored" ? intent.reason : intent.intent.reason),
+            status: taskStatus(job?.status ?? intent.status, paused, job?.retryAt), summary: state.clean(intent.status === "failed" || intent.status === "ignored" ? intent.reason : intent.intent.reason),
             batchId: intent.batchId ?? undefined, createdAt: intent.createdAt, updatedAt: job?.updatedAt ?? intent.updatedAt, afterMessageId: intentAnchors.get(intent.id) };
     });
     for (const job of jobs.filter((job) => job.kind !== "review" && !intents.some((intent) => intent.jobId === job.id))) {
         const candidate = inbox.filter((item) => item.kind === "spec_batch").flatMap((item) =>
             (item.payload.specBatch as { candidates?: { jobId?: string; title?: string }[] } | undefined)?.candidates ?? []).find((candidate) => candidate.jobId === job.id);
         tasks.push({ id: job.id, kind: job.kind, title: candidate?.title ? state.clean(`Create “${candidate.title}”`) : taskTitle(job.kind, job.goal, job.specId),
-            status: taskStatus(job.status, paused), summary: job.stopReason ? state.clean(job.stopReason) : "", batchId: undefined,
+            status: taskStatus(job.status, paused, job.retryAt), summary: job.stopReason ? state.clean(job.stopReason) : "", batchId: undefined,
             createdAt: job.createdAt, updatedAt: job.updatedAt, afterMessageId: jobAnchors.get(job.id) });
     }
     const batchIds = new Map<string, string>();
@@ -170,7 +171,7 @@ export async function chatResults(chatId: string) {
     const specs = (await Promise.all([...specArtifacts].map(async ([id, artifact]) => {
         const spec = await specsRepository.getSpec(id);
         return spec?.projectId === chat.projectId ? { id: spec.id, title: spec.title, status: spec.status,
-            toolName: artifact.toolName, createdAt: artifact.createdAt, afterMessageId: artifact.afterMessageId } : null;
+            toolName: artifact.toolName, change: artifact.value.change ?? (artifact.toolName === "create_spec" ? "created" as const : "updated" as const), createdAt: artifact.createdAt, afterMessageId: artifact.afterMessageId } : null;
     }))).filter((spec) => spec !== null);
     const credentialRequests = [chatId, ...jobs.map((job) => job.chatId)].flatMap((id) => {
         const request = getPendingCredentialRequest(id);

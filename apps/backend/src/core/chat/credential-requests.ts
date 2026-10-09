@@ -5,16 +5,20 @@ export interface CredentialRequestField {
     label?: string;
 }
 
+export type CredentialRequestKind = "login" | "code" | "fields";
+
 export interface PendingCredentialRequest {
     id: string;
     chatId: string;
     projectId: string;
+    kind: CredentialRequestKind;
+    origin: string | null;
     profileName: string;
     fields: CredentialRequestField[];
     createdAt: string;
 }
 
-type Outcome = "saved" | "dismissed";
+type Outcome = "saved" | "dismissed" | { code: string };
 
 interface PendingEntry {
     request: PendingCredentialRequest;
@@ -29,6 +33,8 @@ export function registerCredentialRequest(
     projectId: string,
     profileName: string,
     fields: CredentialRequestField[],
+    kind: CredentialRequestKind = "fields",
+    origin: string | null = null,
 ): PendingCredentialRequest {
     pendingByChat.get(chatId)?.resolve("dismissed");
     let resolve!: (outcome: Outcome) => void;
@@ -37,6 +43,8 @@ export function registerCredentialRequest(
         id: crypto.randomUUID(),
         chatId,
         projectId,
+        kind,
+        origin,
         profileName,
         fields,
         createdAt: new Date().toISOString(),

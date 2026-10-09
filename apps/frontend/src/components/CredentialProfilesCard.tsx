@@ -41,6 +41,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
     const [openId, setOpenId] = useState<string | "new" | null>(null);
     const [name, setName] = useState("");
     const [fields, setFields] = useState<DraftField[]>([]);
+    const [identifier, setIdentifier] = useState("");
     const [saving, setSaving] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<CredentialProfile | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -77,6 +78,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
         setFormError("");
         setOpenId(profile.id);
         setName(profile.name);
+        setIdentifier(profile.identifier ?? "");
         setFields(draftFromProfile(profile));
     }
 
@@ -95,7 +97,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             }));
         try {
             if (openId === "new") await createCredentialProfile(projectId, { name: name.trim(), fields: inputs });
-            else if (openId) await updateCredentialProfile(openId, { fields: inputs });
+            else if (openId) await updateCredentialProfile(openId, { fields: inputs, ...(editing?.identifier != null ? { identifier: identifier.trim() } : {}) });
             setOpenId(null);
             await refresh();
         } catch (err) {
@@ -127,7 +129,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             <SettingsSection
                 id="credentials-heading"
                 title="Credentials"
-                description="Login profiles the agent can use. Every field is encrypted and never shown again once saved."
+                description="Login profiles the agent can use. Passwords and other fields are encrypted and never shown again once saved; a login saved from a chat keeps its username visible so the agent can type it."
                 actions={profiles.length > 0 &&
                     <Button type="button" variant="outline" onClick={(event) => openNew(event.currentTarget)}>
                         <Plus size={14} /> New profile
@@ -175,7 +177,13 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                         {profile.name}
                                     </button>
                                     <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-meta text-ink-subtle">
-                                        {profile.fields.length === 0 ? "No fields" : profile.fields.map((field) => (
+                                        {profile.identifier !== null && (
+                                            <span className="inline-flex min-w-0 items-center gap-1">
+                                                <span className="font-mono">username</span>
+                                                <span className="truncate">{profile.identifier}</span>
+                                            </span>
+                                        )}
+                                        {profile.fields.length === 0 && profile.identifier !== null ? null : profile.fields.length === 0 ? "No fields" : profile.fields.map((field) => (
                                             <span key={field.key} className="inline-flex items-center gap-1">
                                                 <span className="font-mono">{field.key}</span>
                                                 <span aria-label={field.hasValue ? "saved" : "empty"}>{field.hasValue ? "••••" : "empty"}</span>
@@ -252,6 +260,18 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                 autoComplete="off"
                             />
                         </div>
+                        {editing?.identifier != null && (
+                            <div>
+                                <Label htmlFor="credential-identifier" className="mb-1.5">Username</Label>
+                                <Input
+                                    id="credential-identifier"
+                                    value={identifier}
+                                    onChange={(event) => setIdentifier(event.target.value)}
+                                    autoComplete="off"
+                                />
+                                <p className="mt-1 text-meta text-ink-subtle">Not encrypted: the agent sees it and types it. Specs use it as secret(&quot;{editing.name}&quot;, &quot;username&quot;).</p>
+                            </div>
+                        )}
                         <fieldset className="min-w-0">
                             <legend className="mb-1.5 text-control font-medium text-ink">Fields</legend>
                             <div className="space-y-2">

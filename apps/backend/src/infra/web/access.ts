@@ -7,12 +7,12 @@ import type { UserRole } from "../../core/accounts/schemas";
 import type { User } from "../repositories/accounts";
 import { logger } from "../logger";
 
-export type AccessRule = UserRole | "public" | "git-token" | "ci-token";
+export type AccessRule = UserRole | "public" | "git-token" | "ci-token" | "agent-token";
 const policies = new WeakMap<Function, AccessRule>();
 const rank: Record<UserRole, number> = { viewer: 1, editor: 2, admin: 3 };
 
 declare module "hono" {
-    interface ContextVariableMap { user: User | null }
+    interface ContextVariableMap { user: User | null; agentClientName: string }
 }
 
 export function access(rule: AccessRule): MiddlewareHandler {
@@ -34,7 +34,7 @@ export function accessGate(): MiddlewareHandler {
     return async (c, next) => {
         const declared = matchedRoutes(c).map(({ handler }) => routePolicy(handler)).filter((rule): rule is AccessRule => Boolean(rule));
         const required = declared.filter((rule): rule is UserRole => rule in rank).sort((a, b) => rank[b] - rank[a]).at(0);
-        const bearer = !required && declared.find((rule) => rule === "git-token" || rule === "ci-token");
+        const bearer = !required && declared.find((rule) => rule === "git-token" || rule === "ci-token" || rule === "agent-token");
         const probe = c.req.path === "/health" || c.req.path === "/ready";
         const session = bearer || probe ? null : await sessionFromHeaders(c.req.raw.headers);
         c.set("user", session?.user ?? null);
@@ -42,12 +42,12 @@ export function accessGate(): MiddlewareHandler {
         if (required) requireRole(c, required);
         const actor: Actor = session
             ? { id: session.user.id, name: session.user.name, email: session.user.email, kind: "user" }
-            : { id: null, name: bearer === "git-token" ? "Git client" : bearer === "ci-token" ? "CI" : "Specbook", kind: bearer === "git-token" ? "git" : bearer === "ci-token" ? "ci" : "system" };
+            : { id: null, name: bearer === "git-token" ? "Git client" : bearer === "ci-token" ? "CI" : bearer === "agent-token" ? c.req.header("user-agent") || "External agent" : "Specbook", kind: bearer === "git-token" ? "git" : bearer === "ci-token" ? "ci" : bearer === "agent-token" ? "agent" : "system" };
         await withActor(actor, async () => {
             await next();
             if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method) && c.res.status < 400 && !c.req.path.startsWith("/auth/") && c.req.path !== "/setup/admin") {
                 const projectId = c.req.path.match(/\/(?:projects|git)\/([a-f0-9-]{36})(?:\/|$)/)?.[1];
-                await recordAudit("http.request", { method: c.req.method, path: c.req.path, status: c.res.status }, projectId)
+                await recordAudit("http.request", { method: c.req.method, path: c.req.path, status: c.res.status }, projectId, bearer === "agent-token" ? { id: null, kind: "agent", name: c.get("agentClientName") || actor.name } : actor)
                     .catch((error) => logger.error("could not record request audit", { error }));
             }
         });

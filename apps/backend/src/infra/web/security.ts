@@ -37,7 +37,7 @@ export function hostGuard(allowlist: HostAllowlist): MiddlewareHandler {
 
 export function csrfGuard(): MiddlewareHandler {
     return async (c, next) => {
-        if (SAFE_METHODS.has(c.req.method) || isGitHttpPath(c.req.path) || c.req.path.startsWith("/ci/")) return next();
+        if (SAFE_METHODS.has(c.req.method) || isGitHttpPath(c.req.path) || c.req.path.startsWith("/ci/") || c.req.path.startsWith("/mcp/projects/")) return next();
         if (c.req.header(REQUEST_HEADER) !== "1") {
             return c.json({ error: `Missing ${REQUEST_HEADER} header` }, 403);
         }
