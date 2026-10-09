@@ -74,7 +74,7 @@ export function SpecBatchDecision({ projectId, item, onChange }: { projectId: st
                     <div className="flex flex-wrap gap-2">
                         {candidate.specId && <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/specs/${candidate.specId}`}>Review Spec</Link></Button>}
                         {candidate.specId && candidate.runId && <Button asChild variant="ghost" size="sm"><Link href={`/p/${projectId}/specs/${candidate.specId}#run-${candidate.runId}`}>View first result</Link></Button>}
-                        {candidate.questionId && <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}/overview#${candidate.questionId}`}>Answer question</Link></Button>}
+                        {candidate.questionId && <Button asChild variant="outline" size="sm"><Link href={`/p/${projectId}#${candidate.questionId}`}>Answer question</Link></Button>}
                     </div>
                 </li>)}
             </ul>

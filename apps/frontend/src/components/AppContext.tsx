@@ -1,0 +1,513 @@
+"use client";
+
+import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/AuthProvider";
+
+import Link from "next/link";
+import { use, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+    AlertCircle,
+    ChevronRight,
+    Compass,
+    ExternalLink,
+    FileCode2,
+    LoaderCircle,
+    PencilLine,
+    RefreshCw,
+    Search,
+    SearchX,
+    Trash2,
+    X,
+} from "lucide-react";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { ContextFileCard } from "@/components/ContextFileCard";
+import { ContextReadout } from "@/components/ContextReadout";
+import { DraftReview } from "@/components/DraftReview";
+import { EmptyState } from "@/components/EmptyState";
+import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { RelativeTime } from "@/components/RelativeTime";
+import { SectionHeader } from "@/components/SectionHeader";
+import { StatusDot } from "@/components/StatusDot";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import {
+    ApiError,
+    errorMessage,
+    getCoverage,
+    getProject,
+    createContextDiscovery,
+    discardProjectContext,
+    getProjectContext,
+    getLlmRuntimeStatus,
+    patchProjectContext,
+    requestTask,
+} from "@/lib/api";
+import { countLabel } from "@/lib/format";
+import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
+import { useProjectOverview } from "@/lib/projectOverview";
+import { useVisiblePolling } from "@/lib/usePolling";
+import type { CoverageArea, CoverageResponse, Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
+
+function parseSafetyNotes(raw: string): string[] {
+    return raw
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 20)
+        .map((line) => line.slice(0, 200));
+}
+
+function DiscoveryStartForm({
+    projectId,
+    baseUrl,
+    seedContext,
+}: {
+    projectId: string;
+    baseUrl: string;
+    seedContext?: ProjectContext;
+}) {
+    const router = useRouter();
+    const [goal, setGoal] = useState(seedContext ? "Update the confirmed project context" : "");
+    const [startUrl, setStartUrl] = useState("");
+    const [safetyNotes, setSafetyNotes] = useState("");
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [error, setError] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+
+    async function startDiscovery(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setError("");
+        setSubmitting(true);
+        try {
+            const trimmedStart = startUrl.trim();
+            const trimmedGoal = goal.trim();
+            const discovery = await createContextDiscovery(projectId, {
+                ...(trimmedGoal ? { goal: trimmedGoal } : {}),
+                ...(trimmedStart ? { startUrl: trimmedStart } : {}),
+                safetyNotes: parseSafetyNotes(safetyNotes),
+            });
+            if (seedContext) {
+                try {
+                    await patchProjectContext(discovery.revision.id, { context: seedContext });
+                } catch (error) {
+                    await discardProjectContext(discovery.revision.id).catch(() => undefined);
+                    throw error;
+                }
+            }
+            router.push(`/p/${projectId}/chats/${discovery.chat.id}`);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+            setSubmitting(false);
+        }
+    }
+
+    return (
+        <form onSubmit={startDiscovery} className="space-y-4">
+            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" size="sm" className="-ml-2 text-ink-muted">
+                        <ChevronRight size={14} aria-hidden className={`transition-transform duration-150 motion-reduce:transition-none ${advancedOpen ? "rotate-90" : ""}`} />
+                        Discovery settings
+                        <span className="font-normal text-ink-subtle">Optional</span>
+                    </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                    <div className="mt-2 space-y-4 rounded-lg border border-line bg-surface p-4">
+                        <div>
+                            <Label className="mb-1.5" htmlFor="discovery-goal">Focus</Label>
+                            <Input id="discovery-goal" value={goal} onChange={(event) => setGoal(event.target.value)} autoComplete="off" placeholder="e.g. Focus on the checkout flow" />
+                            <p className="mt-1.5 text-meta text-ink-subtle">Leave empty to let the agent explore everything it can reach.</p>
+                        </div>
+                        <div>
+                            <Label className="mb-1.5" htmlFor="start-url">Start URL</Label>
+                            <Input id="start-url" value={startUrl} onChange={(event) => setStartUrl(event.target.value)} type="url" inputMode="url" placeholder={baseUrl} className="font-mono text-meta" />
+                            <p className="mt-1.5 text-meta text-ink-subtle">Must stay on the base URL origin.</p>
+                        </div>
+                        <div>
+                            <Label className="mb-1.5" htmlFor="safety-notes">Safety notes</Label>
+                            <Textarea id="safety-notes" value={safetyNotes} onChange={(event) => setSafetyNotes(event.target.value)} rows={3} placeholder={"Do not submit contact forms"} />
+                            <p className="mt-1.5 text-meta text-ink-subtle">One rule per line. The agent follows them during discovery.</p>
+                        </div>
+                    </div>
+                </CollapsibleContent>
+            </Collapsible>
+            {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
+            <Button type="submit" disabled={submitting}>
+                <Compass size={14} /> {submitting ? "Starting discovery…" : seedContext ? "Start update discovery" : "Start discovery"}
+            </Button>
+        </form>
+    );
+}
+
+const coverageLabels: Record<CoverageArea["coverage"], string> = { covered: "Covered", partial: "Partially covered", uncovered: "Uncovered" };
+
+function AreaCoverage({ projectId, area }: { projectId: string; area: CoverageArea }) {
+    const { data: overview } = useProjectOverview();
+    return (
+        <div className="mt-3 border-t border-line pt-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+                <span className={cn("inline-flex items-center gap-1.5 text-meta font-medium", area.coverage === "covered" ? "text-success" : area.coverage === "partial" ? "text-ink" : "text-ink-muted")}>
+                    <span aria-hidden="true" className={cn("size-1.5 rounded-full", area.coverage === "covered" ? "bg-success" : area.coverage === "partial" ? "bg-warning-icon" : "bg-ink-subtle")} />
+                    {coverageLabels[area.coverage]}
+                </span>
+                <span className="text-meta text-ink-muted">{area.reason}</span>
+            </div>
+            {area.specs.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                    {area.specs.map((spec) => (
+                        <li key={spec.id} className="flex min-w-0 items-center gap-1.5">
+                            <StatusDot status={overview?.specHealth[spec.id]?.status ?? "unverified"} size={13} />
+                            <Link href={`/p/${projectId}/specs/${spec.id}`} className="min-w-0 truncate text-ink-muted hover:text-ink hover:underline">{spec.title}</Link>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {area.specs.length > 0 && area.uncoveredRoutes.length > 0 && area.uncoveredRoutes.length < area.routes.length && (
+                <p className="mt-2 text-meta text-ink-subtle [overflow-wrap:anywhere]">No Spec opens <span className="font-mono">{area.uncoveredRoutes.join("  ·  ")}</span></p>
+            )}
+        </div>
+    );
+}
+
+function ConfirmedContextSummary({ projectId, context, coverage }: { projectId: string; context: ProjectContext; coverage?: CoverageResponse | null }) {
+    const areas = new Map(coverage?.areas.map((area) => [area.name, area]));
+    return (
+        <div className="px-4 py-4 sm:px-5">
+            <ContextReadout context={context} renderArea={coverage ? (name) => {
+                const area = areas.get(name);
+                return area && <AreaCoverage projectId={projectId} area={area} />;
+            } : undefined} />
+        </div>
+    );
+}
+
+function ContextPanel({
+    projectId,
+    project,
+    contextState,
+    coverage,
+    onReload,
+    onDraftSaved,
+}: {
+    projectId: string;
+    project: Project;
+    contextState: ProjectContextState;
+    coverage: CoverageResponse | null;
+    onReload: () => void;
+    onDraftSaved: (draft: ProjectContextRevision) => void;
+}) {
+    const { canEdit, isAdmin } = useAuth();
+    const [discardingDiscovery, setDiscardingDiscovery] = useState(false);
+    const [discardDiscoveryOpen, setDiscardDiscoveryOpen] = useState(false);
+    const [discardDiscoveryError, setDiscardDiscoveryError] = useState("");
+    const [updateMode, setUpdateMode] = useState(false);
+    const [yamlMode, setYamlMode] = useState(false);
+    const [findState, setFindState] = useState<"idle" | "requesting" | "requested">("idle");
+    const [findError, setFindError] = useState("");
+    const discardDiscoveryTriggerRef = useRef<HTMLButtonElement>(null);
+
+    async function discardUnfinishedDiscovery(revisionId: string) {
+        setDiscardDiscoveryError("");
+        setDiscardingDiscovery(true);
+        try {
+            await discardProjectContext(revisionId);
+            setDiscardDiscoveryOpen(false);
+            onReload();
+        } catch (error) {
+            setDiscardDiscoveryError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setDiscardingDiscovery(false);
+        }
+    }
+
+    async function findUncoveredAreas() {
+        setFindError("");
+        setFindState("requesting");
+        try {
+            await requestTask(projectId, "coverage");
+            setFindState("requested");
+        } catch (error) {
+            setFindError(errorMessage(error));
+            setFindState("idle");
+        }
+    }
+
+    const [llmReady, setLlmReady] = useState(true);
+    useEffect(() => {
+        let active = true;
+        getLlmRuntimeStatus()
+            .then((status) => {
+                if (active) setLlmReady(status.ready);
+            })
+            .catch(() => undefined);
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const { confirmed, draft } = contextState;
+    const draftHasProposal = draft ? draft.context.summary.trim().length > 0 : false;
+    const draftChatHref = draft?.sourceChatId ? `/p/${projectId}/chats/${draft.sourceChatId}` : null;
+
+    if (!canEdit && !draft && !confirmed) return <section><SectionHeader title="What this app does" /><p className="mt-3 text-body text-ink-muted">No context has been confirmed yet. An editor can start discovery and review the findings here.</p></section>;
+
+    if (!draft && !confirmed) {
+        return (
+            <section aria-labelledby="overview-context-heading" className="rounded-xl border border-line bg-surface-soft">
+                <div className="flex flex-col gap-4 p-5 sm:flex-row sm:p-6">
+                    <span className="hidden size-10 shrink-0 items-center justify-center rounded-full bg-surface text-ink shadow-xs ring-1 ring-line sm:flex">
+                        <Compass size={18} aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <h2 id="overview-context-heading" className="text-section text-ink">Teach Specbook this application</h2>
+                        <p className="mt-1 max-w-[62ch] text-body text-ink-muted">
+                            The agent explores the app in a bounded browser and saves what it learns as the project context. Every future chat receives it, and you can edit it at any time.
+                        </p>
+                        <ol className="mt-4 grid gap-2 text-control text-ink-muted sm:grid-cols-3">
+                            {["Agent explores the app", "Context is saved", "Chats use the context"].map((step, index) => (
+                                <li key={step} className="flex items-center gap-2">
+                                    <span aria-hidden="true" className="tabular flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-label text-ink">{index + 1}</span>
+                                    {step}
+                                </li>
+                            ))}
+                        </ol>
+                        {!llmReady && (
+                            <Alert variant="warning" role="status" className="mt-4">
+                                <AlertTitle>No agent model is configured</AlertTitle>
+                                <AlertDescription>Discovery needs one. {isAdmin ? <Link href="/settings?tab=model">Set up a model in Settings</Link> : "Ask an administrator to connect a provider"}.</AlertDescription>
+                            </Alert>
+                        )}
+                        <div className="mt-5">
+                            <DiscoveryStartForm
+                                projectId={projectId}
+                                baseUrl={project.baseUrl}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </section>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+
+            {draft && !draftHasProposal && (
+                <section aria-labelledby="overview-context-heading">
+                    <div className="rounded-xl border border-line p-4 sm:p-5">
+                        <div id="overview-context-heading" className="flex items-center gap-2 text-control font-medium text-ink">
+                            <LoaderCircle size={14} className="animate-spin text-ink-muted motion-reduce:animate-none" aria-hidden="true" />
+                            Discovery in progress
+                        </div>
+                        {draft.brief.goal && <p className="mt-2 line-clamp-2 text-body text-ink-muted" title={draft.brief.goal}>{draft.brief.goal}</p>}
+                        {draft.brief.safetyNotes.length > 0 && (
+                            <div className="mt-3">
+                                <p className="text-meta text-ink-subtle">{countLabel(draft.brief.safetyNotes.length, "safety note")}</p>
+                                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-meta text-ink-muted">
+                                    {draft.brief.safetyNotes.map((note, index) => <li key={index}>{note}</li>)}
+                                </ul>
+                            </div>
+                        )}
+                        {canEdit && <div className="mt-4 flex flex-wrap gap-2">
+                            {draftChatHref && (
+                                <Button asChild size="sm">
+                                    <Link href={draftChatHref}><Compass size={14} /> Continue discovery</Link>
+                                </Button>
+                            )}
+                            <Button
+                                ref={discardDiscoveryTriggerRef}
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setDiscardDiscoveryOpen(true)}
+                                disabled={discardingDiscovery}
+                            >
+                                <Trash2 size={14} /> Discard discovery
+                            </Button>
+                            <ConfirmDeleteDialog
+                                open={discardDiscoveryOpen}
+                                title="Discard this discovery?"
+                                description="The discovery draft is discarded. The chat stays in your history, and any confirmed context stays active."
+                                confirmLabel="Discard discovery"
+                                busyLabel="Discarding…"
+                                busy={discardingDiscovery}
+                                error={discardDiscoveryError}
+                                returnFocusRef={discardDiscoveryTriggerRef}
+                                onCancel={() => {
+                                    setDiscardDiscoveryOpen(false);
+                                    setDiscardDiscoveryError("");
+                                }}
+                                onConfirm={() => void discardUnfinishedDiscovery(draft.id)}
+                            />
+                        </div>}
+                    </div>
+                </section>
+            )}
+
+            {draft && draftHasProposal && (
+                <section aria-labelledby="overview-context-heading">
+                    <SectionHeader id="overview-context-heading" title="Review project context" description="Drafted from discovery. Edit anything before confirming." className="mb-3" />
+                    <div className="rounded-xl border border-line p-4 sm:p-5">
+                        {canEdit ? <DraftReview
+                            revision={draft}
+                            chatHref={draftChatHref}
+                            onSaved={onDraftSaved}
+                            onConfirmed={() => {
+                                setUpdateMode(false);
+                                onReload();
+                            }}
+                            onDiscarded={() => onReload()}
+                        /> : <ConfirmedContextSummary projectId={projectId} context={draft.context} />}
+                    </div>
+                </section>
+            )}
+
+            {confirmed && (
+                <section aria-labelledby="overview-confirmed-heading">
+                    <SectionHeader
+                        id="overview-confirmed-heading"
+                        title={draft ? "Currently confirmed context" : "Confirmed context"}
+                        description={draft
+                            ? "Stays active until the draft above replaces it."
+                            : <>{confirmed.confirmedAt ? <RelativeTime value={confirmed.confirmedAt} prefix="Confirmed" /> : "Confirmed"} · supplied to every new chat</>}
+                        actions={canEdit && !draft && <>
+                            <Button type="button" variant="ghost" size="sm" disabled={findState === "requesting"} onClick={() => void findUncoveredAreas()}>
+                                <Search size={14} /> {findState === "requesting" ? "Requesting…" : "Find uncovered areas"}
+                            </Button>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => setYamlMode((value) => !value)} aria-expanded={yamlMode}>
+                                {yamlMode ? <><X size={14} /> Close YAML</> : <><FileCode2 size={14} /> Edit YAML</>}
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" onClick={() => setUpdateMode((value) => !value)} aria-expanded={updateMode}>
+                                {updateMode ? <><X size={14} /> Cancel update</> : <><PencilLine size={14} /> Update context</>}
+                            </Button>
+                        </>}
+                        className="mb-3"
+                    />
+                    {findState === "requested" && <p className="mb-3 text-body text-ink-muted">Requested. Review suggested Specs in <Link href={`/p/${projectId}`} className="underline underline-offset-2">Overview</Link>.</p>}
+                    {findError && <Alert variant="danger" role="alert" className="mb-3"><AlertDescription>{findError}</AlertDescription></Alert>}
+                    <div className="overflow-hidden rounded-xl border border-line">
+                        {updateMode && !draft && (
+                            <div className="border-b border-line bg-surface-soft p-4 sm:p-5">
+                                <p className="mb-3 max-w-[64ch] text-control text-ink-muted">
+                                    A new discovery explores the app again, starting from the current context, and replaces it when it finishes.
+                                </p>
+                                <DiscoveryStartForm projectId={projectId} baseUrl={project.baseUrl} seedContext={confirmed.context} />
+                            </div>
+                        )}
+                        <ConfirmedContextSummary projectId={projectId} context={confirmed.context} coverage={coverage} />
+                    </div>
+                    {coverage && <p className="mt-2 text-meta text-ink-subtle">{coverage.basis}</p>}
+                    {yamlMode && !draft && <div className="mt-6"><ContextFileCard projectId={projectId} /></div>}
+                </section>
+            )}
+        </div>
+    );
+}
+
+function ContextSkeleton() {
+    return (
+        <div aria-busy="true" role="status">
+            <span className="sr-only">Loading app context</span>
+            <Skeleton className="h-48 rounded-xl" />
+        </div>
+    );
+}
+
+export function AppContext({ projectId }: { projectId: string }) {
+    const { canEdit } = useAuth();
+    const [project, setProject] = useState<Project | null>(null);
+    const [contextState, setContextState] = useState<ProjectContextState | null>(null);
+    const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
+    const [loadError, setLoadError] = useState("");
+    const [notFound, setNotFound] = useState(false);
+    const [retryKey, setRetryKey] = useState(0);
+
+    const reload = useCallback(() => setRetryKey((key) => key + 1), []);
+
+    useEffect(() => {
+        let active = true;
+        setLoadError("");
+        setNotFound(false);
+        Promise.all([
+            getProject(projectId),
+            getProjectContext(projectId),
+        ])
+            .then(([projectResult, contextResult]) => {
+                if (!active) return;
+                setProject(projectResult.project);
+                setContextState(contextResult);
+            })
+            .catch((error) => {
+                if (!active) return;
+                if (error instanceof ApiError && error.status === 404) setNotFound(true);
+                else setLoadError(errorMessage(error));
+            });
+        return () => {
+            active = false;
+        };
+    }, [projectId, retryKey]);
+
+    const loadCoverage = useCallback(() => {
+        getCoverage(projectId).then(setCoverage).catch(() => undefined);
+    }, [projectId]);
+    useEffect(() => loadCoverage(), [loadCoverage, retryKey]);
+    useVisiblePolling(loadCoverage, 60_000);
+
+    useEffect(() => onInvalidate((event) => {
+        if (matchesInvalidation(event, "projects", projectId)) {
+            getProject(projectId).then((result) => setProject(result.project)).catch(() => undefined);
+        }
+        if (matchesInvalidation(event, "tree", projectId)) loadCoverage();
+    }), [projectId, loadCoverage]);
+
+    if (notFound) {
+        return (
+            <div className="flex min-h-full flex-col bg-surface">
+                <div className="flex flex-1 items-center justify-center px-5 py-10">
+                    <EmptyState
+                        icon={SearchX}
+                        title="Project not found"
+                        description="This project may have been deleted."
+                        action={canEdit && <Button asChild><Link href="/?new=1">Create a project</Link></Button>}
+                    />
+                </div>
+            </div>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <div className="flex min-h-full flex-col bg-surface">
+                <div className="flex flex-1 items-center justify-center px-5 py-10">
+                    <EmptyState
+                        icon={AlertCircle}
+                        tone="danger"
+                        role="alert"
+                        title="The project could not load"
+                        description={loadError}
+                        action={<Button type="button" onClick={reload}><RefreshCw size={14} /> Try again</Button>}
+                    />
+                </div>
+            </div>
+        );
+    }
+
+    if (!project || !contextState) return <ContextSkeleton />;
+
+    return (
+        <ContextPanel
+            projectId={projectId}
+            project={project}
+            contextState={contextState}
+            coverage={coverage}
+            onReload={reload}
+            onDraftSaved={(updated) => setContextState((current) => (current ? { ...current, draft: updated } : current))}
+        />
+    );
+}

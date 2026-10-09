@@ -1,537 +1,288 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/components/AuthProvider";
-
 import Link from "next/link";
-import { use, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import {
-    AlertCircle,
-    ChevronRight,
-    Compass,
-    ExternalLink,
-    FileCode2,
-    LoaderCircle,
-    PencilLine,
-    RefreshCw,
-    Search,
-    SearchX,
-    Trash2,
-    X,
-} from "lucide-react";
-import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
-import { ContextFileCard } from "@/components/ContextFileCard";
-import { ContextReadout } from "@/components/ContextReadout";
-import { DraftReview } from "@/components/DraftReview";
+import { use, useEffect, useRef, useState } from "react";
+import { AlertCircle, Check, ChevronRight, Compass, ExternalLink, CircleHelp, Eye, LoaderCircle, ScanSearch, Search, MessageSquareText, Pause, Play, RefreshCw, type LucideIcon } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
+import { DecisionDetails } from "@/components/DecisionDetails";
 import { EmptyState } from "@/components/EmptyState";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { PageContainer } from "@/components/PageHeader";
+import { SpecGrid } from "@/components/SpecGrid";
 import { RelativeTime } from "@/components/RelativeTime";
 import { SectionHeader } from "@/components/SectionHeader";
+import { InlineFeedback, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { StatusDot } from "@/components/StatusDot";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { StoryDetails } from "@/components/StoryDetails";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import {
-    ApiError,
-    errorMessage,
-    getCoverage,
-    getProject,
-    createContextDiscovery,
-    discardProjectContext,
-    getProjectContext,
-    getLlmRuntimeStatus,
-    patchProjectContext,
-    requestTask,
-} from "@/lib/api";
-import { countLabel } from "@/lib/format";
-import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
+import { getProject, getProjectContext, requestTask as requestProjectTask, setStewardPaused } from "@/lib/api";
+import { environmentLabel, formatDateTime } from "@/lib/format";
 import { useProjectOverview } from "@/lib/projectOverview";
-import { useVisiblePolling } from "@/lib/usePolling";
-import type { CoverageArea, CoverageResponse, Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
+import type { OverviewResponse, Project, RecentRun } from "@/lib/types";
 
-function parseSafetyNotes(raw: string): string[] {
-    return raw
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(0, 20)
-        .map((line) => line.slice(0, 200));
+type Selection = { type: "item" | "story" | "failure"; id: string };
+
+const RUN_TRIGGERS: Record<RecentRun["trigger"], string> = { deploy: "Deployments", ci: "CI", schedule: "Scheduled", manual: "Manual", spec_change: "Spec changes" };
+const LOAD_ERROR = "The latest project overview could not load. Check your connection and try again.";
+
+function OverviewRow({ icon, title, time, action = "Details", onClick, annotation, detail }: { icon: React.ReactNode; title: string; time?: string; action?: string; onClick: () => void; annotation?: string; detail?: string }) {
+    return <li className="min-w-0">
+        <Button type="button" variant="ghost" onClick={onClick} className="h-auto w-full justify-start gap-3 rounded-none px-2 py-3 text-left text-body font-normal">
+            <span className="flex shrink-0 items-center" aria-hidden="true">{icon}</span>
+            <span className="min-w-0 flex-1"><span className={annotation ? "block truncate" : "block whitespace-normal break-words sm:truncate"} title={title}>{title}</span>{detail && <span className="mt-0.5 block whitespace-normal text-meta text-ink-subtle">{detail}</span>}</span>
+            {annotation && <span className="max-w-[45%] shrink-0 truncate text-meta text-ink-muted" title={annotation}>{annotation}</span>}
+            {time && <RelativeTime value={time} className="hidden shrink-0 text-meta text-ink-subtle sm:block" />}
+            <span className="flex shrink-0 items-center gap-1 text-meta font-medium text-ink-muted"><span className={annotation ? "hidden sm:inline" : undefined}>{action}</span><ChevronRight size={13} /></span>
+        </Button>
+    </li>;
 }
 
-function DiscoveryStartForm({
-    projectId,
-    baseUrl,
-    seedContext,
-}: {
-    projectId: string;
-    baseUrl: string;
-    seedContext?: ProjectContext;
-}) {
-    const router = useRouter();
-    const [goal, setGoal] = useState(seedContext ? "Update the confirmed project context" : "");
-    const [startUrl, setStartUrl] = useState("");
-    const [safetyNotes, setSafetyNotes] = useState("");
-    const [advancedOpen, setAdvancedOpen] = useState(false);
-    const [error, setError] = useState("");
-    const [submitting, setSubmitting] = useState(false);
-
-    async function startDiscovery(event: React.FormEvent<HTMLFormElement>) {
-        event.preventDefault();
-        setError("");
-        setSubmitting(true);
-        try {
-            const trimmedStart = startUrl.trim();
-            const trimmedGoal = goal.trim();
-            const discovery = await createContextDiscovery(projectId, {
-                ...(trimmedGoal ? { goal: trimmedGoal } : {}),
-                ...(trimmedStart ? { startUrl: trimmedStart } : {}),
-                safetyNotes: parseSafetyNotes(safetyNotes),
-            });
-            if (seedContext) {
-                try {
-                    await patchProjectContext(discovery.revision.id, { context: seedContext });
-                } catch (error) {
-                    await discardProjectContext(discovery.revision.id).catch(() => undefined);
-                    throw error;
-                }
-            }
-            router.push(`/p/${projectId}/chats/${discovery.chat.id}`);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-            setSubmitting(false);
-        }
-    }
-
-    return (
-        <form onSubmit={startDiscovery} className="space-y-4">
-            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-                <CollapsibleTrigger asChild>
-                    <Button type="button" variant="ghost" size="sm" className="-ml-2 text-ink-muted">
-                        <ChevronRight size={14} aria-hidden className={`transition-transform duration-150 motion-reduce:transition-none ${advancedOpen ? "rotate-90" : ""}`} />
-                        Discovery settings
-                        <span className="font-normal text-ink-subtle">Optional</span>
-                    </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                    <div className="mt-2 space-y-4 rounded-lg border border-line bg-surface p-4">
-                        <div>
-                            <Label className="mb-1.5" htmlFor="discovery-goal">Focus</Label>
-                            <Input id="discovery-goal" value={goal} onChange={(event) => setGoal(event.target.value)} autoComplete="off" placeholder="e.g. Focus on the checkout flow" />
-                            <p className="mt-1.5 text-meta text-ink-subtle">Leave empty to let the agent explore everything it can reach.</p>
-                        </div>
-                        <div>
-                            <Label className="mb-1.5" htmlFor="start-url">Start URL</Label>
-                            <Input id="start-url" value={startUrl} onChange={(event) => setStartUrl(event.target.value)} type="url" inputMode="url" placeholder={baseUrl} className="font-mono text-meta" />
-                            <p className="mt-1.5 text-meta text-ink-subtle">Must stay on the base URL origin.</p>
-                        </div>
-                        <div>
-                            <Label className="mb-1.5" htmlFor="safety-notes">Safety notes</Label>
-                            <Textarea id="safety-notes" value={safetyNotes} onChange={(event) => setSafetyNotes(event.target.value)} rows={3} placeholder={"Do not submit contact forms"} />
-                            <p className="mt-1.5 text-meta text-ink-subtle">One rule per line. The agent follows them during discovery.</p>
-                        </div>
-                    </div>
-                </CollapsibleContent>
-            </Collapsible>
-            {error && <Alert variant="danger" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
-            <Button type="submit" disabled={submitting}>
-                <Compass size={14} /> {submitting ? "Starting discovery…" : seedContext ? "Start update discovery" : "Start discovery"}
-            </Button>
-        </form>
-    );
+function OverviewSection({ id, title, count, children }: { id: string; title: string; count?: number; children: React.ReactNode }) {
+    return <section aria-labelledby={id}><SectionHeader id={id} title={title} count={count} className="mb-2" />{children}</section>;
 }
 
-const coverageLabels: Record<CoverageArea["coverage"], string> = { covered: "Covered", partial: "Partially covered", uncovered: "Uncovered" };
+function RowList({ children }: { children: React.ReactNode }) {
+    return <ul className="divide-y divide-line border-y border-line">{children}</ul>;
+}
 
-function AreaCoverage({ projectId, area }: { projectId: string; area: CoverageArea }) {
-    const { data: overview } = useProjectOverview();
-    return (
-        <div className="mt-3 border-t border-line pt-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-                <span className={cn("inline-flex items-center gap-1.5 text-meta font-medium", area.coverage === "covered" ? "text-success" : area.coverage === "partial" ? "text-ink" : "text-ink-muted")}>
-                    <span aria-hidden="true" className={cn("size-1.5 rounded-full", area.coverage === "covered" ? "bg-success" : area.coverage === "partial" ? "bg-warning-icon" : "bg-ink-subtle")} />
-                    {coverageLabels[area.coverage]}
-                </span>
-                <span className="text-meta text-ink-muted">{area.reason}</span>
-            </div>
-            {area.specs.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                    {area.specs.map((spec) => (
-                        <li key={spec.id} className="flex min-w-0 items-center gap-1.5">
-                            <StatusDot status={overview?.specHealth[spec.id]?.status ?? "unverified"} size={13} />
-                            <Link href={`/p/${projectId}/specs/${spec.id}`} className="min-w-0 truncate text-ink-muted hover:text-ink hover:underline">{spec.title}</Link>
-                        </li>
-                    ))}
-                </ul>
-            )}
-            {area.specs.length > 0 && area.uncoveredRoutes.length > 0 && area.uncoveredRoutes.length < area.routes.length && (
-                <p className="mt-2 text-meta text-ink-subtle [overflow-wrap:anywhere]">No Spec opens <span className="font-mono">{area.uncoveredRoutes.join("  ·  ")}</span></p>
-            )}
+function ShowMore({ label = "Show more", onClick }: { label?: string; onClick: () => void }) {
+    return <Button variant="ghost" size="sm" className="mt-2" onClick={onClick}>{label}</Button>;
+}
+
+function BusyButton({ busy, icon: Icon, variant = "outline", disabled, onClick, children }: { busy: boolean; icon: LucideIcon; variant?: "outline" | "ghost"; disabled: boolean; onClick: () => void; children: React.ReactNode }) {
+    return <Button variant={variant} size="sm" disabled={disabled} onClick={onClick}>
+        {busy ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Icon size={14} />}
+        {children}
+    </Button>;
+}
+
+function RunOutcome({ run }: { run: RecentRun }) {
+    if (run.counts.running > 0) return <LoaderCircle size={15} className="animate-spin text-running motion-reduce:animate-none" />;
+    if (run.outcome === "failed" || run.counts.failed > 0) return <AlertCircle size={15} className="text-danger" />;
+    if (run.outcome === "flaky" || run.counts.flaky > 0) return <RefreshCw size={15} className="text-warning" />;
+    if (run.outcome === "passed") return <Check size={15} className="text-success" />;
+    return <Check size={15} className="text-ink-subtle" />;
+}
+
+function runCounts(run: RecentRun) {
+    if (run.counts.passed + run.counts.failed + run.counts.flaky + run.counts.running <= 1) return "";
+    return `${run.counts.passed} passed · ${run.counts.failed} failed${run.counts.flaky ? ` · ${run.counts.flaky} flaky` : ""}${run.counts.running ? ` · ${run.counts.running} running` : ""}`;
+}
+
+function healthStatus(health: OverviewResponse["summary"]["specHealth"]) {
+    if (health.failing > 0) return "failing";
+    if (health.running > 0) return "running";
+    if (health.invalid > 0) return "invalid";
+    if (health.repairing > 0) return "repairing";
+    if (health.flaky > 0) return "flaky";
+    if (health.passing > 0) return "passing";
+    return "not_checked";
+}
+
+function HomeHero({ projectName, baseUrl, summary, actions }: { projectName?: string; baseUrl?: string; summary?: OverviewResponse["summary"]; actions?: React.ReactNode }) {
+    const paused = summary?.globallyPaused || summary?.paused;
+    const [headline, ...details] = (summary?.verdict ?? "").split(" · ");
+    const agentLine = summary?.globallyPaused ? "Specbook is paused across all projects." : summary?.paused ? "Paused by you. Nothing runs until you resume." : summary?.nextCheck;
+    return <header className="relative isolate shrink-0 overflow-hidden border-b border-line bg-surface px-4 pt-8 pb-7 md:px-8 md:pt-10 md:pb-8">
+        <SpecGrid fade={false} className="spec-grid-header -z-10" />
+        <div className="mx-auto w-full max-w-data">
+            <p className="flex min-w-0 items-center gap-2 font-mono text-meta text-ink-muted">
+                <span className="truncate">{projectName ?? "Project"}</span>
+                {baseUrl && <><span aria-hidden="true">·</span><a href={baseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 items-center gap-1 hover:text-ink"><span className="truncate">{baseUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span><ExternalLink size={11} aria-hidden="true" className="shrink-0" /><span className="sr-only">(opens in a new tab)</span></a></>}
+            </p>
+            {summary ? <>
+                <h1 className="mt-2 text-display font-[650] text-ink">{headline}</h1>
+                {(details.length > 0 || summary.lastCheckedAt) && <p className="mt-2 flex flex-wrap items-center gap-x-2 text-control text-ink-muted">
+                    {details.length > 0 && <span className="font-medium text-ink">{details.join(" · ")}</span>}
+                    {details.length > 0 && summary.lastCheckedAt && <span aria-hidden="true">·</span>}
+                    {summary.lastCheckedAt && <RelativeTime value={summary.lastCheckedAt} prefix="last checked" />}
+                    {summary.nextCheckAt && <><span aria-hidden="true">·</span><span>next run <time dateTime={summary.nextCheckAt}>{formatDateTime(summary.nextCheckAt)}</time></span></>}
+                </p>}
+                <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <p className="flex min-w-0 items-center gap-2 text-control text-ink">
+                        <span aria-hidden="true" className={paused ? "size-2 shrink-0 rounded-full bg-ink-subtle" : "size-2 shrink-0 rounded-full bg-success status-pulse"} />
+                        <span className="min-w-0">{agentLine}</span>
+                    </p>
+                    {actions && <div className="flex flex-wrap items-center gap-1">{actions}</div>}
+                </div>
+                {summary.systemHealth && <Alert variant="warning" role="status" className="mt-4"><AlertDescription>{summary.systemHealth.message}</AlertDescription></Alert>}
+            </> : <Skeleton className="mt-3 h-10 w-80 max-w-full" />}
         </div>
-    );
+    </header>;
 }
 
-function ConfirmedContextSummary({ projectId, context, coverage }: { projectId: string; context: ProjectContext; coverage?: CoverageResponse | null }) {
-    const areas = new Map(coverage?.areas.map((area) => [area.name, area]));
-    return (
-        <div className="px-4 py-4 sm:px-5">
-            <ContextReadout context={context} renderArea={coverage ? (name) => {
-                const area = areas.get(name);
-                return area && <AreaCoverage projectId={projectId} area={area} />;
-            } : undefined} />
-        </div>
-    );
+function NeedsYou({ items, onOpen }: { items: OverviewResponse["needsYou"]; onOpen: (selection: Selection) => void }) {
+    const [limit, setLimit] = useState(5);
+    return <OverviewSection id="needs-you" title="Waiting for you" count={items.length}>
+        <RowList>{items.slice(0, limit).map((item) => <OverviewRow key={item.id} icon={<CircleHelp size={16} className="text-warning-icon" />} title={item.presentation.title} time={item.createdAt} action="Review" onClick={() => onOpen({ type: "item", id: item.id })} />)}</RowList>
+        {items.length > limit && <ShowMore onClick={() => setLimit((count) => count + 5)} />}
+    </OverviewSection>;
 }
 
-function ContextPanel({
-    projectId,
-    project,
-    contextState,
-    coverage,
-    onReload,
-    onDraftSaved,
-}: {
-    projectId: string;
-    project: Project;
-    contextState: ProjectContextState;
-    coverage: CoverageResponse | null;
-    onReload: () => void;
-    onDraftSaved: (draft: ProjectContextRevision) => void;
-}) {
+function SelectedSpecs({ items, onOpen }: { items: OverviewResponse["items"]; onOpen: (selection: Selection) => void }) {
+    return <OverviewSection id="selected-specs" title="In progress">
+        <RowList>{items.slice(0, 5).map((item) => <OverviewRow key={item.id} icon={<LoaderCircle size={16} className="text-ink-subtle" />} title={item.presentation.title} annotation={item.presentation.summary} time={item.createdAt} action="View results" onClick={() => onOpen({ type: "item", id: item.id })} />)}</RowList>
+    </OverviewSection>;
+}
+
+function Failing({ failing, onOpen }: { failing: OverviewResponse["failing"]; onOpen: (selection: Selection) => void }) {
+    const [limit, setLimit] = useState(5);
+    return <OverviewSection id="failing" title="Failing" count={failing.length}>
+        <RowList>{failing.slice(0, limit).map((failure) => <OverviewRow key={failure.specId} icon={<AlertCircle size={16} className="text-danger" />} title={failure.title} annotation={failure.triageStatus} time={failure.updatedAt} onClick={() => onOpen({ type: "failure", id: failure.specId })} />)}</RowList>
+        {failing.length > limit && <ShowMore onClick={() => setLimit((count) => count + 5)} />}
+    </OverviewSection>;
+}
+
+function RecentRuns({ runs, onOpen }: { runs: RecentRun[]; onOpen: (selection: Selection) => void }) {
+    const [limit, setLimit] = useState(10);
+    const groups = new Map<RecentRun["trigger"], RecentRun[]>();
+    for (const run of runs.slice(0, limit)) groups.set(run.trigger, [...(groups.get(run.trigger) ?? []), run]);
+    return <OverviewSection id="recent-runs" title="Recently">
+        {[...groups].map(([trigger, group]) => <div key={trigger} className="mt-4 first:mt-0">
+            <h3 className="mb-1 text-meta font-medium text-ink-subtle">{RUN_TRIGGERS[trigger]}</h3>
+            <RowList>{group.map((run) => <OverviewRow key={run.id} icon={<RunOutcome run={run} />} title={run.subject.name} annotation={[environmentLabel(run.environment?.name), runCounts(run)].filter(Boolean).join(" · ")} detail={`${run.occurrences > 1 ? `${run.occurrences} runs · Last ` : ""}${formatDateTime(run.updatedAt, { seconds: true })}`} onClick={() => onOpen({ type: "story", id: run.id })} />)}</RowList>
+        </div>)}
+        {runs.length > limit && <ShowMore label="Show more runs" onClick={() => setLimit((count) => count + 10)} />}
+    </OverviewSection>;
+}
+
+export default function HomePage({ params }: { params: Promise<{ projectId: string }> }) {
     const { canEdit, isAdmin } = useAuth();
-    const [discardingDiscovery, setDiscardingDiscovery] = useState(false);
-    const [discardDiscoveryOpen, setDiscardDiscoveryOpen] = useState(false);
-    const [discardDiscoveryError, setDiscardDiscoveryError] = useState("");
-    const [updateMode, setUpdateMode] = useState(false);
-    const [yamlMode, setYamlMode] = useState(false);
-    const [findState, setFindState] = useState<"idle" | "requesting" | "requested">("idle");
-    const [findError, setFindError] = useState("");
-    const discardDiscoveryTriggerRef = useRef<HTMLButtonElement>(null);
-
-    async function discardUnfinishedDiscovery(revisionId: string) {
-        setDiscardDiscoveryError("");
-        setDiscardingDiscovery(true);
-        try {
-            await discardProjectContext(revisionId);
-            setDiscardDiscoveryOpen(false);
-            onReload();
-        } catch (error) {
-            setDiscardDiscoveryError(error instanceof Error ? error.message : String(error));
-        } finally {
-            setDiscardingDiscovery(false);
-        }
-    }
-
-    async function findUncoveredAreas() {
-        setFindError("");
-        setFindState("requesting");
-        try {
-            await requestTask(projectId, "coverage");
-            setFindState("requested");
-        } catch (error) {
-            setFindError(errorMessage(error));
-            setFindState("idle");
-        }
-    }
-
-    const [llmReady, setLlmReady] = useState(true);
-    useEffect(() => {
-        let active = true;
-        getLlmRuntimeStatus()
-            .then((status) => {
-                if (active) setLlmReady(status.ready);
-            })
-            .catch(() => undefined);
-        return () => {
-            active = false;
-        };
-    }, []);
-
-    const { confirmed, draft } = contextState;
-    const draftHasProposal = draft ? draft.context.summary.trim().length > 0 : false;
-    const draftChatHref = draft?.sourceChatId ? `/p/${projectId}/chats/${draft.sourceChatId}` : null;
-
-    if (!canEdit && !draft && !confirmed) return <section><SectionHeader title="What this app does" /><p className="mt-3 text-body text-ink-muted">No context has been confirmed yet. An editor can start discovery and review the findings here.</p></section>;
-
-    if (!draft && !confirmed) {
-        return (
-            <section aria-labelledby="overview-context-heading" className="rounded-xl border border-line bg-surface-soft">
-                <div className="flex flex-col gap-4 p-5 sm:flex-row sm:p-6">
-                    <span className="hidden size-10 shrink-0 items-center justify-center rounded-full bg-surface text-ink shadow-xs ring-1 ring-line sm:flex">
-                        <Compass size={18} aria-hidden="true" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                        <h2 id="overview-context-heading" className="text-section text-ink">Teach Specbook this application</h2>
-                        <p className="mt-1 max-w-[62ch] text-body text-ink-muted">
-                            The agent explores the app in a bounded browser and saves what it learns as the project context. Every future chat receives it, and you can edit it at any time.
-                        </p>
-                        <ol className="mt-4 grid gap-2 text-control text-ink-muted sm:grid-cols-3">
-                            {["Agent explores the app", "Context is saved", "Chats use the context"].map((step, index) => (
-                                <li key={step} className="flex items-center gap-2">
-                                    <span aria-hidden="true" className="tabular flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-label text-ink">{index + 1}</span>
-                                    {step}
-                                </li>
-                            ))}
-                        </ol>
-                        {!llmReady && (
-                            <Alert variant="warning" role="status" className="mt-4">
-                                <AlertTitle>No agent model is configured</AlertTitle>
-                                <AlertDescription>Discovery needs one. {isAdmin ? <Link href="/settings?tab=model">Set up a model in Settings</Link> : "Ask an administrator to connect a provider"}.</AlertDescription>
-                            </Alert>
-                        )}
-                        <div className="mt-5">
-                            <DiscoveryStartForm
-                                projectId={projectId}
-                                baseUrl={project.baseUrl}
-                            />
-                        </div>
-                    </div>
-                </div>
-            </section>
-        );
-    }
-
-    return (
-        <div className="space-y-6">
-
-            {draft && !draftHasProposal && (
-                <section aria-labelledby="overview-context-heading">
-                    <div className="rounded-xl border border-line p-4 sm:p-5">
-                        <div id="overview-context-heading" className="flex items-center gap-2 text-control font-medium text-ink">
-                            <LoaderCircle size={14} className="animate-spin text-ink-muted motion-reduce:animate-none" aria-hidden="true" />
-                            Discovery in progress
-                        </div>
-                        {draft.brief.goal && <p className="mt-2 line-clamp-2 text-body text-ink-muted" title={draft.brief.goal}>{draft.brief.goal}</p>}
-                        {draft.brief.safetyNotes.length > 0 && (
-                            <div className="mt-3">
-                                <p className="text-meta text-ink-subtle">{countLabel(draft.brief.safetyNotes.length, "safety note")}</p>
-                                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-meta text-ink-muted">
-                                    {draft.brief.safetyNotes.map((note, index) => <li key={index}>{note}</li>)}
-                                </ul>
-                            </div>
-                        )}
-                        {canEdit && <div className="mt-4 flex flex-wrap gap-2">
-                            {draftChatHref && (
-                                <Button asChild size="sm">
-                                    <Link href={draftChatHref}><Compass size={14} /> Continue discovery</Link>
-                                </Button>
-                            )}
-                            <Button
-                                ref={discardDiscoveryTriggerRef}
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setDiscardDiscoveryOpen(true)}
-                                disabled={discardingDiscovery}
-                            >
-                                <Trash2 size={14} /> Discard discovery
-                            </Button>
-                            <ConfirmDeleteDialog
-                                open={discardDiscoveryOpen}
-                                title="Discard this discovery?"
-                                description="The discovery draft is discarded. The chat stays in your history, and any confirmed context stays active."
-                                confirmLabel="Discard discovery"
-                                busyLabel="Discarding…"
-                                busy={discardingDiscovery}
-                                error={discardDiscoveryError}
-                                returnFocusRef={discardDiscoveryTriggerRef}
-                                onCancel={() => {
-                                    setDiscardDiscoveryOpen(false);
-                                    setDiscardDiscoveryError("");
-                                }}
-                                onConfirm={() => void discardUnfinishedDiscovery(draft.id)}
-                            />
-                        </div>}
-                    </div>
-                </section>
-            )}
-
-            {draft && draftHasProposal && (
-                <section aria-labelledby="overview-context-heading">
-                    <SectionHeader id="overview-context-heading" title="Review project context" description="Drafted from discovery. Edit anything before confirming." className="mb-3" />
-                    <div className="rounded-xl border border-line p-4 sm:p-5">
-                        {canEdit ? <DraftReview
-                            revision={draft}
-                            chatHref={draftChatHref}
-                            onSaved={onDraftSaved}
-                            onConfirmed={() => {
-                                setUpdateMode(false);
-                                onReload();
-                            }}
-                            onDiscarded={() => onReload()}
-                        /> : <ConfirmedContextSummary projectId={projectId} context={draft.context} />}
-                    </div>
-                </section>
-            )}
-
-            {confirmed && (
-                <section aria-labelledby="overview-confirmed-heading">
-                    <SectionHeader
-                        id="overview-confirmed-heading"
-                        title={draft ? "Currently confirmed context" : "Confirmed context"}
-                        description={draft
-                            ? "Stays active until the draft above replaces it."
-                            : <>{confirmed.confirmedAt ? <RelativeTime value={confirmed.confirmedAt} prefix="Confirmed" /> : "Confirmed"} · supplied to every new chat</>}
-                        actions={canEdit && !draft && <>
-                            <Button type="button" variant="ghost" size="sm" disabled={findState === "requesting"} onClick={() => void findUncoveredAreas()}>
-                                <Search size={14} /> {findState === "requesting" ? "Requesting…" : "Find uncovered areas"}
-                            </Button>
-                            <Button type="button" variant="ghost" size="sm" onClick={() => setYamlMode((value) => !value)} aria-expanded={yamlMode}>
-                                {yamlMode ? <><X size={14} /> Close YAML</> : <><FileCode2 size={14} /> Edit YAML</>}
-                            </Button>
-                            <Button type="button" variant="outline" size="sm" onClick={() => setUpdateMode((value) => !value)} aria-expanded={updateMode}>
-                                {updateMode ? <><X size={14} /> Cancel update</> : <><PencilLine size={14} /> Update context</>}
-                            </Button>
-                        </>}
-                        className="mb-3"
-                    />
-                    {findState === "requested" && <p className="mb-3 text-body text-ink-muted">Requested. Review suggested Specs in <Link href={`/p/${projectId}/overview`} className="underline underline-offset-2">Overview</Link>.</p>}
-                    {findError && <Alert variant="danger" role="alert" className="mb-3"><AlertDescription>{findError}</AlertDescription></Alert>}
-                    <div className="overflow-hidden rounded-xl border border-line">
-                        {updateMode && !draft && (
-                            <div className="border-b border-line bg-surface-soft p-4 sm:p-5">
-                                <p className="mb-3 max-w-[64ch] text-control text-ink-muted">
-                                    A new discovery explores the app again, starting from the current context, and replaces it when it finishes.
-                                </p>
-                                <DiscoveryStartForm projectId={projectId} baseUrl={project.baseUrl} seedContext={confirmed.context} />
-                            </div>
-                        )}
-                        <ConfirmedContextSummary projectId={projectId} context={confirmed.context} coverage={coverage} />
-                    </div>
-                    {coverage && <p className="mt-2 text-meta text-ink-subtle">{coverage.basis}</p>}
-                    {yamlMode && !draft && <div className="mt-6"><ContextFileCard projectId={projectId} /></div>}
-                </section>
-            )}
-        </div>
-    );
-}
-
-function ContextSkeleton() {
-    return (
-        <div className="flex min-h-full flex-col bg-surface" aria-busy="true" role="status">
-            <span className="sr-only">Loading app</span>
-            <div className="border-b border-line px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5">
-                <div className="mx-auto flex max-w-reading items-start justify-between gap-6">
-                    <div className="space-y-2.5 pt-1"><Skeleton className="h-6 w-48" /><Skeleton className="h-3.5 w-56" /></div>
-                    <Skeleton className="h-9 w-28" />
-                </div>
-            </div>
-            <PageContainer width="reading">
-                <Skeleton className="h-48 rounded-xl" />
-            </PageContainer>
-        </div>
-    );
-}
-
-export default function AppPage({ params }: { params: Promise<{ projectId: string }> }) {
-    const { canEdit } = useAuth();
     const { projectId } = use(params);
+    const { data, failed, reload } = useProjectOverview();
     const [project, setProject] = useState<Project | null>(null);
-    const [contextState, setContextState] = useState<ProjectContextState | null>(null);
-    const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
-    const [loadError, setLoadError] = useState("");
-    const [notFound, setNotFound] = useState(false);
-    const [retryKey, setRetryKey] = useState(0);
-
-    const reload = useCallback(() => setRetryKey((key) => key + 1), []);
-
+    const [needsContext, setNeedsContext] = useState(false);
     useEffect(() => {
         let active = true;
-        setLoadError("");
-        setNotFound(false);
-        Promise.all([
-            getProject(projectId),
-            getProjectContext(projectId),
-        ])
-            .then(([projectResult, contextResult]) => {
-                if (!active) return;
-                setProject(projectResult.project);
-                setContextState(contextResult);
-            })
-            .catch((error) => {
-                if (!active) return;
-                if (error instanceof ApiError && error.status === 404) setNotFound(true);
-                else setLoadError(errorMessage(error));
-            });
-        return () => {
-            active = false;
-        };
-    }, [projectId, retryKey]);
-
-    const loadCoverage = useCallback(() => {
-        getCoverage(projectId).then(setCoverage).catch(() => undefined);
+        getProject(projectId).then((result) => { if (active) setProject(result.project); }).catch(() => undefined);
+        getProjectContext(projectId).then((result) => { if (active) setNeedsContext(!result.confirmed && !result.draft); }).catch(() => undefined);
+        return () => { active = false; };
     }, [projectId]);
-    useEffect(() => loadCoverage(), [loadCoverage, retryKey]);
-    useVisiblePolling(loadCoverage, 60_000);
+    const [selected, setSelected] = useState<Selection | null>(null);
+    const [requestingTask, setRequestingTask] = useState<"coverage" | "explore" | null>(null);
+    const [savingPause, setSavingPause] = useState(false);
+    const [feedback, setFeedback] = useState<InlineFeedbackValue | null>(null);
+    const openedAnchor = useRef("");
+    const returnFocus = useRef<HTMLElement | null>(null);
 
-    useEffect(() => onInvalidate((event) => {
-        if (matchesInvalidation(event, "projects", projectId)) {
-            getProject(projectId).then((result) => setProject(result.project)).catch(() => undefined);
+    const stories = data ? [...data.stories, ...data.recentRuns] : [];
+    const item = selected?.type === "item" ? data?.items.find((item) => item.id === selected.id) : undefined;
+    const story = selected?.type === "story" ? stories.find((story) => story.id === selected.id) : undefined;
+    const failure = selected?.type === "failure" ? data?.failing.find((entry) => entry.specId === selected.id) : undefined;
+    const failureStory = failure?.storyId ? data?.stories.find((story) => story.id === failure.storyId) : undefined;
+
+    useEffect(() => {
+        function fromHash() {
+            let anchor: string;
+            try { anchor = decodeURIComponent(window.location.hash.slice(1)); } catch { return; }
+            if (!anchor || anchor === openedAnchor.current || !data) return;
+            const item = data.items.find((item) => item.id === anchor);
+            const story = stories.find((story) => story.id === anchor || story.jobIds.includes(anchor) || story.timeline.some((event) => event.id === anchor));
+            if (item) setSelected({ type: "item", id: item.id });
+            else if (story) setSelected({ type: "story", id: story.id });
+            else if (data.failing.some((entry) => entry.specId === anchor)) setSelected({ type: "failure", id: anchor });
+            else return;
+            openedAnchor.current = anchor;
         }
-        if (matchesInvalidation(event, "tree", projectId)) loadCoverage();
-    }), [projectId, loadCoverage]);
+        fromHash();
+        window.addEventListener("hashchange", fromHash);
+        return () => window.removeEventListener("hashchange", fromHash);
+    }, [data]);
 
-    if (notFound) {
-        return (
-            <div className="flex min-h-full flex-col bg-surface">
-                <div className="flex flex-1 items-center justify-center px-5 py-10">
-                    <EmptyState
-                        icon={SearchX}
-                        title="Project not found"
-                        description="This project may have been deleted."
-                        action={canEdit && <Button asChild><Link href="/?new=1">Create a project</Link></Button>}
-                    />
-                </div>
-            </div>
-        );
+    function open(selection: Selection) {
+        if (!selected) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const anchor = selection.id;
+        openedAnchor.current = anchor;
+        window.history.replaceState(window.history.state, "", `#${encodeURIComponent(anchor)}`);
+        setSelected(selection);
     }
 
-    if (loadError) {
-        return (
-            <div className="flex min-h-full flex-col bg-surface">
-                <div className="flex flex-1 items-center justify-center px-5 py-10">
-                    <EmptyState
-                        icon={AlertCircle}
-                        tone="danger"
-                        role="alert"
-                        title="The project could not load"
-                        description={loadError}
-                        action={<Button type="button" onClick={reload}><RefreshCw size={14} /> Try again</Button>}
-                    />
-                </div>
-            </div>
-        );
+    function close() {
+        setSelected(null);
+        openedAnchor.current = "";
+        window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
     }
 
-    if (!project || !contextState) return <ContextSkeleton />;
+    async function togglePause() {
+        if (!data) return;
+        const paused = !data.summary.paused;
+        setSavingPause(true);
+        setFeedback(null);
+        try {
+            await setStewardPaused(projectId, paused);
+            await reload();
+            setFeedback({ type: "success", text: paused ? "Specbook is paused for this project. Current work will stop safely." : "Specbook has resumed this project." });
+        } catch {
+            setFeedback({ type: "error", text: "The pause setting could not be saved. Try again in a moment." });
+        } finally { setSavingPause(false); }
+    }
 
-    return (
-        <div className="flex min-h-full flex-col bg-surface">
-            <PageHeader
-                title="App"
-                width="reading"
-                meta={
-                    <a href={project.baseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-full items-center gap-1 rounded-sm font-mono text-meta text-ink-muted transition-colors hover:text-ink">
-                        <span className="truncate">{project.baseUrl}</span>
-                        <ExternalLink size={12} aria-hidden="true" className="shrink-0" />
-                        <span className="sr-only">(opens in a new tab)</span>
-                    </a>
-                }
-            />
-            <PageContainer width="reading" className="flex-1">
-                <ContextPanel
-                    projectId={projectId}
-                    project={project}
-                    contextState={contextState}
-                    coverage={coverage}
-                    onReload={reload}
-                    onDraftSaved={(updated) => setContextState((current) => (current ? { ...current, draft: updated } : current))}
-                />
-            </PageContainer>
-        </div>
-    );
+    async function requestTask(kind: "coverage" | "explore") {
+        setRequestingTask(kind);
+        setFeedback(null);
+        try {
+            const result = await requestProjectTask(projectId, kind);
+            setFeedback({ type: "success", text: result.status === "paused" ? "Requested. Resume Specbook to start." : kind === "coverage" ? "Coverage review requested. Suggestions will appear in Needs you." : "Exploration requested. Findings will appear in Needs you." });
+            await reload();
+        } catch {
+            setFeedback({ type: "error", text: "The request could not start. Try again in a moment." });
+        } finally { setRequestingTask(null); }
+    }
+
+    const selectedSpecs = data?.items.filter((item) => item.kind === "spec_batch" && item.status === "approved") ?? [];
+    const hasActivity = data && (data.needsYou.length || data.failing.length || data.recentRuns.length);
+    const emptyProject = data && !hasActivity && data.summary.specHealth.total === 0;
+    const panelTitle = item?.presentation.title ?? story?.title ?? failure?.title ?? "Details";
+    const panelTime = item?.createdAt ?? story?.updatedAt ?? failure?.updatedAt;
+    const tryAgain = () => void reload();
+
+    const agentActions = data && canEdit && <>
+        <BusyButton busy={requestingTask === "explore"} icon={ScanSearch} variant="ghost" disabled={requestingTask !== null} onClick={() => void requestTask("explore")}>Explore app</BusyButton>
+        {data.summary.globallyPaused
+            ? isAdmin && <Button asChild variant="ghost" size="sm"><Link href="/settings?tab=agent#agent-pause-heading"><Play size={14} /> Resume in settings</Link></Button>
+            : <BusyButton busy={savingPause} icon={data.summary.paused ? Play : Pause} variant="ghost" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</BusyButton>}
+    </>;
+
+    return <div className="flex min-h-full flex-col bg-surface">
+        <HomeHero projectName={project?.name} baseUrl={project?.baseUrl} summary={data && !emptyProject ? data.summary : undefined} actions={agentActions} />
+        <PageContainer width="data" innerClassName="space-y-9">
+            {failed && data && <Alert variant="danger" role="alert" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{LOAD_ERROR}</AlertDescription><Button variant="outline" size="sm" onClick={tryAgain}><RefreshCw size={13} /> Try again</Button></Alert>}
+            {needsContext && canEdit && <section aria-label="Map your app" className="flex flex-wrap items-center gap-4 rounded-xl border border-line-strong p-5">
+                <div className="min-w-0 flex-1">
+                    <p className="text-section text-ink">Map your app first</p>
+                    <p className="mt-1 text-body text-ink-muted">Specbook explores {project?.baseUrl ?? "your app"} and drafts what it does: areas, roles and rules. Every Spec and chat starts from that map.</p>
+                </div>
+                <Button asChild><Link href={`/p/${projectId}/settings?tab=context`}><Compass size={14} /> Start mapping</Link></Button>
+            </section>}
+            {failed && !data ? <EmptyState role="alert" tone="danger" icon={AlertCircle} title="Home could not load" description={LOAD_ERROR} action={<Button onClick={tryAgain}><RefreshCw size={14} /> Try again</Button>} /> : !data ? <div className="space-y-6" role="status" aria-busy="true" aria-label="Loading Home">{[0, 1, 2].map((row) => <Skeleton key={row} className="h-11 w-full" />)}</div> : <>
+                {feedback && <InlineFeedback feedback={feedback} />}
+                {data.needsYou.length > 0 && <NeedsYou items={data.needsYou} onOpen={open} />}
+                {selectedSpecs.length > 0 && <SelectedSpecs items={selectedSpecs} onOpen={open} />}
+                {data.failing.length > 0 && <Failing failing={data.failing} onOpen={open} />}
+                {data.recentRuns.length > 0 && <RecentRuns runs={data.recentRuns} onOpen={open} />}
+                {emptyProject && <EmptyState icon={Eye} title="Your project starts here" description="Describe a behavior in a chat. Spec results and anything that needs you will appear here." action={canEdit && <Button asChild variant="outline"><Link href={`/p/${projectId}/chats/new`}><MessageSquareText size={14} /> Tell Specbook about your app</Link></Button>} />}
+            </>}
+        </PageContainer>
+        <Sheet open={Boolean(selected)} onOpenChange={(value) => { if (!value) close(); }}>
+            <SheetContent side="right" className="w-full bg-surface sm:max-w-reading" onCloseAutoFocus={(event) => { event.preventDefault(); const target = returnFocus.current?.isConnected ? returnFocus.current : document.getElementById("main-content"); target?.focus(); }}>
+                <SheetHeader className="shrink-0 border-b border-line px-5 py-5 pr-14">
+                    <SheetTitle className="break-words text-section">{panelTitle}</SheetTitle>
+                    <SheetDescription asChild><p className="text-meta">{panelTime ? <RelativeTime value={panelTime} /> : "Details for this Spec."}</p></SheetDescription>
+                </SheetHeader>
+                <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
+                    {item && <DecisionDetails key={item.id} projectId={projectId} item={item} story={data?.stories.find((story) => story.id === item.presentation.activityId)} onChange={reload} />}
+                    {story && <StoryDetails story={story} projectId={projectId} onDecision={(id) => open({ type: "item", id })} />}
+                    {failure && <>
+                        <p className="text-body text-ink">{failure.triageStatus}</p>
+                        {failure.inboxIds.flatMap((id) => data?.items.find((item) => item.id === id) ?? []).map((item) => <Button key={item.id} variant="outline" className="h-auto max-w-full whitespace-normal text-left" onClick={() => open({ type: "item", id: item.id })}>{item.presentation.type === "bug" ? "View the bug report" : "Review the suggestion"}<ChevronRight size={14} /></Button>)}
+                        {failureStory
+                            ? <StoryDetails story={failureStory} showDecisions={false} projectId={projectId} onDecision={(id) => open({ type: "item", id })} />
+                            : <Button asChild variant="outline"><Link href={`/p/${projectId}/specs/${failure.specId}${failure.runId ? `#run-${failure.runId}` : ""}`}>View the Spec and evidence</Link></Button>}
+                    </>}
+                </div>
+            </SheetContent>
+        </Sheet>
+    </div>;
 }

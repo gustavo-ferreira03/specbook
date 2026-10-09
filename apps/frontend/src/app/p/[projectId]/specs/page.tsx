@@ -8,6 +8,7 @@ import { ChevronDown, FileCheck2, Plus, RefreshCw, Search, X } from "lucide-reac
 import { NewFeatureDialog, NewSpecDialog } from "@/components/CreateStructureDialogs";
 import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
+import { SpecsFrontMatter } from "@/components/SpecsFrontMatter";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { SpecRunDialog } from "@/components/SpecRunDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -232,6 +233,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 width="data"
             />
             <PageContainer width="data" innerClassName="space-y-6">
+                <SpecsFrontMatter projectId={projectId} />
                 {syncWarning && <Alert variant="warning" role="status"><AlertDescription>Remote sync failed. Showing the local index: {syncWarning}</AlertDescription></Alert>}
 
                 <div className="space-y-3">

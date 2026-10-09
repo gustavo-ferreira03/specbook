@@ -7,6 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { EmptyState } from "@/components/EmptyState";
 import { Settings } from "lucide-react";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { AppContext } from "@/components/AppContext";
 import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
 import { GitRemoteAccess } from "@/components/GitRemoteAccess";
 import { RepositoryRecovery } from "@/components/RepositoryRecovery";
@@ -18,9 +19,9 @@ import { CiSettingsCard } from "@/components/CiSettingsCard";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const SETTINGS_TABS = ["general", "automation", "git"] as const;
+const SETTINGS_TABS = ["general", "context", "automation", "git"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
-const TAB_LABELS: [SettingsTab, string][] = [["general", "General"], ["automation", "Automation"], ["git", "Git"]];
+const TAB_LABELS: [SettingsTab, string][] = [["general", "General"], ["context", "App context"], ["automation", "Automation"], ["git", "Git"]];
 const LEGACY_TABS: Record<string, SettingsTab> = { environments: "general", credentials: "general", ci: "automation" };
 
 function SettingsContent() {
@@ -57,6 +58,7 @@ function SettingsContent() {
             </div>
             <PageContainer width="reading" className="pb-16">
                 <TabsContent value="general"><ProjectSettingsCard projectId={projectId}><EnvironmentsSettingsCard projectId={projectId} /><CredentialProfilesCard projectId={projectId} /></ProjectSettingsCard></TabsContent>
+                <TabsContent value="context"><AppContext projectId={projectId} /></TabsContent>
                 <TabsContent value="automation"><div className="space-y-10"><AutomationSettingsCard projectId={projectId} /><CiSettingsCard key={projectId} projectId={projectId} oneTimeToken={ciToken?.projectId === projectId ? ciToken.token : null} onOneTimeTokenChange={(token) => setCiToken({ projectId, token })} /><AgentAccessSettingsCard key={`agent-${projectId}`} projectId={projectId} oneTimeToken={agentToken?.projectId === projectId ? agentToken.token : null} onOneTimeTokenChange={(token) => setAgentToken({ projectId, token })} /></div></TabsContent>
                 <TabsContent value="git"><div className="space-y-10"><RepositoryRecovery projectId={projectId} /><GitRemoteAccess projectId={projectId} oneTimeToken={gitToken} onOneTimeTokenChange={setGitToken} /></div></TabsContent>
             </PageContainer>
