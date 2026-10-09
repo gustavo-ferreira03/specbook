@@ -346,7 +346,7 @@ const MessageItem = memo(function MessageItem({
                         </div>
                     </form>
                 ) : (
-                    <div className="w-fit max-w-[min(88%,560px)] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-body leading-[1.6] text-primary-foreground break-words select-text [overflow-wrap:anywhere]">
+                    <div className="w-fit max-w-[min(88%,560px)] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-body leading-[1.6] text-primary-foreground break-words [&_*]:text-inherit [&_a]:underline [&_a]:decoration-current/50 [&_a]:underline-offset-2 [&_blockquote]:border-primary-foreground/40 [&_code]:border-primary-foreground/25 [&_code]:bg-transparent [&_pre]:border-primary-foreground/25 [&_pre]:bg-transparent select-text [overflow-wrap:anywhere]">
                         <MessageContent content={message.content} />
                     </div>
                 )}

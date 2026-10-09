@@ -14,9 +14,9 @@ const buttonVariants = cva(
             variant: {
                 default: "border border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary hover:[&_*]:text-inherit",
                 primary: "border border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary hover:[&_*]:text-inherit",
-                outline: "border border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit",
-                secondary: "border border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit",
-                subtle: "border border-line bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit",
+                outline: "border border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
+                secondary: "border border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
+                subtle: "border border-line bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
                 ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink",
                 destructive: "border border-danger-solid bg-danger-solid text-danger-solid-foreground hover:bg-transparent hover:text-danger hover:[&_*]:text-inherit",
                 "destructive-soft": "bg-danger-soft text-danger hover:bg-danger-soft-hover",

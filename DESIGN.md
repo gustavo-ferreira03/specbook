@@ -128,7 +128,7 @@ Flat. Surfaces are separated by hairlines and spacing. Shadows exist only for th
 
 ## 5. Components
 
-- **Buttons:** 36px (32px small), 6px radius, verb plus object labels. Hover inverts: primary (solid graphite) turns transparent with a graphite outline and text; outline turns solid graphite with white text; icon-only ghost buttons fill with graphite. Content inside inherits the button colour on hover. Split buttons invert as one group. Disabled primary is an outline with subtle text, never a gray block. 320ms, ease-out-quint, instant under reduced motion.
+- **Buttons:** 36px (32px small), 6px radius, verb plus object labels. Hover inverts: primary (solid graphite) turns transparent with a graphite outline and text; outline turns solid graphite with white text; icon-only ghost buttons fill with graphite. Content inside inherits the button colour on hover. Split buttons invert as one group. Menu and select triggers never invert: on hover they stay white and only the border darkens. Disabled primary is an outline with subtle text, never a gray block. 320ms, ease-out-quint, instant under reduced motion.
 - **Panels:** white, 1px line, 10px radius. Content inside a panel is divided by hairlines, never by inner cards.
 - **Status:** `StatusPill` renders icon plus coloured label with no background. Coverage uses a 6px dot plus label.
 - **Spec steps:** 24px square step numbers (6px radius, strong hairline, mono numeral) joined by a hairline.
