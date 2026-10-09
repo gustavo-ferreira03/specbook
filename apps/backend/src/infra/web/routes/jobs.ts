@@ -1,3 +1,4 @@
+import { logger } from "../../logger";
 import { access } from "../access";
 import { closeChatBrowser } from "../../../core/browser/sessions";
 import { enqueueIntent } from "../../../core/steward/engine";
@@ -127,9 +128,10 @@ ${item.body}`.slice(0, 6000),
             throw new HTTPException(409, { message: "Wait for the job to pause before answering" });
         }
         if (!await jobsRepository.claimItem(item.id)) throw new HTTPException(409, { message: "This item has already been reviewed" });
+        let commitSha: string | undefined;
         try {
             if (action === "approve") {
-                const commitSha = await applyProposal(item);
+                commitSha = await applyProposal(item);
                 await jobsRepository.updateItem(item.id, { status: "approved", commitSha });
             } else if (action === "answer") {
                 await jobsRepository.answer(item, answer!);
@@ -152,7 +154,8 @@ ${item.body}`.slice(0, 6000),
             await jobsRepository.log(item.jobId, `inbox:${action}`, item.id);
             return c.json({ item: await jobsRepository.item(item.id) });
         } catch (error) {
-            await jobsRepository.updateItem(item.id, { status: "pending" });
+            if (commitSha) await jobsRepository.updateItem(item.id, { status: "approved", commitSha }).catch((cause) => logger.error("approved proposal could not be recorded", { itemId: item.id, cause }));
+            else await jobsRepository.updateItem(item.id, { status: "pending" });
             throw new HTTPException(409, { message: error instanceof Error ? error.message : String(error) });
         }
     });

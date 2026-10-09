@@ -132,7 +132,6 @@ export async function deleteProjectData(id: string): Promise<boolean> {
     if ((await jobsRepository.list(id)).some((job) => job.status === "running")) {
         throw new ResourceBusyError("Cancel the active jobs before deleting this project");
     }
-    await jobsRepository.cancelProject(id);
     const chatRows = await chatsRepository.listChatRows(id);
     if (chatRows.some((chat) => isChatBusy(chat.id) || isChatDeleting(chat.id))) {
         throw new ResourceBusyError("Wait for the active chat to finish before deleting this project");
@@ -144,7 +143,7 @@ export async function deleteProjectData(id: string): Promise<boolean> {
     if (await runsRepository.hasRunningRuns(specIds)) {
         throw new ResourceBusyError("Wait for a running Spec verification to finish before deleting this project");
     }
-
+    await jobsRepository.cancelProject(id);
 
     for (const chat of chatRows) {
         await deleteChatData(chat.id);

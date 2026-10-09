@@ -1,4 +1,4 @@
-import { access } from "../access";
+import { access, type BearerVerifier } from "../access";
 import { buildHostAllowlist, frontendProxyOrigin } from "../security";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -34,6 +34,14 @@ function unauthorized(): Response {
         headers: { "www-authenticate": REALM, "content-type": "text/plain; charset=utf-8" },
     });
 }
+
+const verifyGitToken: BearerVerifier = async (c) => {
+    const projectId = GIT_PATH.exec(c.req.path)?.[1];
+    if (!projectId || !UUID.test(projectId)) return true;
+    const credentials = parseBasicAuth(c.req.header("authorization"));
+    const project = credentials ? await projectsRepository.getProject(projectId) : null;
+    return project && verifyGitAccessToken(project, credentials!.password) ? true : unauthorized();
+};
 
 function trustProxy(): boolean {
     const value = (process.env.TRUST_PROXY ?? "").trim().toLowerCase();
@@ -260,7 +268,7 @@ async function followExternalPush(projectId: string): Promise<void> {
 export function createGitHttpRouter(): Hono {
     const router = new Hono();
 
-    router.all("/git/*", access("git-token"), async (c) => {
+    router.all("/git/*", access("git-token", verifyGitToken), async (c) => {
         const url = new URL(c.req.url);
         const match = GIT_PATH.exec(url.pathname);
         if (!match) return c.text("Not found\n", 404);

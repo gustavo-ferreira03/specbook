@@ -1,5 +1,5 @@
 import { acceptCiTrigger, CiRequestError, startCiRun } from "../../../core/ci/runs";
-import { access } from "../access";
+import { access, type BearerVerifier } from "../access";
 import { loadProject } from "../load-project";
 import { publicFrontendOrigin } from "../security";
 import fs from "node:fs/promises";
@@ -24,6 +24,18 @@ async function authenticate(c: Context, projectId: string) {
     }
     c.header("Cache-Control", "no-store");
 }
+
+const rejectCi = () => Response.json({ error: "A valid project CI bearer token is required" }, { status: 401 });
+
+const verifyCiToken: BearerVerifier = async (c) => {
+    const authorization = c.req.header("authorization");
+    const projectId = c.req.path.match(/^\/ci\/projects\/([0-9a-f-]{36})\//i)?.[1];
+    if (projectId) return await authenticateCiToken(projectId, authorization) ? true : rejectCi();
+    const batchId = c.req.path.match(/^\/ci\/runs\/([0-9a-f-]{36})$/i)?.[1];
+    const batch = batchId ? await getRunBatch(batchId) : null;
+    if (!batch?.ci) return Response.json({ error: "CI batch not found" }, { status: 404 });
+    return await authenticateCiToken(batch.projectId, authorization) ? true : rejectCi();
+};
 
 const projectAuth: MiddlewareHandler = async (c, next) => {
     await authenticate(c, c.req.param("id")!);
@@ -66,19 +78,19 @@ export function createCiSettingsRouter(): Hono {
 
 export function createCiRouter(): Hono {
     const router = new Hono();
-    router.get("/ci/projects/:id/client.mjs", access("ci-token"), projectAuth, async (c) => {
+    router.get("/ci/projects/:id/client.mjs", access("ci-token", verifyCiToken), projectAuth, async (c) => {
         c.header("Content-Type", "text/javascript; charset=utf-8");
         c.header("X-Content-Type-Options", "nosniff");
         return c.body(await fs.readFile(path.join(backendRoot, "scripts", "specbook-ci.mjs"), "utf8"));
     });
-    router.post("/ci/projects/:id/runs", access("ci-token"), projectAuth, zValidator("json", ciRunSchema), async (c) => {
+    router.post("/ci/projects/:id/runs", access("ci-token", verifyCiToken), projectAuth, zValidator("json", ciRunSchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
         const batch = await startCiRun(projectId, c.req.header("authorization")!, input).catch((error) => ciError(c, error));
         c.header("Location", `/ci/runs/${batch.id}`);
         return c.json(await ciResult(batch, publicFrontendOrigin(c)), 202);
     });
-    router.get("/ci/runs/:batchId", access("ci-token"), async (c) => {
+    router.get("/ci/runs/:batchId", access("ci-token", verifyCiToken), async (c) => {
         if (!c.req.header("authorization")) throw new HTTPException(401, { message: "A valid project CI bearer token is required" });
         const id = c.req.param("batchId");
         if (!z.string().uuid().safeParse(id).success) throw new HTTPException(404, { message: "CI batch not found" });
@@ -101,7 +113,7 @@ export function createCiRouter(): Hono {
         if (format === "markdown") return c.body(markdownResult(result), 200, { "Content-Type": "text/markdown; charset=utf-8" });
         return c.json(result);
     });
-    router.post("/ci/projects/:id/deploy", access("ci-token"), projectAuth, zValidator("json", deploySchema), async (c) => {
+    router.post("/ci/projects/:id/deploy", access("ci-token", verifyCiToken), projectAuth, zValidator("json", deploySchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");
         const environment = await acceptTrigger(c, projectId, input.url, input.environment);

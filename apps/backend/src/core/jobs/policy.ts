@@ -1,3 +1,4 @@
+import { logger } from "../../infra/logger";
 import { createSelectedSpec, selectedSpecResult } from "./spec-batches";
 import { z } from "zod";
 import { Type } from "@earendil-works/pi-ai";
@@ -164,7 +165,7 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
             }));
         },
         tokens(count) {
-            pending = pending.then(() => jobsRepository.recordUsage(job.id, count));
+            pending = pending.then(() => jobsRepository.recordUsage(job.id, count)).catch((error) => logger.error("job usage could not be recorded", { jobId: job.id, error }));
         },
         flush: () => pending,
     };

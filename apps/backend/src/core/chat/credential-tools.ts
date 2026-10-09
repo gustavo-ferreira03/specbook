@@ -15,9 +15,10 @@ import {
     type ControlFill,
 } from "../credentials/login-classifier";
 import { getProfileByName, IDENTIFIER_FIELD, listPublicProfiles } from "../credentials/profiles";
+import { resolveCredentialProfile } from "../credentials/resolve";
 import { createSecretScrubber, registerTransientSecret } from "../credentials/scrub";
 import { generateTotp } from "../credentials/totp";
-import { credentialsRepository, type CredentialProfileRow } from "../../infra/repositories/credentials";
+import type { CredentialProfileRow } from "../../infra/repositories/credentials";
 import type { RunEnvironment } from "../../infra/db/schema";
 import { SECRET_NAME_PATTERN } from "../runner/specbook/guard";
 
@@ -107,13 +108,8 @@ export interface CredentialToolOptions {
 
 export function createCredentialTools(options: CredentialToolOptions) {
     async function resolveProfile(name: string): Promise<{ profile: CredentialProfileRow; allowed: Set<string> } | string> {
-        const overrideId = options.environment?.credentialOverrides[name];
-        const profile = overrideId ? await credentialsRepository.getProfile(overrideId) : await getProfileByName(options.projectId, name);
-        if (!profile) return `no vault item or credential profile named "${name}".`;
-        if (profile.projectId !== options.projectId) return "the overridden profile does not belong to this project.";
-        const base = new URL(overrideId ? options.environment!.configuredBaseUrl : options.baseUrl).origin;
-        const exact = profile.identifier !== null && profile.allowedOrigins.length > 0 && !overrideId;
-        return { profile, allowed: new Set(exact ? profile.allowedOrigins : [base, ...profile.allowedOrigins]) };
+        const resolved = await resolveCredentialProfile(options.projectId, name, options.baseUrl, options.environment);
+        return typeof resolved === "string" ? resolved : { profile: resolved.profile, allowed: resolved.fillOrigins };
     }
 
     async function activeOrigin(signal?: AbortSignal): Promise<string | null> {

@@ -55,12 +55,14 @@ export async function reviewChatContract(projectId: string, chatId: string, item
     const [chat, item, project] = await Promise.all([chatsRepository.getChatRow(chatId), jobsRepository.item(itemId), projectsRepository.getProject(projectId)]);
     if (chat?.projectId !== projectId || !item || item.projectId !== projectId || item.kind !== "spec_fix" || item.payload.sourceChatId !== chatId || (item.payload.mcpContractChange !== true && project?.agentContractPolicy !== "propose_only")) throw new Error("Contract action not found in this conversation");
     if (!await jobsRepository.claimItem(item.id)) throw new Error("This action has already been reviewed");
+    let commitSha: string | undefined;
     try {
-        const commitSha = approve ? await applyProposal(item) : undefined;
+        if (approve) commitSha = await applyProposal(item);
         await jobsRepository.updateItem(item.id, { status: approve ? "approved" : "rejected", commitSha });
         await jobsRepository.log(item.jobId, `inbox:${approve ? "approve" : "reject"}`, item.id);
     } catch (error) {
-        await jobsRepository.updateItem(item.id, { status: "pending" });
+        if (commitSha) await jobsRepository.updateItem(item.id, { status: "approved", commitSha }).catch(() => undefined);
+        else await jobsRepository.updateItem(item.id, { status: "pending" });
         throw new Error(await createProjectScrubber(projectId)(error instanceof Error ? error.message : String(error)));
     }
     publishChatUpdate(chatId);

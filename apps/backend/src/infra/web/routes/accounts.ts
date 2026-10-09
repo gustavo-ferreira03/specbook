@@ -17,7 +17,7 @@ const attempts = new Map<string, { count: number; resets: number }>();
 function limit(key: string, maximum = 10): void {
     const now = Date.now();
     for (const [entry, value] of attempts) if (value.resets <= now) attempts.delete(entry);
-    if (attempts.size > 1000) throw new HTTPException(429, { message: "Too many sign-in attempts. Wait a minute and try again." });
+    while (attempts.size >= 10_000) attempts.delete(attempts.keys().next().value!);
     const entry = attempts.get(key) ?? { count: 0, resets: now + 60_000 };
     entry.count++;
     attempts.set(key, entry);
@@ -57,7 +57,6 @@ export function createAccountsRouter(): Hono {
     });
 
     router.post("/auth/login", access("public"), zValidator("json", loginSchema), async (c) => {
-        limit("login", 60);
         const { email, password } = c.req.valid("json");
         limit(`login:${tokenHash(email)}`);
         if (!(await accountsRepository.getSso()).passwordLoginEnabled) throw new HTTPException(403, { message: "Password sign-in is disabled. Use single sign-on." });

@@ -7,14 +7,21 @@ import { tokenHash } from "../../../core/accounts/tokens";
 import { withActor } from "../../../core/accounts/audit";
 import { createProjectScrubber } from "../../../core/credentials/scrub";
 import { createProjectMcpServer } from "../../../core/mcp/server";
-import { access } from "../access";
+import { access, type BearerVerifier } from "../access";
 import { publicFrontendOrigin } from "../security";
 
 const clientNames = new Map<string, { name: string; until: number }>();
 
+const verifyAgentToken: BearerVerifier = async (c) => {
+    const projectId = c.req.path.match(/^\/mcp\/projects\/([0-9a-f-]{36})$/i)?.[1];
+    return projectId && await authenticateAgentToken(projectId, c.req.header("authorization"))
+        ? true
+        : Response.json({ error: "A valid project agent bearer token is required" }, { status: 401 });
+};
+
 export function createMcpRouter(): Hono {
     const router = new Hono();
-    router.on(["POST", "GET", "DELETE"], "/mcp/projects/:id", access("agent-token"), async (c) => {
+    router.on(["POST", "GET", "DELETE"], "/mcp/projects/:id", access("agent-token", verifyAgentToken), async (c) => {
         const projectId = c.req.param("id");
         const authorization = c.req.header("authorization");
         if (!z.string().uuid().safeParse(projectId).success || !await authenticateAgentToken(projectId, authorization)) {

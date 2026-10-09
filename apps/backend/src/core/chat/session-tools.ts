@@ -6,9 +6,9 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 import { getActiveTabUrl, renderMcpResult, type BrowserMcp } from "../browser/mcp";
 import { decryptSecret, encryptSecret } from "../credentials/crypto";
-import { getProfileByName } from "../credentials/profiles";
 import { chatSessionsRepository } from "../../infra/repositories/chat-sessions";
-import { credentialsRepository, type CredentialProfileRow } from "../../infra/repositories/credentials";
+import { resolveCredentialProfile } from "../credentials/resolve";
+import type { CredentialProfileRow } from "../../infra/repositories/credentials";
 import type { RunEnvironment } from "../../infra/db/schema";
 
 const sessionProfileSchema = z.object({ profile: z.string() });
@@ -32,14 +32,15 @@ export interface SessionToolOptions {
 }
 
 export function createSessionTools(options: SessionToolOptions) {
+    const appOrigins = new WeakMap<CredentialProfileRow, Set<string>>();
     async function profileFor(name: string): Promise<CredentialProfileRow | null> {
-        const targetId = options.environment?.credentialOverrides[name];
-        const profile = targetId ? await credentialsRepository.getProfile(targetId) : await getProfileByName(options.projectId, name);
-        return profile?.projectId === options.projectId ? profile : null;
+        const resolved = await resolveCredentialProfile(options.projectId, name, options.productionBaseUrl ?? options.baseUrl, options.environment);
+        if (typeof resolved === "string") return null;
+        appOrigins.set(resolved.profile, resolved.appOrigins);
+        return resolved.profile;
     }
-    function allows(profile: CredentialProfileRow, name: string, url: string): boolean {
-        const base = options.environment?.credentialOverrides[name] ? options.environment.configuredBaseUrl : options.productionBaseUrl ?? options.baseUrl;
-        return [new URL(base).origin, ...profile.allowedOrigins].includes(new URL(url).origin);
+    function allows(profile: CredentialProfileRow, _name: string, url: string): boolean {
+        return appOrigins.get(profile)?.has(new URL(url).origin) ?? false;
     }
     return [
         defineTool({

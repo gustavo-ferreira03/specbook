@@ -81,7 +81,10 @@ export async function getOrCreateChatBrowser(chatId: string, navigationOrigins: 
         }
     }
     const inFlight = pending.get(chatId);
-    if (inFlight) return inFlight;
+    if (inFlight) {
+        const browser = await inFlight;
+        return browser.navigationPolicy === navigationPolicy ? browser : getOrCreateChatBrowser(chatId, navigationOrigins);
+    }
     const promise = (async () => {
         const vnc = await startVncStack();
         const workDir = path.join(storageRoot, "chat", "browser", chatId);
