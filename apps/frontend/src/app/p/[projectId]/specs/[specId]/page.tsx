@@ -688,7 +688,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                     environment={environment}
                     actions={canEdit && spec.status !== "invalid" && <>
                         <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
-                        <Button type="button" size="sm" onClick={runNow} disabled={running || !content || spec.status === "invalid"}>
+                        <Button type="button" size="sm" onClick={runNow} disabled={running || !content}>
                             <Play size={12} fill="currentColor" /> {running ? "Running…" : latestRun ? "Run again" : "Run"}
                         </Button>
                     </>}
