@@ -136,7 +136,8 @@ Flat. Surfaces are separated by hairlines and spacing. Shadows exist only for th
 - **Tables:** sentence-case header in meta/600, group rows on canvas, numbers in mono, right-aligned.
 - **Navigation:** the Chats/Specs switch uses solid graphite for the active segment; the current sidebar row uses `surface-selected` gray. Filter chips are inverted when active. Disclosure chevrons never invert.
 - **Chat:** the user's own messages are graphite bubbles with white text; agent messages sit on the surface.
-- **Access screens (login, invitation):** a 360px form column with labels above full-width fields, and on wide screens a graphite panel typesetting a sample Spec whose steps check off once on load.
+- **Access screens (login, invitation):** a 360px form column with labels above full-width fields, and on wide screens a graphite panel typesetting a sample Spec whose steps check off once on load. Behind the form sits the spec grid: engineering-paper dots that fade around the form and light up under the pointer. The panel stays dark in both themes (graphite in light, deeper charcoal in dark).
+- **Moments:** a status icon stamps in once when a run finishes while you watch (running to passed, failed, error or invalid), never on page load. The 404 page is a failed Spec: the requested path, the step that failed, expected versus actual, and "Failed · 404".
 
 ## 6. Do's and Don'ts
 

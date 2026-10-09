@@ -504,3 +504,58 @@ summary:focus-visible,
 .auth-step-check {
     animation: auth-step-check 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+.spec-grid {
+    --grid-dot: var(--color-line-strong);
+    --grid-spot: var(--color-ink-muted);
+    background-image: radial-gradient(circle at center, var(--grid-dot) 1px, transparent 1.4px);
+    background-size: 24px 24px;
+    background-position: center;
+}
+
+.auth-panel {
+    --panel-bg: var(--color-primary);
+    --panel-fg: var(--color-primary-foreground);
+}
+
+.dark .auth-panel {
+    --panel-bg: oklch(12% 0 0);
+    --panel-fg: oklch(94.5% 0 0);
+}
+
+.spec-grid-inverse {
+    --grid-dot: color-mix(in oklch, var(--panel-fg) 13%, transparent);
+    --grid-spot: color-mix(in oklch, var(--panel-fg) 55%, transparent);
+}
+
+.spec-grid-fade {
+    mask-image: radial-gradient(ellipse 460px 380px at 50% 50%, transparent 35%, black 100%);
+}
+
+.spec-grid-spot {
+    background-image: radial-gradient(circle at center, var(--grid-spot) 1.2px, transparent 1.7px);
+    background-size: 24px 24px;
+    background-position: center;
+    mask-image: radial-gradient(190px circle at var(--spot-x, -999px) var(--spot-y, -999px), black, transparent 72%);
+    opacity: 0;
+    transition: opacity 450ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.spec-grid[data-spot="on"] .spec-grid-spot {
+    opacity: 1;
+}
+
+@keyframes status-stamp {
+    from {
+        opacity: 0;
+        transform: scale(1.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.status-stamp {
+    animation: status-stamp 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}

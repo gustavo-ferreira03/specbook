@@ -2,6 +2,7 @@ import { Check, Target } from "lucide-react";
 import { LogoMark } from "@/components/LogoMark";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Label } from "@/components/ui/label";
+import { SpecGrid } from "@/components/SpecGrid";
 
 const SAMPLE_STEPS = [
     "Sign in as the standard user",
@@ -12,28 +13,28 @@ const SAMPLE_STEPS = [
 function SpecSheet() {
     return (
         <div className="w-full max-w-[420px]">
-            <p className="font-mono text-meta text-primary-foreground/60">cart/removing-items/spec.yml</p>
-            <h2 className="mt-3 text-title text-primary-foreground">Removing an item updates the cart badge</h2>
+            <p className="font-mono text-meta text-(--panel-fg)/60">cart/removing-items/spec.yml</p>
+            <h2 className="mt-3 text-title text-(--panel-fg)">Removing an item updates the cart badge</h2>
             <ol className="mt-8 space-y-3">
                 {SAMPLE_STEPS.map((step, index) => (
-                    <li key={step} className="flex items-start gap-3 text-body text-primary-foreground/85">
-                        <span className="tabular flex size-6 shrink-0 items-center justify-center rounded-md border border-primary-foreground/25 text-meta">{index + 1}</span>
+                    <li key={step} className="flex items-start gap-3 text-body text-(--panel-fg)/85">
+                        <span className="tabular flex size-6 shrink-0 items-center justify-center rounded-md border border-(--panel-fg)/25 text-meta">{index + 1}</span>
                         <span className="flex-1 pt-0.5">{step}</span>
                         <Check
                             size={15}
                             strokeWidth={2.5}
                             aria-hidden="true"
-                            className="auth-step-check mt-1 shrink-0 text-primary-foreground"
+                            className="auth-step-check mt-1 shrink-0 text-(--panel-fg)"
                             style={{ animationDelay: `${600 + index * 520}ms` }}
                         />
                     </li>
                 ))}
             </ol>
-            <div className="mt-8 rounded-xl border border-primary-foreground/20 px-4 py-3.5">
-                <p className="flex items-center gap-1.5 text-control font-semibold text-primary-foreground"><Target size={14} aria-hidden="true" /> Expected result</p>
-                <p className="mt-1.5 text-body text-primary-foreground/85">The badge shows 1 and the bike light stays in the cart.</p>
+            <div className="mt-8 rounded-xl border border-(--panel-fg)/20 px-4 py-3.5">
+                <p className="flex items-center gap-1.5 text-control font-semibold text-(--panel-fg)"><Target size={14} aria-hidden="true" /> Expected result</p>
+                <p className="mt-1.5 text-body text-(--panel-fg)/85">The badge shows 1 and the bike light stays in the cart.</p>
             </div>
-            <p className="tabular mt-6 flex items-center gap-2 text-meta text-primary-foreground/60">
+            <p className="tabular mt-6 flex items-center gap-2 text-meta text-(--panel-fg)/60">
                 <Check size={13} strokeWidth={2.5} aria-hidden="true" /> Passed · 1.1s
             </p>
         </div>
@@ -43,7 +44,8 @@ function SpecSheet() {
 export function AuthShell({ title, description, children, footer }: { title: string; description: string; children: React.ReactNode; footer?: React.ReactNode }) {
     return (
         <main className="grid min-h-dvh bg-surface lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <section className="flex min-h-dvh flex-col px-6 py-6 sm:px-10">
+            <section className="relative isolate flex min-h-dvh flex-col overflow-hidden px-6 py-6 sm:px-10">
+                <SpecGrid className="-z-10" />
                 <header className="flex items-center justify-between">
                     <span className="flex items-center gap-2.5 text-section text-ink"><LogoMark className="size-7 dark:invert" /> Specbook</span>
                     <ThemeToggle />
@@ -55,7 +57,8 @@ export function AuthShell({ title, description, children, footer }: { title: str
                     {footer && <div className="mt-8 border-t border-line pt-5 text-control text-ink-muted">{footer}</div>}
                 </div>
             </section>
-            <aside aria-hidden="true" className="hidden items-center justify-center bg-primary px-12 lg:flex">
+            <aside aria-hidden="true" className="auth-panel relative isolate hidden items-center justify-center overflow-hidden bg-(--panel-bg) px-12 lg:flex">
+                <SpecGrid className="spec-grid-inverse -z-10" />
                 <SpecSheet />
             </aside>
         </main>
