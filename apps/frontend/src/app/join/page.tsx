@@ -4,9 +4,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
-import { InstanceHeader } from "@/components/InstanceHeader";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
+import { AuthField, AuthShell } from "@/components/AuthShell";
+import { InlineFeedback } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,14 +33,16 @@ export default function JoinPage() {
         try { await api("/auth/invitations/accept", { method: "POST", body: JSON.stringify({ token: token.current, name: name.trim(), password }) }); setPassword(""); token.current = ""; await refresh(); router.replace("/"); }
         catch (reason) { setError(errorMessage(reason)); setBusy(false); }
     }
-    return <main className="min-h-dvh bg-surface"><InstanceHeader setup /><PageHeader title="Join Specbook" description="Create your account to accept the invitation." width="reading" />
-        <PageContainer width="reading"><SettingsSection id="invitation-heading" title="Your invitation">
-            {!invitation ? <SettingsBlock>{error ? <InlineFeedback feedback={{ type: "error", text: error }} /> : <Skeleton className="h-32 w-full" />}</SettingsBlock> : <form onSubmit={accept}>
-                <SettingsBlock><p className="text-body text-ink">Invited as <strong className="font-medium">{invitation.email}</strong> with <span className="font-medium">{invitation.role}</span> access.</p><p className="mt-1 text-meta text-ink-subtle">Expires {formatDateTime(invitation.expiresAt)}</p></SettingsBlock>
-                <SettingsRow label="Name" htmlFor="join-name"><Input id="join-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required disabled={busy} /></SettingsRow>
-                <SettingsRow label="Password" htmlFor="join-password" description="Use at least 12 characters."><Input id="join-password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={12} maxLength={128} required disabled={busy} /></SettingsRow>
-                <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Creating account…" : "Accept invitation"}</Button></SettingsFooter>
-            </form>}
-        </SettingsSection><Button asChild variant="link" className="mt-4 px-0"><Link href="/login">Already have an account? Sign in</Link></Button></PageContainer>
-    </main>;
+    return <AuthShell title="Join Specbook" description="Create your account to accept the invitation." footer={<Link href="/login" className="font-medium text-ink underline-offset-4 hover:underline">Already have an account? Sign in</Link>}>
+        {!invitation ? (error ? <InlineFeedback feedback={{ type: "error", text: error }} /> : <Skeleton className="h-44 w-full" />) : <form onSubmit={accept} className="space-y-4">
+            <div className="rounded-lg border border-line px-3.5 py-3">
+                <p className="text-body text-ink">Invited as <strong className="font-medium">{invitation.email}</strong> with <span className="font-medium">{invitation.role}</span> access.</p>
+                <p className="mt-0.5 text-meta text-ink-muted">Expires {formatDateTime(invitation.expiresAt)}</p>
+            </div>
+            <AuthField id="join-name" label="Name"><Input id="join-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required disabled={busy} className="h-10" /></AuthField>
+            <AuthField id="join-password" label="Password" hint="Use at least 12 characters."><Input id="join-password" aria-describedby="join-password-hint" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={12} maxLength={128} required disabled={busy} className="h-10" /></AuthField>
+            <InlineFeedback feedback={error ? { type: "error", text: error } : null} />
+            <Button type="submit" className="h-10 w-full" disabled={busy}>{busy ? "Creating account…" : "Accept invitation"}</Button>
+        </form>}
+    </AuthShell>;
 }

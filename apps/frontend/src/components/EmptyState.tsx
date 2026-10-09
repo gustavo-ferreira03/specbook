@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 type EmptyTone = "neutral" | "danger" | "success" | "warning";
 
 const toneClasses: Record<EmptyTone, string> = {
-    neutral: "bg-surface-hover text-ink-muted",
+    neutral: "border border-line bg-surface text-ink-muted",
     danger: "bg-danger-soft text-danger",
     success: "bg-success-soft text-success",
     warning: "bg-warning-soft text-warning-icon",

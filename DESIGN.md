@@ -2,24 +2,24 @@
 name: Specbook
 description: Living, executable Specs for web applications
 colors:
-  ink: "oklch(14.5% 0 0)"
-  ink-muted: "oklch(40% 0 0)"
-  ink-subtle: "oklch(49% 0 0)"
+  ink: "oklch(27.5% 0 0)"
+  ink-muted: "oklch(45% 0 0)"
+  ink-subtle: "oklch(51% 0 0)"
   surface: "oklch(100% 0 0)"
-  canvas: "oklch(98.5% 0 0)"
+  canvas: "oklch(100% 0 0)"
   surface-hover: "oklch(96.5% 0 0)"
   surface-selected: "oklch(94% 0 0)"
   line: "oklch(92.5% 0 0)"
   line-strong: "oklch(87.5% 0 0)"
-  primary: "oklch(14.5% 0 0)"
-  dark-surface: "oklch(13% 0 0)"
-  dark-canvas: "oklch(10% 0 0)"
-  dark-ink: "oklch(96.5% 0 0)"
-  dark-line: "oklch(24% 0 0)"
+  primary: "oklch(26% 0 0)"
+  dark-surface: "oklch(20.5% 0 0)"
+  dark-canvas: "oklch(16.5% 0 0)"
+  dark-ink: "oklch(94.5% 0 0)"
+  dark-line: "oklch(28.5% 0 0)"
   success: "#1f8559"
   danger: "#bd5149"
-  warning-icon: "#d99a00"
-  invalid: "#aa5f16"
+  warning-icon: "#b07800"
+  invalid: "#9a5212"
   info: "#406b9f"
 typography:
   display:
@@ -94,7 +94,7 @@ components:
 
 **Creative North Star: "The Spec Sheet"**
 
-Specbook reads like a precise technical document that happens to run. Monochrome and high contrast: near-black ink on pure white, true near-black in dark mode, hairline structure, and colour only where it carries status. Identity comes from typography. Geist carries the interface with firm, slightly tightened headings; Geist Mono is the data voice for numbers only (durations, counts, step numbers, routes, ids), never for prose.
+Specbook reads like a precise technical document that happens to run. Monochrome and high contrast: graphite ink on white, charcoal in dark mode, hairline structure, and colour only where it carries status. Light gray fills are avoided; the one place gray marks state is the current item in the sidebar. Identity comes from typography. Geist carries the interface with firm, slightly tightened headings; Geist Mono is the data voice for numbers only (durations, counts, step numbers, routes, ids), never for prose.
 
 It rejects the generic shadcn look (tinted gray panels, soft pills, default black button on gray), the terminal look (dark hacker chrome, code in front), and anything colourful or decorative.
 
@@ -128,19 +128,21 @@ Flat. Surfaces are separated by hairlines and spacing. Shadows exist only for th
 
 ## 5. Components
 
-- **Buttons:** 36px (32px small), 6px radius. Primary is solid ink; outline is white with a strong hairline. Verb plus object labels.
+- **Buttons:** 36px (32px small), 6px radius, verb plus object labels. Hover inverts: primary (solid graphite) turns transparent with a graphite outline and text; outline turns solid graphite with white text; icon-only ghost buttons fill with graphite. Content inside inherits the button colour on hover. Split buttons invert as one group. Disabled primary is an outline with subtle text, never a gray block. 320ms, ease-out-quint, instant under reduced motion.
 - **Panels:** white, 1px line, 10px radius. Content inside a panel is divided by hairlines, never by inner cards.
 - **Status:** `StatusPill` renders icon plus coloured label with no background. Coverage uses a 6px dot plus label.
 - **Spec steps:** 24px square step numbers (6px radius, strong hairline, mono numeral) joined by a hairline.
 - **Expected result:** a full-border panel with an icon label; no side stripe.
 - **Tables:** sentence-case header in meta/600, group rows on canvas, numbers in mono, right-aligned.
-- **Navigation:** the Chats/Specs switch uses solid ink for the active segment; selected rows use `surface-selected`.
+- **Navigation:** the Chats/Specs switch uses solid graphite for the active segment; the current sidebar row uses `surface-selected` gray. Filter chips are inverted when active. Disclosure chevrons never invert.
+- **Chat:** the user's own messages are graphite bubbles with white text; agent messages sit on the surface.
+- **Access screens (login, invitation):** a 360px form column with labels above full-width fields, and on wide screens a graphite panel typesetting a sample Spec whose steps check off once on load.
 
 ## 6. Do's and Don'ts
 
 - Do use tokens from `apps/frontend/src/app/globals.css` only. Never hard-code colours.
 - Do put numbers in Geist Mono via `.tabular`; don't put sentences in mono.
 - Do show status as icon plus text.
-- Don't add filled status pills, uppercase tracked labels, side-stripe borders, nested cards, gradients or decorative illustration.
+- Don't add filled status pills, light gray fills, uppercase tracked labels, side-stripe borders, nested cards, gradients or decorative illustration.
 - Don't introduce a hue accent. Colour means status.
 - Don't go below 12px or above 12px radius on panels.

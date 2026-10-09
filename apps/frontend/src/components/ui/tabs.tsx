@@ -15,7 +15,7 @@ function TabsList({ className, variant = "underline", ...props }: React.Componen
             data-variant={variant}
             className={cn(
                 "group/tabs flex items-center",
-                variant === "underline" ? "gap-5 overflow-x-auto border-b border-line [scrollbar-width:none]" : "inline-flex gap-0.5 rounded-lg bg-surface-hover p-0.5",
+                variant === "underline" ? "gap-5 overflow-x-auto border-b border-line [scrollbar-width:none]" : "inline-flex gap-0.5 rounded-lg border border-line bg-surface p-0.5",
                 className,
             )}
             {...props}

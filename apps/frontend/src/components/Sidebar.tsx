@@ -385,7 +385,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             type="button"
                             variant="ghost"
                             size="icon-xs"
-                            className="ml-0.5 size-7 shrink-0 text-ink-subtle hover:bg-transparent hover:text-ink"
+                            className="ml-0.5 size-7 shrink-0 text-ink-subtle hover:bg-transparent! hover:text-ink!"
                             aria-label={expanded ? `Collapse ${feature.title}` : `Expand ${feature.title}`}
                         >
                             <ChevronRight size={14} className={`transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} />
@@ -504,7 +504,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         <DropdownMenuTrigger asChild>
                             <Button variant="outline" className="h-10 w-full justify-between gap-2 rounded-lg bg-surface px-2 text-left md:h-9">
                                 <span className="flex min-w-0 items-center gap-2">
-                                    <span className="flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-surface-selected text-label text-ink uppercase" aria-hidden="true">
+                                    <span className="flex size-5 shrink-0 items-center justify-center rounded-[5px] border border-current/25 text-label uppercase" aria-hidden="true">
                                         {projectName.trim().charAt(0) || "P"}
                                     </span>
                                     <span className="truncate font-medium text-ink">{projectName}</span>

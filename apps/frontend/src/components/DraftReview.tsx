@@ -167,7 +167,7 @@ export function DraftReview({
                         <AlertDialogCancel disabled={confirming}>Keep editing</AlertDialogCancel>
                         <AlertDialogAction
                             disabled={confirming}
-                            className="bg-primary text-primary-foreground hover:bg-primary-hover"
+                            className="border border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary"
                             onClick={(event) => {
                                 event.preventDefault();
                                 void confirmDraft();

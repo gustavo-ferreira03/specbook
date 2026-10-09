@@ -58,7 +58,7 @@ export function CredentialRequestCard({
     return (
         <article className={cn("mt-5 overflow-hidden rounded-xl border border-line-strong bg-surface shadow-xs", !nested && "md:ml-10")} aria-label="Credential request">
             <div className="flex items-start gap-3 border-b border-line bg-surface-soft px-4 py-3">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-hover text-ink-muted" aria-hidden="true">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-muted" aria-hidden="true">
                     <KeyRound size={15} />
                 </span>
                 <div className="min-w-0">

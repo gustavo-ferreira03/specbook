@@ -125,10 +125,10 @@
 
 :root {
     color-scheme: light;
-    --sb-canvas: oklch(98.5% 0 0);
+    --sb-canvas: oklch(100% 0 0);
     --sb-sidebar: oklch(100% 0 0);
     --sb-surface: oklch(100% 0 0);
-    --sb-surface-soft: oklch(98% 0 0);
+    --sb-surface-soft: oklch(100% 0 0);
     --sb-surface-hover: oklch(96.5% 0 0);
     --sb-surface-selected: oklch(94% 0 0);
     --sb-surface-raised: oklch(100% 0 0);
@@ -136,18 +136,18 @@
     --sb-line: oklch(92.5% 0 0);
     --sb-line-strong: oklch(87.5% 0 0);
     --sb-line-hover: oklch(72% 0 0);
-    --sb-ink: oklch(14.5% 0 0);
-    --sb-ink-muted: oklch(40% 0 0);
-    --sb-ink-subtle: oklch(49% 0 0);
+    --sb-ink: oklch(27.5% 0 0);
+    --sb-ink-muted: oklch(45% 0 0);
+    --sb-ink-subtle: oklch(51% 0 0);
     --sb-ink-disabled: oklch(74% 0 0);
-    --sb-inverse: oklch(14.5% 0 0);
+    --sb-inverse: oklch(26% 0 0);
     --sb-inverse-foreground: oklch(100% 0 0);
 
-    --sb-primary: oklch(14.5% 0 0);
-    --sb-primary-hover: oklch(30% 0 0);
+    --sb-primary: oklch(26% 0 0);
+    --sb-primary-hover: oklch(35% 0 0);
     --sb-primary-foreground: oklch(100% 0 0);
-    --sb-primary-soft: oklch(95% 0 0);
-    --sb-ring: oklch(14.5% 0 0);
+    --sb-primary-soft: oklch(100% 0 0);
+    --sb-ring: oklch(26% 0 0);
 
     --sb-success: #1f8559;
     --sb-success-soft: #e9f8ef;
@@ -162,8 +162,8 @@
     --sb-warning: #9a6e00;
     --sb-warning-soft: #fff4d8;
     --sb-warning-chart: #f4bd4f;
-    --sb-warning-icon: #d99a00;
-    --sb-invalid: #aa5f16;
+    --sb-warning-icon: #b07800;
+    --sb-invalid: #9a5212;
     --sb-invalid-soft: #fff1e4;
     --sb-invalid-chart: #ee9b46;
     --sb-info: #406b9f;
@@ -172,7 +172,7 @@
 
     --sb-overlay: rgb(24 24 22 / 42%);
     --sb-browser: #11110f;
-    --sb-code-canvas: #f7f7f8;
+    --sb-code-canvas: oklch(100% 0 0);
     --sb-syntax-comment: #6d6d67;
     --sb-syntax-key: #315f87;
     --sb-syntax-string: #3f6b53;
@@ -188,29 +188,29 @@
 
 .dark {
     color-scheme: dark;
-    --sb-canvas: oklch(10% 0 0);
-    --sb-sidebar: oklch(13% 0 0);
-    --sb-surface: oklch(13% 0 0);
-    --sb-surface-soft: oklch(15.5% 0 0);
-    --sb-surface-hover: oklch(19% 0 0);
-    --sb-surface-selected: oklch(23% 0 0);
-    --sb-surface-raised: oklch(17% 0 0);
-    --sb-thumb: oklch(26% 0 0);
-    --sb-line: oklch(24% 0 0);
-    --sb-line-strong: oklch(30% 0 0);
-    --sb-line-hover: oklch(44% 0 0);
-    --sb-ink: oklch(96.5% 0 0);
-    --sb-ink-muted: oklch(78% 0 0);
+    --sb-canvas: oklch(16.5% 0 0);
+    --sb-sidebar: oklch(20.5% 0 0);
+    --sb-surface: oklch(20.5% 0 0);
+    --sb-surface-soft: oklch(22.5% 0 0);
+    --sb-surface-hover: oklch(25.5% 0 0);
+    --sb-surface-selected: oklch(29.5% 0 0);
+    --sb-surface-raised: oklch(23.5% 0 0);
+    --sb-thumb: oklch(33% 0 0);
+    --sb-line: oklch(28.5% 0 0);
+    --sb-line-strong: oklch(34% 0 0);
+    --sb-line-hover: oklch(46% 0 0);
+    --sb-ink: oklch(94.5% 0 0);
+    --sb-ink-muted: oklch(77% 0 0);
     --sb-ink-subtle: oklch(68% 0 0);
-    --sb-ink-disabled: oklch(42% 0 0);
-    --sb-inverse: oklch(96.5% 0 0);
-    --sb-inverse-foreground: oklch(14.5% 0 0);
+    --sb-ink-disabled: oklch(46% 0 0);
+    --sb-inverse: oklch(93% 0 0);
+    --sb-inverse-foreground: oklch(20% 0 0);
 
-    --sb-primary: oklch(96.5% 0 0);
-    --sb-primary-hover: oklch(85% 0 0);
-    --sb-primary-foreground: oklch(14.5% 0 0);
-    --sb-primary-soft: oklch(21% 0 0);
-    --sb-ring: oklch(90% 0 0);
+    --sb-primary: oklch(93% 0 0);
+    --sb-primary-hover: oklch(84% 0 0);
+    --sb-primary-foreground: oklch(19% 0 0);
+    --sb-primary-soft: oklch(27% 0 0);
+    --sb-ring: oklch(88% 0 0);
 
     --sb-success: oklch(77% 0.13 155);
     --sb-success-soft: oklch(28.5% 0.045 155);
@@ -488,4 +488,19 @@ summary:focus-visible,
 
 .syntax-code textarea {
     outline: none;
+}
+
+@keyframes auth-step-check {
+    from {
+        opacity: 0.15;
+        transform: scale(0.6);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.auth-step-check {
+    animation: auth-step-check 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

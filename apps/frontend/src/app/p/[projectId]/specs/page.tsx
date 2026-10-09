@@ -196,13 +196,13 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     <>
                         {createActions}
                         <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={isRunning} />
-                        <div className="flex items-center">
-                            <Button type="button" size="sm" className="rounded-r-none" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>
+                        <div className="group/split flex items-center">
+                            <Button type="button" size="sm" className="rounded-r-none border-r-0 group-hover/split:bg-transparent group-hover/split:text-primary" disabled={isRunning || runnableCount === 0} onClick={() => handleRun(specs, "Run all Specs")}>
                                 <RunningIcon running={isRunning} size={13} /> {isRunning ? "Running…" : "Run all"}
                             </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button type="button" size="sm" className="w-8 rounded-l-none border-l border-primary-foreground/20 px-0" disabled={isRunning} aria-label="More run options">
+                                    <Button type="button" size="sm" className="w-8 rounded-l-none border-l border-l-primary-foreground/20 px-0 group-hover/split:border-l-primary/30 group-hover/split:bg-transparent group-hover/split:text-primary" disabled={isRunning} aria-label="More run options">
                                         <ChevronDown size={14} />
                                     </Button>
                                 </DropdownMenuTrigger>
@@ -249,7 +249,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                         size="sm"
                                         aria-pressed={active}
                                         onClick={() => setFilter(item.value)}
-                                        className={cn("h-8 gap-1.5 rounded-full px-3", active && "bg-surface-selected text-ink hover:bg-surface-selected")}
+                                        className={cn("h-8 gap-1.5 rounded-full px-3", active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground [&_svg]:text-current [&_[class*=text-ink]]:text-primary-foreground/80")}
                                     >
                                         {Icon && <Icon size={12} strokeWidth={2.25} aria-hidden="true" className={statusMeta(item.value).text} />}
                                         {item.label}

@@ -272,7 +272,7 @@ function ContextPanel({
                         <ol className="mt-4 grid gap-2 text-control text-ink-muted sm:grid-cols-3">
                             {["Agent explores the app", "Context is saved", "Chats use the context"].map((step, index) => (
                                 <li key={step} className="flex items-center gap-2">
-                                    <span aria-hidden="true" className="tabular flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-selected text-label text-ink">{index + 1}</span>
+                                    <span aria-hidden="true" className="tabular flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-label text-ink">{index + 1}</span>
                                     {step}
                                 </li>
                             ))}

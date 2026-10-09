@@ -79,7 +79,7 @@ function providerAuthLabel(provider: LlmProvider) {
 }
 
 function StepNumber({ children }: { children: React.ReactNode }) {
-    return <span aria-hidden="true" className="tabular flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-selected text-meta font-semibold text-ink">{children}</span>;
+    return <span aria-hidden="true" className="tabular flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-meta font-semibold text-ink">{children}</span>;
 }
 
 export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () => void }) {

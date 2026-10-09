@@ -104,7 +104,7 @@ export default function SetupPage() {
             {loadError ? <EmptyState icon={AlertCircle} tone="danger" role="alert" title="Setup could not load" description={loadError} action={<Button onClick={() => void load()}><RefreshCw size={14} /> Try again</Button>} /> : !status ? <div role="status" aria-label="Loading setup" aria-busy="true" className="space-y-5"><Skeleton className="h-5 w-60" /><Skeleton className="h-48 w-full" /></div> : <>
                 <ol aria-label="Setup progress" className="flex flex-wrap items-center gap-x-6 gap-y-3 text-body">
                     {steps.map((item, index) => <li key={item.id} aria-current={step === item.id ? "step" : undefined} className={`flex items-center gap-2 ${step === item.id ? "font-medium text-ink" : "text-ink-muted"}`}>
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-selected text-meta tabular" aria-hidden="true">{index < steps.findIndex((item) => item.id === step) ? <Check size={14} /> : index + 1}</span>{item.title}
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-meta tabular" aria-hidden="true">{index < steps.findIndex((item) => item.id === step) ? <Check size={14} /> : index + 1}</span>{item.title}
                     </li>)}
                 </ol>
                 {step === "admin" && <SettingsSection id="setup-admin-heading" title="Create the administrator" description="This account manages access and settings for this Specbook instance.">

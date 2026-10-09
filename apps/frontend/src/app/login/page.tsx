@@ -4,9 +4,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, KeyRound } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
-import { InstanceHeader } from "@/components/InstanceHeader";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
+import { AuthField, AuthShell } from "@/components/AuthShell";
+import { InlineFeedback } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -42,21 +41,20 @@ function LoginContent() {
         try { const result = await api<{ url: string }>("/auth/oidc/start", { method: "POST", body: JSON.stringify({}) }); window.location.assign(result.url); }
         catch (reason) { setError(errorMessage(reason)); setBusy(false); }
     }
-    return <main className="min-h-dvh bg-surface"><InstanceHeader setup />
-        <PageHeader title="Sign in to Specbook" description="Use your account for this Specbook instance." width="reading" />
-        <PageContainer width="reading"><SettingsSection id="sign-in-heading" title="Your account">
-            {!options && !error ? <SettingsBlock><Skeleton className="h-32 w-full" /></SettingsBlock> : <>
-                {options?.oidcEnabled && <SettingsBlock><Button variant="outline" onClick={() => void singleSignOn()} disabled={busy}><KeyRound size={14} /> Continue with single sign-on</Button></SettingsBlock>}
-                {options?.passwordLoginEnabled && <form onSubmit={login}>
-                    <SettingsRow label="Email" htmlFor="login-email"><Input id="login-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} /></SettingsRow>
-                    <SettingsRow label="Password" htmlFor="login-password"><Input id="login-password" type="password" autoComplete="current-password" required maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} /></SettingsRow>
-                    <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}<ArrowRight size={14} /></Button></SettingsFooter>
-                </form>}
-                {!options?.passwordLoginEnabled && error && <SettingsBlock><InlineFeedback feedback={{ type: "error", text: error }} /></SettingsBlock>}
-                {!options && error && <SettingsBlock><Button variant="outline" onClick={() => window.location.reload()}>Try again</Button></SettingsBlock>}
-            </>}
-        </SettingsSection><p className="mt-4 text-body text-ink-muted">Need an account? Ask your administrator for an invitation link.</p></PageContainer>
-    </main>;
+    return <AuthShell title="Sign in to Specbook" description="Use your account for this Specbook instance." footer="Need an account? Ask your administrator for an invitation link.">
+        {!options && !error ? <Skeleton className="h-44 w-full" /> : <div className="space-y-5">
+            {options?.oidcEnabled && <Button variant="outline" className="h-10 w-full" onClick={() => void singleSignOn()} disabled={busy}><KeyRound size={14} /> Continue with single sign-on</Button>}
+            {options?.oidcEnabled && options.passwordLoginEnabled && <div className="flex items-center gap-3 text-meta text-ink-subtle"><span className="h-px flex-1 bg-line" />or<span className="h-px flex-1 bg-line" /></div>}
+            {options?.passwordLoginEnabled && <form onSubmit={login} className="space-y-4">
+                <AuthField id="login-email" label="Email"><Input id="login-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} className="h-10" /></AuthField>
+                <AuthField id="login-password" label="Password"><Input id="login-password" type="password" autoComplete="current-password" required maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} className="h-10" /></AuthField>
+                <InlineFeedback feedback={error ? { type: "error", text: error } : null} />
+                <Button type="submit" className="h-10 w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}<ArrowRight size={14} /></Button>
+            </form>}
+            {!options?.passwordLoginEnabled && error && <InlineFeedback feedback={{ type: "error", text: error }} />}
+            {!options && error && <Button variant="outline" className="h-10 w-full" onClick={() => window.location.reload()}>Try again</Button>}
+        </div>}
+    </AuthShell>;
 }
 
 export default function LoginPage() { return <Suspense fallback={<span className="sr-only" role="status">Loading sign in</span>}><LoginContent /></Suspense>; }
