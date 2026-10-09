@@ -1,3 +1,4 @@
+import { payloadOf } from "../jobs/schemas";
 import type { defineTool } from "@earendil-works/pi-coding-agent";
 import { chatsRepository } from "../../infra/repositories/chats";
 import { jobsRepository } from "../../infra/repositories/jobs";
@@ -53,7 +54,7 @@ export function mcpChatTools(projectId: string, chatId: string, tools: ReturnTyp
 
 export async function reviewChatContract(projectId: string, chatId: string, itemId: string, approve: boolean): Promise<void> {
     const [chat, item, project] = await Promise.all([chatsRepository.getChatRow(chatId), jobsRepository.item(itemId), projectsRepository.getProject(projectId)]);
-    if (chat?.projectId !== projectId || !item || item.projectId !== projectId || item.kind !== "spec_fix" || item.payload.sourceChatId !== chatId || (item.payload.mcpContractChange !== true && project?.agentContractPolicy !== "propose_only")) throw new Error("Contract action not found in this conversation");
+    if (chat?.projectId !== projectId || !item || item.projectId !== projectId || item.kind !== "spec_fix" || payloadOf(item).sourceChatId !== chatId || (payloadOf(item).mcpContractChange !== true && project?.agentContractPolicy !== "propose_only")) throw new Error("Contract action not found in this conversation");
     if (!await jobsRepository.claimItem(item.id)) throw new Error("This action has already been reviewed");
     let commitSha: string | undefined;
     try {

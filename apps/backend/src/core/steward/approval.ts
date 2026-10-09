@@ -1,19 +1,19 @@
+import { payloadOf, verificationOf } from "../jobs/schemas";
 import { parse } from "@babel/parser";
 import { jobsRepository, type InboxItem } from "../../infra/repositories/jobs";
 import { runsRepository } from "../../infra/repositories/runs";
 import { stewardRepository } from "../../infra/repositories/steward";
 import { applyProposal, isImplementationOnly } from "../jobs/proposals";
 import { fixProposalSchema } from "../jobs/schemas";
-import type { ProposalVerification } from "../jobs/verification";
 import { provesExpectedResult } from "../runner/evidence-review";
 import { isAgentPaused } from "../jobs/pause";
 import { recordAgentMetric } from "../jobs/metrics";
 import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, LOCATOR_REFINERS } from "../runner/specbook/allowlist";
 
 export function isLocatorOnlyFix(item: InboxItem): boolean {
-    if (item.kind !== "spec_fix" || !item.payload.requiresVerification) return false;
-    const patch = fixProposalSchema.safeParse(item.payload.params);
-    const before = item.payload.before as { testSource?: unknown } | undefined;
+    if (item.kind !== "spec_fix" || !payloadOf(item).requiresVerification) return false;
+    const patch = fixProposalSchema.safeParse(payloadOf(item).params);
+    const before = payloadOf(item).before;
     if (!patch.success || !isImplementationOnly(patch.data) || typeof before?.testSource !== "string") return false;
     const normalize = (source: string) => {
         const ast = parse(source, { sourceType: "module", plugins: ["typescript"] });
@@ -47,10 +47,10 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
 }
 
 export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> {
-    if (item.kind !== "spec_fix" || item.status !== "pending" || !item.payload.requiresVerification) return false;
-    const verification = item.payload.verification as ProposalVerification | undefined;
+    if (item.kind !== "spec_fix" || item.status !== "pending" || !payloadOf(item).requiresVerification) return false;
+    const verification = verificationOf(item);
     if (verification?.status !== "passed" || !provesExpectedResult(verification.review)) return false;
-    const patch = fixProposalSchema.safeParse(item.payload.params);
+    const patch = fixProposalSchema.safeParse(payloadOf(item).params);
     if (!patch.success || !isImplementationOnly(patch.data)) return false;
     const job = await jobsRepository.get(item.jobId);
     if (job?.kind === "regenerate") return true;
@@ -60,10 +60,10 @@ export async function isSelfApprovableRepair(item: InboxItem): Promise<boolean> 
 
 export async function applyVerifiedRepairs(projectId: string): Promise<void> {
     if (await isAgentPaused(projectId) || (await stewardRepository.get(projectId)).autonomy === "observe") return;
-    const pending = (await jobsRepository.inbox(projectId)).filter((item) => item.kind === "spec_fix" && item.status === "pending");
+    const pending = await jobsRepository.itemsByKind(projectId, "spec_fix", ["pending"]);
     const newestBySpec = new Map<string, InboxItem>();
     for (const item of [...pending].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
-        const specId = fixProposalSchema.safeParse(item.payload.params).data?.specId;
+        const specId = fixProposalSchema.safeParse(payloadOf(item).params).data?.specId;
         if (!specId) continue;
         if (!newestBySpec.has(specId)) { newestBySpec.set(specId, item); continue; }
         await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, supersededBy: newestBySpec.get(specId)!.id } });

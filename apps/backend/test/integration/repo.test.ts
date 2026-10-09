@@ -510,6 +510,83 @@ describe("first-run setup", () => {
 });
 
 describe("autonomous job proposals", () => {
+    test("a wake-up during a drain requests another queue pass", { timeout: 5000 }, async (t) => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { drainJobs } = await import("../../src/core/jobs/worker");
+        let release = () => {};
+        let entered = () => {};
+        let rerun = () => {};
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const firstRead = new Promise<void>((resolve) => { entered = resolve; });
+        const secondRead = new Promise<void>((resolve) => { rerun = resolve; });
+        let reads = 0;
+        t.mock.method(jobsRepository, "queued", async () => {
+            reads++;
+            if (reads === 1) { entered(); await gate; }
+            else rerun();
+            return [];
+        });
+        const draining = drainJobs();
+        await firstRead;
+        try { await drainJobs(); } finally { release(); }
+        await draining;
+        await secondRead;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(reads, 2);
+    });
+
+    test("job handlers preserve restrictions and use typed tool failures", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { createJobPolicy } = await import("../../src/core/jobs/policy");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const { Type } = await import("@earendil-works/pi-ai");
+        const projectId = await createProject("Typed job policy");
+        for (const [kind, name, message] of [["coverage", "create_spec", /propose_spec_batch/], ["generate_spec", "update_spec", /selected Spec/]] as const) {
+            const row = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), kind, trigger: "manual", goal: "Scoped work", limits: jobLimitsSchema.parse({}) });
+            const job = (await jobsRepository.claim(row.id))!;
+            const tool = createJobPolicy(job, () => {}).tools([{ name, label: name, description: "test", parameters: Type.Object({}), async execute() { throw new Error("Original mutation must not run"); } }])[0]!;
+            await assert.rejects(() => tool.execute("call", {}, undefined, undefined, {} as never), message);
+            assert.equal((await jobsRepository.get(job.id))?.actionsUsed, 1);
+            await jobsRepository.update(job.id, { status: "cancelled" });
+        }
+        for (const code of ["environment", "infrastructure"] as const) {
+            const row = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Confirm access", limits: jobLimitsSchema.parse({}) });
+            const job = (await jobsRepository.claim(row.id))!;
+            let aborted = false;
+            const tool = createJobPolicy(job, () => { aborted = true; }).tools([{ name: "toString", label: "toString", description: "test", parameters: Type.Object({}), async execute() {
+                return { isError: true, errorCode: code, content: [{ type: "text" as const, text: code === "environment" ? "No LLM model; Xvfb failed" : "Access needed" }], details: undefined };
+            } }])[0]!;
+            await tool.execute("call", {}, undefined, undefined, {} as never);
+            const changed = (await jobsRepository.get(job.id))!;
+            assert.equal(changed.errorCode, code);
+            assert.equal(aborted, code === "infrastructure");
+            assert.equal(changed.status, code === "infrastructure" ? "queued" : "running");
+            await jobsRepository.update(job.id, { status: "cancelled" });
+        }
+    });
+
+    test("Inbox queries isolate jobs, kinds and statuses", async () => {
+        const { jobsRepository } = await import("../../src/infra/repositories/jobs");
+        const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+        const projectId = await createProject("Inbox query scope");
+        const first = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "First", limits: jobLimitsSchema.parse({}) });
+        const second = await jobsRepository.create({ projectId, chatId: crypto.randomUUID(), trigger: "manual", goal: "Second", limits: jobLimitsSchema.parse({}) });
+        const question = await jobsRepository.addItem({ jobId: first.id, projectId, kind: "question", title: "First question", body: "Question" });
+        const note = await jobsRepository.addItem({ jobId: first.id, projectId, kind: "note", title: "First note", body: "Note" });
+        await jobsRepository.addItem({ jobId: second.id, projectId, kind: "question", title: "Second question", body: "Question" });
+        await jobsRepository.updateItem(question.id, { status: "answered" });
+        assert.deepEqual((await jobsRepository.itemsForJob(first.id, { kind: "question", statuses: ["answered"] })).map((item) => item.id), [question.id]);
+        assert.deepEqual((await jobsRepository.itemsForJobs(projectId, [first.id], { kind: "note" })).map((item) => item.id), [note.id]);
+        assert.equal((await jobsRepository.itemsByKind(projectId, "question", ["pending"])).length, 1);
+        assert.equal((await jobsRepository.itemsForJob(second.id)).length, 1);
+        assert.deepEqual(await jobsRepository.itemsForJobs(projectId, []), []);
+        const sourceChatId = crypto.randomUUID();
+        await jobsRepository.updateItem(note.id, { payload: { sourceChatId } });
+        assert.deepEqual((await jobsRepository.itemsForChat(projectId, sourceChatId, [], [])).map((item) => item.id), [note.id]);
+        assert.deepEqual((await jobsRepository.itemsForChat(projectId, crypto.randomUUID(), [], [question.id])).map((item) => item.id), [question.id]);
+        for (const job of [first, second]) await jobsRepository.update(job.id, { status: "cancelled" });
+    });
+
     test("Inbox file previews match the committed bytes for additions and behavior changes", async () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { proposeMutation, applyProposal } = await import("../../src/core/jobs/proposals");
@@ -691,11 +768,11 @@ describe("autonomous job proposals", () => {
             const job = (await jobsRepository.claim(row.id))!;
             let aborted = false;
             const mcp = { tools: [{ name: "browser_navigate", inputSchema: { type: "object", properties: {} } }], client: { async callTool() {
-                return { isError: true, content: [{ type: "text", text: "Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'" }] };
+                return { isError: true, errorCode: "infrastructure", content: [{ type: "text", text: "Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'" }] };
             } } } as unknown as import("../../src/core/browser/mcp").BrowserMcp;
             const browser = bridgeBrowserTools(mcp, "/tmp")[0]!;
             const session = { name, label: name, description: "Restore", parameters: Type.Object({}), async execute() {
-                return { isError: true, content: [{ type: "text" as const, text: "resume_session failed: The browser could not confirm the current page address." }], details: undefined };
+                return { isError: true, errorCode: "infrastructure", content: [{ type: "text" as const, text: "resume_session failed: The browser could not confirm the current page address." }], details: undefined };
             } };
             const tool = createJobPolicy(job, () => { aborted = true; }).tools([name === "browser_navigate" ? browser : session])[0]!;
             const output = await tool.execute("call", {}, undefined, undefined, {} as never);

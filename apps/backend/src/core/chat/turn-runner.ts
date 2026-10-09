@@ -1,3 +1,4 @@
+import { errorCodeOf, providerErrorCode, type ErrorCode } from "../errors";
 import { mcpChatPrompt, mcpChatTools } from "../mcp/policy";
 import path from "node:path";
 import type { TurnPolicy } from "../jobs/policy";
@@ -118,14 +119,20 @@ export async function branchChatForTurn(
     }
 }
 
+export interface TurnOutcome {
+    status: "completed" | "failed" | "aborted" | "busy";
+    errorCode?: ErrorCode;
+    message?: string;
+}
+
 export async function runChatTurn(
     id: string,
     userText: string,
     existingSessionManager?: SessionManager,
     policy?: TurnPolicy,
-): Promise<void> {
-    if (!tryReserveChatTurn(id)) return;
-    await runReservedChatTurn(id, userText, existingSessionManager, existingSessionManager ? "retry" : "message", policy);
+): Promise<TurnOutcome> {
+    if (!tryReserveChatTurn(id)) return { status: "busy" };
+    return runReservedChatTurn(id, userText, existingSessionManager, existingSessionManager ? "retry" : "message", policy);
 }
 
 interface SessionEventValue {
@@ -150,28 +157,35 @@ async function runReservedChatTurn(
     existingSessionManager: SessionManager | undefined,
     trigger: TurnTrigger,
     turnPolicy?: TurnPolicy,
-): Promise<void> {
+): Promise<TurnOutcome> {
     publishChatUpdate(id);
     const metrics = new TurnMetricsRecorder(id, trigger);
     let sessionManager: SessionManager | null = existingSessionManager ?? null;
     let previousUserCount = 0;
     let activeSession: ActiveChatSession | null = null;
+    let outcome: TurnOutcome = { status: "completed" };
+    const fail = async (code: ErrorCode, message: string) => {
+        outcome = { status: "failed", errorCode: code, message };
+        const job = await jobsRepository.forChat(id);
+        if (job) await jobsRepository.update(job.id, { errorCode: code });
+    };
     try {
         if (consumeAbortRequest(id)) {
             metrics.fail("aborted", "aborted_before_start");
-            return;
+            return { status: "aborted", errorCode: "cancelled" };
         }
         const row = await chatsRepository.getChatRow(id);
         sessionManager = sessionManager ?? (await openSession(id));
         if (!row || !sessionManager) {
             metrics.fail("error", "chat_missing");
-            return;
+            await fail("infrastructure", "The chat no longer exists.");
+            return outcome;
         }
         metrics.setContext({ projectId: row.projectId, mode: row.contextRevisionId ? "discovery" : "standard" });
         metrics.seedFromSession(sessionManager);
         if (consumeAbortRequest(id)) {
             metrics.fail("aborted", "aborted_before_start");
-            return;
+            return { status: "aborted", errorCode: "cancelled" };
         }
         previousUserCount = userMessageCount(sessionManager);
         const storedProject = await projectsRepository.getProject(row.projectId);
@@ -180,7 +194,8 @@ async function runReservedChatTurn(
             metrics.fail("error", "project_missing");
             ensureUserMessage(sessionManager, userText, previousUserCount);
             appendError(sessionManager, "The project for this chat no longer exists.");
-            return;
+            await fail("infrastructure", "The project for this chat no longer exists.");
+            return outcome;
         }
 
         const [modelRegistry, modelRuntime, { provider, model: modelName }] = await Promise.all([
@@ -192,6 +207,7 @@ async function runReservedChatTurn(
         const model = provider && modelName ? modelRegistry.find(provider, modelName) : null;
         if (!model) {
             metrics.fail("error", provider || modelName ? "model_unavailable" : "model_not_configured");
+            await fail("provider_model", "The selected model is unavailable or not configured.");
             ensureUserMessage(sessionManager, userText, previousUserCount);
             appendError(
                 sessionManager,
@@ -199,16 +215,17 @@ async function runReservedChatTurn(
                     ? `The configured LLM model "${provider}/${modelName}" is unavailable. Open Settings and choose an available provider and model.`
                     : "No LLM model is configured. Open Settings and choose a provider and model.",
             );
-            return;
+            return outcome;
         }
         if (!modelRegistry.hasConfiguredAuth(model)) {
             metrics.fail("error", "provider_not_authenticated");
+            await fail("provider_auth", "The model provider is not authenticated.");
             ensureUserMessage(sessionManager, userText, previousUserCount);
             appendError(
                 sessionManager,
                 `The LLM provider "${provider}" is not authenticated. Open Settings and connect it or add an API key.`,
             );
-            return;
+            return outcome;
         }
 
         const contextRevision = row.contextRevisionId
@@ -253,8 +270,9 @@ async function runReservedChatTurn(
         } catch (error) {
             logger.warn("chat browser unavailable", { chatId: id, error });
             if (turnPolicy?.infrastructureFailure) {
-                await turnPolicy.infrastructureFailure(String(error));
-                return;
+                await fail(errorCodeOf(error) ?? "infrastructure", String(error));
+                await turnPolicy.infrastructureFailure(String(error), outcome.errorCode);
+                return outcome;
             }
             appendWarning(
                 sessionManager,
@@ -319,7 +337,7 @@ async function runReservedChatTurn(
         );
         if (consumeAbortRequest(id)) {
             metrics.fail("aborted", "aborted_before_start");
-            return;
+            return { status: "aborted", errorCode: "cancelled" };
         }
         const { session } = await createAgentSession({
             model,
@@ -452,11 +470,13 @@ async function runReservedChatTurn(
             promptFailed = true;
             if (error instanceof ChatTurnTimeoutError) {
                 timedOut = true;
+                await fail("infrastructure", error.message);
                 metrics.fail("error", "turn_timeout");
                 ensureUserMessage(sessionManager, userText, previousUserCount);
                 appendError(sessionManager, error.message);
             } else if (!active.aborted) {
                 metrics.fail("error", "prompt_failed");
+                await fail(providerErrorCode(error), providerFailureMessage(error));
                 ensureUserMessage(sessionManager, userText, previousUserCount);
                 appendError(
                     sessionManager,
@@ -473,14 +493,17 @@ async function runReservedChatTurn(
                 logger.warn("discovered context was not confirmed", { chatId: id, error }),
             );
         }
-        if (active.aborted && !timedOut) metrics.fail("aborted", "user_abort");
+        if (active.aborted && !timedOut) { metrics.fail("aborted", "user_abort"); outcome = { status: "aborted", errorCode: "cancelled" }; }
         if (modelError && !active.aborted && !promptFailed) {
             metrics.fail("error", "model_error");
+            await fail("provider_error", providerFailureMessage(modelError));
             appendError(sessionManager, providerFailureMessage(modelError));
         }
     } catch (error) {
         const aborted = activeSession?.aborted ?? getActiveChatSession(id)?.aborted ?? false;
         metrics.fail(aborted ? "aborted" : "error", aborted ? "user_abort" : "turn_failed");
+        if (!aborted) await fail(errorCodeOf(error) ?? "infrastructure", String(error));
+        else outcome = { status: "aborted", errorCode: "cancelled" };
         if (!aborted) logger.error("chat turn failed", { chatId: id, error });
         if (sessionManager) {
             if (!aborted) {
@@ -506,4 +529,5 @@ async function runReservedChatTurn(
             void metrics.finish();
         }
     }
+    return outcome;
 }

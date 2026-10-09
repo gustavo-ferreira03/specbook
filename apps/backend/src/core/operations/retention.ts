@@ -1,3 +1,4 @@
+import { ACTIVE_JOB_STATUSES } from "../jobs/shared";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -29,7 +30,7 @@ async function entries(directory: string) {
 async function protectedRuns(): Promise<Set<string>> {
     const [decisions, activeJobs] = await Promise.all([
         db.select().from(inboxItems).where(eq(inboxItems.status, "pending")),
-        db.select().from(jobs).where(inArray(jobs.status, ["queued", "running", "paused", "blocked", "stalled"])),
+        db.select().from(jobs).where(inArray(jobs.status, [...ACTIVE_JOB_STATUSES])),
     ]);
     const ids = new Set(activeJobs.flatMap((job) => job.runId ? [job.runId] : []));
     const decisionJobs = new Set(decisions.map((item) => item.jobId));

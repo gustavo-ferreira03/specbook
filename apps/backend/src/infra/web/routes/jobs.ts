@@ -1,3 +1,4 @@
+import { payloadOf, verificationOf } from "../../../core/jobs/schemas";
 import { logger } from "../../logger";
 import { access } from "../access";
 import { closeChatBrowser } from "../../../core/browser/sessions";
@@ -37,7 +38,7 @@ async function projectItem(projectId: string, itemId: string, message = "Inbox i
 
 async function sourceChatForItem(item: InboxItem): Promise<string | undefined> {
     const job = await jobsRepository.get(item.jobId);
-    for (const id of [item.payload.discussionChatId, item.payload.sourceChatId, job?.sourceChatId]) {
+    for (const id of [payloadOf(item).discussionChatId, payloadOf(item).sourceChatId, job?.sourceChatId]) {
         if (typeof id !== "string") continue;
         const chat = await chatsRepository.getChatRow(id);
         if (chat?.projectId === item.projectId) return chat.id;
@@ -78,7 +79,7 @@ export function createJobsRouter(): Hono {
     });
     router.get("/projects/:id/inbox/:itemId/evidence/:file{.+}", access("viewer"), async (c) => {
         const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
-        const verification = item.payload.verification as ProposalVerification | undefined;
+        const verification = verificationOf(item);
         const file = c.req.param("file");
         if (!verification || !verification.screenshots.includes(file) || !isStepScreenshot(file)) throw new HTTPException(404, { message: "Evidence not found" });
         const directory = proposalDirectory(item, verification.id);
@@ -138,8 +139,8 @@ ${item.body}`.slice(0, 6000),
                 await jobsRepository.answer(item, answer!);
                 void drainJobs();
             } else if (action === "report_bug") {
-                const params = item.payload.params as { specId?: string } | undefined;
-                const existing = (await jobsRepository.inbox(item.projectId)).find((other) => other.kind === "bug_report" && other.payload.sourceItemId === item.id);
+                const params = payloadOf(item).params;
+                const existing = (await jobsRepository.itemsByKind(item.projectId, "bug_report")).find((other) => other.kind === "bug_report" && payloadOf(other).sourceItemId === item.id);
                 if (!existing) await jobsRepository.addItem({ projectId: item.projectId, jobId: item.jobId, kind: "bug_report",
                     title: "You marked this as a problem in the app. Add a regression Spec?",
                     body: "The suggested update was declined. The existing check and expected behavior are unchanged.",

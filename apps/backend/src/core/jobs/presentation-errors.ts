@@ -1,6 +1,8 @@
+import { isInfrastructureCode, type ErrorCode } from "../errors";
 const INFRASTRUCTURE_FAILURE = /\bXvfb\b|\bX server\b|servidor X|display\s*:?\s*\d+|EADDRINUSE|BrowserUnavailableError|browserType\.launch|could(?:n['’]t| not) start (?:its |the )?browser|(?:browser|chromium|navegador).{0,80}(?:failed to (?:start|launch)|could not (?:start|launch)|não iniciou|não foi iniciado)|executable doesn't exist|failed to launch.{0,30}browser|(?:LLM|model|provider).{0,60}(?:not configured|not authenticated|unavailable|rate limit)|No LLM model|No API key|MCP.{0,40}(?:disconnected|connection closed|failed to connect)|(?:OpenAI|Anthropic|Copilot).{0,40}(?:401|429|authentication)/i;
 
-export function isInfrastructureFailure(text: string): boolean {
+export function isInfrastructureFailure(text: string, code?: ErrorCode | null): boolean {
+    if (code) return isInfrastructureCode(code);
     return INFRASTRUCTURE_FAILURE.test(text)
         || /\b(?:Your model provider|The model provider could not|Specbook could not reach your model provider|Specbook could not complete this conversation turn|The selected model is unavailable|This conversation turn took too long|The browser (?:could not start|did not start in time|process stopped before it was ready|could not inspect its open tabs|could not confirm (?:or inspect )?(?:the current|the application) page address)|The current browser snapshot could not be read|Browser is already in use)\b/i.test(text)
         || /browser tool failed:.{0,200}(?:EROFS|EACCES|read-only file system|permission denied)/is.test(text);
@@ -77,4 +79,25 @@ export function sanitizeTechnicalDetails(text: string): string {
             .replace(/https?:\/\/[^\s"'`<>)]*|(?:file:\/\/)?(?:\b[A-Za-z]:[\\/]|\/(?:home|Users|tmp|var|app|workspace|root|mnt|opt|srv|storage|code|build|data)\/)[^\s"'`<>)]*/g, (value) => /^https?:\/\//.test(value) ? value : "[server path]")
             .replace(/(?:\.\.[\\/])+(?:src|storage)[^\s"'`<>)]*/g, "[server path]"))
         .join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 16000);
+}
+
+export function isCredentialFailure(text: string, code?: ErrorCode | null, legacy: "triage" | "prerequisite" = "triage"): boolean {
+    if (code) return code === "credentials" || code === "credential_origin";
+    return legacy === "triage" ? /credential|session|login|sign.in|authentication|credencia|sessão/i.test(text)
+        : /credential|password|session|sign.?in|authentication/i.test(text);
+}
+
+export function runFailureKind(run: { errorCode?: ErrorCode | null; status: string; failReason: string | null }): string {
+    if (run.errorCode) {
+        if (isInfrastructureCode(run.errorCode) || ["environment", "credentials", "credential_origin"].includes(run.errorCode)) return "environment";
+        return run.errorCode === "assertion" || run.errorCode === "locator" ? run.errorCode : "failed";
+    }
+    const reason = run.failReason ?? "";
+    return run.status === "error" || /net::|ECONN|ENOTFOUND|connection refused|session expired/i.test(reason) ? "environment"
+        : /expect\(|AssertionError|Expected:|Received:|to[A-Z]\w+/.test(reason) ? "assertion"
+        : /locator|TimeoutError|waiting for|strict mode/i.test(reason) ? "locator" : "failed";
+}
+
+export function isLegacyTurnFailure(text: string | undefined): boolean {
+    return !text || isInfrastructureFailure(text) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(text);
 }

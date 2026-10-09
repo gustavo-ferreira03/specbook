@@ -1,7 +1,10 @@
+import { CodedError } from "../errors";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
-export class NetworkTargetError extends Error {}
+export class NetworkTargetError extends CodedError {
+    constructor(message: string) { super("environment", message); }
+}
 export type ResolvedAddress = { address: string; family: number };
 export type AddressResolver = (hostname: string) => Promise<ResolvedAddress[]>;
 const resolveAddresses: AddressResolver = (hostname) => lookup(hostname, { all: true, verbatim: true });

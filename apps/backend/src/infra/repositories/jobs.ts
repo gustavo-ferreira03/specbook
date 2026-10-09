@@ -1,3 +1,4 @@
+import { payloadOf } from "../../core/jobs/schemas";
 import crypto from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/client";
@@ -23,7 +24,7 @@ function requeuePatch(job: Job, patch: JobPatch & { pendingMessage: string }, ac
 }
 
 export const jobsRepository = {
-    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "limits"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage" | "stopReason" | "sourceChatId">> & { status?: "queued" | "blocked" }): Promise<Job> {
+    async create(input: Pick<Job, "projectId" | "chatId" | "trigger" | "goal" | "limits"> & Partial<Pick<Job, "id" | "kind" | "specId" | "runId" | "pendingMessage" | "stopReason" | "sourceChatId" | "errorCode">> & { status?: "queued" | "blocked" }): Promise<Job> {
         const [job] = await db.insert(jobs).values({ ...input, id: input.id ?? crypto.randomUUID(), status: input.status ?? "queued", pendingMessage: input.pendingMessage ?? input.goal, createdAt: now(), updatedAt: now() }).returning();
         await recordAgentMetric(job!, "created");
         notifyChat(job!);
@@ -114,6 +115,38 @@ export const jobsRepository = {
     async inbox(projectId: string) {
         return db.select().from(inboxItems).where(eq(inboxItems.projectId, projectId)).orderBy(desc(inboxItems.createdAt));
     },
+    async itemsForChat(projectId: string, chatId: string, jobIds: string[], itemIds: string[]) {
+        return db.select().from(inboxItems).where(and(eq(inboxItems.projectId, projectId), or(
+            jobIds.length ? inArray(inboxItems.jobId, jobIds) : undefined,
+            itemIds.length ? inArray(inboxItems.id, itemIds) : undefined,
+            sql`json_extract(${inboxItems.payload}, '$.sourceChatId') = ${chatId}`,
+            sql`json_extract(${inboxItems.payload}, '$.discussionChatId') = ${chatId}`,
+        ))).orderBy(desc(inboxItems.createdAt));
+    },
+    async itemsForJob(jobId: string, filters: { kind?: InboxItem["kind"]; statuses?: InboxItem["status"][] } = {}) {
+        return db.select().from(inboxItems).where(and(eq(inboxItems.jobId, jobId),
+            filters.kind ? eq(inboxItems.kind, filters.kind) : undefined,
+            filters.statuses ? inArray(inboxItems.status, filters.statuses) : undefined)).orderBy(desc(inboxItems.createdAt));
+    },
+    async itemsByKind(projectId: string, kind: InboxItem["kind"], statuses?: InboxItem["status"][]) {
+        return db.select().from(inboxItems).where(and(eq(inboxItems.projectId, projectId), eq(inboxItems.kind, kind),
+            statuses ? inArray(inboxItems.status, statuses) : undefined)).orderBy(desc(inboxItems.createdAt));
+    },
+    async specBatchForJob(projectId: string, jobId: string, approvedOnly = false) {
+        return (await db.select().from(inboxItems).where(and(eq(inboxItems.projectId, projectId), eq(inboxItems.kind, "spec_batch"),
+            approvedOnly ? eq(inboxItems.status, "approved") : undefined,
+            sql`exists (select 1 from json_each(${inboxItems.payload}, '$.specBatch.candidates') candidate where json_extract(candidate.value, '$.jobId') = ${jobId})`))
+            .orderBy(desc(inboxItems.createdAt)).limit(1))[0] ?? null;
+    },
+    async itemsForJobs(projectId: string, jobIds: string[], filters: { kind?: InboxItem["kind"]; statuses?: InboxItem["status"][] } = {}) {
+        if (!jobIds.length) return [];
+        return db.select().from(inboxItems).where(and(eq(inboxItems.projectId, projectId), inArray(inboxItems.jobId, jobIds),
+            filters.kind ? eq(inboxItems.kind, filters.kind) : undefined, filters.statuses ? inArray(inboxItems.status, filters.statuses) : undefined)).orderBy(desc(inboxItems.createdAt));
+    },
+    async decisions(projectId: string, limit = 12) {
+        return db.select().from(inboxItems).where(and(eq(inboxItems.projectId, projectId), inArray(inboxItems.status, ["approved", "rejected", "dismissed"])))
+            .orderBy(desc(inboxItems.createdAt)).limit(limit);
+    },
     async item(id: string) {
         return (await db.select().from(inboxItems).where(eq(inboxItems.id, id)))[0] ?? null;
     },
@@ -126,13 +159,13 @@ export const jobsRepository = {
         if (item) {
             const job = await this.get(item.jobId);
             if (job) notifyChat(job);
-            for (const chatId of [item.payload.sourceChatId, item.payload.discussionChatId]) if (typeof chatId === "string") publishChatUpdate(chatId);
+            for (const chatId of [payloadOf(item).sourceChatId, payloadOf(item).discussionChatId]) if (typeof chatId === "string") publishChatUpdate(chatId);
         }
     },
     async answer(item: InboxItem, answer: string) {
         const job = await this.get(item.jobId);
         if (!job) throw new Error("The investigation no longer exists");
-        const deterministic = item.payload.runIntentId === job.id;
+        const deterministic = payloadOf(item).runIntentId === job.id;
         const [resumed] = await db.batch([
             db.update(jobs).set({ ...requeuePatch(job, { pendingMessage: `Human answer to "${item.title}":\n${answer}\nContinue the original goal. Inspect list_inbox before repeating work.` }),
                 status: deterministic ? "completed" : "queued", updatedAt: now() })

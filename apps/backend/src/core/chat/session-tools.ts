@@ -1,3 +1,4 @@
+import { CodedError, errorCodeOf, type ErrorCode } from "../errors";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -13,10 +14,11 @@ import type { RunEnvironment } from "../../infra/db/schema";
 
 const sessionProfileSchema = z.object({ profile: z.string() });
 
-function text(value: string, isError = false) {
+function text(value: string, isError = false, errorCode?: ErrorCode) {
     return {
         content: [{ type: "text" as const, text: value }],
         details: undefined,
+        errorCode,
         terminate: false,
         ...(isError ? { isError: true } : {}),
     };
@@ -79,7 +81,7 @@ export function createSessionTools(options: SessionToolOptions) {
                     return text(`Session saved for profile "${params.profile}".`);
                 } catch (error) {
                     signal?.throwIfAborted();
-                    return text(`save_session failed: ${error instanceof Error ? error.message : String(error)}`, true);
+                    return text(`save_session failed: ${error instanceof Error ? error.message : String(error)}`, true, errorCodeOf(error) ?? "failed");
                 } finally {
                     await fs.rm(filePath, { force: true });
                 }
@@ -117,12 +119,12 @@ export function createSessionTools(options: SessionToolOptions) {
                     signal?.throwIfAborted();
                     await options.mcp.navigate(options.baseUrl, signal);
                     const activeUrl = await getActiveTabUrl(options.mcp, signal);
-                    if (!activeUrl) throw new Error("The browser could not confirm the current page address. Navigate to the application before continuing.");
-                    if (!allows(profile, params.profile, activeUrl)) throw new Error("The restored page origin is not allowed for this credential profile.");
+                    if (!activeUrl) throw new CodedError("infrastructure", "The browser could not confirm the current page address. Navigate to the application before continuing.");
+                    if (!allows(profile, params.profile, activeUrl)) throw new CodedError("credential_origin", "The restored page origin is not allowed for this credential profile.");
                     return text(`Session restored for profile "${params.profile}"; navigated to ${options.baseUrl}.`);
                 } catch (error) {
                     signal?.throwIfAborted();
-                    return text(`resume_session failed: ${error instanceof Error ? error.message : String(error)}`, true);
+                    return text(`resume_session failed: ${error instanceof Error ? error.message : String(error)}`, true, errorCodeOf(error) ?? "failed");
                 } finally {
                     await fs.rm(filePath, { force: true });
                 }

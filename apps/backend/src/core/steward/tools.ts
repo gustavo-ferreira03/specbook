@@ -1,3 +1,4 @@
+import { enqueueIntent } from "./engine";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { runsRepository } from "../../infra/repositories/runs";
@@ -36,7 +37,6 @@ export function createBackgroundTaskTool(projectId: string, sourceKey: string, s
             const intent = stewardIntentSchema.parse(input);
             await validateReferences(projectId, intent);
             signal?.throwIfAborted();
-            const { enqueueIntent } = await import("./engine");
             const queued = await enqueueIntent(projectId, intent, `${sourceKey}:${toolCallId}`, "user", { sourceChatId });
             return result(await scrub(JSON.stringify(queued)));
         },

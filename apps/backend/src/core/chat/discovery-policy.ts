@@ -1,3 +1,4 @@
+import { CodedError } from "../errors";
 import { getActiveTabUrl, readBrowserSnapshot, type BrowserMcp, type BrowserToolPolicy } from "../browser/mcp";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { consumeVaultSubmit } from "./credential-tools";
@@ -74,7 +75,7 @@ export function createOriginBrowserPolicy(startUrl: string, mcp: BrowserMcp, all
             signal?.throwIfAborted();
             const active = await getActiveTabUrl(mcp, signal);
             if (active === "about:blank" || active && withinOrigins(active, origins)) return;
-            if (!active) throw new Error("The browser could not confirm the current page address. Navigate to the application before continuing.");
+            if (!active) throw new CodedError("infrastructure", "The browser could not confirm the current page address. Navigate to the application before continuing.");
             await mcp.client.callTool({ name: "browser_navigate_back", arguments: {} }, undefined, { signal }).catch(() => undefined);
             const afterBack = await getActiveTabUrl(mcp, signal);
             if (!afterBack || !withinOrigins(afterBack, origins)) await mcp.navigate(startUrl, signal).catch(() => undefined);

@@ -1,3 +1,4 @@
+import { CodedError } from "../errors";
 import type { RunEnvironment } from "../../infra/db/schema";
 import type { Run } from "../../infra/repositories/runs";
 import { parseSpecYaml } from "../repo/yaml";
@@ -11,9 +12,9 @@ export type ExecutedRun = Run & { failedStep: string | null };
 
 export function analyzeForRun(title: string, testSource: string, markdown: string): SpecAnalysis {
     const analysis = analyzeSpecSource(testSource);
-    if (!analysis.ok) throw new Error(`Spec "${title}" is invalid: ${analysis.error}`);
+    if (!analysis.ok) throw new CodedError("invalid_spec", `Spec "${title}" is invalid: ${analysis.error}`);
     const stepsError = stepTitlesError(analysis.analysis.steps, parseSpecYaml(markdown).humanSpec.steps);
-    if (stepsError) throw new Error(`Spec "${title}" is invalid: ${stepsError}`);
+    if (stepsError) throw new CodedError("invalid_spec", `Spec "${title}" is invalid: ${stepsError}`);
     return analysis.analysis;
 }
 

@@ -1,3 +1,4 @@
+import { enqueueJob } from "./queue";
 import crypto from "node:crypto";
 import { featuresRepository } from "../../infra/repositories/features";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
@@ -16,26 +17,10 @@ import path from "node:path";
 import { sanitizeTechnicalDetails } from "./presentation-errors";
 import { isAgentPaused } from "./pause";
 import { finishedAt } from "./shared";
-import { jobLimitsSchema, newSpecProposalSchema, specBatchProposalSchema, type specCandidateSchema } from "./schemas";
-import type { z } from "zod";
+import { jobLimitsSchema, newSpecProposalSchema, specBatchProposalSchema, specBatchOf, payloadOf, type SpecBatch, type SpecBatchCandidate as Candidate } from "./schemas";
 import type { RunEnvironment } from "../../infra/db/schema";
 import { createKeyedLock } from "../operations/keyed-lock";
 
-type Candidate = z.infer<typeof specCandidateSchema> & {
-    id: string;
-    selected?: boolean;
-    jobId?: string;
-    specId?: string;
-    runId?: string;
-    resolvedFeatureId?: string;
-    error?: string;
-};
-interface SpecBatch {
-    candidates: Candidate[];
-    sourceChatId: string;
-    contextRevisionId?: string;
-    selectedAt?: string;
-}
 const batchLocks = createKeyedLock();
 
 async function withBatchLock<T>(id: string, work: () => Promise<T>): Promise<T> {
@@ -44,7 +29,7 @@ async function withBatchLock<T>(id: string, work: () => Promise<T>): Promise<T> 
 
 function batchOf(item: InboxItem): SpecBatch {
     if (item.kind !== "spec_batch") throw new Error("This suggestion is not a list of Specs.");
-    const batch = item.payload.specBatch as SpecBatch | undefined;
+    const batch = specBatchOf(item);
     if (!batch?.candidates?.length) throw new Error("This list of Specs is incomplete. Request a new suggestion in chat.");
     return batch;
 }
@@ -75,8 +60,8 @@ export async function proposeSpecBatch(projectId: string, chatId: string, input:
     const existingJob = await jobsRepository.forChat(chatId);
     const sourceChatId = existingJob?.sourceChatId ?? chatId;
     return withBatchLock(`chat:${chatId}`, async () => {
-        const existing = (await jobsRepository.inbox(projectId)).find((item) => item.kind === "spec_batch" && item.status === "pending"
-            && item.payload.sourceChatId === sourceChatId && JSON.stringify(item.payload.proposed) === JSON.stringify(clean));
+        const existing = (await jobsRepository.itemsByKind(projectId, "spec_batch", ["pending"])).find((item) => item.kind === "spec_batch" && item.status === "pending"
+            && payloadOf(item).sourceChatId === sourceChatId && JSON.stringify(item.payload.proposed) === JSON.stringify(clean));
         if (existing) return existing;
         let job = existingJob;
         if (job && job.projectId !== projectId) throw new Error("This conversation belongs to another project.");
@@ -88,17 +73,16 @@ export async function proposeSpecBatch(projectId: string, chatId: string, input:
         const batch: SpecBatch = { candidates: clean.candidates.map((candidate) => ({ ...candidate, id: crypto.randomUUID() })), sourceChatId, ...options };
         const item = await jobsRepository.addItem({ projectId, jobId: job.id, kind: "spec_batch", title: clean.title,
             body: "Choose the Specs you want. Specbook will create each selected Spec, validate it and run it once.",
-            payload: { proposed: clean, specBatch: batch, sourceChatId, language: "en" } });
+            payload: { errorCode: "failed", proposed: clean, specBatch: batch, sourceChatId, language: "en" } });
         await jobsRepository.log(job.id, "spec_batch:proposed", item.id);
         return item;
     });
 }
 
 async function enqueueSelected(item: InboxItem): Promise<void> {
-    const { enqueueJob } = await import("./worker");
     for (const candidate of batchOf(item).candidates.filter((candidate) => candidate.selected)) {
         await enqueueJob(item.projectId, { kind: "generate_spec", trigger: "chat",
-            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and call create_spec. It saves the Spec and runs it once. If the run fails because the Spec is wrong (a locator, a wait, a wrong assumption about the app), inspect the live page again and call create_spec with the corrected Spec; it can be revised until its first pass, at most 3 runs. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId, { sourceChatId: batchOf(item).sourceChatId });
+            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and call create_spec. It saves the Spec and runs it once. If the run fails because the Spec is wrong (a locator, a wait, a wrong assumption about the app), inspect the live page again and call create_spec with the corrected Spec; it can be revised until its first pass, at most 3 runs. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId, { sourceChatId: batchOf(item).sourceChatId || payloadOf(item).sourceChatId });
     }
 }
 
@@ -133,18 +117,16 @@ export async function selectSpecBatch(item: InboxItem, candidateIds: string[]): 
 
 export async function recoverSpecBatches(): Promise<void> {
     for (const project of await projectsRepository.listProjects()) {
-        for (const item of await jobsRepository.inbox(project.id)) {
+        for (const item of await jobsRepository.itemsByKind(project.id, "spec_batch", ["approved"])) {
             if (item.kind === "spec_batch" && item.status === "approved") await enqueueSelected(item);
         }
     }
 }
 
 async function selectedCandidate(job: Job) {
-    for (const item of await jobsRepository.inbox(job.projectId)) {
-        if (item.kind !== "spec_batch" || item.status !== "approved") continue;
-        const candidate = batchOf(item).candidates.find((candidate) => candidate.selected && candidate.jobId === job.id);
-        if (candidate) return { item, candidate };
-    }
+    const item = await jobsRepository.specBatchForJob(job.projectId, job.id, true);
+    const candidate = item ? batchOf(item).candidates.find((candidate) => candidate.selected && candidate.jobId === job.id) : null;
+    if (item && candidate) return { item, candidate };
     throw new Error("The human has not selected a Spec for this request.");
 }
 
@@ -237,7 +219,7 @@ export async function createSelectedSpec(job: Job, input: unknown, options: { si
 export async function presentSpecBatch(item: InboxItem) {
     const batch = batchOf(item);
     const scrub = createProjectScrubber(item.projectId);
-    const inbox = await jobsRepository.inbox(item.projectId);
+    const inbox = await jobsRepository.itemsForJobs(item.projectId, batch.candidates.flatMap((candidate) => candidate.jobId ? [candidate.jobId] : []), { kind: "question", statuses: ["pending"] });
     const candidates = await Promise.all(batch.candidates.map(async (candidate) => {
         const job = candidate.jobId ? await jobsRepository.get(candidate.jobId) : null;
         const spec = candidate.selected && candidate.specId ? await specsRepository.getSpec(candidate.specId) : null;

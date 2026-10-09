@@ -1,56 +1,32 @@
+import { errorCodeOf, isInfrastructureCode } from "../errors";
+import { payloadOf, verificationOf } from "./schemas";
+import { processProjectSteward } from "../steward/engine";
+import { discoverPendingProjectContexts } from "../chat/discovery";
+import { setJobQueueWakeup } from "./queue";
 import { INSPECT_INSTRUCTION, provesExpectedResult, reviewNextStep } from "../runner/evidence-review";
-import type { ProposalVerification } from "./verification";
 import { selectedSpecInstructions, selectedSpecResult, recoverSpecBatches } from "./spec-batches";
 import { jobEnvironment } from "./environment";
-import { cancelStaleTriage, prepareTriageGoal } from "./triage";
+import { cancelStaleTriage } from "./triage";
 import { closeChatBrowser } from "../browser/sessions";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
 import { logger } from "../../infra/logger";
 import { abortChatTurn } from "../chat/chat-registry";
-import { createChat, getChatMessages } from "../chat/session-store";
+import { getChatMessages } from "../chat/session-store";
 import { runChatTurn } from "../chat/turn-runner";
 import { createProjectScrubber } from "../credentials/scrub";
-import { createJobSchema } from "./schemas";
 import { AGENT_RULES_VERSION, createJobPolicy } from "./policy";
-import { isInfrastructureFailure } from "./presentation-errors";
+import { isInfrastructureFailure, isLegacyTurnFailure } from "./presentation-errors";
 import { retryInfrastructure, stallJob } from "./retry";
 import { canRunAgentJob, isAgentPaused } from "./pause";
 import { projectsRepository } from "../../infra/repositories/projects";
-import { chatsRepository } from "../../infra/repositories/chats";
 import { withActor } from "../accounts/audit";
 
 const active = new Map<string, Promise<void>>();
 const resumeInstructions = "The human paused this investigation. When resumed, read the previous messages, suggestions and current browser state before continuing the original goal. Do not repeat completed actions or change the expected behavior.";
 let polling = false;
+let rerunRequested = false;
 let stopped = false;
 let timer: ReturnType<typeof setInterval> | undefined;
-
-export async function enqueueJob(projectId: string, input: unknown = {}, id?: string, options: { sourceChatId?: string | null } = {}): Promise<Job> {
-    if (options.sourceChatId) {
-        const source = await chatsRepository.getChatRow(options.sourceChatId);
-        if (!source || source.projectId !== projectId) throw new Error("The source conversation must belong to this project.");
-    }
-    if (id) {
-        const existing = await jobsRepository.get(id);
-        if (existing) return existing;
-    }
-    const parsed = createJobSchema.parse(input);
-    let pendingMessage = parsed.goal;
-    if (parsed.kind === "failure_triage") {
-        const input = await prepareTriageGoal(projectId, parsed.runId);
-        const existing = await jobsRepository.forRun(input.runId);
-        if (existing) return existing;
-        parsed.specId = input.specId;
-        parsed.goal = input.goal;
-        pendingMessage = input.message;
-    }
-    const chat = await createChat(projectId);
-    const job = await jobsRepository.create({ ...parsed, id, pendingMessage, projectId, chatId: chat.id, sourceChatId: options.sourceChatId });
-    if (await isAgentPaused(projectId)) await jobsRepository.transition(job.id, "queued", "paused");
-    await jobsRepository.log(job.id, "queued", parsed.trigger);
-    void drainJobs();
-    return (await jobsRepository.get(job.id))!;
-}
 
 const MAX_NUDGES = 2;
 async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof selectedSpecResult>> | null): Promise<string | null> {
@@ -59,10 +35,10 @@ async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof sele
         return `The selected Spec ${selected.status === "failed" ? "still fails" : "passes but does not prove its expected result"}. Do not stop or ask. ${reviewNextStep(selected.evidenceReview) ?? INSPECT_INSTRUCTION} Then call create_spec again with the corrected Spec.`;
     }
     if (!(job.kind === "regenerate" || job.kind === "failure_triage" && job.classification === "test_drift")) return null;
-    const items = (await jobsRepository.inbox(job.projectId)).filter((item) => item.jobId === job.id);
+    const items = await jobsRepository.itemsForJob(job.id);
     if (items.some((item) => item.kind === "bug_report")) return null;
     const proven = items.some((item) => {
-        const verification = item.payload.verification as ProposalVerification | undefined;
+        const verification = verificationOf(item);
         return item.kind === "spec_fix" && verification?.status === "passed" && provesExpectedResult(verification.review);
     });
     return proven ? null : `The Spec is not repaired yet: no proposed fix passed and proved the expected result. ${INSPECT_INSTRUCTION} Then call update_spec with the corrected spec.ts. Do not ask for permission.`;
@@ -80,6 +56,7 @@ async function executeJob(job: Job): Promise<void> {
     };
     const remaining = job.limits.wallTimeMs - job.elapsedMs;
     let deadline: ReturnType<typeof setTimeout> | undefined;
+    let turn: Awaited<ReturnType<typeof runChatTurn>> | undefined;
     try {
         if (await isAgentPaused(job.projectId)) {
             await jobsRepository.transition(job.id, "running", "paused");
@@ -88,7 +65,7 @@ async function executeJob(job: Job): Promise<void> {
         if (await cancelStaleTriage(job)) return;
         if (!await canRunAgentJob(job)) { await jobsRepository.transition(job.id, "running", "queued", { startedAt: null, heartbeatAt: null }); return; }
         if (remaining <= 0 || job.actionsUsed >= job.limits.maxActions) {
-            if (job.systemError) await retryInfrastructure(job, job.systemError);
+            if (job.systemError) await retryInfrastructure(job, job.systemError, job.errorCode ?? "infrastructure");
             else await stallJob(job, "The investigation did not reach a confirmed result.");
         } else {
             deadline = setTimeout(() => {
@@ -97,7 +74,7 @@ async function executeJob(job: Job): Promise<void> {
             await jobsRepository.log(job.id, "started");
             if ((await jobsRepository.get(job.id))?.status !== "running") return;
             const environment = await jobEnvironment(job);
-            await runChatTurn(job.chatId, job.kind === "generate_spec" ? await selectedSpecInstructions(job) : job.pendingMessage, undefined, createJobPolicy(job, abort, environment.baseUrl, environment));
+            turn = await runChatTurn(job.chatId, job.kind === "generate_spec" ? await selectedSpecInstructions(job) : job.pendingMessage, undefined, createJobPolicy(job, abort, environment.baseUrl, environment));
         }
         if (stopped) return;
         const current = await jobsRepository.get(job.id);
@@ -106,21 +83,23 @@ async function executeJob(job: Job): Promise<void> {
         if (current?.status === "running") {
             const selected = job.kind === "generate_spec" ? await selectedSpecResult(job) : null;
             const unfinished = await unfinishedWork(current, selected);
-            if (unfinished) {
+            if (turn?.status === "busy") {
+                await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 2000).toISOString() });
+            } else if (unfinished) {
                 await jobsRepository.log(job.id, "unfinished", unfinished);
                 await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date().toISOString(), pendingMessage: unfinished });
             } else if (selected?.specId && selected.runId && selected.status !== "running") {
-                await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
-            } else if (!last || isInfrastructureFailure(last) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(last)) {
-                await retryInfrastructure(job, last || "The agent service could not complete its response.");
+                await jobsRepository.transition(job.id, "running", "completed", { systemError: null, errorCode: null, stopReason: null, retryAt: null });
+            } else if (!last || turn?.errorCode && isInfrastructureCode(turn.errorCode) || !turn && isLegacyTurnFailure(last)) {
+                await retryInfrastructure(job, turn?.message ?? last ?? "The agent service could not complete its response.", turn?.errorCode ?? "infrastructure");
             } else if (selected?.status === "running") {
                 await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 15_000).toISOString(),
                     pendingMessage: "The selected Spec's first run is still running. Use run_spec to inspect its saved result. Do not create another Spec or start another run." });
             } else if (selected) {
                 await stallJob(job, selected.specId ? "The Spec was saved, but its first result is missing." : "The selected Spec has not been saved.");
             } else {
-                const body = await scrub(last);
-                const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, stopReason: null, retryAt: null });
+                const body = await scrub(last ?? "");
+                const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, errorCode: null, stopReason: null, retryAt: null });
                 if (completed) await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Investigation finished", body, payload: { language: "en" } });
             }
         }
@@ -128,7 +107,9 @@ async function executeJob(job: Job): Promise<void> {
         const current = await jobsRepository.get(job.id);
         if (stopped || current?.status !== "running") return;
         await jobsRepository.log(job.id, "error", await scrub(String(error)));
-        await retryInfrastructure(job, String(error));
+        const code = errorCodeOf(error);
+        if (code && !isInfrastructureCode(code)) await stallJob(job, String(error), code);
+        else await retryInfrastructure(job, String(error), code ?? "infrastructure");
     } finally {
         clearTimeout(deadline);
         await closeChatBrowser(job.chatId).catch(() => undefined);
@@ -139,7 +120,8 @@ async function executeJob(job: Job): Promise<void> {
 }
 
 export async function drainJobs(): Promise<void> {
-    if (polling || stopped) return;
+    if (stopped) return;
+    if (polling) { rerunRequested = true; return; }
     polling = true;
     try {
         const configured = Number(process.env.SPECBOOK_MAX_CONCURRENT_JOBS ?? process.env.SPECBOOK_MAX_CONCURRENT_RUNS ?? 2);
@@ -162,6 +144,7 @@ export async function drainJobs(): Promise<void> {
         }
     } finally {
         polling = false;
+        if (rerunRequested && !stopped) { rerunRequested = false; void drainJobs(); }
     }
 }
 
@@ -191,9 +174,7 @@ export async function resumeAgentJobs(projectId?: string): Promise<void> {
             if (job.status === "paused" && await jobsRepository.transition(job.id, "paused", "queued")) await jobsRepository.log(job.id, "resumed", "The human resumed the agent.");
         }
     }
-    const { processProjectSteward } = await import("../steward/engine");
     for (const project of projects) if (!await isAgentPaused(project.id)) await processProjectSteward(project.id, false);
-    const { discoverPendingProjectContexts } = await import("../chat/discovery");
     discoverPendingProjectContexts();
     void drainJobs();
 }
@@ -203,17 +184,17 @@ async function recoverProject(projectId: string): Promise<void> {
     if (!paused) for (const job of await jobsRepository.list(projectId)) {
         if (job.status === "paused") await jobsRepository.transition(job.id, "paused", "queued");
     }
-    const questions = (await jobsRepository.inbox(projectId)).filter((item) => item.kind === "question" && item.status === "pending");
-    const infrastructure = new Set(questions.filter((item) => isInfrastructureFailure(`${item.title}\n${item.body}`)));
+    const questions = await jobsRepository.itemsByKind(projectId, "question", ["pending"]);
+    const infrastructure = new Set(questions.filter((item) => isInfrastructureFailure(`${item.title}\n${item.body}`, payloadOf(item).errorCode)));
     for (const item of infrastructure) {
         const job = await jobsRepository.get(item.jobId);
         if (job?.status !== "blocked") continue;
-        await retryInfrastructure(job, `${item.title}\n${item.body}`);
+        await retryInfrastructure(job, `${item.title}\n${item.body}`, payloadOf(item).errorCode ?? job.errorCode ?? "infrastructure");
         await jobsRepository.updateItem(item.id, { status: "dismissed", payload: { ...item.payload, internalRecovery: true } });
     }
     if (paused) return;
     for (const item of questions) {
-        if (infrastructure.has(item) || Number(item.payload.rulesVersion ?? 1) >= AGENT_RULES_VERSION) continue;
+        if (infrastructure.has(item) || Number(payloadOf(item).rulesVersion ?? 1) >= AGENT_RULES_VERSION) continue;
         const job = await jobsRepository.get(item.jobId);
         if (job?.status !== "blocked" || !["regenerate", "failure_triage", "generate_spec"].includes(job.kind)) continue;
         const resumed = await jobsRepository.requeue(job, "blocked", {
@@ -243,3 +224,7 @@ export async function stopJobWorker(): Promise<void> {
         if (job) await Promise.allSettled([abortChatTurn(job.chatId), closeChatBrowser(job.chatId)]);
     }
 }
+
+export { enqueueJob } from "./queue";
+
+setJobQueueWakeup(() => void drainJobs().catch((error) => logger.error("job queue failed", { error })));

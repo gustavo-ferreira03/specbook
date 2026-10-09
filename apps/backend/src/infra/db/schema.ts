@@ -158,6 +158,7 @@ export const runs = sqliteTable(
         startedAt: text("started_at").notNull(),
         durationMs: integer("duration_ms"),
         failReason: text("fail_reason"),
+        errorCode: text("error_code").$type<import("../../core/errors").ErrorCode>(),
         automationPending: integer("automation_pending", { mode: "boolean" }).notNull().default(false),
         healOnFailure: integer("heal_on_failure", { mode: "boolean" }).notNull().default(true),
         retryOf: text("retry_of"),
@@ -293,6 +294,7 @@ export const jobs = sqliteTable("jobs", {
     safetyRetries: integer("safety_retries").notNull().default(0),
     retryAt: text("retry_at"),
     systemError: text("system_error"),
+    errorCode: text("error_code").$type<import("../../core/errors").ErrorCode>(),
     infrastructureRetries: integer("infrastructure_retries").notNull().default(0),
     startedAt: text("started_at"),
     heartbeatAt: text("heartbeat_at"),
@@ -314,7 +316,7 @@ export const inboxItems = sqliteTable("inbox_items", {
     commitSha: text("commit_sha"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
-}, (table) => [index("inbox_project_status").on(table.projectId, table.status)]);
+}, (table) => [index("inbox_project_status").on(table.projectId, table.status), index("inbox_job_kind_status").on(table.jobId, table.kind, table.status), index("inbox_project_kind_status").on(table.projectId, table.kind, table.status)]);
 
 export const jobActions = sqliteTable("job_actions", {
     id: integer("id").primaryKey({ autoIncrement: true }),

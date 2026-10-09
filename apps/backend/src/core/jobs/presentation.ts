@@ -1,3 +1,5 @@
+import type { ErrorCode } from "../errors";
+import { payloadOf, verificationOf, specBatchOf } from "./schemas";
 import path from "node:path";
 import { featuresRepository } from "../../infra/repositories/features";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
@@ -12,7 +14,6 @@ import { readSpecRawFiles } from "../repo/manual";
 import { sourceHashOf } from "../repo/writer";
 import { proposalFiles } from "./preview";
 import { isInfrastructureFailure, sanitizeTechnicalDetails } from "./presentation-errors";
-import type { ProposalVerification } from "./verification";
 import { presentSpecBatch } from "./spec-batches";
 import { ACTIVE_JOB_STATUSES, oldestFirst } from "./shared";
 import { readEvidenceManifest, isStepScreenshot } from "../runner/evidence";
@@ -94,7 +95,19 @@ function plainExcerpt(text: string): string | null {
     return clean.split(/(?<=[.!?])\s/).slice(0, 2).join(" ").slice(0, 400);
 }
 
-function plainReason(text: string): string {
+function plainReason(text: string, code?: ErrorCode | null): string {
+    if (code) {
+        const reasons: Partial<Record<ErrorCode, string>> = {
+            credential_origin: "The saved sign-in details are not allowed on this application address.",
+            credentials: "The Spec needs access to the application before it can continue.",
+            environment: "The application could not be reached.",
+            assertion: "An expected button or result was not available during the test run.",
+            locator: "An expected button or result was not available during the test run.",
+            invalid_spec: "The current Spec could not run as written.",
+            repository_dirty: "The project has pending file edits that need review before the Specs can run.",
+        };
+        return reasons[code] ?? plainExcerpt(text) ?? "The Spec still needs attention before it can run successfully.";
+    }
     if (/origin is not allowed|allowed origins/i.test(text)) return "The saved sign-in details are not allowed on this application address.";
     if (/credential|password|sign.?in|log.?in|session expired|credencia/i.test(text)) return "The Spec needs access to the application before it can continue.";
     if (/ERR_CONNECTION|ERR_NAME|unreachable|could not be reached|HTTP 50[234]/i.test(text)) return "The application could not be reached.";
@@ -114,7 +127,7 @@ function batchTitle(item: InboxItem, batch: SpecBatch): string {
 
 async function screenshotsFor(projectId: string, item: InboxItem, job: Job | undefined, specsById: Map<string, Spec>): Promise<InboxPresentation["screenshots"]> {
     const screenshots: InboxPresentation["screenshots"] = {};
-    const runId = string(item.payload.runId) ?? job?.runId;
+    const runId = string(payloadOf(item).runId) ?? job?.runId;
     let beforeFile: string | undefined;
     if (runId && /^[a-f0-9-]{36}$/.test(runId)) {
         const run = await runsRepository.getRun(runId);
@@ -127,7 +140,7 @@ async function screenshotsFor(projectId: string, item: InboxItem, job: Job | und
             }
         }
     }
-    const verification = item.payload.verification as ProposalVerification | undefined;
+    const verification = verificationOf(item);
     const afterFile = beforeFile ? verification?.screenshots?.find((file) => file === beforeFile) : verification?.screenshots?.at(-1);
     if (afterFile && isStepScreenshot(afterFile)) screenshots.after = {
         url: `/projects/${projectId}/inbox/${item.id}/evidence/${afterFile}`, label: verification?.status === "passed" ? "After the update" : "Latest attempt",
@@ -153,7 +166,7 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
     const jobsById = new Map(jobs.map((job) => [job.id, job]));
     const selectedSpecTitles = new Map<string, string>();
     for (const item of inbox.filter((item) => item.kind === "spec_batch")) {
-        const candidates = record(item.payload.specBatch).candidates;
+        const candidates = specBatchOf(item)?.candidates;
         for (const candidate of Array.isArray(candidates) ? candidates : []) {
             const { jobId, title } = record(candidate);
             if (typeof jobId === "string" && typeof title === "string") selectedSpecTitles.set(jobId, title);
@@ -183,10 +196,10 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
         return signal ? forSignal(signal) : specSubject(intent.intent.specIds?.[0]) ?? projectSubject;
     };
     const itemSubjects = new Map(inbox.map((item) => {
-        const params = record(item.payload.params);
+        const params = record(payloadOf(item).params);
         const job = jobsById.get(item.jobId);
         const intent = job && intentsByJob.get(job.id);
-        return [item.id, specSubject(string(params.specId) ?? string(item.payload.specId) ?? job?.specId)
+        return [item.id, specSubject(string(params.specId) ?? string(payloadOf(item).specId) ?? job?.specId)
             ?? featureSubject(string(params.featureId)) ?? (intent ? forIntent(intent) : projectSubject)] as const;
     }));
     const forJob = (job: Job): Subject => {
@@ -194,10 +207,10 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
         const intent = intentsByJob.get(job.id);
         return specSubject(job.specId) ?? (item ? itemSubjects.get(item.id)! : intent ? forIntent(intent) : projectSubject);
     };
-    const awaitingSpecIds = new Set(inbox.filter(awaiting).map((item) => record(item.payload.params).specId));
+    const awaitingSpecIds = new Set(inbox.filter(awaiting).map((item) => record(payloadOf(item).params).specId));
     const rawSpecs = new Map(await Promise.all(specs.filter((spec) => awaitingSpecIds.has(spec.id))
         .map(async (spec) => [spec.id, await readSpecRawFiles(spec).catch(() => null)] as const)));
-    const infrastructureQuestions = new Set(inbox.filter((item) => item.kind === "question" && awaiting(item) && isInfrastructureFailure(`${item.title}\n${item.body}`)).map((item) => item.jobId));
+    const infrastructureQuestions = new Set(inbox.filter((item) => item.kind === "question" && awaiting(item) && isInfrastructureFailure(`${item.title}\n${item.body}`, payloadOf(item).errorCode)).map((item) => item.jobId));
     const infrastructureJobs = new Set(jobs.filter((job) => !["completed", "cancelled"].includes(job.status) && (Boolean(job.systemError) || infrastructureQuestions.has(job.id))).map((job) => job.id));
     const newestAwaiting = new Map<string, string>();
     for (const item of inbox.filter(awaiting)) {
@@ -206,15 +219,15 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
     }
     const items: PresentedItem[] = [];
     for (const item of inbox) {
-        if (item.kind === "note" || item.payload.retiredByScope === true) continue;
+        if (item.kind === "note" || payloadOf(item).retiredByScope === true) continue;
         const job = jobsById.get(item.jobId);
         if (job && infrastructureJobs.has(job.id)) continue;
         const subject = itemSubjects.get(item.id)!;
-        const params = record(item.payload.params);
-        const before = record(item.payload.before);
-        const verification = item.payload.verification as ProposalVerification | undefined;
+        const params = record(payloadOf(item).params);
+        const before = record(payloadOf(item).before);
+        const verification = verificationOf(item);
         const diagnostic = `${item.title}\n${item.body}\n${verification?.failReason ?? ""}`;
-        if (item.kind !== "bug_report" && isInfrastructureFailure(diagnostic)) continue;
+        if (item.kind !== "bug_report" && isInfrastructureFailure(diagnostic, verification?.errorCode ?? payloadOf(item).errorCode ?? job?.errorCode)) continue;
         if (item.kind === "question" && awaiting(item) && job?.status !== "blocked") continue;
         const patchSpecId = string(params.specId);
         if (item.kind === "spec_fix" && awaiting(item)) {
@@ -222,12 +235,12 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
             if (!raw || (typeof before.yaml === "string" && raw.yaml !== before.yaml) || ("testSource" in before && raw.testSource !== before.testSource)) continue;
         }
         const verified = verification?.status === "passed" && (!params.testSource || verification.sourceHash === sourceHashOf(String(params.testSource)));
-        const unfinished = item.payload.requiresVerification === true && !verified;
+        const unfinished = payloadOf(item).requiresVerification === true && !verified;
         if (unfinished && awaiting(item) && job && (active(job.status) || (job.status === "stalled" && job.retryAt))) continue;
         if (unfinished && awaiting(item) && (newestAwaiting.get(subjectKey(subject)) ?? "") > item.createdAt) continue;
         const batch = item.kind === "spec_batch" ? await presentSpecBatch(item) : undefined;
         const type = unfinished && awaiting(item) ? "help" : ITEM_TYPES[item.kind] ?? "question";
-        const credentialRequest = item.payload.waitingFor === "credentials";
+        const credentialRequest = payloadOf(item).waitingFor === "credentials";
         const name = subject.type === "project" ? string(params.title) ?? selectedSpecTitles.get(item.jobId) ?? "this Spec" : subject.name;
         const safeTitle = plainExcerpt(item.title)?.replace(/^(?:Bug report|Possible bug):\s*/i, "");
         let title: string;
@@ -235,7 +248,7 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
         switch (type) {
             case "help":
                 title = `I couldn’t update “${name}” by myself. Look at it together?`;
-                summary = plainReason(verification?.failReason ?? job?.stopReason ?? item.body);
+                summary = plainReason(verification?.failReason ?? job?.stopReason ?? item.body, verification?.errorCode ?? job?.errorCode ?? payloadOf(item).errorCode);
                 break;
             case "update": {
                 if (params.humanSpec !== undefined || params.title !== undefined || params.description !== undefined) {
@@ -248,10 +261,10 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
                     summary = "Review this suggested update to the Spec before saving it to the project.";
                     break;
                 }
-                const originalRunId = string(item.payload.runId) ?? job?.runId;
+                const originalRunId = string(payloadOf(item).runId) ?? job?.runId;
                 const originalRun = originalRunId ? await runsRepository.getRun(originalRunId) : null;
                 const originalReason = originalRun && specsById.has(originalRun.specId) ? originalRun.failReason : patchSpecId ? specsById.get(patchSpecId)?.invalidReason : undefined;
-                const updateReason = originalReason ? plainReason(clean(originalReason)).replace(/[.!?]+$/, "") + "." : "This suggestion updates how the Spec runs.";
+                const updateReason = originalReason ? plainReason(clean(originalReason), originalRun?.errorCode ?? (patchSpecId && specsById.get(patchSpecId)?.status === "invalid" ? "invalid_spec" : undefined)).replace(/[.!?]+$/, "") + "." : "This suggestion updates how the Spec runs.";
                 summary = `${updateReason} The expected behavior stays the same.`;
                 break;
             }
@@ -321,7 +334,7 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
         const failureRunId = string(noticed?.payload.runId) ?? latestJob?.runId;
         const failureRun = failureRunId ? await runsRepository.getRun(failureRunId) : null;
         const failureReason = failureRun && specsById.has(failureRun.specId) && failureRun.failReason
-            ? plainReason(clean(failureRun.failReason)) : undefined;
+            ? plainReason(clean(failureRun.failReason), failureRun.errorCode) : undefined;
         const invalidReason = currentSpec?.invalidReason ?? noticed?.body ?? "";
         const invalidTitle = /missing.*spec\.ts|spec\.ts.*missing|no.*spec\.ts/i.test(invalidReason)
             ? `The Spec “${subject.name}” has no executable source`
@@ -345,15 +358,15 @@ export async function projectPresentation(projectId: string, state?: ProjectStat
             : "Specbook will check again when the application or its Specs change.";
         const summary = decisions[0]?.presentation.summary ?? failureReason ?? (noticed ? NOTICED_TEXT[noticed.kind] : undefined) ?? "";
         const timeline: ActivityStory["timeline"] = [];
-        const noticedDetail = noticed?.kind === "invalid_spec" ? plainReason(clean(invalidReason)) : noticed ? NOTICED_TEXT[noticed.kind] : undefined;
+        const noticedDetail = noticed?.kind === "invalid_spec" ? plainReason(clean(invalidReason), "invalid_spec") : noticed ? NOTICED_TEXT[noticed.kind] : undefined;
         if (noticed && noticedDetail && noticedDetail !== summary) timeline.push({ id: noticed.id, label: "Noticed", detail: noticedDetail, createdAt: noticed.createdAt });
         for (const item of value.items) {
-            if (!item.payload.verification) continue;
+            if (!payloadOf(item).verification) continue;
             const verifiedAction = actions.get(item.jobId)?.find((action) => action.action === "proposal:verified" && action.detail?.startsWith(`${item.id}:`));
             if (verifiedAction) timeline.push({ id: `${item.id}:test`, label: "Tested update", detail: item.presentation.workDone, createdAt: verifiedAction.createdAt });
         }
         if (latestItem?.kind === "spec_batch") {
-            const batch = latestItem.payload.specBatch as SpecBatch;
+            const batch = specBatchOf(latestItem)!;
             const selected = batch.candidates.filter((candidate) => candidate.selected);
             timeline.push({ id: latestItem.id, label: latestItem.status === "approved" ? "Selected" : "Suggested",
                 detail: latestItem.status === "approved" ? `${selected.length} Spec${selected.length === 1 ? "" : "s"} selected to create.` : latestItem.presentation.title,

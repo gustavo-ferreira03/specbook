@@ -1,3 +1,4 @@
+import { CodedError } from "../errors";
 import crypto from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
@@ -25,9 +26,9 @@ interface VncSessionRecord extends VncSession {
     viewers: Set<WebSocket>;
 }
 
-export class BrowserUnavailableError extends Error {
+export class BrowserUnavailableError extends CodedError {
     constructor(cause: unknown) {
-        super(browserFailureMessage(cause), { cause });
+        super("infrastructure", browserFailureMessage(cause), { cause });
         this.name = "BrowserUnavailableError";
     }
 }

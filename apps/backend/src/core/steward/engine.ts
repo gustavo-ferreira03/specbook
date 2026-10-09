@@ -1,3 +1,8 @@
+import { errorCodeOf, type ErrorCode } from "../errors";
+import { isCredentialFailure, runFailureKind } from "../jobs/presentation-errors";
+import { ACTIVE_JOB_STATUSES } from "../jobs/shared";
+import { payloadOf } from "../jobs/schemas";
+import { recordScheduledBatch } from "../jobs/schedule-batches";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { applyVerifiedRepairs } from "./approval";
@@ -12,7 +17,7 @@ import { stewardRepository, type Intent, type ProjectSignal } from "../../infra/
 import { logger } from "../../infra/logger";
 import { createProjectScrubber } from "../credentials/scrub";
 import { createChat } from "../chat/session-store";
-import { enqueueJob } from "../jobs/worker";
+import { enqueueJob } from "../jobs/queue";
 import { jobLimitsSchema } from "../jobs/schemas";
 import { canRunAgentJob, isAgentPaused } from "../jobs/pause";
 import { currentFailure, StaleTriageError } from "../jobs/triage";
@@ -43,10 +48,7 @@ async function intentFingerprint(projectId: string, intent: StewardIntent, sourc
         if (!spec || intent.specIds?.some((id) => id !== spec.id)) throw new Error("The failed run must belong to the selected Spec in this project");
         const yaml = await fs.readFile(path.join(runsDir, run.id, "spec.yml"), "utf8").catch(() => null);
         const evidence = await readEvidenceManifest(path.join(runsDir, run.id));
-        const reason = run.failReason ?? "";
-        const failureKind = run.status === "error" || /net::|ECONN|ENOTFOUND|connection refused|session expired/i.test(reason) ? "environment"
-            : /expect\(|AssertionError|Expected:|Received:|to[A-Z]\w+/.test(reason) ? "assertion"
-              : /locator|TimeoutError|waiting for|strict mode/i.test(reason) ? "locator" : "failed";
+        const failureKind = runFailureKind(run);
         const project = await projectsRepository.getProject(projectId);
         return fingerprint({ kind: "triage", specId: spec.id, sourceHash: run.sourceHash,
             markdownHash: yaml === null ? null : markdownHashOf(yaml),
@@ -142,9 +144,9 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
         deployment_changed: "run_specs", deployment: "run_specs", spec_changed: "run_specs", schedule: "run_specs",
     };
     if (signal.kind === "credentials_changed") {
-        for (const item of await jobsRepository.inbox(signal.projectId)) {
+        for (const item of await jobsRepository.itemsByKind(signal.projectId, "question", ["pending"])) {
             if (await isAgentPaused(signal.projectId)) return;
-            if (item.kind !== "question" || item.status !== "pending" || item.payload.waitingFor !== "credentials") continue;
+            if (item.kind !== "question" || item.status !== "pending" || payloadOf(item).waitingFor !== "credentials") continue;
             const job = await jobsRepository.get(item.jobId);
             if (job?.status !== "blocked" || !await canRunAgentJob(job) || !await jobsRepository.claimItem(item.id)) continue;
             try { await jobsRepository.answer(item, "Credential profiles changed. Check the available profiles and continue if the requested access is now available."); }
@@ -159,28 +161,28 @@ async function handleSignal(signal: ProjectSignal, observe: boolean): Promise<vo
     await stewardRepository.acknowledge(signal.id, observe ? "observed" : "handled");
 }
 
-async function askForRunPrerequisite(row: Intent, reason: string): Promise<void> {
+async function askForRunPrerequisite(row: Intent, reason: string, code?: ErrorCode | null): Promise<void> {
     let job = await jobsRepository.get(row.id);
     if (!job) {
         const chat = await createChat(row.projectId);
-        job = await jobsRepository.create({ id: row.id, projectId: row.projectId, chatId: chat.id, sourceChatId: row.sourceChatId, kind: "review", status: "blocked", stopReason: reason,
+        job = await jobsRepository.create({ id: row.id, projectId: row.projectId, chatId: chat.id, sourceChatId: row.sourceChatId, kind: "review", status: "blocked", stopReason: reason, errorCode: code,
             trigger: row.source === "user" ? "manual" : "steward", goal: row.intent.goal, specId: row.intent.specIds?.[0], limits: jobLimitsSchema.parse({}) });
     }
-    await jobsRepository.transition(job.id, "queued", "blocked", { stopReason: reason });
-    const existing = (await jobsRepository.inbox(row.projectId)).some((item) => item.jobId === job!.id && item.payload.runIntentId === row.id);
+    await jobsRepository.transition(job.id, "queued", "blocked", { stopReason: reason, ...(code ? { errorCode: code } : {}) });
+    const existing = (await jobsRepository.itemsForJob(job.id)).some((item) => item.jobId === job!.id && payloadOf(item).runIntentId === row.id);
     if (!existing) {
-        const question = /credential|password|session|sign.?in|authentication/i.test(reason)
+        const question = isCredentialFailure(reason, code ?? job.errorCode, "prerequisite")
             ? { title: "Can you provide access to run these Specs?", body: "Add the missing sign-in details in Settings → Credentials, then answer here. Do not paste passwords in your answer.", waitingFor: "credentials" }
-            : /uncommitted|repository.*dirty/i.test(reason)
+            : ((code ?? job.errorCode) ? (code ?? job.errorCode) === "repository_dirty" : /uncommitted|repository.*dirty/i.test(reason))
                 ? { title: "Can you save or discard the pending edits before running these Specs?", body: "Save or discard the pending edits in the project repository, then answer here to retry.", waitingFor: "run_prerequisite" }
                 : { title: "Can you resolve this prerequisite so the Specs can run?", body: "The requested Specs could not start. Resolve the prerequisite described below, then answer here to retry.", waitingFor: "run_prerequisite" };
         await jobsRepository.addItem({ projectId: row.projectId, jobId: job.id, kind: "question", title: question.title, body: `${question.body}\n\n${reason}`,
-            payload: { runIntentId: row.id, waitingFor: question.waitingFor, language: "en", specId: job.specId } });
+            payload: { errorCode: code ?? job.errorCode, runIntentId: row.id, waitingFor: question.waitingFor, language: "en", specId: job.specId } });
     }
     await stewardRepository.updateIntent(row.id, { status: "running", jobId: job.id, reason });
 }
 
-export async function recordScheduledPrerequisite(projectId: string, specIds: string[], dueAt: string, reason: string, healFailures: boolean): Promise<void> {
+export async function recordScheduledPrerequisite(projectId: string, specIds: string[], dueAt: string, reason: string, healFailures: boolean, code?: ErrorCode): Promise<void> {
     await withProjectLock(projectId, async () => {
         if (await isAgentPaused(projectId)) return;
         const [intents, signals, jobs] = await Promise.all([stewardRepository.intents(projectId), stewardRepository.signals(projectId, null), jobsRepository.list(projectId)]);
@@ -188,7 +190,7 @@ export async function recordScheduledPrerequisite(projectId: string, specIds: st
         const existing = intents.find((intent) => intent.intent.kind === "run_specs" && runTriggerForIntent(intent, intents, signals) === "schedule"
             && JSON.stringify([...(intent.intent.specIds ?? [])].sort()) === selection
             && jobs.some((job) => job.id === intent.jobId && job.status === "blocked" && job.stopReason === reason));
-        if (existing) { await askForRunPrerequisite(existing, reason); return; }
+        if (existing) { await askForRunPrerequisite(existing, reason, code); return; }
         const key = `schedule:${dueAt}`;
         await stewardRepository.signal({ projectId, key, kind: "schedule", title: "A scheduled run needs a prerequisite", body: reason, payload: { specIds, healFailures } });
         const signal = (await stewardRepository.signals(projectId, null)).find((row) => row.key === key)!;
@@ -197,7 +199,7 @@ export async function recordScheduledPrerequisite(projectId: string, specIds: st
         const row = await stewardRepository.addIntent({ projectId, key: `signal:${signal.id}`, source: "event", intent, priority: intent.priority, reason: intent.reason,
             fingerprint: fingerprint({ projectId, key, specIds }) });
         await stewardRepository.acknowledge(signal.id, "handled");
-        await askForRunPrerequisite(row, reason);
+        await askForRunPrerequisite(row, reason, code);
     });
 }
 
@@ -231,13 +233,13 @@ async function dispatchIntent(row: Intent): Promise<void> {
     const projectJobs = await jobsRepository.list(row.projectId);
     const existing = await jobsRepository.get(row.id);
     if (existing) {
-        if (row.intent.kind === "run_specs" && existing.status === "blocked" && existing.stopReason) await askForRunPrerequisite(row, existing.stopReason);
+        if (row.intent.kind === "run_specs" && existing.status === "blocked" && existing.stopReason) await askForRunPrerequisite(row, existing.stopReason, existing.errorCode);
         else await stewardRepository.updateIntent(row.id, { status: "running", jobId: existing.id });
         return;
     }
     for (const job of projectJobs.filter((job) => ["queued", "running"].includes(job.status))) if (await canRunAgentJob(job)) return;
     if (relatedIntents.some((other) => other.id !== row.id && other.status === "running" && other.batchId)) return;
-    const inbox = await jobsRepository.inbox(row.projectId);
+    const inbox = await jobsRepository.itemsForJobs(row.projectId, relatedIntents.flatMap((intent) => intent.jobId ? [intent.jobId] : []));
     const allSpecs = await specsRepository.listSpecs(row.projectId);
     const currentSubject = row.intent.kind === "triage" ? await intentFingerprint(row.projectId, row.intent, row.source, row.key, allSpecs) : row.fingerprint;
     const previous: Intent[] = [];
@@ -246,9 +248,9 @@ async function dispatchIntent(row: Intent): Promise<void> {
         const subject = other.intent.kind === "triage" ? await intentFingerprint(other.projectId, other.intent, other.source, other.key, allSpecs).catch(() => null) : other.fingerprint;
         if (subject === currentSubject) previous.push(other);
     }
-    const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && (item.status === "rejected" || item.payload.ignoredCheck === true)));
+    const rejected = previous.some((other) => inbox.some((item) => item.jobId === other.jobId && (item.status === "rejected" || payloadOf(item).ignoredCheck === true)));
     if ((row.source === "event" && row.intent.kind !== "run_specs" && rejected)
-        || previous.some((other) => projectJobs.some((job) => job.id === other.jobId && ["queued", "running", "paused", "blocked", "stalled"].includes(job.status)))
+        || previous.some((other) => projectJobs.some((job) => job.id === other.jobId && ACTIVE_JOB_STATUSES.includes(job.status)))
         || (row.source === "event" && row.intent.kind !== "run_specs" && previous.some((other) => Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000
             && !driftWithoutFix(other, projectJobs, inbox)))) {
         await stewardRepository.updateIntent(row.id, { status: "ignored", reason: rejected ? "A human rejected this proposal for the current Spec/context version." : "Equivalent work is already active or was handled recently." });
@@ -268,14 +270,14 @@ async function dispatchIntent(row: Intent): Promise<void> {
             healFailures: signal?.payload.healFailures !== false,
             onPrepared: async (batch) => {
                 if (stopped || await isAgentPaused(row.projectId) || (row.source === "event" && runTrigger !== "schedule" && (await stewardRepository.get(row.projectId)).autonomy === "observe")) throw new IntentDeferred("Automatic execution was deferred before the Specs started");
-                if (runTrigger === "schedule") await (await import("../jobs/schedules")).recordScheduledBatch(batch);
+                if (runTrigger === "schedule") await recordScheduledBatch(batch);
                 await stewardRepository.updateIntent(row.id, { status: "running", batchId: batch.id });
             },
         });
         return;
     }
     const kind = row.intent.kind === "triage" ? "failure_triage" : row.intent.kind;
-    const decisions = inbox.filter((item) => ["approved", "rejected", "dismissed"].includes(item.status)).slice(0, 12).map((item) => ({ title: item.title, status: item.status }));
+    const decisions = (await jobsRepository.decisions(row.projectId)).map((item) => ({ title: item.title, status: item.status }));
     const goal = `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${KIND_INSTRUCTIONS[kind]}\nRecent human decisions: ${JSON.stringify(decisions)}`;
     const job = await enqueueJob(row.projectId, { kind, goal: goal.slice(0, 12000), trigger: row.source === "user" ? "manual" : row.intent.kind === "triage" ? "spec_failure" : "steward",
         specId: row.intent.specIds?.[0], runId: row.intent.runId,
@@ -302,10 +304,10 @@ export async function processProjectSteward(projectId: string, collect = true): 
         for (const intent of intents.filter((intent) => intent.status === "running")) {
             const job = intent.jobId ? await jobsRepository.get(intent.jobId) : null;
             const batch = intent.batchId ? await getRunBatch(intent.batchId) : null;
-            if (intent.intent.kind === "run_specs" && job?.status === "blocked" && job.stopReason) await askForRunPrerequisite(intent, job.stopReason);
+            if (intent.intent.kind === "run_specs" && job?.status === "blocked" && job.stopReason) await askForRunPrerequisite(intent, job.stopReason, job.errorCode);
             if (job && ["completed", "cancelled"].includes(job.status)) {
                 if (intent.intent.kind === "run_specs" && job.status === "completed") {
-                    const answered = (await jobsRepository.inbox(projectId)).find((item) => item.jobId === job.id && item.payload.runIntentId === intent.id && item.status === "answered");
+                    const answered = (await jobsRepository.itemsForJob(job.id, { statuses: ["answered"] })).find((item) => item.jobId === job.id && payloadOf(item).runIntentId === intent.id && item.status === "answered");
                     if (answered) await enqueueIntent(projectId, intent.intent, `resume-run:${intent.id}:${answered.id}`, intent.source, { sourceChatId: intent.sourceChatId });
                 }
                 await stewardRepository.updateIntent(intent.id, { status: job.status === "completed" ? "completed" : "failed" });
@@ -326,7 +328,7 @@ export async function processProjectSteward(projectId: string, collect = true): 
                 const scrub = createProjectScrubber(projectId);
                 const reason = await scrub(String(error));
                 if (intent.intent.kind === "run_specs") {
-                    await askForRunPrerequisite(intent, reason);
+                    await askForRunPrerequisite(intent, reason, errorCodeOf(error) ?? "failed");
                 } else await stewardRepository.updateIntent(intent.id, { status: "failed", reason });
                 logger.warn("steward intent failed", { projectId, intentId: intent.id, error });
             }

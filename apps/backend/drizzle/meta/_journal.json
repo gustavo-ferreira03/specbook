@@ -232,6 +232,13 @@
       "when": 1791519397126,
       "tag": "0032_agent_access_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1791547241774,
+      "tag": "0033_powerful_sandman",
+      "breakpoints": true
     }
   ]
 }

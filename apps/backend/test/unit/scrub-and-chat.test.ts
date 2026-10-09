@@ -350,3 +350,38 @@ describe("browser tool execution", () => {
         assert.equal(getPendingCredentialRequest("cancel-credential"), null);
     });
 });
+
+describe("typed orchestration data", () => {
+    test("failure codes take precedence over localized prose", async () => {
+        const { CodedError, errorCodeOf, providerErrorCode } = await import("../../src/core/errors");
+        const { isInfrastructureFailure, isCredentialFailure, runFailureKind } = await import("../../src/core/jobs/presentation-errors");
+        assert.equal(isInfrastructureFailure("Password rejected", "provider_auth"), true);
+        assert.equal(isInfrastructureFailure("No LLM model; Xvfb failed", "environment"), false);
+        assert.equal(isCredentialFailure("The provider is unavailable", "credentials"), true);
+        assert.equal(isCredentialFailure("Session expired", "infrastructure"), false);
+        assert.equal(runFailureKind({ status: "failed", failReason: "session expired", errorCode: "assertion" }), "assertion");
+        assert.equal(runFailureKind({ status: "failed", failReason: "ECONNREFUSED", errorCode: null }), "environment");
+        assert.equal(errorCodeOf(new Error("Localized", { cause: new CodedError("credentials", "Localized") })), "credentials");
+        assert.equal(errorCodeOf({ errorCode: "locator" }), "locator");
+        assert.equal(providerErrorCode({ status: 401, message: "Localized" }), "provider_auth");
+        assert.equal(providerErrorCode({ status: 429, message: "Localized" }), "provider_limit");
+        assert.equal(providerErrorCode(new Error("The app password was rejected")), "provider_error");
+    });
+
+    test("Inbox accessors tolerate legacy rows and reject malformed decision data", async () => {
+        const { payloadOf, specBatchOf, verificationOf } = await import("../../src/core/jobs/schemas");
+        const legacy = { payload: { sourceChatId: "chat", specBatch: { candidates: [{ title: "Sign in", jobId: "job" }] }, verification: { status: "passed" }, custom: "kept" } };
+        assert.equal(specBatchOf(legacy)?.candidates[0]?.title, "Sign in");
+        assert.equal(specBatchOf(legacy)?.candidates[0]?.jobId, "job");
+        assert.deepEqual(verificationOf(legacy)?.screenshots, []);
+        assert.equal(payloadOf(legacy).custom, "kept");
+        const params = { parentId: "parent", title: "Feature", description: "Description" };
+        assert.equal(JSON.stringify(payloadOf({ payload: { params } }).params), JSON.stringify(params));
+        const malformed = { payload: { sourceChatId: "chat", waitingFor: 42, requiresVerification: "true", verification: { status: "passed", sourceHash: 17 } } };
+        assert.equal(payloadOf(malformed).sourceChatId, "chat");
+        assert.equal(payloadOf(malformed).waitingFor, undefined);
+        assert.equal(payloadOf(malformed).requiresVerification, true);
+        assert.equal(verificationOf(malformed), undefined);
+        assert.deepEqual(payloadOf({ payload: null }), {});
+    });
+});

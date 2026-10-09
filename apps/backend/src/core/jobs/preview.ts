@@ -1,3 +1,4 @@
+import { payloadOf } from "./schemas";
 import type { InboxItem } from "../../infra/repositories/jobs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { parseSpecYaml, serializeFeatureYaml, serializeSpecYaml } from "../repo/yaml";
@@ -11,18 +12,18 @@ interface ProposalFile {
 
 export async function proposalFiles(item: InboxItem): Promise<ProposalFile[]> {
     if (item.kind === "feature") {
-        return [{ path: "feature.yml", before: null, after: serializeFeatureYaml(featureProposalSchema.parse(item.payload.params)) }];
+        return [{ path: "feature.yml", before: null, after: serializeFeatureYaml(featureProposalSchema.parse(payloadOf(item).params)) }];
     }
     if (item.kind === "new_spec") {
-        const proposed = newSpecProposalSchema.parse(item.payload.params);
+        const proposed = newSpecProposalSchema.parse(payloadOf(item).params);
         return [
             { path: "spec.yml", before: null, after: serializeSpecYaml(proposed) },
             { path: "spec.ts", before: null, after: proposed.testSource },
         ];
     }
     if (item.kind !== "spec_fix") return [];
-    const patch = fixProposalSchema.parse(item.payload.params);
-    const before = item.payload.before as { yaml: string; testSource: string | null };
+    const patch = fixProposalSchema.parse(payloadOf(item).params);
+    const before = { yaml: payloadOf(item).before?.yaml ?? "", testSource: payloadOf(item).before?.testSource ?? null };
     const original = parseSpecYaml(before.yaml);
     const yaml = patch.title === undefined && patch.description === undefined && patch.humanSpec === undefined
         ? before.yaml

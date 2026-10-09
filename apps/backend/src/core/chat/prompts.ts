@@ -1,13 +1,7 @@
-import { readFileSync } from "node:fs";
+import { loadPrompt } from "./prompt-loader";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import type { Project } from "../../infra/repositories/projects";
 import { projectContextJsonSchema } from "./context-tools";
-
-const promptsDir = new URL("./prompts/", import.meta.url);
-
-function loadPrompt(name: string): string {
-    return readFileSync(new URL(name, promptsDir), "utf8").trimEnd();
-}
 
 export function fillTemplate(template: string, values: Record<string, string>): string {
     return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {

@@ -1,3 +1,6 @@
+import { CodedError, errorCodeOf } from "../errors";
+import { recordBatch } from "./schedule-batches";
+export { recordScheduledBatch } from "./schedule-batches";
 import { z } from "zod";
 import { logger } from "../../infra/logger";
 import { projectsRepository } from "../../infra/repositories/projects";
@@ -9,7 +12,7 @@ import { createKeyedLock } from "../operations/keyed-lock";
 import { postWebhook } from "../network/webhook";
 import { decryptSecret } from "../credentials/crypto";
 import { projectSecretScrubber } from "../credentials/scrub";
-import { getRunBatch, startSpecBatch, type RunBatch } from "../runner/batch";
+import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { areSpecsLocked } from "../specs/lifecycle";
 import { recordScheduledPrerequisite } from "../steward/engine";
 import { isAgentPaused } from "./pause";
@@ -118,29 +121,6 @@ export async function updateAutomation(projectId: string, input: unknown) {
     });
 }
 
-async function recordBatch(automation: ProjectAutomation, batch: RunBatch): Promise<void> {
-    let notification: { webhookUrl: string; payload: Record<string, unknown> } | null = null;
-    if (automation.webhookUrl) {
-        const project = await projectsRepository.getProject(automation.projectId);
-        if (!project) return;
-        const scrub = await projectSecretScrubber(project.id);
-        const name = scrub(project.name).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        notification = { webhookUrl: automation.webhookUrl, payload: {
-            text: `Specbook: ${name} — scheduled run ${batch.status} (${batch.specs.length} Specs)`,
-            event: "run_batch.status_changed", eventId: `${batch.id}:${batch.status}`,
-            projectId: project.id, batchId: batch.id, status: batch.status, total: batch.specs.length,
-            passed: batch.specs.filter((spec) => spec.status === "passed").length,
-            failed: batch.specs.filter((spec) => spec.status === "failed").length,
-            errors: batch.specs.filter((spec) => spec.status === "error").length,
-        } };
-    }
-    await schedulesRepository.recordBatch(automation.projectId, batch.id, batch.status, notification);
-}
-
-export async function recordScheduledBatch(batch: RunBatch): Promise<void> {
-    const automation = await schedulesRepository.get(batch.projectId);
-    if (automation) await recordBatch(automation, batch);
-}
 
 async function scheduleProject(projectId: string, at: Date): Promise<void> {
     await withAutomationLock(projectId, async () => {
@@ -164,13 +144,13 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
         if (!await schedulesRepository.claimDue(projectId, automation.nextRunAt, nextRunAt)) return;
         try {
             if (automation.specIds.length && (selected.some((spec) => spec.status === "invalid") || automation.specIds.some((id) => !allSpecs.some((spec) => spec.id === id)))) {
-                throw new Error("Some selected Specs are missing or invalid. Review the selected Specs before the next scheduled run.");
+                throw new CodedError("invalid_spec", "Some selected Specs are missing or invalid. Review the selected Specs before the next scheduled run.");
             }
             if (!selected.length) {
                 await schedulesRepository.update(projectId, { lastError: null });
                 return;
             }
-            if (!ids.length) throw new Error("There are no runnable Specs. Add a Spec or resolve the invalid Specs before the next scheduled run.");
+            if (!ids.length) throw new CodedError("invalid_spec", "There are no runnable Specs. Add a Spec or resolve the invalid Specs before the next scheduled run.");
             await startSpecBatch(projectId, ids, "Scheduled run", {
                 trigger: "schedule",
                 healFailures: automation.healFailures,
@@ -184,7 +164,7 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
             const scrub = await projectSecretScrubber(projectId);
             const message = scrub(error instanceof Error ? error.message : String(error)).slice(0, 4000);
             await schedulesRepository.update(projectId, { lastError: message });
-            await recordScheduledPrerequisite(projectId, automation.specIds.length ? automation.specIds : ids, automation.nextRunAt, message, automation.healFailures);
+            await recordScheduledPrerequisite(projectId, automation.specIds.length ? automation.specIds : ids, automation.nextRunAt, message, automation.healFailures, errorCodeOf(error) ?? "failed");
         }
     });
 }

@@ -1,3 +1,5 @@
+import { CodedError } from "../errors";
+import { payloadOf } from "./schemas";
 import crypto from "node:crypto";
 import { jobBaseUrl, jobEnvironment } from "./environment";
 import fs from "node:fs/promises";
@@ -30,6 +32,7 @@ export interface ProposalVerification {
     sourceHash: string;
     baseUrl: string;
     screenshots: string[];
+    errorCode?: import("../errors").ErrorCode | null;
     review?: EvidenceReview | null;
 }
 
@@ -40,13 +43,13 @@ export function proposalDirectory(item: InboxItem, verificationId: string): stri
 
 export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSignal): Promise<ProposalVerification> {
     if (item.jobId !== job.id || item.status !== "pending") throw new Error("Only this job's pending proposals can be verified");
-    const patch = fixProposalSchema.parse(item.payload.params);
-    const before = item.payload.before as { yaml?: string };
+    const patch = fixProposalSchema.parse(payloadOf(item).params);
+    const before = payloadOf(item).before ?? {};
     if (!patch.testSource || !before.yaml) throw new Error("Proposal needs spec.ts and a behavior contract");
     const analysis = analyzeSpecSource(patch.testSource);
-    if (!analysis.ok) throw new Error(analysis.error);
+    if (!analysis.ok) throw new CodedError("invalid_spec", analysis.error);
     const stepsError = stepTitlesError(analysis.analysis.steps, (patch.humanSpec ?? parseSpecYaml(before.yaml).humanSpec).steps);
-    if (stepsError) throw new Error(stepsError);
+    if (stepsError) throw new CodedError("invalid_spec", stepsError);
     const project = await projectsRepository.getProject(job.projectId);
     if (!project) throw new Error("Project not found");
     const environment = await jobEnvironment(job);
@@ -54,13 +57,13 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     const spec = await specsRepository.getSpec(patch.specId);
     if (!spec || spec.projectId !== job.projectId) throw new Error("Spec no longer exists");
     const raw = await repoGit.withRepoLock(job.projectId, () => readSpecRawFiles(spec));
-    const original = item.payload.before as { yaml: string; testSource: string | null };
+    const original = payloadOf(item).before!;
     if (raw.yaml !== original.yaml || raw.testSource !== original.testSource) {
         throw new Error("Proposal is stale; inspect the current Spec and propose again");
     }
     const refs = analysis.analysis.secretRefs.map((ref) => ref.envName);
     const { env: secretEnv, missing } = await resolveSecretEnv(job.projectId, refs, environment.credentialOverrides);
-    if (missing.length) throw new Error(`Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`);
+    if (missing.length) throw new CodedError("credentials", `Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`);
     const secretOrigins = await resolveSecretOriginPolicy(job.projectId, refs, environment);
     const scrub = await projectSecretScrubber(job.projectId);
     const id = crypto.randomUUID();
@@ -83,6 +86,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     const verification: ProposalVerification = {
         id, status: outcome.processFailure ? "error" : result?.status ?? "error", durationMs: result?.durationMs ?? null,
         failReason: scrub(outcome.processFailure ?? result?.failReason ?? "") || null, failedStep: result?.failedStep ?? null,
+        errorCode: outcome.processFailure ? "infrastructure" : result?.errorCode ?? null,
         sourceHash: sourceHashOf(patch.testSource), baseUrl, screenshots: manifest.steps.map((step) => step.file),
     };
     verification.review = await reviewRunEvidence(directory, verification);

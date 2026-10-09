@@ -1,3 +1,4 @@
+import { CodedError, errorCodeOf, type ErrorCode } from "../errors";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
@@ -160,7 +161,7 @@ export function getRunBatchDirectory(id: string): string {
 async function finishPreparedSpec(
     batchId: string,
     prepared: PreparedSpec,
-    outcome: { status: FinalRunStatus; durationMs: number | null; failReason: string | null },
+    outcome: { status: FinalRunStatus; durationMs: number | null; failReason: string | null; errorCode?: ErrorCode | null },
     scrub: (text: string) => string,
     options?: RunOptions,
     failedStep: string | null = null,
@@ -179,7 +180,7 @@ async function finishPreparedSpec(
     } catch (error) {
         if (!options) throw error;
     }
-    await runsRepository.finishRun(prepared.run.id, result.status, result.durationMs, result.failReason);
+    await runsRepository.finishRun(prepared.run.id, result.status, result.durationMs, result.failReason, result.errorCode ?? (result.status === "passed" ? null : "infrastructure"));
     if (options) {
         const stored = await runsRepository.getRun(prepared.run.id);
         if (!stored) throw new Error("Run disappeared");
@@ -212,7 +213,7 @@ async function executeBatch(
 ): Promise<void> {
     let started = Date.now();
     const directory = options ? path.join(runsDir, prepared[0].run.id) : batchDirectory(batch.id);
-    const results = new Map<string, { status: FinalRunStatus; durationMs: number | null; failReason: string | null; failedStep: string | null }>();
+    const results = new Map<string, { status: FinalRunStatus; durationMs: number | null; failReason: string | null; failedStep: string | null; errorCode?: ErrorCode | null }>();
     let processFailure: string | null = null;
     try {
         await fs.mkdir(directory, { recursive: true });
@@ -246,7 +247,7 @@ async function executeBatch(
                 results.set(entry.run.id, result);
             } else {
                 results.set(entry.run.id, {
-                    status: "error", durationMs: null, failedStep: null,
+                    status: "error", durationMs: null, failedStep: null, errorCode: "infrastructure",
                     failReason: options
                         ? processFailure ?? "Playwright produced no result"
                         : result?.failReason ?? processFailure ?? "Playwright produced no result for this Spec",
@@ -255,7 +256,7 @@ async function executeBatch(
         }
     } catch (error) {
         processFailure = error instanceof Error ? error.message : String(error);
-        for (const entry of prepared) results.set(entry.run.id, { status: "error", durationMs: null, failReason: processFailure, failedStep: null });
+        for (const entry of prepared) results.set(entry.run.id, { status: "error", durationMs: null, failReason: processFailure, failedStep: null, errorCode: options?.signal?.aborted ? "cancelled" : errorCodeOf(error) ?? "infrastructure" });
     }
     try {
         for (const entry of prepared) {
@@ -306,7 +307,7 @@ async function prepareSpecBatch(
             const spec = await specsRepository.getSpec(id);
             if (!spec || spec.projectId !== projectId) throw new Error(options ? "This Spec was removed. Refresh the project to see its current Specs." : `Spec ${id} not found in this project`);
             if (spec.status === "invalid") {
-                throw new Error(options ? `This Spec needs repair before it can run. ${spec.invalidReason ?? "Open the Spec and choose Repair in chat."}` : `Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
+                throw new CodedError("invalid_spec", options ? `This Spec needs repair before it can run. ${spec.invalidReason ?? "Open the Spec and choose Repair in chat."}` : `Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
             }
             const [markdown, testSource] = await Promise.all([
                 fs.readFile(path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)), "utf8"),
@@ -343,7 +344,7 @@ async function prepareSpecBatch(
         const titles = definitions
             .filter((definition) => refsOf(definition.analysis).some((ref) => missing.includes(ref)))
             .map((definition) => `"${definition.spec.title}"`);
-        throw new Error(
+        throw new CodedError("credentials",
             `${options ? `Spec ${titles[0]} references` : `Specs ${titles.join(", ")} reference`} credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
         );
     }

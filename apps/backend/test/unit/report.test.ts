@@ -22,6 +22,15 @@ function fileSuite(file: string, result: Record<string, unknown>, annotations: u
 }
 
 describe("parsePlaywrightReport", () => {
+    test("reads structured failure annotations without classifying error prose", () => {
+        const parsed = parsePlaywrightReport(report([
+            fileSuite("assertion.spec.ts", { status: "failed", errors: [{ message: "No LLM model; session expired" }], attachments: [] }, [{ type: "specbook-error-code", description: "assertion" }]),
+            fileSuite("setup.spec.ts", { status: "failed", errors: [{ message: "Localized setup failure" }], attachments: [] }),
+        ]));
+        assert.equal(parsed.files.get("assertion")?.errorCode, "assertion");
+        assert.equal(parsed.files.get("setup")?.errorCode, "infrastructure");
+    });
+
     test("maps each spec file to its result, keyed by run id", () => {
         const parsed = parsePlaywrightReport(report([
             fileSuite("run-a.spec.ts", {

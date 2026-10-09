@@ -1,3 +1,4 @@
+import type { ErrorCode } from "../../core/errors";
 import crypto from "node:crypto";
 import { and, desc, eq, inArray, lt, max, or } from "drizzle-orm";
 import { db } from "../db/client";
@@ -19,6 +20,7 @@ class RunsRepository {
             startedAt: new Date().toISOString(),
             durationMs: null,
             failReason: null,
+            errorCode: null,
             automationPending: input.automate ?? false,
             healOnFailure: input.healOnFailure ?? true,
             retryOf: input.retryOf ?? null,
@@ -35,8 +37,9 @@ class RunsRepository {
         status: Exclude<RunStatus, "running">,
         durationMs: number | null,
         failReason: string | null,
+        errorCode: ErrorCode | null = null,
     ): Promise<void> {
-        await db.update(runs).set({ status, durationMs, failReason }).where(eq(runs.id, id));
+        await db.update(runs).set({ status, durationMs, failReason, errorCode }).where(eq(runs.id, id));
     }
 
     async listRuns(specId: string, options: { limit?: number; before?: string } = {}): Promise<Run[]> {
@@ -117,7 +120,7 @@ class RunsRepository {
     async markInterruptedRuns(): Promise<void> {
         await db
             .update(runs)
-            .set({ status: "error", failReason: "Backend stopped before the run completed" })
+            .set({ status: "error", failReason: "Backend stopped before the run completed", errorCode: "infrastructure" })
             .where(eq(runs.status, "running"));
     }
 }

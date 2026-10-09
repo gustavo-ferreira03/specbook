@@ -1,3 +1,4 @@
+import { errorCodeSchema, type ErrorCode } from "../errors";
 import path from "node:path";
 import { FAILED_STEP_ANNOTATION } from "./specbook/guard";
 
@@ -6,6 +7,7 @@ export interface SpecFileResult {
     durationMs: number | null;
     failReason: string | null;
     failedStep: string | null;
+    errorCode?: ErrorCode | null;
     attachments: { name: string; path: string; contentType: string }[];
 }
 
@@ -50,7 +52,7 @@ function fileKey(file: string): string {
 function testResult(test: Json): SpecFileResult {
     const results = records(test.results);
     const result = results[results.length - 1];
-    if (!result) return { status: "error", durationMs: null, failReason: "Playwright did not run the test", failedStep: null, attachments: [] };
+    if (!result) return { status: "error", durationMs: null, failReason: "Playwright did not run the test", failedStep: null, attachments: [], errorCode: "infrastructure" };
     const duration = Number(result.duration);
     const durationMs = Number.isFinite(duration) ? Math.round(duration) : null;
     const attachments = records(result.attachments).flatMap((attachment) =>
@@ -64,7 +66,7 @@ function testResult(test: Json): SpecFileResult {
     const single = result.error && typeof result.error === "object" ? errorMessage(result.error as Json) : null;
     if (messages.length === 0 && single) messages.push(single);
     if (status === "skipped") {
-        return { status: "error", durationMs, failReason: messages.join("\n\n") || "The test was skipped", failedStep: null, attachments };
+        return { status: "error", durationMs, failReason: messages.join("\n\n") || "The test was skipped", failedStep: null, attachments, errorCode: "infrastructure" };
     }
     return {
         status: "failed",
@@ -72,6 +74,8 @@ function testResult(test: Json): SpecFileResult {
         failReason: messages.join("\n\n") || (status === "timedOut" ? "The test timed out" : `The test ${status || "failed"}`),
         failedStep: failedStepOf(test, result),
         attachments,
+        errorCode: [...records(result.annotations), ...records(test.annotations)].filter((annotation) => annotation.type === "specbook-error-code")
+            .map((annotation) => errorCodeSchema.safeParse(annotation.description)).find((parsed) => parsed.success)?.data ?? "infrastructure",
     };
 }
 

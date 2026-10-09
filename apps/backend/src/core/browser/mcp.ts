@@ -1,3 +1,4 @@
+import { CodedError, errorCodeOf, type ErrorCode } from "../errors";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -128,11 +129,11 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string;
         const { tools } = await client.listTools();
         const ensureBrowser = async (signal?: AbortSignal) => {
             const result = await client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal });
-            if (result.isError) throw new Error(`The browser could not start: ${extractMcpText(result as { content?: unknown })}`);
+            if (result.isError) throw new CodedError("infrastructure", `The browser could not start: ${extractMcpText(result as { content?: unknown })}`);
         };
         const navigate = async (url: string, signal?: AbortSignal) => {
             const result = await client.callTool({ name: "browser_navigate", arguments: { url } }, undefined, { signal });
-            if (result.isError) throw new Error(`browser tool failed: ${extractMcpText(result as { content?: unknown })}`);
+            if (result.isError) throw new CodedError("environment", `browser tool failed: ${extractMcpText(result as { content?: unknown })}`);
         };
         return {
             client,
@@ -199,7 +200,7 @@ export async function renderMcpResult(result: { content?: unknown }, workDir: st
 export async function readBrowserSnapshot(mcp: BrowserMcp, signal?: AbortSignal): Promise<string> {
     signal?.throwIfAborted();
     const result = await mcp.client.callTool({ name: "browser_snapshot", arguments: {} }, undefined, { signal });
-    if (result.isError) throw new Error("The current browser snapshot could not be read.");
+    if (result.isError) throw new CodedError("infrastructure", "The current browser snapshot could not be read.");
     const content = result as { content?: unknown };
     return mcp.workDir ? renderMcpResult(content, mcp.workDir) : extractMcpText(content);
 }
@@ -208,10 +209,10 @@ export async function getActiveTabUrl(mcp: BrowserMcp, signal?: AbortSignal): Pr
     signal?.throwIfAborted();
     const result = await mcp.client.callTool({ name: "browser_tabs", arguments: { action: "list" } }, undefined, { signal }).catch((error) => {
         signal?.throwIfAborted();
-        throw new Error(`The browser could not inspect its open tabs: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        throw new CodedError("infrastructure", `The browser could not inspect its open tabs: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     });
     const text = extractMcpText(result as { content?: unknown });
-    if (result.isError) throw new Error(`The browser could not inspect its open tabs: ${text}`);
+    if (result.isError) throw new CodedError("infrastructure", `The browser could not inspect its open tabs: ${text}`);
     const pageUrl = text.match(/^- Page URL: (\S+)/m);
     if (pageUrl) return pageUrl[1];
     const currentTab = text.split("\n").find((line) => line.includes("(current)"));
@@ -241,7 +242,8 @@ export function bridgeBrowserTools(
                     if (tool.name === "browser_take_screenshot") delete args.filename;
                     const clean = async (value: string) =>
                         policy?.sanitizeResult ? await policy.sanitizeResult(value) : value;
-                    const toolError = async (text: string) => ({
+                    const toolError = async (text: string, errorCode?: ErrorCode) => ({
+                        errorCode,
                         content: [{ type: "text" as const, text: await clean(text) }],
                         details: undefined,
                         terminate: false,
@@ -252,19 +254,22 @@ export function bridgeBrowserTools(
                             await policy.beforeCall(tool.name, args, signal);
                         } catch (error) {
                             signal?.throwIfAborted();
-                            return toolError(error instanceof Error ? error.message : String(error));
+                            return toolError(error instanceof Error ? error.message : String(error), errorCodeOf(error) ?? "failed");
                         }
                     }
                     let resultText = "";
                     let callError = "";
+                    let callErrorCode: ErrorCode | undefined;
                     let images: { type: "image"; data: string; mimeType: string }[] = [];
                     try {
                         signal?.throwIfAborted();
                         const result = await mcp.client.callTool({ name: tool.name, arguments: args }, undefined, { signal });
+                        callErrorCode = errorCodeOf(result) ?? errorCodeOf(result.structuredContent) ?? "failed";
                         resultText = await renderMcpResult(result as { content?: unknown }, workDir);
                         images = mcpImages(result as { content?: unknown });
                         if (result.isError) callError = `browser tool failed: ${resultText || "The browser returned an error without details."}`;
                     } catch (error) {
+                        callErrorCode = errorCodeOf(error) ?? "infrastructure";
                         callError = `browser tool failed: ${String(error)}`;
                         resultText = callError;
                     }
@@ -274,11 +279,11 @@ export function bridgeBrowserTools(
                         } catch (error) {
                             signal?.throwIfAborted();
                             const message = error instanceof Error ? error.message : String(error);
-                            return toolError(callError ? `${callError}\n${message}` : message);
+                            return toolError(callError ? `${callError}\n${message}` : message, errorCodeOf(error) ?? callErrorCode ?? "failed");
                         }
                     }
                     signal?.throwIfAborted();
-                    if (callError) return toolError(callError);
+                    if (callError) return toolError(callError, callErrorCode);
                     const sendImages = images.length > 0 && (await policy?.sendScreenshots?.()) === true;
                     if (images.length > 0 && !sendImages) resultText += "\nThe screenshot was withheld: screenshots are not sent to the model in this instance's security settings.";
                     return {

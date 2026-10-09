@@ -1,3 +1,5 @@
+import type { ErrorCode } from "../errors";
+import { specBatchOf, payloadOf, verificationOf } from "./schemas";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
 import { createProjectScrubber } from "../credentials/scrub";
 import { specsRepository } from "../../infra/repositories/specs";
@@ -7,31 +9,30 @@ import { sanitizeTechnicalDetails } from "./presentation-errors";
 export const MAX_SAFETY_RETRIES = 2;
 
 async function askAboutStalledWork(job: Job): Promise<void> {
-    const existing = (await jobsRepository.inbox(job.projectId)).some((item) => item.jobId === job.id && item.kind === "question" && ["pending", "applying"].includes(item.status));
+    const existing = (await jobsRepository.itemsForJob(job.id, { kind: "question", statuses: ["pending", "applying"] })).length > 0;
     if (existing) return;
     let spec = job.specId ? await specsRepository.getSpec(job.specId) : null;
-    const source = job.kind === "generate_spec" ? (await jobsRepository.inbox(job.projectId)).find((item) => item.kind === "spec_batch"
-        && (item.payload.specBatch as { candidates?: { jobId?: string }[] } | undefined)?.candidates?.some((candidate) => candidate.jobId === job.id)) : null;
-    const candidate = (source?.payload.specBatch as { candidates?: { jobId?: string; specId?: string; title?: string }[] } | undefined)?.candidates?.find((candidate) => candidate.jobId === job.id);
+    const source = job.kind === "generate_spec" ? await jobsRepository.specBatchForJob(job.projectId, job.id) : null;
+    const candidate = (source ? specBatchOf(source) : undefined)?.candidates?.find((candidate) => candidate.jobId === job.id);
     if (!spec && candidate?.specId) spec = await specsRepository.getSpec(candidate.specId);
     const name = spec?.title ?? candidate?.title;
     const scrub = createProjectScrubber(job.projectId);
     await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "question",
         title: await scrub(`I couldn’t finish ${name ? `the Spec “${name}”` : "this investigation"}. Look at it together?`),
         body: sanitizeTechnicalDetails(await scrub(`${job.stopReason ?? "The investigation has not reached a confirmed result."}\nI tried another approach but still could not confirm the expected result. Your explanation of the flow can help me continue.`)),
-        payload: { waitingFor: "investigation", language: "en", specId: spec?.id ?? job.specId, runId: job.runId, ...(source ? { sourceItemId: source.id } : {}) } });
+        payload: { errorCode: job.errorCode ?? "failed", waitingFor: "investigation", language: "en", specId: spec?.id ?? job.specId, runId: job.runId, ...(source ? { sourceItemId: source.id } : {}) } });
 }
 
-export async function stallJob(job: Job, fallback: string): Promise<void> {
+export async function stallJob(job: Job, fallback: string, code?: ErrorCode): Promise<void> {
     const current = await jobsRepository.get(job.id);
     if (current?.status !== "running") return;
-    const candidates = (await jobsRepository.inbox(job.projectId)).filter((item) => item.jobId === job.id);
-    const failure = candidates.map((item) => (item.payload.verification as { failReason?: string } | undefined)?.failReason).find(Boolean);
+    const candidates = await jobsRepository.itemsForJob(job.id);
+    const failure = candidates.map((item) => verificationOf(item)?.failReason).find(Boolean);
     const actions = await jobsRepository.actions(job.id);
     const lastError = [...actions].reverse().find((action) => action.action.endsWith(":error"))?.detail;
     const stopReason = await createProjectScrubber(job.projectId)(failure ?? lastError ?? fallback);
     const retryAt = current.safetyRetries < MAX_SAFETY_RETRIES ? new Date(Date.now() + 60_000 * 2 ** current.safetyRetries).toISOString() : null;
-    const changed = await jobsRepository.transition(job.id, "running", "stalled", { stopReason, retryAt });
+    const changed = await jobsRepository.transition(job.id, "running", "stalled", { stopReason, retryAt, errorCode: code ?? candidates.map((item) => verificationOf(item)?.errorCode).find(Boolean) ?? current.errorCode ?? "failed" });
     if (changed) await jobsRepository.log(job.id, "stalled", stopReason);
 }
 
@@ -43,7 +44,7 @@ export async function retryStalledJob(job: Job): Promise<void> {
         return;
     }
     if (current.status !== "stalled") return;
-    if (current.systemError) { await retryInfrastructure(current, current.systemError); return; }
+    if (current.systemError) { await retryInfrastructure(current, current.systemError, current.errorCode ?? "infrastructure"); return; }
     if (current.safetyRetries >= MAX_SAFETY_RETRIES) {
         const blocked = await jobsRepository.transition(job.id, "stalled", "blocked", { retryAt: null });
         if (blocked) await askAboutStalledWork(blocked);
@@ -57,14 +58,14 @@ export async function retryStalledJob(job: Job): Promise<void> {
     if (changed) await jobsRepository.log(job.id, "different_approach", `Attempt ${current.safetyRetries + 1}: ${current.stopReason ?? "No confirmed result"}`);
 }
 
-export async function retryInfrastructure(job: Job, error: string): Promise<void> {
+export async function retryInfrastructure(job: Job, error: string, code: ErrorCode = "infrastructure"): Promise<void> {
     const current = await jobsRepository.get(job.id);
     if (!current || !["running", "blocked", "stalled"].includes(current.status)) return;
     const message = await createProjectScrubber(job.projectId)(error);
     const attempts = current.infrastructureRetries + 1;
     const activeMs = current.startedAt ? Math.max(0, Date.now() - Date.parse(current.startedAt)) : 0;
     const changed = await jobsRepository.requeue(current, current.status, {
-        infrastructureRetries: attempts, systemError: message, safetyRetries: current.safetyRetries, stopReason: current.stopReason,
+        infrastructureRetries: attempts, systemError: message, errorCode: code, safetyRetries: current.safetyRetries, stopReason: current.stopReason,
         retryAt: new Date(Date.now() + Math.min(300_000, 15_000 * 2 ** Math.min(attempts - 1, 5))).toISOString(),
         pendingMessage: "Specbook encountered an internal service problem and is retrying. Check the current state before repeating actions. This is not a question for the human; do not put browser, server or AI-provider failures in the Inbox.",
     }, { to: await isAgentPaused(job.projectId) ? "paused" : "queued", activeMs });

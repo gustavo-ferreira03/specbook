@@ -10,7 +10,7 @@ import { specsRepository } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
 import { createProjectScrubber } from "../credentials/scrub";
 import { triageSchema } from "./schemas";
-import { isInfrastructureFailure } from "./presentation-errors";
+import { isCredentialFailure, isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure } from "./retry";
 import { matchesCurrentSpec } from "./current-run";
 import { reviewRunEvidence } from "../runner/evidence-review";
@@ -76,20 +76,22 @@ export function createTriageTools(job: Job, abort: () => void) {
             parameters: Type.Unsafe<z.infer<typeof triageSchema>>(triageSchema.toJSONSchema()),
             async execute(_id, input) {
                 const triage = triageSchema.parse(input);
-                await jobsRepository.update(job.id, { classification: triage.classification });
-                if (isInfrastructureFailure(triage.reason)) {
-                    await retryInfrastructure(job, triage.reason);
+                const run = job.runId ? await runsRepository.getRun(job.runId) : null;
+                const code = triage.errorCode ?? run?.errorCode;
+                await jobsRepository.update(job.id, { classification: triage.classification, errorCode: code ?? (triage.classification === "environment" ? "environment" : "failed") });
+                if (isInfrastructureFailure(triage.reason, code)) {
+                    await retryInfrastructure(job, triage.reason, code ?? "infrastructure");
                     abort();
                     return { content: [{ type: "text" as const, text: "Specbook will retry its internal service. No Inbox decision was created." }], details: undefined, terminate: true };
                 }
-                const credentials = triage.classification === "environment" && /credential|session|login|sign.in|authentication|credencia|sessão/i.test(triage.reason);
+                const credentials = triage.classification === "environment" && isCredentialFailure(triage.reason, code);
                 const body = await scrub(`${triage.reason}\n\nReproduction:\n${triage.reproduction.map((step, index) => `${index + 1}. ${step}`).join("\n")}\n\nEvidence:\n${triage.evidence.join("\n")}\nRun: ${job.runId}`);
                 const kind = triage.classification === "application_bug" ? "bug_report" : credentials ? "question" : "note";
                 const item = await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind,
                     title: kind === "bug_report" ? "The app did not behave as expected. What should happen next?" : credentials ? "Can you restore access to the app?" : "The failure was investigated", body,
-                    payload: { runId: job.runId, specId: job.specId, language: "en", classification: triage.classification, ...(credentials ? { waitingFor: "credentials" } : {}) } });
+                    payload: { errorCode: credentials ? "credentials" : code ?? (triage.classification === "environment" ? "environment" : "failed"), runId: job.runId, specId: job.specId, language: "en", classification: triage.classification, ...(credentials ? { waitingFor: "credentials" } : {}) } });
                 if (triage.classification === "environment" && !credentials) {
-                    await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 60_000).toISOString(), systemError: null,
+                    await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 60_000).toISOString(), systemError: null, errorCode: "environment",
                         pendingMessage: "Check whether the app is available again. Retry the original investigation without changing its intended behavior. Availability failures are progress updates, not questions for the human." });
                     abort();
                 }

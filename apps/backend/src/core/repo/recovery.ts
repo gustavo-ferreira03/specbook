@@ -1,3 +1,4 @@
+import { CodedError } from "../errors";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -6,7 +7,9 @@ import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
 import { assertRepoPathSafe, readOptionalRepoFile } from "./safe-fs";
 
-export class RepositoryRecoveryError extends Error {}
+export class RepositoryRecoveryError extends CodedError {
+    constructor(message: string) { super("repository_dirty", message); }
+}
 
 interface RecoveryFile {
     path: string;

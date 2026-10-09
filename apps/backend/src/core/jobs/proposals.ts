@@ -1,3 +1,4 @@
+import { payloadOf, verificationOf } from "./schemas";
 import type { z } from "zod";
 import { jobBaseUrl } from "./environment";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
@@ -67,12 +68,12 @@ export async function proposeMutation(job: Job, name: string, input: unknown): P
             title = `Proposed Feature: ${proposed.title}`;
             params = proposed;
         }
-        const rejected = (await jobsRepository.inbox(job.projectId)).find((item) =>
-            item.status === "rejected" && item.kind === kind && JSON.stringify(item.payload.params) === JSON.stringify(params));
+        const rejected = (await jobsRepository.itemsByKind(job.projectId, kind, ["rejected"])).find((item) =>
+            item.status === "rejected" && item.kind === kind && JSON.stringify(payloadOf(item).params) === JSON.stringify(params));
         if (rejected) throw new Error("The human rejected this proposal. Respect that decision; ask a question if new evidence changes the recommendation.");
-        const payload = { baseHead, params, before, requiresVerification: ["failure_triage", "regenerate"].includes(job.kind) };
-        const existing = (await jobsRepository.inbox(job.projectId)).find((item) =>
-            item.jobId === job.id && item.status === "pending" && item.payload.baseHead === baseHead && JSON.stringify(item.payload.params) === JSON.stringify(params));
+        const payload = { errorCode: "failed", baseHead, params, before, requiresVerification: ["failure_triage", "regenerate"].includes(job.kind) };
+        const existing = (await jobsRepository.itemsForJob(job.id, { statuses: ["pending"] })).find((item) =>
+            item.jobId === job.id && item.status === "pending" && payloadOf(item).baseHead === baseHead && JSON.stringify(payloadOf(item).params) === JSON.stringify(params));
         if (existing) return existing;
         return jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind, title,
             body: "Review the proposed files below. Approval commits this change to the project repository.", payload });
@@ -84,14 +85,14 @@ export async function applyProposal(item: InboxItem, checkPolicy?: () => Promise
     const git = repoGit.getProjectGit(item.projectId);
     const previous = await git.raw(["log", "--format=%H", "--fixed-strings", `--grep=${marker}`, "-1"]);
     if (previous.trim()) return previous.trim();
-    if (item.payload.requiresVerification && (item.payload.verification as { status?: string } | undefined)?.status !== "passed") {
+    if (payloadOf(item).requiresVerification && verificationOf(item)?.status !== "passed") {
         throw new Error("This proposal needs a passing verification before approval");
     }
-    const options = { expectedHead: String(item.payload.baseHead), commitMessage: `${marker} ${item.title}`, checkPolicy };
+    const options = { expectedHead: String(payloadOf(item).baseHead), commitMessage: `${marker} ${item.title}`, checkPolicy };
     if (item.kind === "spec_fix") {
-        const { specId, ...patch } = fixProposalSchema.parse(item.payload.params);
-        if (item.payload.requiresVerification) {
-            const verified = item.payload.verification as { sourceHash: string; baseUrl: string };
+        const { specId, ...patch } = fixProposalSchema.parse(payloadOf(item).params);
+        if (payloadOf(item).requiresVerification) {
+            const verified = verificationOf(item)!;
             const project = await projectsRepository.getProject(item.projectId);
             const job = await jobsRepository.get(item.jobId);
             const override = job ? await jobBaseUrl(job) : undefined;
@@ -102,15 +103,15 @@ export async function applyProposal(item: InboxItem, checkPolicy?: () => Promise
         return withSpecLock(specId, async () => {
             const spec = await specsRepository.getSpec(specId);
             if (!spec || spec.projectId !== item.projectId) throw new Error("Spec no longer exists in this project");
-            return (await updateSpecInRepo(spec, patch, { ...options, expectedHead: undefined, expectedSpec: item.payload.before as { yaml: string; testSource: string | null } })).commitSha;
+            return (await updateSpecInRepo(spec, patch, { ...options, expectedHead: undefined, expectedSpec: { yaml: payloadOf(item).before?.yaml ?? "", testSource: payloadOf(item).before?.testSource ?? null } })).commitSha;
         });
     }
     if (item.kind === "new_spec") {
-        const input = newSpecProposalSchema.parse(item.payload.params);
+        const input = newSpecProposalSchema.parse(payloadOf(item).params);
         return (await createSpecInRepo({ ...input, projectId: item.projectId }, options)).commitSha;
     }
     if (item.kind === "feature") {
-        const input = featureProposalSchema.parse(item.payload.params);
+        const input = featureProposalSchema.parse(payloadOf(item).params);
         await createFeatureInRepo(item.projectId, input.parentId ?? null, input.title, input.description, options);
         return (await git.raw(["log", "--format=%H", "--fixed-strings", `--grep=${marker}`, "-1"])).trim();
     }

@@ -1,3 +1,4 @@
+import { specBatchOf, payloadOf, verificationOf } from "../jobs/schemas";
 import { z } from "zod";
 import { chatsRepository } from "../../infra/repositories/chats";
 import { jobsRepository } from "../../infra/repositories/jobs";
@@ -74,13 +75,36 @@ function scanNote(id: string, evidence: Record<string, unknown>, createdAt: stri
 export async function chatResults(chatId: string) {
     const chat = await chatsRepository.getChatRow(chatId);
     if (!chat) return null;
-    const [state, rawItems, { artifacts, abandonedBatchIds }, revision] = await Promise.all([
-        loadProjectState(chat.projectId), jobsRepository.inbox(chat.projectId), artifactsForChat(chatId),
+    const [state, { artifacts, abandonedBatchIds }, revision] = await Promise.all([
+        loadProjectState(chat.projectId), artifactsForChat(chatId),
         chat.contextRevisionId ? projectContextsRepository.getProjectContextRevision(chat.contextRevisionId) : null,
     ]);
+    const linkedJobs = new Set(state.jobs.filter((job) => job.sourceChatId === chatId || job.chatId === chatId).map((job) => job.id));
+    for (const intent of state.intents) if (intent.sourceChatId === chatId || intent.key.startsWith(`chat:${chatId}:`)) {
+        if (intent.jobId) linkedJobs.add(intent.jobId);
+    }
+    const scopedItems = await jobsRepository.itemsForChat(chat.projectId, chatId, [...linkedJobs], artifacts.flatMap((artifact) => artifact.value.inboxId ? [artifact.value.inboxId] : []));
+    const relatedItems = new Map(scopedItems.map((item) => [item.id, item]));
+    let pendingItems = scopedItems;
+    const loadedJobs = new Set(linkedJobs);
+    while (pendingItems.length) {
+        const nextJobs = new Set<string>();
+        for (const item of pendingItems) {
+            nextJobs.add(item.jobId);
+            for (const candidate of specBatchOf(item)?.candidates ?? []) if (candidate.jobId) nextJobs.add(candidate.jobId);
+            const regression = state.intents.find((intent) => intent.id === payloadOf(item).regressionIntentId);
+            if (regression?.jobId) nextJobs.add(regression.jobId);
+        }
+        const ids = [...nextJobs].filter((id) => !loadedJobs.has(id));
+        if (!ids.length) break;
+        for (const id of ids) loadedJobs.add(id);
+        pendingItems = await jobsRepository.itemsForJobs(chat.projectId, ids);
+        for (const item of pendingItems) relatedItems.set(item.id, item);
+    }
+    const rawItems = [...relatedItems.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const allItems = rawItems.filter((item) => {
         if (item.kind !== "spec_batch" || !abandonedBatchIds.has(item.id)) return true;
-        const batch = item.payload.specBatch as { candidates?: { selected?: boolean }[] } | undefined;
+        const batch = specBatchOf(item);
         return batch?.candidates?.some((candidate) => candidate.selected) ?? false;
     });
     const itemAnchors = new Map<string, Anchor>();
@@ -94,7 +118,7 @@ export async function chatResults(chatId: string) {
         if (artifact.value.runId) runAnchors.set(artifact.value.runId, artifact.afterMessageId);
         if (artifact.value.specId && ["create_spec", "update_spec"].includes(artifact.toolName)) specArtifacts.set(artifact.value.specId, artifact);
     }
-    const belongs = (payload: Record<string, unknown>) => payload.sourceChatId === chatId || payload.discussionChatId === chatId;
+    const belongs = (payload: Record<string, unknown>) => payloadOf({ payload }).sourceChatId === chatId || payloadOf({ payload }).discussionChatId === chatId;
     const intents = state.intents.filter((intent) => intent.sourceChatId === chatId || intent.key.startsWith(`chat:${chatId}:`));
     for (const intent of intents) {
         if (!intentAnchors.has(intent.id)) intentAnchors.set(intent.id, toolAnchors.get(intent.key.slice(`chat:${chatId}:`.length)));
@@ -107,11 +131,11 @@ export async function chatResults(chatId: string) {
     for (const item of allItems.filter((item) => belongs(item.payload) || jobIds.has(item.jobId))) {
         const anchor = itemAnchors.has(item.id) ? itemAnchors.get(item.id) : jobAnchors.get(item.jobId);
         if (item.kind === "spec_batch") {
-            const batch = item.payload.specBatch as { candidates?: { jobId?: string }[] } | undefined;
+            const batch = specBatchOf(item);
             for (const candidate of batch?.candidates ?? []) if (candidate.jobId) { jobIds.add(candidate.jobId); jobAnchors.set(candidate.jobId, anchor); }
         }
-        if (typeof item.payload.regressionIntentId === "string") {
-            const intent = state.intents.find((intent) => intent.id === item.payload.regressionIntentId);
+        if (typeof payloadOf(item).regressionIntentId === "string") {
+            const intent = state.intents.find((intent) => intent.id === payloadOf(item).regressionIntentId);
             if (intent && !intents.some((row) => row.id === intent.id)) intents.push(intent);
             if (intent) { intentAnchors.set(intent.id, anchor); if (intent.jobId) { jobIds.add(intent.jobId); jobAnchors.set(intent.jobId, anchor); } }
         }
@@ -121,7 +145,7 @@ export async function chatResults(chatId: string) {
     const anchorForItem = (item: (typeof inbox)[number]) => itemAnchors.has(item.id) ? itemAnchors.get(item.id) : jobAnchors.get(item.jobId);
     const presentation = await projectPresentation(chat.projectId, { ...state, jobs, intents, signals: [] }, { inbox });
     const items = presentation.items.map((item) => ({ ...item, afterMessageId: anchorForItem(item) }));
-    const notes = inbox.filter((item) => item.kind === "note" && item.payload.retiredByScope !== true).map((item) => ({
+    const notes = inbox.filter((item) => item.kind === "note" && payloadOf(item).retiredByScope !== true).map((item) => ({
         id: item.id, title: state.clean(item.title), body: state.clean(item.body), createdAt: item.createdAt, updatedAt: item.updatedAt, afterMessageId: anchorForItem(item),
     }));
     for (const artifact of artifacts) if (artifact.toolName === "scan_page" && artifact.value.evidence) notes.push(scanNote(artifact.id, artifact.value.evidence, artifact.createdAt, artifact.afterMessageId, state.clean));
@@ -137,14 +161,14 @@ export async function chatResults(chatId: string) {
     const tasks: { id: string; kind: string; title: string; status: ReturnType<typeof taskStatus>; summary: string; batchId?: string;
         createdAt: string; updatedAt: string; afterMessageId?: Anchor }[] = intents.map((intent) => {
         const job = jobs.find((job) => job.id === intent.jobId);
-        const bug = items.find((item) => item.kind === "bug_report" && item.payload.regressionIntentId === intent.id);
+        const bug = items.find((item) => item.kind === "bug_report" && payloadOf(item).regressionIntentId === intent.id);
         return { id: intent.id, kind: intent.intent.kind, title: bug ? `Create a regression Spec for “${bug.presentation.title}”` : taskTitle(intent.intent.kind, intent.intent.goal, job?.specId ?? (intent.intent.specIds?.length === 1 ? intent.intent.specIds[0] : undefined)),
             status: taskStatus(job?.status ?? intent.status, paused, job?.retryAt), summary: state.clean(intent.status === "failed" || intent.status === "ignored" ? intent.reason : intent.intent.reason),
             batchId: intent.batchId ?? undefined, createdAt: intent.createdAt, updatedAt: job?.updatedAt ?? intent.updatedAt, afterMessageId: intentAnchors.get(intent.id) };
     });
     for (const job of jobs.filter((job) => job.kind !== "review" && !intents.some((intent) => intent.jobId === job.id))) {
         const candidate = inbox.filter((item) => item.kind === "spec_batch").flatMap((item) =>
-            (item.payload.specBatch as { candidates?: { jobId?: string; title?: string }[] } | undefined)?.candidates ?? []).find((candidate) => candidate.jobId === job.id);
+            specBatchOf(item)?.candidates ?? []).find((candidate) => candidate.jobId === job.id);
         tasks.push({ id: job.id, kind: job.kind, title: candidate?.title ? state.clean(`Create “${candidate.title}”`) : taskTitle(job.kind, job.goal, job.specId),
             status: taskStatus(job.status, paused, job.retryAt), summary: job.stopReason ? state.clean(job.stopReason) : "", batchId: undefined,
             createdAt: job.createdAt, updatedAt: job.updatedAt, afterMessageId: jobAnchors.get(job.id) });
@@ -157,7 +181,7 @@ export async function chatResults(chatId: string) {
     }
     for (const job of jobs) if (job.runId) runAnchors.set(job.runId, jobAnchors.get(job.id));
     for (const item of items.filter((item) => item.kind === "spec_batch")) {
-        const batch = item.payload.specBatch as { candidates?: { runId?: string }[] } | undefined;
+        const batch = specBatchOf(item);
         for (const candidate of batch?.candidates ?? []) if (candidate.runId) runAnchors.set(candidate.runId, item.afterMessageId);
     }
     const runs = (await Promise.all([...runAnchors].map(async ([id, afterMessageId]) => {

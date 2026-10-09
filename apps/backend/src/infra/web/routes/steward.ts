@@ -1,3 +1,4 @@
+import { ACTIVE_JOB_STATUSES } from "../../../core/jobs/shared";
 import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
 import crypto from "node:crypto";
@@ -52,7 +53,7 @@ export function createStewardRouter(): Hono {
             const existing = (await stewardRepository.intents(id)).find((row) => row.source === "user"
                 && row.intent.kind === input.kind && normalize(row.intent.goal) === normalize(goal)
                 && (row.status === "pending" || row.status === "running" && jobs.some((job) => job.id === (row.jobId ?? row.id)
-                    && ["queued", "running", "paused", "blocked", "stalled"].includes(job.status))));
+                    && ACTIVE_JOB_STATUSES.includes(job.status))));
             return existing ?? enqueueIntent(id, { kind: input.kind, goal, priority: 70,
                 reason: input.kind === "coverage" ? "You requested a coverage review." : "You requested an exploration of the app.",
             }, `manual-task:${crypto.randomUUID()}`, "user");

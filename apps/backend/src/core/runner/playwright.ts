@@ -1,3 +1,4 @@
+import type { ErrorCode } from "../errors";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -34,6 +35,7 @@ export interface SuiteSpecResult {
     durationMs: number | null;
     failReason: string | null;
     failedStep: string | null;
+    errorCode?: ErrorCode | null;
 }
 
 export interface SuiteOutcome {
@@ -212,6 +214,7 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
                 durationMs: safeResult?.durationMs ?? null,
                 failReason: safeResult ? safeResult.failReason : processFailure ?? "Playwright produced no result for this Spec",
                 failedStep: safeResult?.failedStep ?? null,
+                errorCode: status === "passed" ? null : safeResult?.errorCode ?? (processFailure ? "infrastructure" : "failed"),
             });
         }
         reportAvailable = withHtmlReport && existsSync(path.join(reportDir, "index.html"));

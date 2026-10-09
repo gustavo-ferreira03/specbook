@@ -1,3 +1,4 @@
+import { CodedError } from "../../errors";
 import { LOCATOR_FACTORIES, LOCATOR_REFINERS, RUNTIME_LOCATOR_ACTIONS as LOCATOR_ACTIONS } from "./allowlist";
 import type { ApiRequestEvidence } from "../evidence";
 export type { ApiRequestEvidence } from "../evidence";
@@ -171,7 +172,7 @@ export function createGuard(options: GuardOptions) {
         const ref = secretRefs.get(token);
         if (!ref) throw new Error("Not a Specbook secret");
         const value = options.readSecret(ref.envName);
-        if (value === undefined) throw new Error(`${ref.label} is not configured for this run`);
+        if (value === undefined) throw new CodedError("credentials", `${ref.label} is not configured for this run`);
         return { value, envName: ref.envName };
     }
 
@@ -180,9 +181,9 @@ export function createGuard(options: GuardOptions) {
         try {
             origin = new URL(page.url()).origin;
         } catch {
-            throw new Error(SECRET_ORIGIN_ERROR);
+            throw new CodedError("credential_origin", SECRET_ORIGIN_ERROR);
         }
-        if (!allowedOriginsFor(envName).includes(origin)) throw new Error(SECRET_ORIGIN_ERROR);
+        if (!allowedOriginsFor(envName).includes(origin)) throw new CodedError("credential_origin", SECRET_ORIGIN_ERROR);
     }
 
     async function textArgument(page: RawPage, value: unknown, target: RawLocator | null): Promise<string> {
@@ -194,7 +195,7 @@ export function createGuard(options: GuardOptions) {
             const handle = await target.elementHandle();
             try {
                 if (!handle || (await handle.ownerFrame()) !== page.mainFrame()) {
-                    throw new Error("Refusing to type a secret into an element outside the page's main frame.");
+                    throw new CodedError("credential_origin", "Refusing to type a secret into an element outside the page's main frame.");
                 }
             } finally {
                 await handle?.dispose().catch(() => undefined);
@@ -204,7 +205,7 @@ export function createGuard(options: GuardOptions) {
                 const active = (globalThis as unknown as { document?: { activeElement?: { tagName?: string } | null } }).document?.activeElement;
                 return active?.tagName === "IFRAME" || active?.tagName === "FRAME";
             });
-            if (intoFrame) throw new Error("Refusing to type a secret into an element outside the page's main frame.");
+            if (intoFrame) throw new CodedError("credential_origin", "Refusing to type a secret into an element outside the page's main frame.");
         }
         assertPageOrigin(page, envName);
         return secret;
@@ -264,11 +265,13 @@ export function createGuard(options: GuardOptions) {
             }
             const url = new URL(`${baseOrigin}${basePath}${target}`);
             if (url.origin !== baseOrigin) throw new Error("page.goto() must stay on the project origin.");
-            await page.goto(url.href, sanitize(gotoOptions));
+            try { await page.goto(url.href, sanitize(gotoOptions)); }
+            catch (cause) { throw new CodedError("environment", cause instanceof Error ? cause.message : String(cause), { cause }); }
         };
         for (const name of ["reload", "goBack", "goForward"] as const) {
             methods[name] = async (navigationOptions?: unknown) => {
-                await page[name](sanitize(navigationOptions));
+                try { await page[name](sanitize(navigationOptions)); }
+                catch (cause) { throw new CodedError("environment", cause instanceof Error ? cause.message : String(cause), { cause }); }
             };
         }
         methods.waitForURL = async (url: unknown, waitOptions?: unknown) => {
@@ -348,7 +351,7 @@ export function createGuard(options: GuardOptions) {
         };
         const checkOrigin = (url: URL, refs: Set<string>) => {
             if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || !apiOrigins.includes(url.origin)) throw new Error("API request origin is not allowed for this run.");
-            for (const ref of refs) if (!allowedOriginsFor(ref).includes(url.origin)) throw new Error("Refusing to send a secret: the API origin is not allowed for this credential.");
+            for (const ref of refs) if (!allowedOriginsFor(ref).includes(url.origin)) throw new CodedError("credential_origin", "Refusing to send a secret: the API origin is not allowed for this credential.");
         };
         const resolveValue = (value: unknown, refs: Set<string>, depth = 0): unknown => {
             if (depth > 6) throw new Error("API values are nested too deeply");

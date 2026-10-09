@@ -1,3 +1,4 @@
+import { specBatchOf, payloadOf, verificationOf } from "../jobs/schemas";
 import { chatsRepository } from "../../infra/repositories/chats";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
@@ -73,10 +74,10 @@ export async function conversationState(projectId: string, conversationId: strin
     }
     for (const item of results.items.filter((item) => item.status === "pending")) {
         if (item.kind === "spec_batch") {
-            const batch = item.payload.specBatch as { candidates?: { id: string; title: string }[] } | undefined;
+            const batch = specBatchOf(item);
             actions.push({ id: item.id, type: "spec_selection", description: item.title,
                 candidates: batch?.candidates?.map(({ id, title }) => ({ id, title })) ?? [] });
-        } else if (item.kind === "spec_fix" && (item.payload.mcpContractChange === true || project.agentContractPolicy === "propose_only")) {
+        } else if (item.kind === "spec_fix" && (payloadOf(item).mcpContractChange === true || project.agentContractPolicy === "propose_only")) {
             actions.push({ id: item.id, type: "contract_change", description: item.title });
         }
     }
@@ -91,10 +92,10 @@ export async function conversationState(projectId: string, conversationId: strin
     const changedSpecs = results.specs.filter(inTurn).map((spec) => ({ id: spec.id, title: spec.title, change: spec.change, url: `${frontendOrigin}/p/${projectId}/specs/${spec.id}` }));
     for (const item of results.items.filter((item) => inTurn(item) && item.status === "approved")) {
         if (item.kind === "spec_batch") {
-            const batch = item.payload.specBatch as { candidates?: { specId?: string; title: string; selected?: boolean }[] } | undefined;
+            const batch = specBatchOf(item);
             for (const candidate of batch?.candidates ?? []) if (candidate.selected && candidate.specId && !changedSpecs.some((spec) => spec.id === candidate.specId)) changedSpecs.push({ id: candidate.specId, title: candidate.title, change: "created", url: `${frontendOrigin}/p/${projectId}/specs/${candidate.specId}` });
-        } else if (item.kind === "spec_fix" && item.payload.mcpContractChange === true) {
-            const specId = (item.payload.params as { specId?: string } | undefined)?.specId;
+        } else if (item.kind === "spec_fix" && payloadOf(item).mcpContractChange === true) {
+            const specId = payloadOf(item).params?.specId;
             if (specId && !changedSpecs.some((spec) => spec.id === specId)) changedSpecs.push({ id: specId, title: item.title.replace(/^Proposed fix: /, ""), change: "updated", url: `${frontendOrigin}/p/${projectId}/specs/${specId}` });
         }
     }
@@ -156,7 +157,7 @@ export async function sendConversationMessage(projectId: string, clientName: str
     const chat = conversationId ? await requireConversation(projectId, conversationId) : await createChat(projectId, { source: "mcp", sourceClient: clientName }, chatTitle(message));
     if (conversationId && !isChatBusy(chat.id)) {
         const results = await chatResults(chat.id);
-        const questions = results?.items.filter((item) => item.kind === "question" && item.status === "pending" && item.payload.waitingFor !== "credentials") ?? [];
+        const questions = results?.items.filter((item) => item.kind === "question" && item.status === "pending" && payloadOf(item).waitingFor !== "credentials") ?? [];
         if (questions.length === 1) {
             const item = await jobsRepository.item(questions[0].id);
             const job = item ? await jobsRepository.get(item.jobId) : null;
@@ -193,7 +194,7 @@ export async function respondToConversationAction(projectId: string, conversatio
             ...(entry.request.origin ? { allowedOrigins: [entry.request.origin] } : {}) });
     } else if (action.type === "spec_selection" && "candidateIds" in response) {
         const item = await jobsRepository.item(actionId);
-        if (!item || item.projectId !== projectId || item.payload.sourceChatId !== conversationId) throw new Error("Suggestion no longer belongs to this conversation");
+        if (!item || item.projectId !== projectId || payloadOf(item).sourceChatId !== conversationId) throw new Error("Suggestion no longer belongs to this conversation");
         await selectSpecBatch(item, response.candidateIds);
     } else if (action.type === "contract_change" && "approve" in response) {
         await reviewChatContract(projectId, conversationId, actionId, response.approve);

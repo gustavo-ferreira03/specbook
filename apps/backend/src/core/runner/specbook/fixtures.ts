@@ -1,3 +1,4 @@
+import { specErrorCode } from "../../errors.ts";
 import fs from "node:fs/promises";
 import { expect as baseExpect, test as base, type ConsoleMessage, type Page, type Request, type Response } from "@playwright/test";
 import type { RunDiagnostic } from "../evidence.ts";
@@ -108,6 +109,7 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvide
                 });
             } catch (error) {
                 testInfo.annotations.push({ type: FAILED_STEP_ANNOTATION, description: title });
+                testInfo.annotations.push({ type: "specbook-error-code", description: specErrorCode(error) });
                 try {
                     if (!real) throw new Error("This step has no browser page");
                     const snapshot = await real.locator("body").ariaSnapshot({ timeout: 2000 });

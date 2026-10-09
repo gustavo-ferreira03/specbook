@@ -3,7 +3,7 @@ import { runsRepository } from "../../infra/repositories/runs";
 import type { RunBatch } from "../runner/batch";
 
 export async function knownBugSpecIds(projectId: string): Promise<string[]> {
-    const [items, jobs] = await Promise.all([jobsRepository.inbox(projectId), jobsRepository.list(projectId)]);
+    const [items, jobs] = await Promise.all([jobsRepository.itemsByKind(projectId, "bug_report", ["pending"]), jobsRepository.list(projectId)]);
     const ids = items.filter((item) => item.kind === "bug_report" && item.status === "pending").flatMap((item) => {
         const id = typeof item.payload.specId === "string" ? item.payload.specId : jobs.find((job) => job.id === item.jobId)?.specId;
         return id ? [id] : [];

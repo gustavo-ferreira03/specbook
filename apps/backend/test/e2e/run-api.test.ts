@@ -192,6 +192,7 @@ test("Store", async ({ page, step, secret }) => {
         const run = await executeSpec(spec.id);
         assert.equal(run.status, "failed");
         assert.equal(run.failedStep, "See the store");
+        assert.equal(run.errorCode, "assertion");
         assert.equal(run.sourceHash, spec.sourceHash);
         assert.match(run.failReason ?? "", /toHaveText/);
         assert.doesNotMatch(run.failReason ?? "", /\/tmp\/specbook|node_modules|src\/core\/runner|\n\s+at /);
