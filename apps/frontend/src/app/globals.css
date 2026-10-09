@@ -3,14 +3,7 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/*
- * Specbook design tokens (monochrome: black, white, and neutral grays; color only for status). Every value that changes with the theme is a CSS variable defined on
- * :root (light) and overridden on .dark (set on <html> by the theme script). Components only use
- * the Tailwind utilities generated from these tokens (bg-surface, bg-primary, text-ink-muted, shadow-popover,
- * text-body, rounded-lg, max-w-reading, font-mono, ...). Never hard-code colors in components.
- */
 @theme static {
-    /* Neutrals */
     --color-canvas: var(--sb-canvas);
     --color-sidebar: var(--sb-sidebar);
     --color-surface: var(--sb-surface);
@@ -18,7 +11,6 @@
     --color-surface-hover: var(--sb-surface-hover);
     --color-surface-selected: var(--sb-surface-selected);
     --color-surface-raised: var(--sb-surface-raised);
-    /* Active thumb of segmented controls / switches */
     --color-thumb: var(--sb-thumb);
     --color-line: var(--sb-line);
     --color-line-strong: var(--sb-line-strong);
@@ -30,13 +22,11 @@
     --color-inverse: var(--sb-inverse);
     --color-inverse-foreground: var(--sb-inverse-foreground);
 
-    /* Primary (monochrome): near-black in light, near-white in dark */
     --color-primary: var(--sb-primary);
     --color-primary-hover: var(--sb-primary-hover);
     --color-primary-foreground: var(--sb-primary-foreground);
     --color-primary-soft: var(--sb-primary-soft);
 
-    /* Status: text color, soft tinted background, chart fill */
     --color-success: var(--sb-success);
     --color-success-soft: var(--sb-success-soft);
     --color-success-chart: var(--sb-success-chart);
@@ -47,7 +37,6 @@
     --color-danger-solid: var(--sb-danger-solid);
     --color-danger-solid-hover: var(--sb-danger-solid-hover);
     --color-danger-solid-foreground: var(--sb-danger-solid-foreground);
-    /* warning = the original "pending" amber */
     --color-warning: var(--sb-warning);
     --color-warning-soft: var(--sb-warning-soft);
     --color-warning-chart: var(--sb-warning-chart);
@@ -64,7 +53,6 @@
     --color-running-soft: var(--sb-surface-hover);
     --color-running-chart: var(--sb-primary);
 
-    /* shadcn compatibility aliases */
     --color-background: var(--sb-surface);
     --color-foreground: var(--sb-ink);
     --color-card: var(--sb-surface);
@@ -81,7 +69,6 @@
     --color-input: var(--sb-line-strong);
     --color-ring: var(--sb-ring);
 
-    /* Overlays, live browser, code editor */
     --color-overlay: var(--sb-overlay);
     --color-browser: var(--sb-browser);
     --color-code-canvas: var(--sb-code-canvas);
@@ -93,15 +80,13 @@
     --color-syntax-variable: var(--sb-syntax-number);
     --color-syntax-punctuation: var(--sb-syntax-punctuation);
 
-    /* Elevation: only popovers, dialogs, and the composer float */
     --shadow-xs: var(--sb-shadow-xs);
     --shadow-popover: var(--sb-shadow-popover);
     --shadow-dialog: var(--sb-shadow-dialog);
     --shadow-composer: var(--sb-shadow-composer);
 
-    /* Type */
-    --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-    --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+    --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
     --text-label: 0.75rem;
     --text-label--line-height: 1rem;
     --text-label--letter-spacing: 0.06em;
@@ -115,21 +100,21 @@
     --text-section: 0.9375rem;
     --text-section--line-height: 1.375rem;
     --text-section--font-weight: 600;
-    --text-title: 1.3125rem;
-    --text-title--line-height: 1.75rem;
-    --text-title--letter-spacing: -0.015em;
+    --text-section--letter-spacing: -0.01em;
+    --text-title: 1.5rem;
+    --text-title--line-height: 2rem;
+    --text-title--letter-spacing: -0.025em;
     --text-title--font-weight: 600;
-    --text-display: 1.75rem;
-    --text-display--line-height: 2.25rem;
-    --text-display--letter-spacing: -0.02em;
+    --text-display: 2rem;
+    --text-display--line-height: 2.5rem;
+    --text-display--letter-spacing: -0.03em;
     --text-display--font-weight: 600;
 
-    /* Geometry */
-    --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 10px;
-    --radius-xl: 12px;
-    --radius-2xl: 14px;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 10px;
+    --radius-2xl: 12px;
     --container-reading: 760px;
     --container-data: 1080px;
     --container-chat: 780px;
@@ -140,29 +125,29 @@
 
 :root {
     color-scheme: light;
-    --sb-canvas: oklch(97.5% 0.003 260);
-    --sb-sidebar: oklch(98.2% 0.002 260);
+    --sb-canvas: oklch(98.5% 0 0);
+    --sb-sidebar: oklch(100% 0 0);
     --sb-surface: oklch(100% 0 0);
-    --sb-surface-soft: oklch(97.2% 0.004 260);
-    --sb-surface-hover: oklch(95.2% 0.006 260);
-    --sb-surface-selected: oklch(91.8% 0.006 260);
+    --sb-surface-soft: oklch(98% 0 0);
+    --sb-surface-hover: oklch(96.5% 0 0);
+    --sb-surface-selected: oklch(94% 0 0);
     --sb-surface-raised: oklch(100% 0 0);
     --sb-thumb: oklch(100% 0 0);
-    --sb-line: oklch(91.8% 0.004 260);
-    --sb-line-strong: oklch(86.8% 0.006 260);
-    --sb-line-hover: oklch(75.5% 0.008 260);
-    --sb-ink: oklch(27.5% 0 0);
-    --sb-ink-muted: oklch(45% 0.004 260);
-    --sb-ink-subtle: oklch(51% 0.004 260);
-    --sb-ink-disabled: oklch(73.5% 0.003 260);
-    --sb-inverse: oklch(26% 0 0);
+    --sb-line: oklch(92.5% 0 0);
+    --sb-line-strong: oklch(87.5% 0 0);
+    --sb-line-hover: oklch(72% 0 0);
+    --sb-ink: oklch(14.5% 0 0);
+    --sb-ink-muted: oklch(40% 0 0);
+    --sb-ink-subtle: oklch(49% 0 0);
+    --sb-ink-disabled: oklch(74% 0 0);
+    --sb-inverse: oklch(14.5% 0 0);
     --sb-inverse-foreground: oklch(100% 0 0);
 
-    --sb-primary: oklch(26% 0 0);
-    --sb-primary-hover: oklch(35% 0 0);
+    --sb-primary: oklch(14.5% 0 0);
+    --sb-primary-hover: oklch(30% 0 0);
     --sb-primary-foreground: oklch(100% 0 0);
-    --sb-primary-soft: oklch(93.5% 0.004 260);
-    --sb-ring: oklch(26% 0 0);
+    --sb-primary-soft: oklch(95% 0 0);
+    --sb-ring: oklch(14.5% 0 0);
 
     --sb-success: #1f8559;
     --sb-success-soft: #e9f8ef;
@@ -177,14 +162,13 @@
     --sb-warning: #9a6e00;
     --sb-warning-soft: #fff4d8;
     --sb-warning-chart: #f4bd4f;
-    /* Amber text dark enough to read looks brown, so warnings keep neutral text and use this vivid amber for icons and dots. */
     --sb-warning-icon: #d99a00;
     --sb-invalid: #aa5f16;
     --sb-invalid-soft: #fff1e4;
     --sb-invalid-chart: #ee9b46;
     --sb-info: #406b9f;
     --sb-info-soft: #edf3fa;
-    --sb-neutral-chart: oklch(84% 0.004 260);
+    --sb-neutral-chart: oklch(84% 0 0);
 
     --sb-overlay: rgb(24 24 22 / 42%);
     --sb-browser: #11110f;
@@ -196,38 +180,37 @@
     --sb-syntax-keyword: #714f87;
     --sb-syntax-punctuation: #686862;
 
-    --sb-shadow-xs: 0 1px 2px rgb(20 20 18 / 5%);
-    --sb-shadow-popover: 0 1px 2px rgb(20 20 18 / 5%), 0 10px 28px -8px rgb(20 20 18 / 16%);
-    --sb-shadow-dialog: 0 2px 6px rgb(20 20 18 / 6%), 0 28px 56px -16px rgb(20 20 18 / 24%);
-    --sb-shadow-composer: 0 4px 14px rgb(20 20 18 / 4%);
+    --sb-shadow-xs: 0 1px 2px rgb(0 0 0 / 4%);
+    --sb-shadow-popover: 0 1px 2px rgb(0 0 0 / 4%), 0 8px 24px -6px rgb(0 0 0 / 12%);
+    --sb-shadow-dialog: 0 2px 4px rgb(0 0 0 / 4%), 0 24px 48px -12px rgb(0 0 0 / 20%);
+    --sb-shadow-composer: 0 2px 8px rgb(0 0 0 / 5%);
 }
 
-/* Dark: the same monochrome system inverted. Neutral grays (no tint), near-white primary. */
 .dark {
     color-scheme: dark;
-    --sb-canvas: oklch(16.5% 0 0);
-    --sb-sidebar: oklch(17.5% 0 0);
-    --sb-surface: oklch(20.5% 0 0);
-    --sb-surface-soft: oklch(22.5% 0 0);
-    --sb-surface-hover: oklch(25.5% 0 0);
-    --sb-surface-selected: oklch(29.5% 0 0);
-    --sb-surface-raised: oklch(23.5% 0 0);
-    --sb-thumb: oklch(33% 0 0);
-    --sb-line: oklch(28.5% 0 0);
-    --sb-line-strong: oklch(34% 0 0);
-    --sb-line-hover: oklch(46% 0 0);
-    --sb-ink: oklch(94.5% 0 0);
-    --sb-ink-muted: oklch(77% 0 0);
+    --sb-canvas: oklch(10% 0 0);
+    --sb-sidebar: oklch(13% 0 0);
+    --sb-surface: oklch(13% 0 0);
+    --sb-surface-soft: oklch(15.5% 0 0);
+    --sb-surface-hover: oklch(19% 0 0);
+    --sb-surface-selected: oklch(23% 0 0);
+    --sb-surface-raised: oklch(17% 0 0);
+    --sb-thumb: oklch(26% 0 0);
+    --sb-line: oklch(24% 0 0);
+    --sb-line-strong: oklch(30% 0 0);
+    --sb-line-hover: oklch(44% 0 0);
+    --sb-ink: oklch(96.5% 0 0);
+    --sb-ink-muted: oklch(78% 0 0);
     --sb-ink-subtle: oklch(68% 0 0);
-    --sb-ink-disabled: oklch(46% 0 0);
-    --sb-inverse: oklch(93% 0 0);
-    --sb-inverse-foreground: oklch(20% 0 0);
+    --sb-ink-disabled: oklch(42% 0 0);
+    --sb-inverse: oklch(96.5% 0 0);
+    --sb-inverse-foreground: oklch(14.5% 0 0);
 
-    --sb-primary: oklch(93% 0 0);
-    --sb-primary-hover: oklch(84% 0 0);
-    --sb-primary-foreground: oklch(19% 0 0);
-    --sb-primary-soft: oklch(27% 0 0);
-    --sb-ring: oklch(88% 0 0);
+    --sb-primary: oklch(96.5% 0 0);
+    --sb-primary-hover: oklch(85% 0 0);
+    --sb-primary-foreground: oklch(14.5% 0 0);
+    --sb-primary-soft: oklch(21% 0 0);
+    --sb-ring: oklch(90% 0 0);
 
     --sb-success: oklch(77% 0.13 155);
     --sb-success-soft: oklch(28.5% 0.045 155);
@@ -287,7 +270,6 @@ body {
     font-family: var(--font-sans);
     font-size: var(--text-body);
     line-height: 1.55;
-    font-feature-settings: "cv11", "ss01";
     font-kerning: normal;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -321,9 +303,7 @@ h4 {
     scrollbar-gutter: stable;
 }
 
-/* Element defaults live in the base layer so utilities (font-mono, text-*) still win. */
 @layer base {
-    /* Code must show what was typed: no "=>" to arrow ligatures. */
     code,
     pre,
     kbd,
@@ -370,8 +350,6 @@ textarea::placeholder {
     color: var(--color-primary-foreground);
 }
 
-/* Focus: 2px primary (ink) ring with a 2px offset everywhere. Components use the same recipe via
- * `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-surface`. */
 a:focus-visible:not([data-slot]),
 summary:focus-visible,
 [role="treeitem"]:focus-visible {
@@ -381,17 +359,16 @@ summary:focus-visible,
 }
 
 .tabular {
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
+    font-variant-ligatures: none;
 }
 
-/* Uppercase eyebrow label: use sparingly (section labels in the sidebar, table heads). */
 .eyebrow {
-    font-size: var(--text-label);
-    line-height: var(--text-label--line-height);
-    letter-spacing: var(--text-label--letter-spacing);
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
     font-weight: 600;
-    text-transform: uppercase;
-    color: var(--color-ink-subtle);
+    color: var(--color-ink-muted);
 }
 
 .skip-link {

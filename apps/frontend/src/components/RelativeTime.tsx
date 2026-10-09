@@ -31,7 +31,7 @@ export function RelativeTime({ value, prefix, className }: { value: string | num
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return null;
     return (
-        <time dateTime={date.toISOString()} title={formatDateTime(date)} className={cn("tabular", className)} suppressHydrationWarning>
+        <time dateTime={date.toISOString()} title={formatDateTime(date)} className={cn("[font-variant-numeric:tabular-nums]", className)} suppressHydrationWarning>
             {prefix ? `${prefix} ` : ""}{formatRelative(date, current)}
         </time>
     );

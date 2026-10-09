@@ -1,13 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_INIT_SCRIPT } from "@/lib/theme-script";
 import { AuthProvider } from "@/components/AuthProvider";
 import { SetupGate } from "@/components/SetupGate";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains-mono" });
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
     title: "Specbook",
@@ -16,14 +16,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
     themeColor: [
-        { media: "(prefers-color-scheme: light)", color: "#f9f7f5" },
-        { media: "(prefers-color-scheme: dark)", color: "#141211" },
+        { media: "(prefers-color-scheme: light)", color: "#fafafa" },
+        { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
     ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
-        <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+        <html lang="en" className={`${geist.variable} ${geistMono.variable}`} suppressHydrationWarning>
             <head>
                 <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
             </head>

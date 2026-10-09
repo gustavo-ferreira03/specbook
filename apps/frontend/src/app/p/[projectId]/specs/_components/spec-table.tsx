@@ -176,7 +176,7 @@ export function SpecTable({
 }) {
     return (
         <div className={cn("overflow-hidden rounded-xl border border-line bg-surface", className)}>
-            <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-meta font-semibold tracking-[0.06em] text-ink-subtle uppercase sm:flex">
+            <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-meta font-semibold text-ink-subtle sm:flex">
                 <span className="w-24 shrink-0">Status</span>
                 <span className="flex-1">Spec</span>
                 <span className="w-32 shrink-0 text-right">Last run</span>

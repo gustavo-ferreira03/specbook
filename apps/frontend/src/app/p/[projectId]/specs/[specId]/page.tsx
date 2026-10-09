@@ -254,7 +254,7 @@ function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
                         {humanSpec.steps.map((step, index) => (
                             <li key={`${index}-${step}`} className="relative flex gap-3.5 pb-4 last:pb-0">
                                 {index < humanSpec.steps.length - 1 && <span aria-hidden="true" className="absolute top-7 bottom-1 left-3 w-px bg-line" />}
-                                <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line-strong bg-surface text-meta font-semibold text-ink-muted tabular">{index + 1}</span>
+                                <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-md border border-line-strong bg-surface text-meta font-semibold text-ink-muted tabular">{index + 1}</span>
                                 <span className="min-w-0 pt-0.5 text-body text-ink"><span className="sr-only">Step {index + 1}: </span>{step}</span>
                             </li>
                         ))}
@@ -262,8 +262,7 @@ function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
                 )}
             </SpecSection>
 
-            {humanSpec.expectedResult && <section aria-labelledby="expected-result-heading" className="relative overflow-hidden rounded-xl border border-line bg-surface-soft py-3.5 pr-4 pl-5">
-                <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1 bg-primary" />
+            {humanSpec.expectedResult && <section aria-labelledby="expected-result-heading" className="rounded-xl border border-line-strong bg-surface px-4 py-3.5">
                 <h3 id="expected-result-heading" className="flex items-center gap-1.5 text-control font-semibold text-ink">
                     <Target size={14} aria-hidden="true" className="text-ink-muted" /> Expected result
                 </h3>

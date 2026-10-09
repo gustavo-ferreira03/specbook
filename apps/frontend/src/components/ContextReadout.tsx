@@ -13,9 +13,9 @@ export function ContextReadout({ context, renderArea }: { context: ProjectContex
             {context.areas.length > 0 && (
                 <div>
                     <h4 className="eyebrow mb-2 text-ink-subtle">Areas</h4>
-                    <div className="grid items-start gap-2 sm:grid-cols-2">
+                    <div className="grid items-start gap-x-8 sm:grid-cols-2">
                         {context.areas.map((area, index) => (
-                            <div key={index} className="rounded-lg border border-line bg-surface-soft p-3">
+                            <div key={index} className="border-t border-line py-3">
                                 <p className="font-semibold text-ink">{area.name}</p>
                                 {area.routes.length > 0 && (
                                     <p className="mt-0.5 font-mono text-meta text-ink-subtle [overflow-wrap:anywhere]">{area.routes.join("  ·  ")}</p>

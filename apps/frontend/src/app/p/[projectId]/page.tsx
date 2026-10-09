@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/AuthProvider";
 
 import Link from "next/link";
@@ -29,7 +30,6 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { SectionHeader } from "@/components/SectionHeader";
 import { StatusDot } from "@/components/StatusDot";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -152,7 +152,10 @@ function AreaCoverage({ projectId, area }: { projectId: string; area: CoverageAr
     return (
         <div className="mt-3 border-t border-line pt-2.5">
             <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={area.coverage === "covered" ? "success" : area.coverage === "partial" ? "warning" : "secondary"} size="sm">{coverageLabels[area.coverage]}</Badge>
+                <span className={cn("inline-flex items-center gap-1.5 text-meta font-medium", area.coverage === "covered" ? "text-success" : area.coverage === "partial" ? "text-ink" : "text-ink-muted")}>
+                    <span aria-hidden="true" className={cn("size-1.5 rounded-full", area.coverage === "covered" ? "bg-success" : area.coverage === "partial" ? "bg-warning-icon" : "bg-ink-subtle")} />
+                    {coverageLabels[area.coverage]}
+                </span>
                 <span className="text-meta text-ink-muted">{area.reason}</span>
             </div>
             {area.specs.length > 0 && (
