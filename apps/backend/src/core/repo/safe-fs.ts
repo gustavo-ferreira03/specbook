@@ -4,9 +4,16 @@ import path from "node:path";
 
 export class UnsafeRepoPathError extends Error {}
 
+export function isInside(parent: string, child: string, options: { allowRoot: boolean; rejectDotPrefix?: boolean } = { allowRoot: true }): boolean {
+    const relative = path.relative(parent, child);
+    if (relative === "") return options.allowRoot;
+    return !path.isAbsolute(relative) && (options.rejectDotPrefix
+        ? !relative.startsWith("..")
+        : relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+
 function assertInside(root: string, target: string): void {
-    const relative = path.relative(root, target);
-    if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    if (!isInside(root, target, { allowRoot: false, rejectDotPrefix: true })) {
         throw new UnsafeRepoPathError(`Path escapes the project repository: ${target}`);
     }
 }

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getSecuritySettings } from "../chat/safety-settings";
 import { configuredModel, modelRuntimePromise } from "../llm/runtime";
 import { logger } from "../../infra/logger";
+import { readEvidenceManifest, isStepScreenshot } from "./evidence";
 
 const verdictSchema = z.object({
     verdict: z.enum(["matches", "weak", "assertion_wrong", "app_differs", "contradicts", "unclear"]),
@@ -43,9 +44,7 @@ export async function reviewRunEvidence(directory: string, outcome: { status: st
         if (!selected.ready || !selected.model) return null;
         const specYaml = await fs.readFile(path.join(directory, "spec.yml"), "utf8");
         const specSource = await fs.readFile(path.join(directory, "spec.ts"), "utf8").catch(() => "");
-        const manifest = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8").catch(() => "{}")) as {
-            steps?: { label: string; file: string }[]; errorContext?: string; failedStep?: string;
-        };
+        const manifest = await readEvidenceManifest(directory);
         const steps = manifest.steps ?? [];
         const failedStep = outcome.failedStep ?? manifest.failedStep;
         const failedIndex = steps.findIndex((step) => step.label === failedStep);
@@ -59,7 +58,7 @@ export async function reviewRunEvidence(directory: string, outcome: { status: st
         ].filter(Boolean).join("\n\n") }];
         if ((await getSecuritySettings()).sendScreenshotsToModel) {
             for (const step of shown) {
-                if (!/^evidence\/step-\d{2,3}\.png$/.test(step.file)) continue;
+                if (!isStepScreenshot(step.file)) continue;
                 const bytes = await fs.readFile(path.join(directory, step.file)).catch(() => null);
                 if (!bytes || bytes.byteLength > 4 * 1024 * 1024) continue;
                 content.push({ type: "text", text: `Screenshot after step "${step.label}":` }, { type: "image", data: bytes.toString("base64"), mimeType: "image/png" });

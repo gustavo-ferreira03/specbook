@@ -43,6 +43,37 @@ export interface EvidenceManifest {
     apiSteps?: ApiStepEvidence[];
 }
 
+export function isStepScreenshot(file: string): boolean {
+    return /^evidence\/step-\d{2,3}\.png$/.test(file);
+}
+
+const evidenceStepSchema = z.object({
+    number: z.number().int().positive().optional(),
+    label: z.string().default(""),
+    file: z.string().refine(isStepScreenshot),
+}).transform((step) => ({ ...step, number: step.number ?? Number(step.file.match(/step-(\d+)/)![1]) }));
+
+const evidenceManifestSchema = z.object({
+    steps: z.array(evidenceStepSchema).default([]),
+    video: z.string().nullable().default(null),
+    failedStep: z.string().nullable().default(null),
+    diagnostics: z.array(runDiagnosticSchema).max(100).optional(),
+    errorContext: z.string().max(32_000).optional(),
+    apiSteps: z.array(z.object({
+        number: z.number().int().positive(),
+        label: z.string(),
+        requests: z.array(apiRequestEvidenceSchema).max(30),
+    })).optional(),
+});
+
+export async function readEvidenceManifest(runDir: string): Promise<EvidenceManifest> {
+    try {
+        return evidenceManifestSchema.parse(JSON.parse(await fs.readFile(path.join(runDir, "evidence.json"), "utf8")));
+    } catch {
+        return { steps: [], video: null, failedStep: null };
+    }
+}
+
 async function readText(source: string, maxBytes: number): Promise<string | null> {
     try {
         const stat = await fs.lstat(source);

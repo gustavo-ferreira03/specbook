@@ -2,6 +2,8 @@ import { parse } from "@babel/parser";
 import type * as t from "@babel/types";
 import type { HumanSpec } from "../../infra/db/schema";
 import { isSafeRelativePath, SECRET_NAME_PATTERN, secretEnvName } from "./specbook/guard";
+import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, STATIC_LOCATOR_REFINERS as LOCATOR_REFINERS } from "./specbook/allowlist";
+export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist";
 
 export type SpecSourceValidation = { ok: true } | { ok: false; error: string };
 
@@ -26,36 +28,7 @@ const IMPORTS = new Set(["test", "expect"]);
 const RESERVED = new Set([...FIXTURES, ...IMPORTS]);
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-export const LOCATOR_FACTORIES = [
-    "getByRole",
-    "getByLabel",
-    "getByText",
-    "getByPlaceholder",
-    "getByTestId",
-    "getByAltText",
-    "getByTitle",
-    "locator",
-];
-const LOCATOR_REFINERS = ["first", "last", "nth", "filter", "and", "or"];
 export const PAGE_ACTIONS = ["goto", "reload", "goBack", "goForward", "waitForURL", "waitForLoadState"];
-export const LOCATOR_ACTIONS = [
-    "click",
-    "dblclick",
-    "fill",
-    "press",
-    "pressSequentially",
-    "check",
-    "uncheck",
-    "setChecked",
-    "selectOption",
-    "hover",
-    "focus",
-    "blur",
-    "clear",
-    "scrollIntoViewIfNeeded",
-    "waitFor",
-    "dragTo",
-];
 const KEYBOARD_ACTIONS = ["press", "type"];
 const MOUSE_COORDINATES: Record<string, number> = { move: 2, click: 2, dblclick: 2, down: 0, up: 0, wheel: 2 };
 const MOUSE_ACTIONS = Object.keys(MOUSE_COORDINATES);

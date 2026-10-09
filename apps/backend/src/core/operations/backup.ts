@@ -12,6 +12,7 @@ import { decryptWithKey, keyFingerprint, parseEncryptionKey } from "../credentia
 import { encryptedColumns, transformSecretColumn } from "../credentials/locations";
 import { writeProtectedFile } from "../credentials/files";
 import { storageRoot } from "../paths";
+import { isInside } from "../repo/safe-fs";
 
 const exec = promisify(execFile);
 const manifestName = "backup-manifest.json";
@@ -21,10 +22,6 @@ const manifestSchema = z.object({
     files: z.array(z.object({ path: z.string(), sha256: z.string(), size: z.number().int().nonnegative() })),
 }).strict();
 
-function isInside(root: string, file: string): boolean {
-    const relative = path.relative(root, file);
-    return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
-}
 
 async function listFiles(root: string, prefix = ""): Promise<string[]> {
     const files: string[] = [];
@@ -86,7 +83,7 @@ async function validateStorage(root: string): Promise<void> {
 
 export async function backupStorage(archivePath: string): Promise<void> {
     const archive = path.resolve(archivePath);
-    if (isInside(path.resolve(storageRoot), archive)) throw new Error("Write backups outside the Specbook storage directory.");
+    if (isInside(path.resolve(storageRoot), archive, { allowRoot: true })) throw new Error("Write backups outside the Specbook storage directory.");
     const staging = await fs.mkdtemp(path.join(os.tmpdir(), "specbook-backup-"));
     const output = `${archive}.${crypto.randomUUID()}.tmp`;
     try {
@@ -135,7 +132,7 @@ export async function restoreStorage(archivePath: string): Promise<void> {
         const files = (await listFiles(staging)).filter((file) => file !== manifestName);
         if (files.length !== manifest.files.length || new Set(manifest.files.map((file) => file.path)).size !== files.length) throw new Error("Backup contents do not match the manifest.");
         for (const file of manifest.files) {
-            if (!files.includes(file.path) || !isInside(staging, path.resolve(staging, file.path))) throw new Error("The backup manifest contains an unsafe path.");
+            if (!files.includes(file.path) || !isInside(staging, path.resolve(staging, file.path), { allowRoot: true })) throw new Error("The backup manifest contains an unsafe path.");
             const digest = await fileDigest(path.join(staging, file.path));
             if (digest.size !== file.size || digest.sha256 !== file.sha256) throw new Error("Backup checksum verification failed.");
         }

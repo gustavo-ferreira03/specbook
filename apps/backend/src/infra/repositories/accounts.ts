@@ -3,11 +3,12 @@ import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { DEFAULT_SSO_SETTINGS, type SsoSettings, type UserRole } from "../../core/accounts/schemas";
 import { db } from "../db/client";
 import { appSettings, auditEvents, oidcIdentities, oidcStates, userInvites, users, userSessions } from "../db/schema";
+import { createKeyedLock } from "../../core/operations/keyed-lock";
 
 export type User = typeof users.$inferSelect;
 export type Invitation = typeof userInvites.$inferSelect;
 const now = () => new Date().toISOString();
-let accountOperation = Promise.resolve<unknown>(undefined);
+const accountLock = createKeyedLock();
 
 function usableLogin(sso: SsoSettings) {
     return sql`((${sso.passwordLoginEnabled} and password_hash is not null)
@@ -17,9 +18,7 @@ function usableLogin(sso: SsoSettings) {
 }
 
 export function withAccountsLock<T>(work: () => Promise<T>): Promise<T> {
-    const current = accountOperation.catch(() => undefined).then(work);
-    accountOperation = current;
-    return current;
+    return accountLock.run("accounts", work);
 }
 
 export const accountsRepository = {

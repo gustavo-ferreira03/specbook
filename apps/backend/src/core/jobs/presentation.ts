@@ -1,4 +1,3 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { featuresRepository } from "../../infra/repositories/features";
 import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
@@ -16,6 +15,7 @@ import { isInfrastructureFailure, sanitizeTechnicalDetails } from "./presentatio
 import type { ProposalVerification } from "./verification";
 import { presentSpecBatch } from "./spec-batches";
 import { ACTIVE_JOB_STATUSES, oldestFirst } from "./shared";
+import { readEvidenceManifest, isStepScreenshot } from "../runner/evidence";
 
 interface Subject { type: "spec" | "feature" | "deployment" | "project"; id?: string; name: string }
 interface Screenshot { url: string; label: string }
@@ -119,9 +119,9 @@ async function screenshotsFor(projectId: string, item: InboxItem, job: Job | und
     if (runId && /^[a-f0-9-]{36}$/.test(runId)) {
         const run = await runsRepository.getRun(runId);
         if (run && specsById.has(run.specId)) {
-            const manifest = JSON.parse(await fs.readFile(path.join(runsDir, runId, "evidence.json"), "utf8").catch(() => "{}")) as { failedStep?: string; steps?: { label: string; file: string }[] };
+            const manifest = await readEvidenceManifest(path.join(runsDir, runId));
             const step = manifest.steps?.find((entry) => entry.label === manifest.failedStep) ?? manifest.steps?.at(-1);
-            if (step && /^evidence\/step-\d{2,3}\.png$/.test(step.file)) {
+            if (step && isStepScreenshot(step.file)) {
                 beforeFile = step.file;
                 screenshots.before = { url: `/runs/${runId}/artifacts/${step.file}`, label: "When the Spec failed" };
             }
@@ -129,7 +129,7 @@ async function screenshotsFor(projectId: string, item: InboxItem, job: Job | und
     }
     const verification = item.payload.verification as ProposalVerification | undefined;
     const afterFile = beforeFile ? verification?.screenshots?.find((file) => file === beforeFile) : verification?.screenshots?.at(-1);
-    if (afterFile && /^evidence\/step-\d{2,3}\.png$/.test(afterFile)) screenshots.after = {
+    if (afterFile && isStepScreenshot(afterFile)) screenshots.after = {
         url: `/projects/${projectId}/inbox/${item.id}/evidence/${afterFile}`, label: verification?.status === "passed" ? "After the update" : "Latest attempt",
     };
     return screenshots;

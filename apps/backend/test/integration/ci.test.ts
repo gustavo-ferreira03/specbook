@@ -23,7 +23,7 @@ const { issueCiToken, authenticateCiToken } = await import("../../src/core/ci/to
 const { ciResult, junitResult, markdownResult } = await import("../../src/core/ci/results");
 const { ciRunSchema } = await import("../../src/core/ci/schemas");
 const { environmentSchema } = await import("../../src/core/environments");
-const { getRunBatchDirectory, getRunBatch } = await import("../../src/core/runner/batch");
+const { getRunBatchDirectory, getRunBatch, listRunBatches, listCiBatches } = await import("../../src/core/runner/batch");
 const { createCiRouter, createCiSettingsRouter } = await import("../../src/infra/web/routes/ci");
 const { createEnvironmentsRouter } = await import("../../src/infra/web/routes/environments");
 const { buildHostAllowlist, csrfGuard, hostGuard, jsonBodyLimit } = await import("../../src/infra/web/security");
@@ -52,6 +52,28 @@ async function fixture() {
 }
 
 describe("CI access and quality gates", () => {
+    test("batch history remains complete across cache eviction and project switches", async () => {
+        const first = await fixture();
+        const second = await fixture();
+        const copies = Array.from({ length: 305 }, (_, index) => ({ ...first.batch, id: crypto.randomUUID(), startedAt: new Date(Date.UTC(2025, 0, 1) + index * 1000).toISOString(), ...(index % 2 ? { ci: undefined } : {}) }));
+        await Promise.all(copies.map(async (batch) => {
+            const directory = getRunBatchDirectory(batch.id);
+            await fs.mkdir(directory, { recursive: true });
+            await fs.writeFile(path.join(directory, "batch.json"), JSON.stringify(batch));
+        }));
+        const all = await listRunBatches(first.project.id, 400);
+        assert.equal(all.length, 306);
+        assert.equal(all[0].id, first.batch.id);
+        assert.deepEqual(all.slice(1).map((batch) => batch.id), [...copies].reverse().map((batch) => batch.id));
+        assert.deepEqual((await listRunBatches(second.project.id)).map((batch) => batch.id), [second.batch.id]);
+        assert.equal((await listCiBatches(first.project.id, 400)).length, 154);
+        assert.equal((await listRunBatches(first.project.id, 400)).length, 306);
+        const deleted = copies[0];
+        await fs.rm(getRunBatchDirectory(deleted.id), { recursive: true });
+        assert.equal((await listRunBatches(first.project.id, 400)).length, 305);
+        assert.equal(await getRunBatch(deleted.id), null);
+    });
+
     test("public CI links follow the runtime frontend origin", async () => {
         const { project, batch } = await fixture();
         const response = await app.request(`/projects/${project.id}/ci`, { headers: {

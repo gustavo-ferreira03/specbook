@@ -5,6 +5,7 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { reposDir } from "../paths";
 import { repoBare } from "./bare";
 import { currentActor, recordAudit } from "../accounts/audit";
+import { createKeyedLock } from "../operations/keyed-lock";
 
 const STALE_CHECKOUT_LOCKS = [
     "index.lock",
@@ -15,7 +16,7 @@ const STALE_CHECKOUT_LOCKS = [
 ];
 
 class RepoGit {
-    private locks = new Map<string, Promise<unknown>>();
+    private locks = createKeyedLock();
     private hardenedCheckouts = new Set<string>();
 
     getRepoDir(projectId: string): string {
@@ -34,14 +35,7 @@ class RepoGit {
     }
 
     async withRepoLock<T>(projectId: string, work: () => Promise<T>): Promise<T> {
-        const previous = this.locks.get(projectId) ?? Promise.resolve();
-        const current = previous.catch(() => undefined).then(work);
-        this.locks.set(projectId, current);
-        try {
-            return await current;
-        } finally {
-            if (this.locks.get(projectId) === current) this.locks.delete(projectId);
-        }
+        return this.locks.run(projectId, work);
     }
 
     async ensureProjectRepo(projectId: string, options: { create?: boolean } = {}): Promise<void> {

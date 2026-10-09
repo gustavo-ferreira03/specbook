@@ -7,11 +7,12 @@ import type { RunEnvironment, RunStatus } from "../../infra/db/schema";
 import { runNetworkPolicy } from "../ci/targets";
 import { createRunProxy } from "../network/proxy";
 import { sanitizeTechnicalDetails } from "../jobs/presentation-errors";
-import { writeRunEvidence } from "./evidence";
 import { runNodeCli } from "./process";
 import { parsePlaywrightReport, stripAnsi, type SpecFileResult } from "./report";
 import { RUNTIME_ENV, type SecretOriginPolicy, type SpecbookRuntime } from "./specbook/guard";
 import type { SpecAnalysis } from "./validate";
+import { isInside } from "../repo/safe-fs";
+import { writeRunEvidence } from "./evidence";
 
 const require = createRequire(import.meta.url);
 
@@ -73,10 +74,6 @@ export function executableSource(source: string, analysis: SpecAnalysis, moduleP
     return `${source.slice(0, start)}${JSON.stringify(modulePath)}${source.slice(end)}`;
 }
 
-function isInside(parent: string, child: string): boolean {
-    const relative = path.relative(parent, child);
-    return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
-}
 
 function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyServer?: string): Record<string, unknown> {
     const file = (spec: SuiteSpec) => `${spec.key}.spec.ts`;
@@ -199,7 +196,7 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
             const fileResult = parsed?.files.get(spec.key) ?? null;
             const safeResult = fileResult
                 ? { ...fileResult, failReason: fileResult.failReason ? sanitizeTechnicalDetails(options.scrub(fileResult.failReason)) : null,
-                    attachments: fileResult.attachments.filter((attachment) => isInside(workDir, path.resolve(workDir, attachment.path))) }
+                    attachments: fileResult.attachments.filter((attachment) => isInside(workDir, path.resolve(workDir, attachment.path), { allowRoot: false, rejectDotPrefix: true })) }
                 : null;
             const status = safeResult ? statusOf(safeResult) : "error";
             await fs.mkdir(spec.outputDir, { recursive: true });

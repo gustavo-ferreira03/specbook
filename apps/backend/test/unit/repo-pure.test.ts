@@ -5,6 +5,7 @@ import { describe, test } from "node:test";
 import { EMPTY_PROJECT_CONTEXT, type ProjectContext } from "../../src/infra/db/schema";
 import {
     assertRepoPathSafe,
+    isInside,
     readOptionalRepoFile,
     readRepoFile,
     UnsafeRepoPathError,
@@ -148,5 +149,20 @@ describe("safe-fs", () => {
         await assert.rejects(writeRepoFile(root, target, "x"), UnsafeRepoPathError);
         await assert.rejects(assertRepoPathSafe(root, path.join(root, "specs", "linked", "sub", "x")), UnsafeRepoPathError);
         assert.deepEqual(await fs.readdir(outside), []);
+    });
+});
+
+describe("path containment", () => {
+    test("preserves artifact and strict runner boundary rules", () => {
+        const root = path.resolve("parent");
+        assert.equal(isInside(root, root, { allowRoot: true }), true);
+        assert.equal(isInside(root, root, { allowRoot: false, rejectDotPrefix: true }), false);
+        assert.equal(isInside(root, path.join(root, "..hidden"), { allowRoot: true }), true);
+        assert.equal(isInside(root, path.join(root, "..hidden"), { allowRoot: false, rejectDotPrefix: true }), false);
+        for (const child of [path.dirname(root), path.join(root, "..", "sibling")]) {
+            assert.equal(isInside(root, child, { allowRoot: true }), false);
+            assert.equal(isInside(root, child, { allowRoot: false, rejectDotPrefix: true }), false);
+        }
+        assert.equal(isInside(root, path.join(root, "evidence", "step-01.png"), { allowRoot: false, rejectDotPrefix: true }), true);
     });
 });

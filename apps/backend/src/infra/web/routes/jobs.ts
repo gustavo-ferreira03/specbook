@@ -20,6 +20,7 @@ import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
 import { chatTitle, createChat, startChatTurn } from "../../../core/chat/session";
 import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors";
+import { isStepScreenshot } from "../../../core/runner/evidence";
 
 
 async function projectJob(projectId: string, jobId: string) {
@@ -79,7 +80,7 @@ export function createJobsRouter(): Hono {
         const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
         const verification = item.payload.verification as ProposalVerification | undefined;
         const file = c.req.param("file");
-        if (!verification || !verification.screenshots.includes(file) || !/^evidence\/step-\d{2,3}\.png$/.test(file)) throw new HTTPException(404, { message: "Evidence not found" });
+        if (!verification || !verification.screenshots.includes(file) || !isStepScreenshot(file)) throw new HTTPException(404, { message: "Evidence not found" });
         const directory = proposalDirectory(item, verification.id);
         const target = path.join(directory, file);
         if (await fs.realpath(target) !== target) throw new HTTPException(400, { message: "Invalid artifact path" });

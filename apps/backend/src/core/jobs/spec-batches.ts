@@ -19,6 +19,7 @@ import { finishedAt } from "./shared";
 import { jobLimitsSchema, newSpecProposalSchema, specBatchProposalSchema, type specCandidateSchema } from "./schemas";
 import type { z } from "zod";
 import type { RunEnvironment } from "../../infra/db/schema";
+import { createKeyedLock } from "../operations/keyed-lock";
 
 type Candidate = z.infer<typeof specCandidateSchema> & {
     id: string;
@@ -35,13 +36,10 @@ interface SpecBatch {
     contextRevisionId?: string;
     selectedAt?: string;
 }
-const batchLocks = new Map<string, Promise<unknown>>();
+const batchLocks = createKeyedLock();
 
 async function withBatchLock<T>(id: string, work: () => Promise<T>): Promise<T> {
-    const previous = batchLocks.get(id) ?? Promise.resolve();
-    const pending = previous.catch(() => undefined).then(work);
-    batchLocks.set(id, pending);
-    try { return await pending; } finally { if (batchLocks.get(id) === pending) batchLocks.delete(id); }
+    return batchLocks.run(id, work);
 }
 
 function batchOf(item: InboxItem): SpecBatch {

@@ -5,13 +5,10 @@ import { runsRepository } from "../../infra/repositories/runs";
 import { runsDir } from "../paths";
 import { parseSpecYaml } from "../repo/yaml";
 import { getRunBatch, getRunBatchDirectory } from "./batch";
+import { readEvidenceManifest, type EvidenceManifest } from "./evidence";
+export { isInside } from "../repo/safe-fs";
 
 export const REPORT_FILE = "report/index.html";
-
-export function isInside(parent: string, child: string): boolean {
-    const relative = path.relative(parent, child);
-    return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
-}
 
 function runDirectory(runId: string): string {
     const root = path.resolve(runsDir);
@@ -73,32 +70,19 @@ export async function readRunEvidence(runId: string) {
     const humanSpec = directory && available.has("spec.yml")
         ? await fs.readFile(path.join(directory, "spec.yml"), "utf8").then((source) => parseSpecYaml(source).humanSpec).catch(() => null)
         : null;
-    let manifest: {
-        steps?: { number?: number; label?: string; file?: string }[];
-        video?: string | null;
-        failedStep?: string | null;
-        diagnostics?: import("./evidence").RunDiagnostic[];
-        apiSteps?: import("./evidence").ApiStepEvidence[];
-        errorContext?: string;
-    } = {};
-    if (directory && available.has("evidence.json")) {
-        try {
-            manifest = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8"));
-        } catch {}
-    }
-    const manifestSteps = Array.isArray(manifest?.steps) ? manifest.steps : [];
-    const steps = manifestSteps.flatMap((item) => {
-        if (!Number.isInteger(item.number) || !item.file || !available.has(item.file)) return [];
-        const number = item.number as number;
+    const manifest: EvidenceManifest = directory ? await readEvidenceManifest(directory) : { steps: [], video: null, failedStep: null };
+    const steps = manifest.steps.flatMap((item) => {
+        if (!available.has(item.file)) return [];
+        const number = item.number;
         return [{
             number,
-            label: typeof item.label === "string" && item.label.trim()
+            label: item.label.trim()
                 ? item.label
                 : humanSpec?.steps[number - 1] ?? `Step ${number}`,
             file: item.file,
         }];
     });
-    const video = typeof manifest?.video === "string" && available.has(manifest.video) ? manifest.video : null;
+    const video = manifest.video !== null && available.has(manifest.video) ? manifest.video : null;
     let reportUrl = available.has(REPORT_FILE)
         ? `/runs/${encodeURIComponent(run.id)}/artifacts/${REPORT_FILE}`
         : null;
@@ -118,7 +102,7 @@ export async function readRunEvidence(runId: string) {
         expectedResult: humanSpec?.expectedResult ?? "",
         steps,
         video,
-        failedStep: typeof manifest?.failedStep === "string" ? manifest.failedStep : null,
+        failedStep: manifest.failedStep,
         reportAvailable: reportUrl !== null,
         reportUrl,
         diagnostics: manifest.diagnostics ?? [],

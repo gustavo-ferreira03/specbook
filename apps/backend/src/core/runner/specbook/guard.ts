@@ -1,3 +1,4 @@
+import { LOCATOR_FACTORIES, LOCATOR_REFINERS, RUNTIME_LOCATOR_ACTIONS as LOCATOR_ACTIONS } from "./allowlist";
 import type { ApiRequestEvidence } from "../evidence";
 export type { ApiRequestEvidence } from "../evidence";
 
@@ -114,33 +115,6 @@ function frozen(kind: WrapperKind, methods: Record<string, unknown>, original: o
     originals.set(wrapper, { kind, original });
     return wrapper;
 }
-
-const LOCATOR_FACTORIES = [
-    "getByRole",
-    "getByLabel",
-    "getByText",
-    "getByPlaceholder",
-    "getByTestId",
-    "getByAltText",
-    "getByTitle",
-    "locator",
-] as const;
-const LOCATOR_REFINERS = ["first", "last", "nth"] as const;
-const LOCATOR_ACTIONS = [
-    "click",
-    "dblclick",
-    "press",
-    "check",
-    "uncheck",
-    "setChecked",
-    "selectOption",
-    "hover",
-    "focus",
-    "blur",
-    "clear",
-    "scrollIntoViewIfNeeded",
-    "waitFor",
-] as const;
 
 export interface GuardOptions {
     runtime: SpecbookRuntime;

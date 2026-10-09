@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { createSecretScrubber } from "../../src/core/credentials/scrub";
-import { writeRunEvidence } from "../../src/core/runner/evidence";
+import { isStepScreenshot, readEvidenceManifest, writeRunEvidence } from "../../src/core/runner/evidence";
 import { executableSource } from "../../src/core/runner/playwright";
 import { parsePlaywrightReport, stripAnsi } from "../../src/core/runner/report";
 import { analyzeSpecSource } from "../../src/core/runner/validate";
@@ -79,6 +79,21 @@ describe("parsePlaywrightReport", () => {
 });
 
 describe("run evidence", () => {
+    test("validates stored manifests and supports older step entries", async () => {
+        const directory = tempDir();
+        const file = path.join(directory, "evidence.json");
+        const empty = { steps: [], video: null, failedStep: null };
+        assert.deepEqual(await readEvidenceManifest(directory), empty);
+        await fs.writeFile(file, JSON.stringify({ failedStep: "Open", steps: [{ label: "Open", file: "evidence/step-01.png" }] }));
+        assert.deepEqual(await readEvidenceManifest(directory), { steps: [{ number: 1, label: "Open", file: "evidence/step-01.png" }], video: null, failedStep: "Open" });
+        for (const invalid of ["{", JSON.stringify({ steps: "invalid" }), JSON.stringify({ diagnostics: [{ kind: "console", message: 123 }] }), JSON.stringify({ steps: [{ number: 1, label: "Open", file: "../private.png" }] })]) {
+            await fs.writeFile(file, invalid);
+            assert.deepEqual(await readEvidenceManifest(directory), empty);
+        }
+        for (const valid of ["evidence/step-01.png", "evidence/step-100.png"]) assert.equal(isStepScreenshot(valid), true);
+        for (const invalid of ["evidence/step-1.png", "evidence/step-1000.png", "../evidence/step-01.png", "evidence/step-01.png/extra"]) assert.equal(isStepScreenshot(invalid), false);
+    });
+
     test("copies step screenshots and the failure video and writes evidence.json", async () => {
         const work = tempDir();
         const output = tempDir();
@@ -104,6 +119,7 @@ describe("run evidence", () => {
             failedStep: "Log in",
         });
         assert.deepEqual(JSON.parse(await fs.readFile(path.join(output, "evidence.json"), "utf8")), manifest);
+        assert.deepEqual(await readEvidenceManifest(output), manifest);
         assert.equal(await fs.readFile(path.join(output, "evidence", "step-02.png"), "utf8"), "png2");
 
         const passed = await writeRunEvidence(tempDir(), "passed", {

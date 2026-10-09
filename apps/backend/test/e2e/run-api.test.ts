@@ -90,6 +90,51 @@ test("chat events disable compression and buffering in the frontend proxy", asyn
 });
 
 describe("executeSpec (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
+    test("single-Spec batches preserve retry options and discard temporary failures", { timeout: 120_000 }, async () => {
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { specsRepository } = await import("../../src/infra/repositories/specs");
+        const { runsDir } = await import("../../src/core/paths");
+        const project = await projectsRepository.createProject("Temporary run", baseUrl);
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const feature = await writer.createFeatureInRepo(project.id, null, "Store", "");
+        const { spec } = await writer.createSpecInRepo({
+            projectId: project.id, featureId: feature.id, title: "Checkout", description: "",
+            humanSpec: { preconditions: [], steps: ["Check checkout"], expectedResult: "Checkout appears", postconditions: [] },
+            testSource: 'import { test, expect } from "specbook"; test("Checkout", async ({ page, step }) => { await step("Check checkout", async () => { await page.goto("/"); await expect(page.getByRole("heading")).toHaveText("Checkout", { timeout: 100 }); }); });',
+        });
+        await assert.rejects(() => executeSpec(spec.id, { signal: AbortSignal.abort(new Error("Cancelled before starting")) }), /Cancelled before starting/);
+        assert.deepEqual(await runsRepository.listRuns(spec.id), []);
+        const original = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(project.id) });
+        await runsRepository.finishRun(original.id, "failed", 1, "Original failure");
+        const run = await executeSpec(spec.id, { persistFailures: false, automate: true, healOnFailure: false, retryOf: original.id, expected: { sourceHash: spec.sourceHash, markdownHash: spec.markdownHash } });
+        assert.equal(run.status, "failed");
+        assert.equal(run.failedStep, "Check checkout");
+        assert.equal(run.automationPending, true);
+        assert.equal(run.healOnFailure, false);
+        assert.equal(run.retryOf, original.id);
+        assert.equal(await runsRepository.getRun(run.id), null);
+        await assert.rejects(() => fs.stat(path.join(runsDir, run.id)), { code: "ENOENT" });
+        await assert.rejects(() => repoGit.getProjectGit(project.id).raw(["rev-parse", "--verify", `refs/specbook/runs/${run.id}`]));
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "unverified");
+        const createRun = runsRepository.createRun;
+        runsRepository.createRun = async function (input) {
+            const created = await createRun.call(this, input);
+            await fs.mkdir(runsDir, { recursive: true });
+            await fs.writeFile(path.join(runsDir, created.id), "Output directory unavailable");
+            return created;
+        };
+        try {
+            const blocked = await executeSpec(spec.id);
+            assert.equal(blocked.status, "error");
+            assert.equal((await runsRepository.getRun(blocked.id))?.status, "error", "artifact failures still finish the run");
+            assert.equal(blocked.automationPending, false);
+            assert.equal(blocked.healOnFailure, true);
+            await fs.rm(path.join(runsDir, blocked.id));
+        } finally {
+            runsRepository.createRun = createRun;
+        }
+    });
+
     test("blocks redirected navigation outside the configured project origins", { timeout: 120_000 }, async () => {
         let privateRequests = 0;
         const privateSite = http.createServer((_request, response) => { privateRequests++; response.end("Internal service"); });

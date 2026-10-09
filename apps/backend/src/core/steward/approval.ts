@@ -8,7 +8,7 @@ import type { ProposalVerification } from "../jobs/verification";
 import { provesExpectedResult } from "../runner/evidence-review";
 import { isAgentPaused } from "../jobs/pause";
 import { recordAgentMetric } from "../jobs/metrics";
-import { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "../runner/validate";
+import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, LOCATOR_REFINERS } from "../runner/specbook/allowlist";
 
 export function isLocatorOnlyFix(item: InboxItem): boolean {
     if (item.kind !== "spec_fix" || !item.payload.requiresVerification) return false;
@@ -24,7 +24,7 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
             let target = call.callee.object;
             while (target?.type === "CallExpression" && target.callee?.type === "MemberExpression" && !target.callee.computed) {
                 const method = target.callee.property?.name;
-                if (![...LOCATOR_FACTORIES, "first", "last", "nth"].includes(method)) return;
+                if (![...LOCATOR_FACTORIES, ...LOCATOR_REFINERS].includes(method)) return;
                 if (["locator", "getByLabel", "getByTestId", "getByPlaceholder"].includes(method)
                     && target.arguments.length === 1 && target.arguments[0]?.type === "StringLiteral") selectors.push(target.arguments[0]);
                 target = target.callee.object;

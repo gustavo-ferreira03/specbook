@@ -14,6 +14,7 @@ import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure } from "./retry";
 import { matchesCurrentSpec } from "./current-run";
 import { reviewRunEvidence } from "../runner/evidence-review";
+import { readEvidenceManifest, isStepScreenshot } from "../runner/evidence";
 
 export class StaleTriageError extends Error {}
 
@@ -55,13 +56,13 @@ export function createTriageTools(job: Job, abort: () => void) {
                 const spec = run ? await specsRepository.getSpec(run.specId) : null;
                 if (!run || spec?.projectId !== job.projectId) throw new Error("Failure evidence is no longer available");
                 const directory = path.join(runsDir, run.id);
-                const evidence = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8").catch(() => "{}")) as { steps?: { file: string }[] };
-                const evidenceReview = await reviewRunEvidence(directory, { status: run.status, failReason: run.failReason && await scrub(run.failReason), failedStep: (evidence as { failedStep?: string }).failedStep });
+                const evidence = await readEvidenceManifest(directory);
+                const evidenceReview = await reviewRunEvidence(directory, { status: run.status, failReason: run.failReason && await scrub(run.failReason), failedStep: evidence.failedStep });
                 const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
                     { type: "text", text: await scrub(JSON.stringify({ run, evidence, evidenceReview, artifactBase: `/runs/${run.id}/artifacts/` })) },
                 ];
                 for (const step of (await getSecuritySettings()).sendScreenshotsToModel ? (evidence.steps ?? []).slice(-2) : []) {
-                    if (!/^evidence\/step-\d{2,3}\.png$/.test(step.file)) continue;
+                    if (!isStepScreenshot(step.file)) continue;
                     const file = path.join(directory, step.file);
                     const bytes = await fs.readFile(file).catch(() => null);
                     if (bytes && bytes.byteLength <= 4 * 1024 * 1024) content.push({ type: "image", data: bytes.toString("base64"), mimeType: "image/png" });

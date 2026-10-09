@@ -1,4 +1,4 @@
-import { REPORT_FILE, isInside, realRunDirectory, listArtifactFiles, realBatchDirectory, batchReportAvailable, readRunEvidence } from "../../../core/runner/artifacts";
+import { REPORT_FILE, realRunDirectory, listArtifactFiles, realBatchDirectory, batchReportAvailable, readRunEvidence } from "../../../core/runner/artifacts";
 import { access } from "../access";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -10,6 +10,7 @@ import { getRunBatch, startSpecBatch } from "../../../core/runner/batch";
 import { executeSpec } from "../../../core/runner/run";
 import { MAX_RUN_LIST_LIMIT, runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
+import { isInside } from "../../../core/repo/safe-fs";
 
 const CONTENT_TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
@@ -130,7 +131,7 @@ export function createRunsRouter(): Hono {
         const file = c.req.param("file");
         if (!file || file.includes("\0")) throw new HTTPException(400, { message: "Invalid artifact path" });
         const absolute = path.resolve(directory, file);
-        if (!isInside(directory, absolute) || absolute === directory) {
+        if (!isInside(directory, absolute, { allowRoot: true }) || absolute === directory) {
             throw new HTTPException(400, { message: "Invalid artifact path" });
         }
         let realArtifact: string;
@@ -140,7 +141,7 @@ export function createRunsRouter(): Hono {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new HTTPException(404, { message: "Artifact not found" });
             throw error;
         }
-        if (!isInside(directory, realArtifact)) throw new HTTPException(400, { message: "Invalid artifact path" });
+        if (!isInside(directory, realArtifact, { allowRoot: true })) throw new HTTPException(400, { message: "Invalid artifact path" });
         const stat = await fs.stat(realArtifact);
         if (!stat.isFile()) throw new HTTPException(404, { message: "Artifact not found" });
         const data = await fs.readFile(realArtifact);
@@ -156,7 +157,7 @@ export function createRunsRouter(): Hono {
         const file = c.req.param("file");
         if (!file || file.includes("\0")) throw new HTTPException(400, { message: "Invalid artifact path" });
         const absolute = path.resolve(directory, file);
-        if (!isInside(directory, absolute) || absolute === directory) {
+        if (!isInside(directory, absolute, { allowRoot: true }) || absolute === directory) {
             throw new HTTPException(400, { message: "Invalid artifact path" });
         }
         let realArtifact: string;
@@ -168,7 +169,7 @@ export function createRunsRouter(): Hono {
             }
             throw error;
         }
-        if (!isInside(directory, realArtifact)) throw new HTTPException(400, { message: "Invalid artifact path" });
+        if (!isInside(directory, realArtifact, { allowRoot: true })) throw new HTTPException(400, { message: "Invalid artifact path" });
         const stat = await fs.stat(realArtifact);
         if (!stat.isFile()) throw new HTTPException(404, { message: "Artifact not found" });
         const data = await fs.readFile(realArtifact);

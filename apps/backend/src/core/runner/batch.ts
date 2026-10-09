@@ -16,7 +16,7 @@ import { projectSecretScrubber } from "../credentials/scrub";
 import { acquireSpecLocks, ResourceBusyError } from "../specs/lifecycle";
 import { runPlaywrightSuite } from "./playwright";
 import { withRunSlot } from "./process";
-import { analyzeForRun, MAX_FAIL_REASON_CHARS, RUN_TIMEOUT_MS } from "./run";
+import { analyzeForRun, MAX_FAIL_REASON_CHARS, MAX_FAILED_STEP_CHARS, RUN_TIMEOUT_MS, StaleRunError, type ExecutedRun, type RunOptions } from "./execution";
 import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
 import type { SpecAnalysis } from "./validate";
 
@@ -60,10 +60,12 @@ export interface RunBatch {
 
 interface PreparedSpec {
     run: Run;
+    projectId: string;
     markdown: string;
     testSource: string;
     analysis: SpecAnalysis;
     item: RunBatchItem;
+    finished?: ExecutedRun;
 }
 
 interface BatchSecrets {
@@ -74,32 +76,53 @@ interface BatchSecrets {
 
 const MAX_BATCH_TIMEOUT_MS = 30 * 60 * 1000;
 const activeBatches = new Map<string, Promise<void>>();
+const MAX_CACHED_BATCHES = 300;
 const batchIndex = new Map<string, Map<string, { startedAt: string; ci: boolean }>>();
-let indexing: Promise<void> | undefined;
-let indexedDirectoryStamp: string | undefined;
-const indexedBatchIds = new Set<string>();
+const indexedBatchIds = new Map<string, string>();
 
 function indexBatch(batch: RunBatch): void {
+    const previousProject = indexedBatchIds.get(batch.id);
+    if (previousProject && previousProject !== batch.projectId) {
+        const previous = batchIndex.get(previousProject);
+        previous?.delete(batch.id);
+        if (!previous?.size) batchIndex.delete(previousProject);
+    }
     let project = batchIndex.get(batch.projectId);
     if (!project) { project = new Map(); batchIndex.set(batch.projectId, project); }
     project.set(batch.id, { startedAt: batch.startedAt, ci: Boolean(batch.ci) });
-    indexedBatchIds.add(batch.id);
+    indexedBatchIds.delete(batch.id);
+    indexedBatchIds.set(batch.id, batch.projectId);
+    while (indexedBatchIds.size > MAX_CACHED_BATCHES) {
+        const [id, projectId] = indexedBatchIds.entries().next().value!;
+        indexedBatchIds.delete(id);
+        const entries = batchIndex.get(projectId)!;
+        entries.delete(id);
+        if (!entries.size) batchIndex.delete(projectId);
+    }
 }
 
-function ensureBatchIndex(): Promise<void> {
-    return indexing ??= (async () => {
-        const stamp = await fs.stat(runBatchesDir).then((stat) => `${stat.ino}:${stat.mtimeMs}`).catch((error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return "missing";
-            throw error;
-        });
-        if (stamp === indexedDirectoryStamp) return;
-        const entries = await fs.readdir(runBatchesDir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return [];
-            throw error;
-        });
-        for (const entry of entries) if (entry.isDirectory() && !indexedBatchIds.has(entry.name)) await getRunBatch(entry.name);
-        indexedDirectoryStamp = stamp;
-    })().finally(() => { indexing = undefined; });
+async function ensureBatchIndex(projectId: string): Promise<Map<string, { startedAt: string; ci: boolean }>> {
+    const entries = await fs.readdir(runBatchesDir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+    });
+    const project = new Map<string, { startedAt: string; ci: boolean }>();
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        let indexedProject = indexedBatchIds.get(entry.name);
+        let metadata = indexedProject ? batchIndex.get(indexedProject)?.get(entry.name) : undefined;
+        if (!metadata) {
+            const batch = await getRunBatch(entry.name);
+            if (!batch) continue;
+            indexedProject = batch.projectId;
+            metadata = { startedAt: batch.startedAt, ci: Boolean(batch.ci) };
+        } else {
+            indexedBatchIds.delete(entry.name);
+            indexedBatchIds.set(entry.name, indexedProject!);
+        }
+        if (indexedProject === projectId) project.set(entry.name, metadata);
+    }
+    return project;
 }
 
 function batchDirectory(id: string): string {
@@ -139,19 +162,35 @@ async function finishPreparedSpec(
     prepared: PreparedSpec,
     outcome: { status: FinalRunStatus; durationMs: number | null; failReason: string | null },
     scrub: (text: string) => string,
+    options?: RunOptions,
+    failedStep: string | null = null,
 ): Promise<void> {
     const result = {
         ...outcome,
-        failReason: outcome.failReason === null ? null : scrub(outcome.failReason).slice(0, MAX_FAIL_REASON_CHARS),
+        failReason: outcome.failReason === null || options && outcome.status === "passed" ? null : scrub(outcome.failReason).slice(0, MAX_FAIL_REASON_CHARS),
     };
     const runDir = path.join(runsDir, prepared.run.id);
-    await fs.mkdir(runDir, { recursive: true });
-    await fs.writeFile(path.join(runDir, "batch.json"), JSON.stringify({ batchId }), "utf8");
-    if (!(await fs.stat(path.join(runDir, "evidence.json")).catch(() => null))) {
-        await fs.writeFile(path.join(runDir, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null }), "utf8");
+    try {
+        await fs.mkdir(runDir, { recursive: true });
+        if (!options) await fs.writeFile(path.join(runDir, "batch.json"), JSON.stringify({ batchId }), "utf8");
+        if (!(await fs.stat(path.join(runDir, "evidence.json")).catch(() => null))) {
+            await fs.writeFile(path.join(runDir, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null }), "utf8");
+        }
+    } catch (error) {
+        if (!options) throw error;
     }
     await runsRepository.finishRun(prepared.run.id, result.status, result.durationMs, result.failReason);
-    if (result.status === "passed" || result.status === "failed") {
+    if (options) {
+        const stored = await runsRepository.getRun(prepared.run.id);
+        if (!stored) throw new Error("Run disappeared");
+        prepared.finished = { ...stored, failedStep: failedStep === null ? null : scrub(failedStep).slice(0, MAX_FAILED_STEP_CHARS) };
+        if (options.persistFailures === false && stored.status !== "passed") {
+            await fs.rm(runDir, { recursive: true, force: true });
+            await runsRepository.deleteRun(stored.id);
+            await repoGit.withRepoLock(prepared.projectId, () => repoGit.deleteRunCommitRefsUnlocked(prepared.projectId, [stored.id]));
+        }
+    }
+    if ((options?.persistFailures !== false || result.status === "passed") && (result.status === "passed" || result.status === "failed")) {
         await specsRepository.updateSpecStatusForContent(
             prepared.item.specId,
             prepared.item.sourceHash,
@@ -169,11 +208,14 @@ async function executeBatch(
     prepared: PreparedSpec[],
     baseUrl: string,
     secrets: BatchSecrets,
+    options?: RunOptions,
 ): Promise<void> {
     let started = Date.now();
-    const batchDir = batchDirectory(batch.id);
-    await fs.mkdir(batchDir, { recursive: true });
+    const directory = options ? path.join(runsDir, prepared[0].run.id) : batchDirectory(batch.id);
+    const results = new Map<string, { status: FinalRunStatus; durationMs: number | null; failReason: string | null; failedStep: string | null }>();
+    let processFailure: string | null = null;
     try {
+        await fs.mkdir(directory, { recursive: true });
         for (const entry of prepared) {
             await fs.mkdir(path.join(runsDir, entry.run.id), { recursive: true });
             await Promise.all([
@@ -181,53 +223,60 @@ async function executeBatch(
                 fs.writeFile(path.join(runsDir, entry.run.id, "spec.yml"), entry.markdown, "utf8"),
             ]);
         }
-
         const timeout = Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(RUN_TIMEOUT_MS, prepared.length * RUN_TIMEOUT_MS));
         const outcome = await withRunSlot(() => {
             started = Date.now();
             return runPlaywrightSuite({
                 projectId: batch.projectId,
-                directory: batchDir,
+                directory,
                 baseUrl,
                 environment: batch.environment,
-                specs: prepared.map((entry) => ({
-                    key: entry.run.id,
-                    source: entry.testSource,
-                    analysis: entry.analysis,
-                    outputDir: path.join(runsDir, entry.run.id),
-                })),
+                specs: prepared.map((entry) => ({ key: entry.run.id, source: entry.testSource, analysis: entry.analysis, outputDir: path.join(runsDir, entry.run.id) })),
                 timeoutMs: timeout,
                 secretEnv: secrets.env,
                 secretOrigins: secrets.origins,
                 scrub: secrets.scrub,
+                signal: options?.signal,
             });
-        });
-        const processFailure = outcome.processFailure;
+        }, options?.signal);
+        processFailure = outcome.processFailure;
         for (const entry of prepared) {
             const result = outcome.results.get(entry.run.id);
-            await finishPreparedSpec(batch.id, entry, result && result.status !== "error"
-                ? { status: result.status, durationMs: result.durationMs, failReason: result.failReason }
-                : { status: "error", durationMs: null, failReason: result?.failReason ?? processFailure ?? "Playwright produced no result for this Spec" }, secrets.scrub);
+            if (result && (options ? !processFailure : result.status !== "error")) {
+                results.set(entry.run.id, result);
+            } else {
+                results.set(entry.run.id, {
+                    status: "error", durationMs: null, failedStep: null,
+                    failReason: options
+                        ? processFailure ?? "Playwright produced no result"
+                        : result?.failReason ?? processFailure ?? "Playwright produced no result for this Spec",
+                });
+            }
         }
-        batch.status = processFailure
-            ? "error"
-            : prepared.some((entry) => entry.item.status === "failed" || entry.item.status === "error")
-              ? "failed"
-              : "passed";
+    } catch (error) {
+        processFailure = error instanceof Error ? error.message : String(error);
+        for (const entry of prepared) results.set(entry.run.id, { status: "error", durationMs: null, failReason: processFailure, failedStep: null });
+    }
+    try {
+        for (const entry of prepared) {
+            const result = results.get(entry.run.id)!;
+            await finishPreparedSpec(batch.id, entry, { ...result, durationMs: options ? result.durationMs ?? Date.now() - started : result.durationMs }, secrets.scrub, options, result.failedStep);
+        }
+        batch.status = processFailure ? "error" : prepared.some((entry) => entry.item.status === "failed" || entry.item.status === "error") ? "failed" : "passed";
         batch.failReason = processFailure;
     } catch (error) {
+        if (options) throw error;
         const message = error instanceof Error ? error.message : String(error);
         for (const entry of prepared) {
             if (entry.item.status !== "running") continue;
-            await finishPreparedSpec(batch.id, entry, { status: "error", durationMs: null, failReason: message }, secrets.scrub)
-                .catch(console.error);
+            await finishPreparedSpec(batch.id, entry, { status: "error", durationMs: null, failReason: message }, secrets.scrub).catch(console.error);
         }
         batch.status = "error";
         batch.failReason = message;
     } finally {
         batch.durationMs = Date.now() - started;
         batch.failReason = batch.failReason === null ? null : secrets.scrub(batch.failReason).slice(0, MAX_FAIL_REASON_CHARS);
-        await writeBatch(batch);
+        if (!options) await writeBatch(batch);
     }
 }
 
@@ -240,6 +289,7 @@ async function prepareSpecBatch(
     ci?: CiBatchMetadata,
     trigger: RunBatchTrigger = "manual",
     environment?: RunEnvironment,
+    options?: RunOptions,
 ): Promise<{ batch: RunBatch; prepared: PreparedSpec[]; secrets: BatchSecrets }> {
     const { commitSha, definitions } = await repoGit.withRepoLock(projectId, async () => {
         await prepareRunRepositoryUnlocked(projectId);
@@ -254,9 +304,9 @@ async function prepareSpecBatch(
         }[] = [];
         for (const id of ids) {
             const spec = await specsRepository.getSpec(id);
-            if (!spec || spec.projectId !== projectId) throw new Error(`Spec ${id} not found in this project`);
+            if (!spec || spec.projectId !== projectId) throw new Error(options ? "This Spec was removed. Refresh the project to see its current Specs." : `Spec ${id} not found in this project`);
             if (spec.status === "invalid") {
-                throw new Error(`Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
+                throw new Error(options ? `This Spec needs repair before it can run. ${spec.invalidReason ?? "Open the Spec and choose Repair in chat."}` : `Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`);
             }
             const [markdown, testSource] = await Promise.all([
                 fs.readFile(path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)), "utf8"),
@@ -265,7 +315,10 @@ async function prepareSpecBatch(
             const sourceHash = sourceHashOf(testSource);
             const markdownHash = markdownHashOf(markdown);
             if (sourceHash !== spec.sourceHash || markdownHash !== spec.markdownHash) {
-                throw new Error(`The Spec "${spec.title}" changed while it was being prepared. Run it again to use the latest version.`);
+                throw new Error(options ? "The Spec changed while it was being prepared. Run it again to use the latest version." : `The Spec "${spec.title}" changed while it was being prepared. Run it again to use the latest version.`);
+            }
+            if (options?.expected && (sourceHash !== options.expected.sourceHash || markdownHash !== options.expected.markdownHash)) {
+                throw new StaleRunError("Spec changed after the failed run; retry skipped");
             }
             definitions.push({
                 spec,
@@ -279,6 +332,10 @@ async function prepareSpecBatch(
         return { commitSha, definitions };
     });
 
+    if (options) {
+        environment = typeof options.environment === "object" ? options.environment : await resolveRunEnvironment(projectId, options.environment, options.baseUrl);
+        baseUrl = environment.baseUrl;
+    }
     const refsOf = (analysis: SpecAnalysis) => analysis.secretRefs.map((ref) => ref.envName);
     const refs = [...new Set(definitions.flatMap((definition) => refsOf(definition.analysis)))];
     const { env: secretEnv, missing } = await resolveSecretEnv(projectId, refs, environment?.credentialOverrides);
@@ -287,7 +344,7 @@ async function prepareSpecBatch(
             .filter((definition) => refsOf(definition.analysis).some((ref) => missing.includes(ref)))
             .map((definition) => `"${definition.spec.title}"`);
         throw new Error(
-            `Specs ${titles.join(", ")} reference credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
+            `${options ? `Spec ${titles[0]} references` : `Specs ${titles.join(", ")} reference`} credentials that are not configured: ${missing.join(", ")}. Add them in Settings » Credentials.`,
         );
     }
     const secrets: BatchSecrets = {
@@ -297,13 +354,18 @@ async function prepareSpecBatch(
     };
 
     const createdRuns: Run[] = [];
+    const rollback = async () => {
+        await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
+        await repoGit.withRepoLock(projectId, () => repoGit.deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id))).catch(() => undefined);
+    };
     try {
         for (const definition of definitions) {
             const run = await runsRepository.createRun({
                 specId: definition.spec.id,
                 commitSha,
                 sourceHash: definition.sourceHash,
-                automate: true,
+                automate: options ? options.automate : true,
+                retryOf: options?.retryOf,
                 healOnFailure,
                 baseUrl,
                 environment,
@@ -312,8 +374,7 @@ async function prepareSpecBatch(
             await repoGit.withRepoLock(projectId, () => repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha));
         }
     } catch (error) {
-        await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
-        await repoGit.withRepoLock(projectId, () => repoGit.deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
+        await rollback();
         throw error;
     }
 
@@ -342,20 +403,31 @@ async function prepareSpecBatch(
         })),
     };
     try {
-        await writeBatch(batch);
+        if (!options) await writeBatch(batch);
     } catch (error) {
-        await Promise.all(createdRuns.map((run) => runsRepository.deleteRun(run.id).catch(() => undefined)));
-        await repoGit.withRepoLock(projectId, () => repoGit.deleteRunCommitRefsUnlocked(projectId, createdRuns.map((run) => run.id)));
+        await rollback();
         throw error;
     }
     const prepared = definitions.map((definition, index): PreparedSpec => ({
         run: createdRuns[index],
+        projectId,
         markdown: definition.markdown,
         testSource: definition.testSource,
         analysis: definition.analysis,
         item: batch.specs[index],
     }));
     return { batch, prepared, secrets };
+}
+
+export async function executeSingleSpecBatch(specId: string, options: RunOptions): Promise<ExecutedRun> {
+    options.signal?.throwIfAborted();
+    const spec = await specsRepository.getSpec(specId);
+    if (!spec) throw new Error("Spec not found");
+    const project = await projectsRepository.getProject(spec.projectId);
+    if (!project) throw new Error("Project not found");
+    const { batch, prepared, secrets } = await prepareSpecBatch(project.id, [specId], spec.title, "", options.healOnFailure !== false, undefined, "manual", undefined, options);
+    await executeBatch(batch, prepared, batch.baseUrl!, secrets, options);
+    return prepared[0].finished!;
 }
 
 export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { environment?: string | RunEnvironment; baseUrl?: string; ci?: CiBatchMetadata; trigger?: RunBatchTrigger; healFailures?: boolean; rejectIfBusy?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {
@@ -421,18 +493,23 @@ async function readListedBatch(id: string): Promise<RunBatch | null> {
         throw error;
     });
     const cached = finishedBatches.get(id);
-    if (stamp && cached?.stamp === stamp) return cached.batch;
+    if (stamp && cached?.stamp === stamp) {
+        finishedBatches.delete(id);
+        finishedBatches.set(id, cached);
+        return cached.batch;
+    }
     finishedBatches.delete(id);
     if (!stamp) return null;
     const batch = await getRunBatch(id);
-    if (batch && batch.status !== "running") finishedBatches.set(id, { stamp, batch });
+    if (batch && batch.status !== "running") {
+        finishedBatches.set(id, { stamp, batch });
+        while (finishedBatches.size > MAX_CACHED_BATCHES) finishedBatches.delete(finishedBatches.keys().next().value!);
+    }
     return batch;
 }
 
 export async function listRunBatches(projectId: string, limit = 100, ciOnly = false): Promise<RunBatch[]> {
-    await ensureBatchIndex();
-    const project = batchIndex.get(projectId);
-    if (!project) return [];
+    const project = await ensureBatchIndex(projectId);
     const candidates = [...project].filter(([, entry]) => !ciOnly || entry.ci)
         .sort(([, a], [, b]) => b.startedAt.localeCompare(a.startedAt));
     const batches: RunBatch[] = [];

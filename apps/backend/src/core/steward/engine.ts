@@ -22,18 +22,17 @@ import { retryStalledJob } from "../jobs/retry";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { collectProjectSignals, fingerprint, runSignalForIntent, runTriggerForIntent } from "./signals";
 import { stewardIntentSchema, type StewardIntent } from "./schemas";
+import { readEvidenceManifest } from "../runner/evidence";
+import { createKeyedLock } from "../operations/keyed-lock";
 
-const locks = new Map<string, Promise<unknown>>();
+const locks = createKeyedLock();
 let stopped = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 let processing = false;
 class IntentDeferred extends Error {}
 
 export async function withProjectLock<T>(id: string, work: () => Promise<T>): Promise<T> {
-    const previous = locks.get(id) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(work);
-    locks.set(id, current);
-    try { return await current; } finally { if (locks.get(id) === current) locks.delete(id); }
+    return locks.run(id, work);
 }
 
 async function intentFingerprint(projectId: string, intent: StewardIntent, source: "user" | "event", key: string, specs?: Spec[]): Promise<string> {
@@ -43,7 +42,7 @@ async function intentFingerprint(projectId: string, intent: StewardIntent, sourc
         const spec = specs.find((spec) => spec.id === run.specId);
         if (!spec || intent.specIds?.some((id) => id !== spec.id)) throw new Error("The failed run must belong to the selected Spec in this project");
         const yaml = await fs.readFile(path.join(runsDir, run.id, "spec.yml"), "utf8").catch(() => null);
-        const evidence = await fs.readFile(path.join(runsDir, run.id, "evidence.json"), "utf8").then((value) => JSON.parse(value) as { failedStep?: string }).catch(() => ({} as { failedStep?: string }));
+        const evidence = await readEvidenceManifest(path.join(runsDir, run.id));
         const reason = run.failReason ?? "";
         const failureKind = run.status === "error" || /net::|ECONN|ENOTFOUND|connection refused|session expired/i.test(reason) ? "environment"
             : /expect\(|AssertionError|Expected:|Received:|to[A-Z]\w+/.test(reason) ? "assertion"

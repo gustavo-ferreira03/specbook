@@ -7,21 +7,15 @@ import {
     type DiscoveryBrief,
     type ProjectContext,
 } from "../db/schema";
+import { createKeyedLock } from "../../core/operations/keyed-lock";
 
 export type ProjectContextRevisionRow = typeof projectContextRevisions.$inferSelect;
 
 class ProjectContextsRepository {
-    private draftLocks = new Map<string, Promise<unknown>>();
+    private draftLocks = createKeyedLock();
 
     async withProjectContextDraftLock<T>(projectId: string, work: () => Promise<T>): Promise<T> {
-        const previous = this.draftLocks.get(projectId) ?? Promise.resolve();
-        const current = previous.catch(() => undefined).then(work);
-        this.draftLocks.set(projectId, current);
-        try {
-            return await current;
-        } finally {
-            if (this.draftLocks.get(projectId) === current) this.draftLocks.delete(projectId);
-        }
+        return this.draftLocks.run(projectId, work);
     }
 
     async createProjectContextDraft(

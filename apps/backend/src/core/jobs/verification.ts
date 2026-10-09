@@ -19,6 +19,7 @@ import { analyzeSpecSource, stepTitlesError } from "../runner/validate";
 import { resolveSecretOriginPolicy } from "../runner/secrets";
 import { fixProposalSchema } from "./schemas";
 import { isAgentPaused } from "./pause";
+import { readEvidenceManifest } from "../runner/evidence";
 
 export interface ProposalVerification {
     id: string;
@@ -78,7 +79,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
             timeoutMs: Math.min(120_000, remaining), secretEnv, secretOrigins, scrub, signal });
     }, signal);
     const result = outcome.results.get(id);
-    const manifest = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8")) as { steps: { file: string }[] };
+    const manifest = await readEvidenceManifest(directory);
     const verification: ProposalVerification = {
         id, status: outcome.processFailure ? "error" : result?.status ?? "error", durationMs: result?.durationMs ?? null,
         failReason: scrub(outcome.processFailure ?? result?.failReason ?? "") || null, failedStep: result?.failedStep ?? null,

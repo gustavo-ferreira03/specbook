@@ -12,6 +12,7 @@ import { getRunBatch } from "../runner/batch";
 import { areSpecsLocked, withSpecLock } from "../specs/lifecycle";
 import { withFileQueue } from "./file-queue";
 import type { RetentionCleanup, RetentionSettings } from "./schemas";
+import { readEvidenceManifest } from "../runner/evidence";
 
 const DAY_MS = 86_400_000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -55,17 +56,11 @@ async function removeVideos(directory: string, cutoff: number): Promise<number> 
         await fs.rm(directory, { recursive: true, force: true });
     } else if (removed) {
         const manifestPath = path.join(directory, "evidence.json");
-        const source = await fs.readFile(manifestPath, "utf8").catch((error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return null;
-            throw error;
-        });
-        if (source) {
-            const manifest = JSON.parse(source) as { video?: string | null };
-            if (manifest.video) {
-                const file = path.resolve(directory, manifest.video);
-                const exists = file.startsWith(`${path.resolve(directory)}${path.sep}`) && await fs.lstat(file).then((stat) => stat.isFile(), () => false);
-                if (!exists) await writeProtectedFile(manifestPath, JSON.stringify({ ...manifest, video: null }));
-            }
+        const manifest = await readEvidenceManifest(directory);
+        if (manifest.video) {
+            const file = path.resolve(directory, manifest.video);
+            const exists = file.startsWith(`${path.resolve(directory)}${path.sep}`) && await fs.lstat(file).then((stat) => stat.isFile(), () => false);
+            if (!exists) await writeProtectedFile(manifestPath, JSON.stringify({ ...manifest, video: null }));
         }
     }
     return removed;
