@@ -132,8 +132,16 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string;
             if (result.isError) throw new CodedError("infrastructure", `The browser could not start: ${extractMcpText(result as { content?: unknown })}`);
         };
         const navigate = async (url: string, signal?: AbortSignal) => {
-            const result = await client.callTool({ name: "browser_navigate", arguments: { url } }, undefined, { signal });
-            if (result.isError) throw new CodedError("environment", `browser tool failed: ${extractMcpText(result as { content?: unknown })}`);
+            for (let attempt = 0; ; attempt++) {
+                const result = await client.callTool({ name: "browser_navigate", arguments: { url } }, undefined, { signal });
+                if (!result.isError) return;
+                const text = extractMcpText(result as { content?: unknown });
+                if (attempt < 3 && /is interrupted by another navigation/.test(text)) {
+                    await new Promise((resolve) => setTimeout(resolve, 300));
+                    continue;
+                }
+                throw new CodedError("environment", `browser tool failed: ${text}`);
+            }
         };
         return {
             client,

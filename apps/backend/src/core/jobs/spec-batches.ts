@@ -52,8 +52,11 @@ export async function proposeSpecBatch(projectId: string, chatId: string, input:
     }
     const features = await featuresRepository.listFeatures(projectId);
     for (const candidate of proposed.candidates) {
-        if (candidate.featureId && !features.some((feature) => feature.id === candidate.featureId)) throw new Error("A suggested feature belongs to another project or no longer exists.");
-        if (candidate.featureId) candidate.feature = features.find((feature) => feature.id === candidate.featureId)!.title;
+        const byId = candidate.featureId ? features.find((feature) => feature.id === candidate.featureId) : undefined;
+        if (candidate.featureId && !byId && await featuresRepository.getFeature(candidate.featureId)) throw new Error("A suggested feature belongs to another project.");
+        const match = byId ?? features.find((feature) => feature.title.toLowerCase() === candidate.feature.toLowerCase());
+        candidate.featureId = match?.id;
+        if (match) candidate.feature = match.title;
     }
     const scrub = createProjectScrubber(projectId);
     const clean = specBatchProposalSchema.parse(JSON.parse(await scrub(JSON.stringify(proposed))));
@@ -158,7 +161,7 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
 export async function selectedSpecResult(job: Job) {
     const { candidate } = await selectedCandidate(job);
     const spec = candidate.specId ? await specsRepository.getSpec(candidate.specId) : null;
-    const run = candidate.runId ? await runsRepository.getRun(candidate.runId) : spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null;
+    const run = (spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null) ?? (candidate.runId ? await runsRepository.getRun(candidate.runId) : null);
     const evidenceReview = run && run.status !== "running" ? await reviewRunEvidence(path.join(runsDir, run.id), run) : null;
     const attemptsLeft = spec ? Math.max(0, MAX_DRAFT_RUNS - await draftFailures(spec.id)) : MAX_DRAFT_RUNS;
     return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null, evidenceReview, attemptsLeft,
@@ -223,7 +226,7 @@ export async function presentSpecBatch(item: InboxItem) {
     const candidates = await Promise.all(batch.candidates.map(async (candidate) => {
         const job = candidate.jobId ? await jobsRepository.get(candidate.jobId) : null;
         const spec = candidate.selected && candidate.specId ? await specsRepository.getSpec(candidate.specId) : null;
-        const run = candidate.runId ? await runsRepository.getRun(candidate.runId) : spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null;
+        const run = (spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null) ?? (candidate.runId ? await runsRepository.getRun(candidate.runId) : null);
         const question = job ? inbox.find((other) => other.jobId === job.id && other.kind === "question" && other.status === "pending") : null;
         const state = !candidate.selected ? "proposed" : run && run.status !== "running" ? run.status === "passed" ? "passed" : "failed"
             : job?.status === "blocked" ? "needs_answer" : job?.status === "running" || run?.status === "running" ? "generating"

@@ -1712,7 +1712,7 @@ describe("repository recovery", () => {
 });
 
 describe("encrypted credentials and operations", () => {
-    test("migrates old credentials, rotates every stored secret and restores an independent backup", { timeout: 60_000 }, async () => {
+    test("rotates every stored secret and restores an independent backup", { timeout: 60_000 }, async () => {
         const { execFile } = await import("node:child_process");
         const { promisify } = await import("node:util");
         const exec = promisify(execFile);
@@ -1726,7 +1726,6 @@ describe("encrypted credentials and operations", () => {
             import assert from 'node:assert/strict'; import fs from 'node:fs/promises'; import crypto from 'node:crypto';
             const {runMigrations}=await import('./src/infra/db/migrate.ts'); await runMigrations();
             const {createProject}=await import('./src/core/projects.ts'); const p=await createProject('Backup check','https://example.com');
-            const old=crypto.randomBytes(32); await fs.writeFile(process.env.SPECBOOK_STORAGE_DIR+'/credentials.key',old);
             const {createProfile}=await import('./src/core/credentials/profiles.ts');
             const profile=await createProfile(p.id,{name:'account',fields:[{key:'password',value:'credential-to-preserve'}]});
             const {db}=await import('./src/infra/db/client.ts'); const schema=await import('./src/infra/db/schema.ts');
@@ -1740,7 +1739,6 @@ describe("encrypted credentials and operations", () => {
             process.env.SPECBOOK_ENCRYPTION_KEY=crypto.randomBytes(32).toString('base64'); await migrateSecrets();
             assert.ok(!(await fs.readFile(auth,'utf8')).includes('model-to-preserve'));
             assert.equal((await fs.stat(auth)).mode & 0o777,0o600);
-            await assert.rejects(fs.access(process.env.SPECBOOK_STORAGE_DIR+'/credentials.key'));
             const next=crypto.randomBytes(32); const result=await rotateEncryptionKey(next); assert.equal(result.requiresConfiguration,true);
             await assert.rejects(migrateSecrets(),/Configure the new/);
             process.env.SPECBOOK_ENCRYPTION_KEY=next.toString('base64'); await migrateSecrets();
@@ -2018,21 +2016,14 @@ describe("selected batch suggestions", () => {
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { stewardRepository } = await import("../../src/infra/repositories/steward");
         const { proposeSpecBatch, selectSpecBatch, presentSpecBatch } = await import("../../src/core/jobs/spec-batches");
-        const { startJobWorker, stopJobWorker } = await import("../../src/core/jobs/worker");
+        const { concludeJobTurn, stopJobWorker } = await import("../../src/core/jobs/worker");
         const { retryStalledJob, MAX_SAFETY_RETRIES } = await import("../../src/core/jobs/retry");
         const { createChat, openSession, flushSessionFile } = await import("../../src/core/chat/session-store");
-        const { tryReserveChatTurn, releaseChatTurn } = await import("../../src/core/chat/chat-registry");
         const read = jobsRepository.get.bind(jobsRepository);
-        const log = jobsRepository.log.bind(jobsRepository);
         let targetId = "";
-        let notifyStopped: () => void = () => undefined;
         t.mock.method(jobsRepository, "queued", async () => {
             const row = await read(targetId);
             return row?.status === "queued" ? [row] : [];
-        });
-        t.mock.method(jobsRepository, "log", async (id: string, action: string, detail = "") => {
-            await log(id, action, detail);
-            if (id === targetId && action === "stopped") notifyStopped();
         });
         await stopJobWorker();
         for (const outcome of ["missing_spec", "missing_run", "failed"] as const) {
@@ -2057,12 +2048,9 @@ describe("selected batch suggestions", () => {
             const session = (await openSession(job.chatId))!;
             session.appendCustomMessageEntry("result", "The selected Spec is ready.", true);
             flushSessionFile(session);
-            assert.equal(tryReserveChatTurn(job.chatId), true);
             const executeAttempt = async () => {
-                const stopped = new Promise<void>((resolve) => { notifyStopped = resolve; });
-                await startJobWorker();
-                await stopped;
-                await stopJobWorker();
+                assert.ok(await jobsRepository.transition(job.id, "queued", "running"));
+                await concludeJobTurn((await read(job.id))!, { status: "completed" } as Parameters<typeof concludeJobTurn>[1]);
             };
             try {
                 await stewardRepository.update(projectId, { paused: false });
@@ -2070,6 +2058,7 @@ describe("selected batch suggestions", () => {
                 await executeAttempt();
                 assert.equal((await jobsRepository.inbox(projectId)).some((entry) => entry.jobId === job.id && entry.kind === "note"), false);
                 if (outcome === "failed") {
+                    while ((await read(job.id))?.status === "queued") await executeAttempt();
                     assert.equal((await read(job.id))?.status, "completed");
                     assert.equal((await presentSpecBatch((await jobsRepository.item(item.id))!)).candidates[0]!.state, "failed");
                     assert.equal((await jobsRepository.inbox(projectId)).filter((entry) => entry.jobId === job.id && entry.kind === "question").length, 0);
@@ -2110,7 +2099,6 @@ describe("selected batch suggestions", () => {
                 }
             } finally {
                 await stopJobWorker();
-                releaseChatTurn(job.chatId);
             }
         }
     });

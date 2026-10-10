@@ -171,7 +171,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.equal(outcome.processFailure, null);
         assert.deepEqual(
             { ...outcome.results.get("pass"), durationMs: null },
-            { status: "passed", durationMs: null, failReason: null, failedStep: null },
+            { status: "passed", durationMs: null, failReason: null, failedStep: null, errorCode: null },
         );
         const pass = JSON.parse(await fs.readFile(path.join(passDir, "evidence.json"), "utf8"));
         assert.deepEqual(pass.steps.map((step: { label: string }) => step.label), ["Open the sign-in page", "Enter the password", "See the welcome message"]);
@@ -433,8 +433,9 @@ describe("agent browser policy (real MCP)", { skip: process.env.SPECBOOK_TEST_VN
             assert.match(await readBrowserSnapshot(mcp), /Opened/);
             assert.ok(!explorationRequests.some((entry) => entry.includes("unsafe-action")));
 
-            await mcp.navigate(`${origin(app)}/policy-redirect`);
-            await mcp.navigate(`${origin(evil)}/policy-offsite`);
+            const blocked = (url: string) => mcp!.navigate(url).catch((error: Error) => assert.match(error.message, /ERR_BLOCKED_BY_CLIENT/));
+            await blocked(`${origin(app)}/policy-redirect`);
+            await blocked(`${origin(evil)}/policy-offsite`);
             await mcp.navigate(`${origin(app)}/policy`);
             assert.match(await readBrowserSnapshot(mcp), /Policy/);
             assert.ok(!externalRequests.some((url) => url.startsWith("/policy-")), "forbidden documents are never fetched, even through allowed-origin redirects");

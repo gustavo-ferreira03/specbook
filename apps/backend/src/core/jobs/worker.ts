@@ -12,7 +12,7 @@ import { jobsRepository, type Job } from "../../infra/repositories/jobs";
 import { logger } from "../../infra/logger";
 import { abortChatTurn } from "../chat/chat-registry";
 import { getChatMessages } from "../chat/session-store";
-import { runChatTurn } from "../chat/turn-runner";
+import { runChatTurn, type TurnOutcome } from "../chat/turn-runner";
 import { createProjectScrubber } from "../credentials/scrub";
 import { AGENT_RULES_VERSION, createJobPolicy } from "./policy";
 import { isInfrastructureFailure } from "./presentation-errors";
@@ -42,6 +42,36 @@ async function unfinishedWork(job: Job, selected: Awaited<ReturnType<typeof sele
         return item.kind === "spec_fix" && verification?.status === "passed" && provesExpectedResult(verification.review);
     });
     return proven ? null : `The Spec is not repaired yet: no proposed fix passed and proved the expected result. ${INSPECT_INSTRUCTION} Then call update_spec with the corrected spec.ts. Do not ask for permission.`;
+}
+
+export async function concludeJobTurn(job: Job, turn: TurnOutcome | undefined): Promise<void> {
+    const scrub = createProjectScrubber(job.projectId);
+    const current = await jobsRepository.get(job.id);
+    const messages = await getChatMessages(job.chatId);
+    const last = messages?.filter((message) => message.role === "agent").at(-1)?.content;
+    if (current?.status === "running") {
+        const selected = job.kind === "generate_spec" ? await selectedSpecResult(job) : null;
+        const unfinished = await unfinishedWork(current, selected);
+        if (turn?.status === "busy") {
+            await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 2000).toISOString() });
+        } else if (unfinished) {
+            await jobsRepository.log(job.id, "unfinished", unfinished);
+            await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date().toISOString(), pendingMessage: unfinished });
+        } else if (selected?.specId && selected.runId && selected.status !== "running") {
+            await jobsRepository.transition(job.id, "running", "completed", { systemError: null, errorCode: null, stopReason: null, retryAt: null });
+        } else if (!last || turn?.errorCode && isInfrastructureCode(turn.errorCode)) {
+            await retryInfrastructure(job, turn?.message ?? last ?? "The agent service could not complete its response.", turn?.errorCode ?? "infrastructure");
+        } else if (selected?.status === "running") {
+            await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 15_000).toISOString(),
+                pendingMessage: "The selected Spec's first run is still running. Use run_spec to inspect its saved result. Do not create another Spec or start another run." });
+        } else if (selected) {
+            await stallJob(job, selected.specId ? "The Spec was saved, but its first result is missing." : "The selected Spec has not been saved.");
+        } else {
+            const body = await scrub(last ?? "");
+            const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, errorCode: null, stopReason: null, retryAt: null });
+            if (completed) await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Investigation finished", body, payload: { language: "en" } });
+        }
+    }
 }
 
 async function executeJob(job: Job): Promise<void> {
@@ -77,32 +107,7 @@ async function executeJob(job: Job): Promise<void> {
             turn = await runChatTurn(job.chatId, job.kind === "generate_spec" ? await selectedSpecInstructions(job) : job.pendingMessage, undefined, createJobPolicy(job, abort, environment.baseUrl, environment));
         }
         if (stopped) return;
-        const current = await jobsRepository.get(job.id);
-        const messages = await getChatMessages(job.chatId);
-        const last = messages?.filter((message) => message.role === "agent").at(-1)?.content;
-        if (current?.status === "running") {
-            const selected = job.kind === "generate_spec" ? await selectedSpecResult(job) : null;
-            const unfinished = await unfinishedWork(current, selected);
-            if (turn?.status === "busy") {
-                await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 2000).toISOString() });
-            } else if (unfinished) {
-                await jobsRepository.log(job.id, "unfinished", unfinished);
-                await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date().toISOString(), pendingMessage: unfinished });
-            } else if (selected?.specId && selected.runId && selected.status !== "running") {
-                await jobsRepository.transition(job.id, "running", "completed", { systemError: null, errorCode: null, stopReason: null, retryAt: null });
-            } else if (!last || turn?.errorCode && isInfrastructureCode(turn.errorCode)) {
-                await retryInfrastructure(job, turn?.message ?? last ?? "The agent service could not complete its response.", turn?.errorCode ?? "infrastructure");
-            } else if (selected?.status === "running") {
-                await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 15_000).toISOString(),
-                    pendingMessage: "The selected Spec's first run is still running. Use run_spec to inspect its saved result. Do not create another Spec or start another run." });
-            } else if (selected) {
-                await stallJob(job, selected.specId ? "The Spec was saved, but its first result is missing." : "The selected Spec has not been saved.");
-            } else {
-                const body = await scrub(last ?? "");
-                const completed = await jobsRepository.transition(job.id, "running", "completed", { systemError: null, errorCode: null, stopReason: null, retryAt: null });
-                if (completed) await jobsRepository.addItem({ jobId: job.id, projectId: job.projectId, kind: "note", title: "Investigation finished", body, payload: { language: "en" } });
-            }
-        }
+        await concludeJobTurn(job, turn);
     } catch (error) {
         const current = await jobsRepository.get(job.id);
         if (stopped || current?.status !== "running") return;

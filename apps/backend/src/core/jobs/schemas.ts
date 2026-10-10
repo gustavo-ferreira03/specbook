@@ -30,7 +30,7 @@ export const specCandidateSchema = z.object({
     title: z.string().trim().min(1).max(200),
     goal: z.string().trim().min(1).max(1000),
     feature: z.string().trim().min(1).max(200),
-    featureId: z.string().uuid().optional(),
+    featureId: z.string().trim().max(100).optional(),
     why: z.string().trim().min(1).max(2000),
     apiDocsUrl: z.string().url().max(2000).optional(),
 }).strict();
