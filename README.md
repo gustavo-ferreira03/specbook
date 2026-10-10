@@ -1,33 +1,64 @@
-<p align="center">
-  <img src="apps/frontend/public/specbook-chat-icon.svg" alt="Specbook logo" width="72" height="72">
-</p>
+<!-- prettier-ignore -->
+<div align="center">
 
-# Specbook
+<h1><img src="apps/frontend/public/specbook-chat-icon.svg" alt="" height="40" align="top" /> specbook</h1>
 
-Specbook is a self-hosted QA agent for web applications. Describe a flow in chat, and it writes readable Specs with Playwright tests, runs them, and investigates failures in a browser you can watch.
+*A self-hosted QA agent that turns plain-language behavior into Playwright tests you can read.*
 
-Each Spec keeps its behavior contract, run history, and evidence together. Projects store their files in Git; your coding agent can request QA over MCP, while CI pipelines and schedules run saved checks.
+[![CI](https://img.shields.io/github/actions/workflow/status/gustavo-ferreira03/specbook/ci.yml?style=flat-square&label=CI)](https://github.com/gustavo-ferreira03/specbook/actions/workflows/ci.yml)
+[![Docker image](https://img.shields.io/badge/Docker-ghcr.io-2496ed?style=flat-square&logo=docker&logoColor=white)](https://github.com/gustavo-ferreira03/specbook/pkgs/container/specbook)
+![Node version](https://img.shields.io/badge/Node.js-26-3c873a?style=flat-square)
+[![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+
+[Features](#features) • [Get started](#get-started) • [How it works](#how-it-works) • [Coding agents](#connect-your-coding-agent) • [CI](#run-checks-from-ci) • [Configuration](#configuration-and-data) • [Development](#develop-locally)
+
+<img src=".github/assets/specbook-demo.gif" alt="Opening a Spec in Specbook, running it against the app and reviewing the step-by-step screenshots of the passing run">
+
+</div>
+
+Describe a flow in chat, and Specbook explores your app in a real browser, writes a **Spec** (a readable contract plus a Playwright test), runs it and keeps the evidence. When a Spec fails, the agent investigates in a browser you can watch and proposes a repair that keeps the intended behavior.
+
+## Features
+
+- **Specs people can read**: every check is a `spec.yml` with steps and an expected result, paired with an executable `spec.ts`.
+- **An agent that does the legwork**: it maps your app, proposes Specs, signs in with stored credentials and asks only when it is blocked.
+- **Evidence for every run**: screenshots per step, video on failure, diagnostics and run history live next to the Spec.
+- **QA for your coding agent**: Claude Code or any MCP client can ask Specbook to verify a change, as a QA subagent.
+- **Checks on every deploy**: schedules and CI pipelines run saved Specs, with JUnit and Markdown reports and pull request comments.
+- **Yours to host**: one container, your model provider, credentials encrypted at rest and projects stored in Git.
 
 ## Get started
 
-With Docker and Docker Compose installed, run this command from the repository root:
+With [Docker](https://docs.docker.com/get-docker/) installed, run:
 
 ```sh
-docker compose up -d
+docker run -d --name specbook --restart unless-stopped \
+  -p 127.0.0.1:4001:4001 -v specbook:/data \
+  ghcr.io/gustavo-ferreira03/specbook
 ```
 
-Open [localhost:4001](http://localhost:4001). The setup wizard walks you through creating the admin account, connecting a model provider, and adding your first project. You can use the included Sauce Demo project to try the workflow.
+Open [localhost:4001](http://localhost:4001). The setup wizard creates the admin account, connects a model provider and adds your first project; the bundled Sauce Demo project is a quick way to try it.
 
-The Compose file runs the published container image and keeps data in the `specbook-storage` volume. It binds the app ports to localhost. For a public deployment, route your reverse proxy to port 4001 and set `FRONTEND_ORIGIN` to the public URL, such as `https://specbook.example.com`. Add any extra hostnames to the comma-separated `SPECBOOK_ALLOWED_HOSTS` setting.
+The container holds everything: the web app, the agent, both browsers and the test runner. Data lives in the `specbook` volume, so updating is a `docker pull` and a new `docker run` with the same volume.
 
-## Work with Specs
+> [!TIP]
+> To serve Specbook on a domain, point your reverse proxy at port 4001 and add `-e FRONTEND_ORIGIN=https://specbook.example.com`. Extra hostnames go in `-e SPECBOOK_ALLOWED_HOSTS=host1,host2`.
 
-1. Create a project with your application's base URL, then describe the behavior you want to check in chat.
-2. Review the proposed Specs and select the ones you want to create. Add login details through the secure credential form when the agent requests access.
-3. Open a Spec to read its steps, run it, and inspect screenshots or failure diagnostics. The agent can investigate a failing run and propose a repair without changing the intended behavior.
-4. Configure **Settings → Automation** for scheduled checks, or connect a pipeline through **Settings → CI/CD**.
+OpenAI device-code login and Anthropic's copy-the-code login work out of the box. The browser login that redirects back to localhost also needs `-p 127.0.0.1:1455:1455` (OpenAI) or `-p 127.0.0.1:53692:53692` (Anthropic).
 
-A Spec pairs a readable `spec.yml` with an executable `spec.ts`. For example:
+## How it works
+
+1. Create a project with your app's URL and describe a behavior in chat.
+2. Pick the Specs the agent proposes. When it needs to sign in, it asks through a secure form, never in the chat.
+3. Open a Spec to run it and inspect the evidence. On a failure, the agent investigates and proposes a repair.
+4. Keep it running from **Settings → Automation**, with schedules, CI access and agent access.
+
+A Spec pairs the contract with its test, and the step titles match in both files:
+
+<table>
+<tr><th><code>spec.yml</code></th><th><code>spec.ts</code></th></tr>
+<tr><td>
 
 ```yaml
 title: Open the application
@@ -38,6 +69,8 @@ steps:
 expectedResult: The application heading is visible.
 postconditions: []
 ```
+
+</td><td>
 
 ```ts
 import { test, expect } from "specbook";
@@ -50,11 +83,14 @@ test("Open the application", async ({ page, step }) => {
 });
 ```
 
-The step titles must match in both files. Browser and API tests use the supported `specbook` methods, which Specbook validates before execution.
+</td></tr>
+</table>
+
+Tests use the supported `specbook` methods for browser and API checks, and Specbook validates them before they run.
 
 ## Connect your coding agent
 
-Open the project's **Settings → Agent access**, create an agent token, and copy the connection command. For Claude Code, the command has this form; replace the project ID and token:
+Create an agent token under **Settings → Automation → Agent access** and copy the connection command. For Claude Code it looks like this:
 
 ```sh
 claude mcp add --transport http specbook \
@@ -62,89 +98,70 @@ claude mcp add --transport http specbook \
   --header "Authorization: Bearer YOUR_AGENT_TOKEN"
 ```
 
-Other MCP clients can use the same HTTP endpoint and authorization header. Specbook acts as the coding agent's QA subagent, and its conversations appear in the project's Chats.
+Any MCP client can use the same endpoint and header. Conversations started this way show up in the project's Chats.
 
-| Tool | Purpose |
+| Tool | What it does |
 | --- | --- |
-| `send_message` | Describe a change or continue an existing QA conversation. |
-| `wait_for_reply` | Wait for progress, a reply, or an action that needs a response. |
-| `respond_to_action` | Provide secure access, select Specs, approve a contract change, or hand an action to the human. |
-| `list_conversations` | Find recent MCP conversations for the project. |
+| `send_message` | Describe a change or continue a QA conversation. |
+| `wait_for_reply` | Wait for progress, a reply or an action that needs an answer. |
+| `respond_to_action` | Provide access, select Specs, approve a contract change or hand the action to a human. |
+| `list_conversations` | Find recent conversations for the project. |
 | `run_specs` | Run saved Specs without a model conversation. |
-| `get_run_results` | Read a batch's results, failed steps, and flaky status. |
+| `get_run_results` | Read a batch's results, failed steps and flaky status. |
 
-Agent access settings control whether declared behavior changes can update existing contracts or require approval. They also control whether an external agent may provide credentials. Credential actions keep secret values outside chat messages and model context.
+Agent access settings decide whether declared behavior changes can update existing contracts and whether the external agent may provide credentials. Secret values never enter chat messages or model context.
 
 ## Run checks from CI
 
-Create a separate project CI token in **Settings → CI/CD** and copy the generated snippet for your pipeline provider. The bundled client starts a batch, waits for its result, and writes JUnit and Markdown reports. It can also update GitHub pull request comments or GitLab merge request notes.
-
-For a pipeline that checks out this repository:
+Create a CI token under **Settings → Automation → CI access** and copy the pipeline snippet for your provider. The bundled client starts a batch, waits for the result and writes JUnit and Markdown reports; it can also comment on GitHub pull requests and GitLab merge requests.
 
 ```sh
 SPECBOOK_API_URL="https://specbook.example.com/api" \
 SPECBOOK_PROJECT_ID="YOUR_PROJECT_ID" \
 SPECBOOK_CI_TOKEN="YOUR_CI_TOKEN" \
-node apps/backend/scripts/specbook-ci.mjs
+node apps/backend/scripts/specbook-ci.mjs --environment Staging
 ```
 
-Use `--environment Staging` to select a configured environment. Preview URLs must belong to that environment's allowed origins, and credentials for another environment require explicit overrides. Quality gates can fail on flaky results or known bugs; the settings page includes these options in its generated snippets.
+Preview URLs must belong to the chosen environment's allowed origins. Quality gates can fail the build on flaky results or known bugs.
 
-## Storage and configuration
+## Configuration and data
 
-The Docker volume holds the SQLite database, project repositories, conversations, run artifacts, and encryption key. Native development uses `apps/backend/storage` unless you set `SPECBOOK_STORAGE_DIR`.
+The `/data` volume holds the SQLite database, project repositories, conversations, run artifacts and the encryption key. Pass settings with `-e`:
 
-| Setting | Purpose |
+| Variable | Purpose |
 | --- | --- |
-| `FRONTEND_ORIGIN` | Public frontend URL; defaults to `http://localhost:4001` in the backend. |
-| `SPECBOOK_ALLOWED_HOSTS` | Additional hostnames accepted by the frontend and backend. |
-| `SPECBOOK_STORAGE_DIR` | Backend storage directory. |
-| `SPECBOOK_BACKEND_URL` | Backend URL used by the frontend's `/api` proxy; defaults to `http://127.0.0.1:4000`. |
-| `SPECBOOK_ENCRYPTION_KEY` / `SPECBOOK_ENCRYPTION_KEY_FILE` | Optional external encryption key; configure one source. |
-| `LOG_LEVEL` | Server logging level. |
+| `FRONTEND_ORIGIN` | Public URL used for links and allowed origins. Defaults to `http://localhost:4001`. |
+| `SPECBOOK_ALLOWED_HOSTS` | Extra hostnames accepted besides localhost and IP addresses. |
+| `SPECBOOK_ENCRYPTION_KEY` or `SPECBOOK_ENCRYPTION_KEY_FILE` | External encryption key instead of the generated `encryption.key`. Use one. |
+| `LOG_LEVEL` | Server log level. |
 
 > [!IMPORTANT]
-> Back up the storage together with its encryption key. Specbook creates `encryption.key` inside storage by default; if you supply an external key, keep a separate private backup of it. Losing the matching key prevents recovery of encrypted credentials.
+> Back up the volume together with its encryption key. Without the matching key, stored credentials cannot be recovered.
 
-Retention settings in global Settings control saved runs, videos, metrics, and browser profiles. The backend also provides backup, restore, and key rotation commands through its [operations CLI](apps/backend/src/operations-cli.ts); these require exclusive access to storage while Specbook is stopped.
+Backups, restores and key rotation need exclusive access to the data, so stop the container first:
+
+```sh
+docker stop specbook
+docker run --rm -v specbook:/data -v "$PWD":/backup --entrypoint node \
+  ghcr.io/gustavo-ferreira03/specbook \
+  apps/backend/dist/operations-cli.js backup /backup/specbook.tar.gz
+docker start specbook
+```
+
+`restore <archive>` and `rotate-key --new-key-file <file>` work the same way. Retention of runs, videos, metrics and browser profiles is set in the instance settings.
 
 ## Develop locally
 
-Native development requires Linux, Node.js 26, pnpm 10.30.1, Git, Xvfb, x11vnc, and `flock` from util-linux. Install the system packages on Debian or Ubuntu:
+You need Linux, Node.js 26, pnpm 10.30.1, Git, Xvfb, x11vnc and `flock` (util-linux). On Debian or Ubuntu:
 
 ```sh
-sudo apt-get update
 sudo apt-get install -y git xvfb x11vnc util-linux
-```
-
-Then install dependencies and both Chromium builds used by the agent and test runner:
-
-```sh
 npm install --global pnpm@10.30.1
 pnpm install --frozen-lockfile
-pnpm --filter backend browser:install:docker
+pnpm --filter backend browser:install:docker   # both Chromium builds and their system dependencies
 pnpm dev
 ```
 
-The `browser:install:docker` script includes Chromium's system dependencies on Linux.
+The frontend runs on port 4001 and proxies `/api` to the backend on port 4000. Data goes to `apps/backend/storage` unless `SPECBOOK_STORAGE_DIR` is set. Migrations apply on startup; after a schema change, generate one with `pnpm --filter backend db:generate`.
 
-The frontend runs on port 4001 and the backend on port 4000. The backend applies generated database migrations on startup. After editing the database schema, generate its migration with `pnpm --filter backend db:generate` before continuing development.
-
-Run type checks and tests with:
-
-```sh
-pnpm typecheck
-pnpm test
-```
-
-`pnpm check` runs both. Browser tests need installed Chromium; the optional VNC tests also need `SPECBOOK_TEST_VNC=1` and the display programs above.
-
-## Repository layout
-
-| Path | Contents |
-| --- | --- |
-| [`apps/backend`](apps/backend) | Hono API, QA agent, Playwright runner, MCP server, SQLite storage, and generated migrations. |
-| [`apps/frontend`](apps/frontend) | Next.js interface and backend proxy. |
-| [`shared`](shared) | HTTP host and origin validation shared by both apps. |
-
-Read [PRODUCT.md](PRODUCT.md) for the product direction and [DESIGN.md](DESIGN.md) for the interface's design system.
+`pnpm check` runs the type checks and tests. Browser tests need Chromium installed, and the VNC tests also need `SPECBOOK_TEST_VNC=1`.
