@@ -41,7 +41,6 @@ export interface SuiteSpecResult {
 export interface SuiteOutcome {
     results: Map<string, SuiteSpecResult>;
     processFailure: string | null;
-    reportAvailable: boolean;
 }
 
 export interface SuiteOptions {
@@ -77,7 +76,7 @@ export function executableSource(source: string, analysis: SpecAnalysis, moduleP
 }
 
 
-function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyServer?: string): Record<string, unknown> {
+function playwrightConfig(options: SuiteOptions, proxyServer?: string): Record<string, unknown> {
     const file = (spec: SuiteSpec) => `${spec.key}.spec.ts`;
     const plain = options.specs.filter((spec) => spec.analysis.secretRefs.length === 0).map(file);
     const secret = options.specs.filter((spec) => spec.analysis.secretRefs.length > 0).map(file);
@@ -86,7 +85,6 @@ function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyS
         secret.length ? { name: "specbook-secrets", testMatch: secret, use: { trace: "off", video: "off" } } : null,
     ].filter(Boolean);
     const reporter: unknown[] = [["line"], ["json", { outputFile: "results.json" }]];
-    if (withHtmlReport) reporter.push(["html", { outputFolder: "../report", open: "never" }]);
     return {
         testDir: "tests",
         outputDir: "test-results",
@@ -120,7 +118,7 @@ function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyS
     };
 }
 
-async function writeWorkDir(workDir: string, options: SuiteOptions, withHtmlReport: boolean, proxyServer?: string): Promise<void> {
+async function writeWorkDir(workDir: string, options: SuiteOptions, proxyServer?: string): Promise<void> {
     const modulePath = specbookModulePath();
     await fs.mkdir(path.join(workDir, "tests"), { recursive: true });
     await Promise.all([
@@ -128,7 +126,7 @@ async function writeWorkDir(workDir: string, options: SuiteOptions, withHtmlRepo
         fs.writeFile(path.join(workDir, "tsconfig.json"), JSON.stringify({ compilerOptions: {} }), "utf8"),
         fs.writeFile(
             path.join(workDir, "playwright.config.mjs"),
-            `export default ${JSON.stringify(playwrightConfig(options, withHtmlReport, proxyServer), null, 2)};\n`,
+            `export default ${JSON.stringify(playwrightConfig(options, proxyServer), null, 2)};\n`,
             "utf8",
         ),
         ...options.specs.map((spec) =>
@@ -144,19 +142,14 @@ function statusOf(result: SpecFileResult): Exclude<RunStatus, "running"> {
 export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOutcome> {
     const directory = options.directory;
     const workDir = path.join(directory, "work");
-    const reportDir = path.join(directory, "report");
-    const usesSecrets = options.specs.some((spec) => spec.analysis.secretRefs.length > 0);
-    const withHtmlReport = !usesSecrets;
     await fs.rm(workDir, { recursive: true, force: true });
-    await fs.rm(reportDir, { recursive: true, force: true });
     const policy = options.projectId ? await runNetworkPolicy(options.projectId, options.baseUrl, options.environment) : undefined;
     const proxy = policy ? await createRunProxy(policy.allowPrivate ? policy.origins : []) : undefined;
     const runtime: SpecbookRuntime = { baseURL: options.baseUrl, secretOrigins: options.secretOrigins, navigationOrigins: policy?.origins };
     const results = new Map<string, SuiteSpecResult>();
     let processFailure: string | null = null;
-    let reportAvailable = false;
     try {
-        await writeWorkDir(workDir, options, withHtmlReport, proxy?.server);
+        await writeWorkDir(workDir, options, proxy?.server);
         const processResult = await runNodeCli(playwrightCli(), ["test", "--config", "playwright.config.mjs"], {
             cwd: workDir,
             timeoutMs: options.timeoutMs,
@@ -173,7 +166,6 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
         const rawReport = await fs.readFile(path.join(workDir, "results.json"), "utf8").catch(() => null);
         const report = rawReport === null ? null : options.scrub(rawReport);
         if (report !== null) await fs.writeFile(path.join(directory, "results.json"), report, "utf8");
-        if (report !== null && rawReport !== report) await fs.rm(reportDir, { recursive: true, force: true });
 
         if (processResult.timedOut) processFailure = `Run timed out after ${Math.round(options.timeoutMs / 1000)}s`;
         else if (report === null) processFailure = output || `Playwright exited with code ${processResult.code} without a report`;
@@ -203,13 +195,7 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
                 : null;
             const status = safeResult ? statusOf(safeResult) : "error";
             await fs.mkdir(spec.outputDir, { recursive: true });
-            let evidenceRedacted = false;
-            await writeRunEvidence(spec.outputDir, status, safeResult, spec.analysis.steps, (text) => {
-                const safe = options.scrub(text);
-                if (safe !== text) evidenceRedacted = true;
-                return safe;
-            });
-            if (evidenceRedacted) await fs.rm(reportDir, { recursive: true, force: true });
+            await writeRunEvidence(spec.outputDir, status, safeResult, spec.analysis.steps, options.scrub);
             results.set(spec.key, {
                 status,
                 durationMs: safeResult?.durationMs ?? null,
@@ -218,10 +204,9 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
                 errorCode: status === "passed" ? null : safeResult?.errorCode ?? (processFailure ? "infrastructure" : "failed"),
             });
         }
-        reportAvailable = withHtmlReport && existsSync(path.join(reportDir, "index.html"));
     } finally {
         await proxy?.close();
         await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }
-    return { results, processFailure, reportAvailable };
+    return { results, processFailure };
 }

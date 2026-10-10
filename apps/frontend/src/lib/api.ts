@@ -161,17 +161,6 @@ export function getRunEvidence(runId: string, signal?: AbortSignal): Promise<Run
     return api(apiPath`/runs/${runId}/evidence`, { signal });
 }
 
-export async function getRunArtifactText(runId: string, file: string, signal?: AbortSignal): Promise<string | null> {
-    let response: Response;
-    try {
-        response = await fetch(`${API_URL}${apiPath`/runs/${runId}/artifacts/`}${file.split("/").map(encodeURIComponent).join("/")}`, { signal });
-    } catch (error) {
-        if (isAbortError(error)) throw error;
-        return null;
-    }
-    return response.ok ? response.text() : null;
-}
-
 export interface DiscoveryBriefInput {
     goal?: string;
     startUrl?: string;

@@ -5,7 +5,8 @@ import { backendRoot } from "../paths";
 import { parseSpecYaml } from "../repo/yaml";
 import { realRunDirectory } from "../runner/artifacts";
 import { readEvidenceManifest } from "../runner/evidence";
-import type { CiResult } from "./results";
+import { ciResult, type CiResult } from "./results";
+import type { RunBatch } from "../runner/batch";
 
 const MAX_IMAGE_BYTES = 600_000;
 const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
@@ -76,10 +77,10 @@ function statusOf(item: Item): { tone: "passed" | "failed" | "running"; label: s
     return { tone: "passed", label: "Passed" };
 }
 
-function renderSection({ item, path: file, preconditions, expectedResult, steps }: SpecSection): string {
+function renderSection({ item, path: file, preconditions, expectedResult, steps }: SpecSection, open = false): string {
     const status = statusOf(item);
     const shots = steps.filter((step) => step.image);
-    return `<details class="spec ${status.tone}"${status.tone === "failed" ? " open" : ""}>
+    return `<details class="spec ${status.tone}"${open || status.tone === "failed" ? " open" : ""}>
 <summary>
   <span class="seal">${status.tone === "failed" ? CROSS : CHECK}</span>
   <span class="heading"><span class="title">${escape(item.title)}</span>${file ? `<span class="path">${escape(file)}</span>` : ""}</span>
@@ -100,7 +101,6 @@ function renderSection({ item, path: file, preconditions, expectedResult, steps 
 
 const STYLE = `
 :root{--ink:#2b2b2b;--muted:#6b6b6b;--subtle:#8f8f8f;--line:#ebebeb;--strong:#d6d6d6;--surface:#fff;--soft:#fafafa;--primary:#262626;--success:#1f7a4d;--success-soft:#e9f6ef;--danger:#bd5149;--danger-soft:#fff0ed;--warning:#f2b705;--dot:#c9c9c9}
-@media (prefers-color-scheme:dark){:root{--ink:#eeeeee;--muted:#bdbdbd;--subtle:#9a9a9a;--line:#333;--strong:#444;--surface:#1f1f1f;--soft:#262626;--primary:#dedede;--success:#5fd39a;--success-soft:#1d3a2b;--danger:#f08a7a;--danger-soft:#3d2421;--dot:#3a3a3a}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--surface);color:var(--ink);font:15px/1.55 Geist,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
 code,pre,.path,.time,.mono{font-family:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-ligatures:none}
@@ -110,7 +110,6 @@ header{background-image:radial-gradient(circle,var(--dot) 1.1px,transparent 1.5p
 .top{padding-top:28px;padding-bottom:32px;background:linear-gradient(to right,var(--surface) 45%,transparent)}
 .brand{display:flex;align-items:center;gap:6px;font-weight:700;font-size:18px;letter-spacing:-.04em}
 .logo{width:26px;height:26px}
-@media (prefers-color-scheme:dark){.logo{filter:invert(1)}}
 .kicker{margin:22px 0 4px;color:var(--muted);font-size:13px}
 h1{margin:0;font-size:32px;line-height:1.15;letter-spacing:-.02em}
 .meta{margin-top:10px;color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 14px}
@@ -119,7 +118,7 @@ h1{margin:0;font-size:32px;line-height:1.15;letter-spacing:-.02em}
 .counts{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 8px}
 .count{border:1px solid var(--strong);border-radius:10px;padding:8px 14px;font-size:13px;color:var(--muted)}
 .count b{display:block;font-size:20px;color:var(--ink);font-variant-numeric:tabular-nums}
-main{padding:20px 0 64px}
+main.wrap{padding-top:32px;padding-bottom:64px}
 .spec{border:1px solid var(--strong);border-radius:12px;background:var(--surface);margin:0 8px 22px 0;box-shadow:4px 4px 0 -1px var(--surface),4px 4px 0 0 var(--strong),8px 8px 0 -1px var(--surface),8px 8px 0 0 var(--strong)}
 .spec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:16px 18px}
 .spec>summary::-webkit-details-marker{display:none}
@@ -158,7 +157,7 @@ figcaption{font-size:12px;color:var(--muted);margin-top:6px}
 footer{color:var(--subtle);font-size:12px;padding:0 0 40px}
 `;
 
-export async function htmlReport(result: CiResult): Promise<string> {
+export async function htmlReport(result: CiResult, options: { single?: boolean } = {}): Promise<string> {
     const sections = await Promise.all(result.results.map(section));
     const order = (entry: SpecSection) => (["failed", "error"].includes(entry.item.status) ? 0 : entry.item.flaky ? 1 : 2);
     sections.sort((a, b) => order(a) - order(b));
@@ -186,18 +185,28 @@ export async function htmlReport(result: CiResult): Promise<string> {
 <header><div class="wrap top">
   <div class="brand">${await logo()}specbook</div>
   <p class="kicker mono">${escape(batch.label)}</p>
-  <h1>${passed} of ${total} Spec${total === 1 ? "" : "s"} passed</h1>
+  <h1>${options.single && result.results[0] ? escape(result.results[0].title) : `${passed} of ${total} Spec${total === 1 ? "" : "s"} passed`}</h1>
   <div class="meta">${meta}</div>
 </div></header>
 <main class="wrap">
-  <div class="counts">
+  ${options.single ? "" : `<div class="counts">
     <div class="count"><b>${passed}</b>Passed</div>
     <div class="count"><b>${failed}</b>Failed</div>
     <div class="count"><b>${result.qualityGate.flaky}</b>Flaky</div>
     <div class="count"><b>${result.qualityGate.knownBugs}</b>Known bugs</div>
-  </div>
-  ${sections.map(renderSection).join("\n")}
+  </div>`}
+  ${sections.map((entry) => renderSection(entry, options.single)).join("\n")}
 </main>
-<footer class="wrap">Generated by Specbook from the files each Spec ran with.</footer>
+<footer class="wrap">Generated by Specbook.</footer>
 </body></html>`;
+}
+
+export async function runReport(run: { id: string; specId: string; status: string; startedAt: string; durationMs: number | null; failReason: string | null; environment?: RunBatch["environment"] | null }, spec: { title: string; projectId: string }, frontendOrigin: string): Promise<string> {
+    const batch = { id: run.id, label: "Spec run", projectId: spec.projectId, status: run.status, startedAt: run.startedAt, durationMs: run.durationMs, environment: run.environment ?? undefined,
+        specs: [{ specId: run.specId, runId: run.id, title: spec.title, status: run.status, durationMs: run.durationMs, failReason: run.failReason }] } as unknown as RunBatch;
+    return htmlReport(await ciResult(batch, frontendOrigin), { single: true });
+}
+
+export async function batchReport(batch: RunBatch, frontendOrigin: string): Promise<string> {
+    return htmlReport(await ciResult(batch, frontendOrigin));
 }

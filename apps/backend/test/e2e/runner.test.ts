@@ -186,7 +186,6 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.equal(guardEvidence.failedStep, "Type the password on the other origin");
         assert.equal(guardEvidence.video, null, "secret runs must not record values in failure videos");
 
-        assert.equal(outcome.reportAvailable, false, "no HTML report when a Spec types secrets");
         assert.ok(!existsSync(path.join(directory, "batch", "report")));
         assert.ok(!existsSync(path.join(directory, "batch", "work")), "the work directory (traces, test-results) is removed");
         const results = await fs.readFile(path.join(directory, "batch", "results.json"), "utf8");
@@ -210,7 +209,6 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.equal(result?.failedStep, "See the greeting");
         assert.match(result?.failReason ?? "", /toHaveText/);
         assert.doesNotMatch(result?.failReason ?? "", /\u001b\[/);
-        assert.equal(outcome.reportAvailable, true);
         assert.ok(existsSync(path.join(directory, "report", "index.html")));
         const evidence = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8"));
         assert.equal(evidence.steps.length, 2);
@@ -240,7 +238,6 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.ok(diagnostics.some((entry) => entry.kind === "response" && entry.status === 503 && entry.url?.endsWith("/http-error")));
         assert.ok(diagnostics.some((entry) => entry.kind === "requestfailed" && entry.url?.endsWith("/network-error")));
         assert.match(evidence.errorContext, /heading "Diagnostics ••••"/);
-        assert.equal(outcome.reportAvailable, false, "reports that embed unredacted text are removed");
         assert.ok(!existsSync(path.join(directory, "report")));
         assert.ok(!existsSync(path.join(directory, "work")));
 
@@ -256,7 +253,6 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
             scrub: createSecretScrubber([SECRET]),
         });
         assert.equal(passing.results.get("diagnostics-pass")?.status, "passed");
-        assert.equal(passing.reportAvailable, false, "redaction in an attachment alone removes the report too");
         const passingEvidence = JSON.parse(await fs.readFile(path.join(passingDirectory, "evidence.json"), "utf8"));
         assert.ok(passingEvidence.diagnostics.some((entry: { message: string }) => entry.message === "Console failure ••••"));
         assert.equal(passingEvidence.errorContext, undefined);
@@ -300,7 +296,6 @@ test("API echo", async ({ request, step, secret }) => {
         assert.equal(evidence.apiSteps[0].requests[0].method, "POST");
         assert.equal(evidence.apiSteps[0].requests[0].status, 200);
         assert.equal(evidence.apiSteps[0].requests[0].requestHeaders["x-token"], "••••");
-        assert.equal(outcome.reportAvailable, false);
         const results = await fs.readFile(path.join(directory, "batch", "results.json"), "utf8");
         assert.ok(!results.includes(SECRET));
     });

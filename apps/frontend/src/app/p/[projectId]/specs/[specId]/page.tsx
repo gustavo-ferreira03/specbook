@@ -5,7 +5,7 @@ import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, Info, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { API_URL, ApiError, errorMessage, getRunArtifactText, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
+import { API_URL, ApiError, errorMessage, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
 import { useDisplayStatus } from "@/lib/projectOverview";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { formatDateTime, formatDuration, environmentLabel } from "@/lib/format";
@@ -44,7 +44,6 @@ function splitLines(raw: string): string[] {
 interface LoadedRunEvidence {
     data: RunEvidence | null;
     error: string;
-    usedSecrets?: boolean;
 }
 
 function parseSourceLocation(reason: string): { line: number; column: number; message: string } | null {
@@ -65,12 +64,7 @@ const RUN_HISTORY_LIMIT = 20;
 async function loadRunEvidence(runId: string, signal?: AbortSignal): Promise<LoadedRunEvidence> {
     try {
         const data = await getRunEvidence(runId, signal);
-        let usedSecrets = false;
-        if (!data.reportUrl) {
-            const source = await getRunArtifactText(runId, "spec.ts", signal);
-            usedSecrets = source !== null && /\bsecret\s*\(/.test(source);
-        }
-        return { data, error: "", usedSecrets };
+        return { data, error: "" };
     } catch (error) {
         if (isAbortError(error)) throw error;
         return { data: null, error: errorMessage(error) };
@@ -334,12 +328,6 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
             <ApiRunEvidence evidence={evidence} />
             <RunDiagnostics evidence={evidence} />
             {empty && <p className="text-control text-ink-subtle">No evidence was recorded for this run.</p>}
-            {!evidence.reportUrl && loaded.usedSecrets && (
-                <p className="flex items-start gap-2 text-meta text-ink-subtle">
-                    <Info size={13} aria-hidden="true" className="mt-0.5 shrink-0" />
-                    Report not kept because this run used saved credentials.
-                </p>
-            )}
         </div>
     );
 }

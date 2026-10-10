@@ -112,7 +112,7 @@ export function createCiRouter(): Hono {
         }
         if (format === "junit") return c.body(junitResult(result), 200, { "Content-Type": "application/xml; charset=utf-8" });
         if (format === "markdown") return c.body(markdownResult(result), 200, { "Content-Type": "text/markdown; charset=utf-8" });
-        if (format === "html") return c.body(await htmlReport(result), 200, { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox allow-popups" });
+        if (format === "html") return c.body(await htmlReport(result), 200, { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" });
         return c.json(result);
     });
     router.post("/ci/projects/:id/deploy", access("ci-token", verifyCiToken), projectAuth, zValidator("json", deploySchema), async (c) => {
