@@ -1,0 +1,13 @@
+title: Sign in with valid credentials
+description: Sign in to Specbook with the saved administrator account and
+  confirm the Sauce Demo project workspace opens.
+preconditions:
+  - A saved dogfood-admin login is available for Specbook.
+steps:
+  - Open the Specbook sign-in page
+  - Enter the saved administrator email and password
+  - See the Sauce Demo project workspace
+expectedResult: The sign-in form submits and the Sauce Demo project workspace
+  appears with project navigation and its dashboard.
+postconditions:
+  - The authenticated session remains signed in to Specbook.

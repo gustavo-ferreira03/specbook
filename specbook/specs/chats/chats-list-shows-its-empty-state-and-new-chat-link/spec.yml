@@ -1,0 +1,16 @@
+title: Chats list shows its empty state and New chat link
+description: Open Chats when there are no conversations and observe the
+  empty-state guidance and New chat link.
+preconditions:
+  - A saved dogfood-admin login is available for Specbook.
+  - There are no conversations in the project.
+steps:
+  - Open the Specbook sign-in page
+  - Sign in with the saved administrator account
+  - Open Chats from the project navigation
+  - Observe the empty-state guidance and New chat link
+expectedResult: The Chats page shows “No chats yet,” the guidance “Describe a
+  behavior while the agent operates a live browser, and save the result as a
+  Spec.”, and a New chat link.
+postconditions:
+  - No conversation is created.

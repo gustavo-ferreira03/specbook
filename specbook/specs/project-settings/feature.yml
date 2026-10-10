@@ -1,0 +1,5 @@
+title: Project settings
+description: Settings include General, App context, Automation, and Git
+  sections. General shows project name, environments, encrypted credential
+  profiles, and a danger zone. App context explains discovery and indicates
+  model configuration is needed.

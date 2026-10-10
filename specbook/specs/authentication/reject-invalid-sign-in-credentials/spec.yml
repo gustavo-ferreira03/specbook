@@ -1,0 +1,12 @@
+title: Reject invalid sign-in credentials
+description: Submit invalid sign-in credentials and confirm the visible
+  rejection keeps the user on the sign-in page.
+preconditions:
+  - The Specbook sign-in page is available.
+steps:
+  - Open the sign-in page
+  - Submit invalid credentials
+  - See the rejection and remain on the sign-in page
+expectedResult: The sign-in page remains open and displays “Email or password is incorrect.”
+postconditions:
+  - No authenticated workspace is entered.

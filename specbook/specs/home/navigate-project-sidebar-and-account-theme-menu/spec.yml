@@ -1,0 +1,20 @@
+title: Navigate project sidebar and account theme menu
+description: Sign in to the Sauce Demo project, visit Home, Specs, and Chats
+  from the persistent project sidebar, then open the account menu and observe
+  the theme options.
+preconditions:
+  - A saved dogfood-admin login is available for Specbook.
+steps:
+  - Open the Specbook sign-in page
+  - Enter the saved administrator email and password
+  - See the Sauce Demo project workspace
+  - Open Home from the project sidebar
+  - Open Specs from the project sidebar
+  - Open Chats from the project sidebar
+  - Open the account menu and observe the theme options
+expectedResult: The Sauce Demo project workspace opens, each sidebar destination
+  opens its corresponding page, and the account menu displays Light, Dark, and
+  System theme choices with System selected.
+postconditions:
+  - The Chats page remains open with the account menu displayed; no theme
+    setting is changed.

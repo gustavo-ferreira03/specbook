@@ -1,0 +1,19 @@
+title: Open a Spec and run it to a visible result
+description: Sign in to Specbook, open the existing Spec from the Specs list,
+  run it again, and confirm the visible status and run-history update without
+  changing the Spec steps.
+preconditions:
+  - The saved dogfood-admin login is available.
+  - The existing “Home page opens” Spec is available under Smoke.
+steps:
+  - Sign in to the Sauce Demo project
+  - Open the existing Spec from the Specs list
+  - Run the Spec again
+  - See the updated pass status, unchanged Spec step, and additional run in
+    history
+expectedResult: The Spec detail shows “Last run passed”; the newest run in the
+  history is from just now and marked “Passed”; and the Spec continues to show
+  the original step “Open the application.”
+postconditions:
+  - The existing Spec definition is unchanged and one additional run is recorded
+    in its history.

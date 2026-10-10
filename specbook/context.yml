@@ -1,0 +1,118 @@
+summary: Specbook is a project workspace for organizing application behavior as
+  Features and Specs, running Specs against configured environments, and using
+  agent chats/discovery to map or verify application behavior. The inspected
+  project is named Sauce Demo and links to www.saucedemo.com.
+areas:
+  - name: Home
+    routes:
+      - /p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe
+    description: Project dashboard showing Spec pass status, last checked time,
+      automation controls, a prompt to map the app, and recent activity.
+  - name: Specs
+    routes:
+      - /p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/specs
+      - /p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/specs/:specId
+    description: Browse Specs grouped by Feature, filter by status and title, and
+      access run controls and individual Spec detail.
+  - name: Chats
+    routes:
+      - /p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/chats
+      - /p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/chats/new
+    description: List conversations and create an agent chat to describe a flow or
+      explore a feature; the UI describes saving verified results as Specs.
+  - name: Project settings
+    routes:
+      - /p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/settings
+      - /p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/settings?tab=context
+    description: Settings include General, App context, Automation, and Git
+      sections. General shows project name, environments, encrypted credential
+      profiles, and a danger zone. App context explains discovery and indicates
+      model configuration is needed.
+  - name: Authentication
+    routes:
+      - /login?next=%2F
+    description: Email/password sign-in page; provides an invitation-link notice for
+      account registration.
+terminology:
+  - term: Project
+    meaning: Workspace with a name, target application URL, Features, Specs, chats,
+      settings, and project-level automation.
+  - term: Feature
+    meaning: Grouping used to organize Specs; the observed feature is Smoke.
+  - term: Spec
+    meaning: A behavior specification with run status and duration; Specs can be run
+      individually, by Feature, or all together.
+  - term: Environment
+    meaning: A configured destination URL for running Specs; settings state
+      schedules use Production and CI can choose any saved environment.
+  - term: App context
+    meaning: Saved map of an application, intended to inform future chats and
+      editable from settings.
+  - term: Credential profile
+    meaning: Encrypted saved login fields an agent can use; saved field values are
+      masked in settings.
+roles:
+  - name: Project user / signed-in account
+    capabilities:
+      - View project dashboard, Specs, chats, and settings; admin permissions
+        were observed for the Dogfood Admin account.
+  - name: Administrator
+    capabilities:
+      - Configure project settings, environments, credential profiles, and
+        access project danger-zone controls; some controls were observed but not
+        activated.
+businessRules:
+  - Specs are grouped under Features and expose status, last-run time, and
+    duration.
+  - Run controls exist for an individual Spec, a Feature's Specs, and all Specs.
+  - The settings page states schedules use Production; CI can choose any saved
+    environment.
+  - App context is supplied to future chats and can be edited at any time, per
+    settings copy.
+  - Discovery and agent chats require a configured model; the inspected UI
+    indicated no model was set up.
+  - The login page says users needing an account should ask an administrator for
+    an invitation link.
+uiPatterns:
+  - Persistent left project navigation contains Home, Specs, Chats, Settings,
+    project selector, and account control.
+  - "Settings are organized as tabs: General, App context, Automation, and Git."
+  - Specs use status filter buttons, a title search box, grouped lists, and
+    contextual run buttons.
+  - Home uses status summary cards/regions and a recent activity section.
+  - Forms and destructive controls appear in settings; discovery remained
+    read-only and none were submitted.
+executionNotes:
+  - Authenticated using the saved dogfood-admin login and confirmed access to
+    the project; saved the resulting session as dogfood-admin.
+  - "Project name observed: Sauce Demo; linked application URL:
+    https://www.saucedemo.com."
+  - Observed one passing Spec, “Home page opens,” under Smoke. The sign-in page
+    also displayed an existing passing test summary about removing an item and
+    updating a cart badge.
+  - No model was configured, so chat options were disabled and app-context
+    settings reported discovery needs a model.
+  - Exploration was limited to the Specbook workspace on the allowed origin; the
+    linked Sauce Demo application was not opened.
+unknowns:
+  - The behavior and content of Automation and Git settings tabs were not
+    inspected.
+  - Individual Spec detail content and run-option menus were not opened.
+  - Project selector and account menu contents were not inspected.
+  - The target Sauce Demo application itself was not explored; only its URL and
+    a sign-in-page sample Spec summary were observed.
+sources:
+  - url: http://127.0.0.1:4101/login?next=%2F
+    note: Login page and displayed sample Spec summary.
+  - url: http://127.0.0.1:4101/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe
+    note: Project dashboard and project identity.
+  - url: http://127.0.0.1:4101/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/specs
+    note: Feature grouping, Spec status, filters, and run controls.
+  - url: http://127.0.0.1:4101/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/settings
+    note: General project settings, environments, credentials, and settings sections.
+  - url: http://127.0.0.1:4101/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/settings?tab=context
+    note: App context guidance and model-configuration status.
+  - url: http://127.0.0.1:4101/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/chats
+    note: Chats empty-state content.
+  - url: http://127.0.0.1:4101/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/chats/new
+    note: New chat flow choices and unavailable model state.

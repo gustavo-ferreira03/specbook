@@ -1,0 +1,19 @@
+title: New chat explains model setup is needed before messaging
+description: Observe the no-model setup notice, disabled message composer, and
+  disabled Send message control without entering or sending text.
+preconditions:
+  - A saved dogfood-admin login is available for Specbook.
+  - No model is configured for the project.
+steps:
+  - Open the Specbook sign-in page
+  - Sign in to the Sauce Demo project
+  - Open the New chat page
+  - Read the no-model setup notice
+  - Confirm the message composer is disabled
+  - Confirm Send message is disabled
+expectedResult: The New chat page displays “No model is set up yet.” with
+  guidance to choose a provider, while the Message Specbook composer and Send
+  message button are disabled.
+postconditions:
+  - No message text has been entered or sent.
+  - Project settings remain unchanged.

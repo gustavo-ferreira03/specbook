@@ -1,0 +1,15 @@
+title: New chat presents disabled flow suggestions without a model
+description: Open New chat and observe that Describe a flow and Explore a
+  feature are shown but unavailable while no model is configured.
+preconditions:
+  - The saved administrator account can sign in to the Sauce Demo project.
+  - No model is configured for the project.
+steps:
+  - Sign in to the Sauce Demo project
+  - Open the New chat page
+  - Observe the flow and feature suggestions are unavailable
+expectedResult: The New chat page shows the Describe a flow and Explore a
+  feature choices as disabled buttons, along with a notice that no model is set
+  up yet.
+postconditions:
+  - No chat is started and project settings are unchanged.

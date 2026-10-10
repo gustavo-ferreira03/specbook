@@ -1,0 +1,19 @@
+title: Browse Specs by feature, status, and title
+description: Observe Specs grouped by feature, select a status filter, and
+  search by Spec title.
+preconditions:
+  - A saved dogfood-admin login is available for Specbook, and the Sauce Demo
+    project has at least one Spec.
+steps:
+  - Open the Specbook sign-in page
+  - Sign in with the saved administrator account
+  - Open the Specs list and observe its feature grouping
+  - Filter the list to passing Specs
+  - Search for a Spec by its title
+expectedResult: After signing in, the Specs list shows Specs grouped under their
+  feature; selecting Passing displays the passing status and searching for “Home
+  page opens” displays that matching Spec with the search field retaining the
+  title.
+postconditions:
+  - The user remains signed in, and the Specs list remains filtered by the
+    entered title until the search is cleared or the page is left.

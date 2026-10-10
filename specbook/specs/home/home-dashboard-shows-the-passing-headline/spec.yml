@@ -1,0 +1,13 @@
+title: Home dashboard shows the passing headline
+description: Sign in to Specbook, open the Sauce Demo project Home dashboard,
+  and observe its passing-Spec headline.
+preconditions:
+  - The saved dogfood-admin login is available.
+steps:
+  - Open the Specbook sign-in page
+  - Sign in with the saved administrator account
+  - Open the project Home dashboard
+  - Observe the passing-Spec headline
+expectedResult: The Home dashboard displays the headline “1 of 1 Spec passing”.
+postconditions:
+  - The dashboard remains open; no project data is changed.

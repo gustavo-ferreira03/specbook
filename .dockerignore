@@ -18,6 +18,7 @@ apps/backend/storage
 Dockerfile
 docs
 site
+specbook
 **/.playwright-mcp
 .playwright-cli
 .codex-task-*
