@@ -96,7 +96,7 @@ export default function ChatsHome({ params }: { params: Promise<{ projectId: str
                         <p className="tabular text-meta text-ink-muted">{chats.length} {chats.length === 1 ? "conversation" : "conversations"}</p>
                         {newChatButton}
                     </div>
-                    <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line" aria-label="Chats">
+                    <ul className="sheet divide-y divide-line overflow-hidden rounded-xl bg-surface" aria-label="Chats">
                         {chats.map((chat) => (
                             <li key={chat.id}>
                                 <Link

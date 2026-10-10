@@ -129,7 +129,7 @@ export function GitRemoteAccess({
             <section aria-label="Loading Specbook repository access" aria-busy="true" role="status">
                 <Skeleton className="mb-2 h-5 w-44" />
                 <Skeleton className="mb-4 h-3.5 w-72" />
-                <div className="rounded-xl border border-line">
+                <div className="sheet rounded-xl">
                     {[0, 1, 2].map((row) => (
                         <div key={row} className="grid gap-3 border-b border-line px-5 py-4 last:border-0 md:grid-cols-[13rem_1fr] md:gap-8">
                             <Skeleton className="h-4 w-24 md:mt-2.5" />

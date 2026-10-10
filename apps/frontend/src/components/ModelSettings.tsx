@@ -319,7 +319,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
     function renderModelUnavailable() {
         if (loadError) {
             return (
-                <div className="rounded-xl border border-line">
+                <div className="sheet rounded-xl">
                     <EmptyState
                         icon={AlertCircle}
                         tone="danger"
@@ -337,7 +337,7 @@ export function ModelSettings({ onConnectionTested }: { onConnectionTested?: () 
                     <div key={index}>
                         <Skeleton className="mb-2 h-5 w-32" />
                         <Skeleton className="mb-4 h-3.5 w-64" />
-                        <div className="rounded-xl border border-line">
+                        <div className="sheet rounded-xl">
                             {Array.from({ length: rows }, (_, row) => (
                                 <div key={row} className="grid gap-3 border-b border-line px-5 py-4 last:border-0 md:grid-cols-[13rem_1fr] md:gap-8">
                                     <Skeleton className="h-4 w-20 md:mt-2.5" />

@@ -5,7 +5,7 @@ import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, Info, PencilLine, Play, RefreshCw, RotateCcw, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, Info, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
@@ -18,7 +18,6 @@ import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
 import { ApiRunEvidence } from "@/components/SpecRunDialog";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -126,7 +125,7 @@ function InvalidReason({ reason, testSource }: { reason: string; testSource: str
     );
 }
 
-const sealBorder: Record<string, string> = { passed: "border-success/45", failed: "border-danger/45", error: "border-danger/45", invalid: "border-invalid/45", running: "border-line-strong", unverified: "border-line-strong" };
+const sealColor: Record<string, string> = { passed: "[--slab-color:color-mix(in_oklch,var(--color-success)_50%,transparent)]", failed: "[--slab-color:color-mix(in_oklch,var(--color-danger)_50%,transparent)]", error: "[--slab-color:color-mix(in_oklch,var(--color-danger)_50%,transparent)]", invalid: "[--slab-color:color-mix(in_oklch,var(--color-invalid)_50%,transparent)]" };
 const sealFill: Record<string, string> = { passed: "bg-success", failed: "bg-danger", error: "bg-danger", invalid: "bg-invalid", running: "bg-ink", unverified: "bg-ink-subtle" };
 
 function VerificationBanner({
@@ -207,7 +206,7 @@ function VerificationBanner({
     const meta = statusMeta(status);
     const Icon = meta.icon;
     return (
-        <section aria-label="Run status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className={cn("flex flex-wrap gap-4 rounded-xl border bg-surface p-4 sm:flex-nowrap", body ? "items-start" : "items-center", sealBorder[status] ?? "border-line-strong")}>
+        <section aria-label="Run status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className={cn("slab flex flex-wrap gap-4 rounded-xl bg-surface p-4 sm:flex-nowrap", body ? "items-start" : "items-center", sealColor[status])}>
             <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-md text-surface", sealFill[status] ?? "bg-ink-subtle")}>
                 <Icon size={19} strokeWidth={2.5} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
             </span>
@@ -379,7 +378,7 @@ function RunEntry({
             >
                 <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
                     <StatusPill status={run.status} kind="run" size="sm" />
-                    {run.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
+                    {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
                         {environmentLabel(run.environment?.name) && <><Dot /><span title={run.baseUrl ?? undefined}>{run.environment!.name}</span></>}
@@ -668,7 +667,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 kicker={spec.path ? `${spec.path}/spec.yml` : undefined}
                 size="document"
                 width="reading"
-                titleAdornment={latestRun?.flaky && <Badge variant="warning"><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
+                titleAdornment={latestRun?.flaky && <StatusPill status="flaky" />}
                 description={spec.description || undefined}
             />
             <PageContainer width="reading" className="min-w-0 [overflow-wrap:anywhere] lg:pb-14" innerClassName="space-y-9">
@@ -752,7 +751,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                     <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={rawYamlDraft} onChange={setRawYamlDraft} disabled={saving} />
                                 </div>
                             )}
-                            <Collapsible open={sourceOpen} onOpenChange={setSourceOpen} className="group/source overflow-hidden rounded-xl border border-line">
+                            <Collapsible open={sourceOpen} onOpenChange={setSourceOpen} className="group/source overflow-hidden sheet rounded-xl">
                                 <CollapsibleTrigger asChild>
                                     <button type="button" className="flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none transition-colors hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
                                         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink-muted"><FileCode2 size={15} aria-hidden="true" /></span>
@@ -784,11 +783,11 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                     ) : content && content.humanSpec ? (
                         <SpecificationView humanSpec={content.humanSpec} />
                     ) : content ? (
-                        <div className="rounded-xl border border-line">
+                        <div className="sheet rounded-xl">
                             <EmptyState size="compact" tone="warning" icon={FileX2} title="The Spec file could not be read" description="Use Edit to fix the source by hand." />
                         </div>
                     ) : (
-                        <div className="rounded-xl border border-line">
+                        <div className="sheet rounded-xl">
                             <EmptyState size="compact" tone="warning" icon={FileX2} title="Spec files unavailable" description="Restore or fix the spec.yml and spec.ts files to continue." />
                         </div>
                     )}

@@ -253,7 +253,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                                         onClick={() => setFilter(item.value)}
                                         className={cn("h-8 gap-1.5 rounded-full px-3", active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground [&_svg]:text-current [&_[class*=text-ink]]:text-primary-foreground/80")}
                                     >
-                                        {Icon && <Icon size={12} strokeWidth={2.25} aria-hidden="true" className={statusMeta(item.value).text} />}
+                                        {Icon && <Icon size={12} strokeWidth={2.25} aria-hidden="true" className={statusMeta(item.value).iconColor} />}
                                         {item.label}
                                         <span className="tabular text-ink-subtle">{count}</span>
                                     </Button>
@@ -282,7 +282,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                     </div>
 
                     {visibleCount === 0 && filtering ? (
-                        <div className="rounded-xl border border-line">
+                        <div className="sheet rounded-xl">
                             <EmptyState
                                 size="compact"
                                 icon={Search}
@@ -302,9 +302,9 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                             onRunGroup={(group) => handleRun(group.specs, `Run ${typeof group.title === "string" ? group.title : "feature"}`)}
                         />
                     )}
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
                         {filtering && visibleCount > 0 ? <p className="text-meta text-ink-subtle" aria-live="polite">Showing {plural(visibleCount, "Spec")} of {formatNumber(specs.length)}.</p> : <span />}
-                        {canEdit && createActions && <div className="flex items-center gap-2">{createActions}</div>}
+                        {canEdit && createActions && <div className="flex items-center gap-3">{createActions}</div>}
                     </div>
                 </div>
             </PageContainer>

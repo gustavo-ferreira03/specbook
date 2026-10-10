@@ -29,7 +29,7 @@ const LOAD_ERROR = "The latest project overview could not load. Check your conne
 
 function OverviewRow({ icon, title, time, action = "Details", onClick, annotation, detail }: { icon: React.ReactNode; title: string; time?: string; action?: string; onClick: () => void; annotation?: string; detail?: string }) {
     return <li className="min-w-0">
-        <Button type="button" variant="ghost" onClick={onClick} className="h-auto w-full justify-start gap-3 rounded-none px-2 py-3 text-left text-body font-normal">
+        <Button type="button" variant="ghost" onClick={onClick} className="h-auto w-full justify-start gap-3 rounded-none px-4 py-3 text-left text-body font-normal">
             <span className="flex shrink-0 items-center" aria-hidden="true">{icon}</span>
             <span className="min-w-0 flex-1"><span className={annotation ? "block truncate" : "block whitespace-normal break-words sm:truncate"} title={title}>{title}</span>{detail && <span className="mt-0.5 block whitespace-normal text-meta text-ink-subtle">{detail}</span>}</span>
             {annotation && <span className="max-w-[45%] shrink-0 truncate text-meta text-ink-muted" title={annotation}>{annotation}</span>}
@@ -44,7 +44,7 @@ function OverviewSection({ id, title, count, children }: { id: string; title: st
 }
 
 function RowList({ children }: { children: React.ReactNode }) {
-    return <ul className="divide-y divide-line border-y border-line">{children}</ul>;
+    return <ul className="sheet divide-y divide-line overflow-hidden rounded-xl bg-surface">{children}</ul>;
 }
 
 function ShowMore({ label = "Show more", onClick }: { label?: string; onClick: () => void }) {
@@ -249,7 +249,7 @@ export default function HomePage({ params }: { params: Promise<{ projectId: stri
         <HomeHero projectName={project?.name} baseUrl={project?.baseUrl} summary={data && !emptyProject ? data.summary : undefined} actions={agentActions} />
         <PageContainer width="data" innerClassName="space-y-9">
             {failed && data && <Alert variant="danger" role="alert" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{LOAD_ERROR}</AlertDescription><Button variant="outline" size="sm" onClick={tryAgain}><RefreshCw size={13} /> Try again</Button></Alert>}
-            {needsContext && canEdit && <section aria-label="Map your app" className="flex flex-wrap items-center gap-4 rounded-xl border border-line-strong p-5">
+            {needsContext && canEdit && <section aria-label="Map your app" className="sheet flex flex-wrap items-center gap-4 rounded-xl bg-surface p-5">
                 <div className="min-w-0 flex-1">
                     <p className="text-section text-ink">Map your app first</p>
                     <p className="mt-1 text-body text-ink-muted">Specbook explores {project?.baseUrl ?? "your app"} and drafts what it does: areas, roles and rules. Every Spec and chat starts from that map.</p>

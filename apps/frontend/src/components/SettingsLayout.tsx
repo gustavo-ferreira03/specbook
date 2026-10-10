@@ -22,7 +22,7 @@ export function SettingsSection({
     return (
         <section aria-labelledby={id} className={cn("min-w-0", className)}>
             <SectionHeader id={id} title={title} description={description} actions={actions} className="mb-3" />
-            <div className={cn("overflow-hidden rounded-xl border bg-surface", tone === "danger" ? "border-danger/25" : "border-line")}>{children}</div>
+            <div className={cn("sheet overflow-hidden rounded-xl bg-surface", tone === "danger" && "[--sheet-color:color-mix(in_oklch,var(--color-danger)_40%,transparent)]")}>{children}</div>
         </section>
     );
 }

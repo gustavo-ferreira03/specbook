@@ -4,10 +4,9 @@ import { useDisplayStatus } from "@/lib/projectOverview";
 import { useAuth } from "@/components/AuthProvider";
 
 import Link from "next/link";
-import { Folder, LoaderCircle, Play, RotateCcw } from "lucide-react";
+import { Folder, LoaderCircle, Play } from "lucide-react";
 import { RelativeTime } from "@/components/RelativeTime";
 import { StatusPill } from "@/components/StatusPill";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -63,7 +62,7 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
                 const Icon = meta.icon;
                 return (
                     <span key={status} className="inline-flex items-center gap-1" title={meta.label}>
-                        <Icon size={12} strokeWidth={2.25} aria-hidden="true" className={meta.text} />
+                        <Icon size={12} strokeWidth={2.25} aria-hidden="true" className={meta.iconColor} />
                         <span className="tabular">{formatNumber(counts[status] ?? 0)}</span>
                         <span className="sr-only">{meta.label}</span>
                     </span>
@@ -96,7 +95,7 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                     >
                         {spec.title}
                     </Link>
-                    {run?.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
+                    {run?.flaky && <StatusPill status="flaky" size="sm" />}
                     <span aria-hidden="true" className="toc-leader hidden sm:block" />
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted sm:hidden">
@@ -176,7 +175,7 @@ export function SpecTable({
     className?: string;
 }) {
     return (
-        <div className={cn("overflow-hidden rounded-xl border border-line bg-surface", className)}>
+        <div className={cn("sheet overflow-hidden rounded-xl bg-surface", className)}>
             <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-meta font-semibold text-ink-subtle sm:flex">
                 <span className="w-24 shrink-0">Status</span>
                 <span className="flex-1">Spec</span>

@@ -106,7 +106,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
                                         setText(suggestion.seed);
                                         textareaRef.current?.focus();
                                     }}
-                                    className="group/suggestion flex items-start gap-3 rounded-xl border border-line bg-surface p-3.5 text-left transition-colors hover:border-line-strong hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                                    className="group/suggestion flex items-start gap-3 slab slab-lift rounded-xl bg-surface p-3.5 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                                 >
                                     <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink-muted transition-colors group-hover/suggestion:text-ink" aria-hidden="true">
                                         <suggestion.icon size={14} />

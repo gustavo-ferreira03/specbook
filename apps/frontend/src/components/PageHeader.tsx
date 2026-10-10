@@ -73,7 +73,7 @@ export function PageHeader({
                         {description && <p className={cn("max-w-[70ch] text-body text-ink-muted", size === "document" ? "mt-2" : "mt-0.5")}>{description}</p>}
                         {meta && <div className="mt-1 text-meta text-ink-muted">{meta}</div>}
                     </div>
-                    {actions && <div className={cn("flex shrink-0 flex-wrap items-center gap-2 sm:justify-end", kicker ? (size === "document" ? "sm:pt-7" : "sm:pt-6") : size === "document" && "sm:pt-1")}>{actions}</div>}
+                    {actions && <div className={cn("flex shrink-0 flex-wrap items-center gap-3 sm:justify-end", kicker ? (size === "document" ? "sm:pt-7" : "sm:pt-6") : size === "document" && "sm:pt-1")}>{actions}</div>}
                 </div>
             </div>
         </header>

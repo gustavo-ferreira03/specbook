@@ -5,7 +5,7 @@ export function StatusDot({ status, size = 14, className }: { status: string; si
     const meta = statusMeta(status);
     const Icon = meta.icon;
     return (
-        <span role="img" aria-label={`Status: ${meta.label}`} title={meta.label} className={cn("inline-flex shrink-0 items-center justify-center", meta.text, className)}>
+        <span role="img" aria-label={`Status: ${meta.label}`} title={meta.label} className={cn("inline-flex shrink-0 items-center justify-center", meta.iconColor, className)}>
             <Icon size={size} strokeWidth={2.25} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
         </span>
     );

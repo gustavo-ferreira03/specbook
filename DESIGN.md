@@ -124,13 +124,21 @@ Geist (sans) for everything people read; Geist Mono only through the `.tabular` 
 
 ## 4. Elevation
 
-Flat. Surfaces are separated by hairlines and spacing. Shadows exist only for things that float: popovers and menus (short, 8px-class blur with a 1px base), dialogs, and the chat composer. Panels never combine a border with a wide soft shadow.
+Tables and most cards read as a small stack of pages, the same as the Specification: a 1px `line-strong` border plus two hairline sheets offset 4px and 8px behind (`.sheet`, drawn with layered box-shadows so panels that clip their content keep the sheets). Danger-zone cards tint the sheets with `--sheet-color`. Soft neo-brutalism, after Gumroad's system, is kept for a few accents, never as a blanket rule:
+
+- **Run seal (`.slab`):** a border and a 2px solid thickness in the Spec's status colour.
+- **Floating layers:** menus, popovers and the chat composer take a solid 3px offset shadow, dialogs 4px, zero-blur. No blurred shadows anywhere.
+- **Buttons:** every bordered button shares a 2px ink border and a 2px ink thickness (`.key`) that presses flat on click. Menu and select triggers (`aria-haspopup`), ghost and text buttons stay flat.
+- **Interactive cards (`.slab-lift`):** the New chat suggestions rise on hover and press flat.
+- **Flaky:** the Flaky status sits in a yellow pill with a 2px yellow border and thickness; warning icons use a vivid yellow while their label stays ink.
+
+Keep button groups 12px apart and leave room below stacked panels so thickness and sheets never collide.
 
 ## 5. Components
 
 - **Tabs (the identity):** navigation tabs, meaning the sidebar destinations and rows and the underline-variant `Tabs`, mark the current one with a 2px ink stroke (`--stroke`) instead of a gray fill. The current tab sits raised 1px with a 2px hard ink shadow, like a key or a page standing off the stack, and hovering it presses it down flat. Sidebar rows and underline `Tabs` share one class, `.tab-key` (active via `.is-active` or Radix `data-state="active"`): the stroke is a single pseudo-element that goes from transparent to ink, so selecting never swaps elements. Hover on an inactive tab only darkens its text. The stroke and its hard shadow share one colour, `--stroke-ink`, because the shadow is the piece's thickness: graphite in light, a mid grey (70%) in dark so it never glares. In dark the active tab also takes the raised surface tone. This is reserved for tabs: menus, selects, lists, filters, segmented controls and fields keep their normal states.
 - **Buttons:** 36px (32px small), 6px radius, 2px border, verb plus object labels. Hover inverts: primary (solid graphite) turns transparent with a graphite outline and text; outline turns solid graphite with white text; icon-only ghost buttons fill with graphite. Content inside inherits the button colour on hover. Split buttons invert as one group. Menu and select triggers never invert: on hover they stay white and only the border darkens. Disabled primary is an outline with subtle text, never a gray block. 320ms, ease-out-quint, instant under reduced motion.
-- **Panels:** white, 1px line, 10px radius. Content inside a panel is divided by hairlines, never by inner cards.
+- **Panels:** white page stacks (`.sheet`), 12px radius. Content inside a panel is divided by hairlines, never by inner cards.
 - **Status:** `StatusPill` renders icon plus coloured label with no background. Coverage uses a 6px dot plus label.
 - **Spec steps:** 24px square step numbers (6px radius, strong hairline, mono numeral) joined by a hairline.
 - **Expected result:** a full-border panel with an icon label; no side stripe.

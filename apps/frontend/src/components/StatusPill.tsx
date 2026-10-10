@@ -16,13 +16,13 @@ export function StatusPill({ status, kind = "spec", size = "default", className 
         previous.current = status;
     }
     return (
-        <span className={cn("inline-flex w-fit shrink-0 items-center gap-1.5 text-meta font-medium whitespace-nowrap", size === "sm" ? "h-5" : "h-6", meta.text, className)} title={meta.description || undefined}>
+        <span className={cn("inline-flex w-fit shrink-0 items-center gap-1.5 text-meta font-medium whitespace-nowrap", size === "sm" ? "h-5" : "h-6", status === "flaky" && "rounded-full border-(length:--stroke) border-warning-icon px-2 shadow-[2px_2px_0_var(--color-warning-icon)]", meta.text, className)} title={meta.description || undefined}>
             <Icon
                 key={settled.current ? `${status}-settled` : status}
                 size={size === "sm" ? 12 : 13}
                 strokeWidth={2.25}
                 aria-hidden="true"
-                className={cn(status === "running" && "animate-spin motion-reduce:animate-none", settled.current && "status-stamp")}
+                className={cn(meta.iconColor, status === "running" && "animate-spin motion-reduce:animate-none", settled.current && "status-stamp")}
             />
             {kind === "run" ? meta.runLabel : meta.label}
         </span>

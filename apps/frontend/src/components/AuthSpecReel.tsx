@@ -6,32 +6,32 @@ import { cn } from "@/lib/utils";
 
 const SPECS = [
     {
-        path: "cart/removing-items/spec.yml",
-        title: "Removing an item updates the cart badge",
-        steps: ["Sign in as the standard user", "Add the backpack and the bike light to the cart", "Remove the backpack from the cart"],
-        expected: "The badge shows 1 and the bike light stays in the cart.",
-        duration: "1.1s",
+        path: "authentication/reject-invalid-sign-in-credentials/spec.yml",
+        title: "Reject invalid sign-in credentials",
+        steps: ["Open the sign-in page", "Submit invalid credentials", "See the rejection and remain on the sign-in page"],
+        expected: "The sign-in page remains open and displays “Email or password is incorrect.”",
+        duration: "1.0s",
     },
     {
-        path: "login/locked-out-user/spec.yml",
-        title: "A locked out user cannot sign in",
-        steps: ["Open the login page", "Sign in as the locked out user", "Read the error under the form"],
-        expected: "The user stays on the login page and sees that the account is locked.",
-        duration: "0.8s",
+        path: "authentication/sign-in-with-valid-credentials/spec.yml",
+        title: "Sign in with valid credentials",
+        steps: ["Open the Specbook sign-in page", "Enter the saved administrator email and password", "See the Sauce Demo project workspace"],
+        expected: "The sign-in form submits and the Sauce Demo project workspace appears with project navigation and its dashboard.",
+        duration: "1.5s",
     },
     {
-        path: "checkout/order-total/spec.yml",
-        title: "The order total includes tax",
-        steps: ["Add two items to the cart", "Start checkout and enter a shipping address", "Open the order overview"],
-        expected: "The total equals the item subtotal plus the displayed tax.",
-        duration: "2.4s",
-    },
-    {
-        path: "inventory/sorting/spec.yml",
-        title: "Sorting by price puts the cheapest item first",
-        steps: ["Sign in as the standard user", "Sort the inventory from low to high price"],
-        expected: "The onesie is listed first and prices never decrease down the list.",
+        path: "home/home-dashboard-shows-the-passing-headline/spec.yml",
+        title: "Home dashboard shows the passing headline",
+        steps: ["Open the Specbook sign-in page", "Sign in with the saved administrator account", "Open the project Home dashboard", "Observe the passing-Spec headline"],
+        expected: "The Home dashboard displays the headline “1 of 1 Spec passing”.",
         duration: "0.9s",
+    },
+    {
+        path: "specs/open-a-spec-and-run-it-to-a-visible-result/spec.yml",
+        title: "Open a Spec and run it to a visible result",
+        steps: ["Sign in to the Sauce Demo project", "Open the existing Spec from the Specs list", "Run the Spec again", "See the updated pass status, unchanged Spec step, and additional run in history"],
+        expected: "The Spec detail shows “Last run passed” and the newest run in the history is from just now and marked “Passed”.",
+        duration: "4.2s",
     },
 ];
 
