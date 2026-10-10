@@ -1,7 +1,7 @@
 <!-- prettier-ignore -->
 <div align="center">
 
-<h1><img src="apps/frontend/public/specbook-chat-icon.svg" alt="" height="40" align="top" /> specbook</h1>
+<h1><img src="apps/frontend/src/app/icon.svg" alt="" height="40" align="top" /> specbook</h1>
 
 *A self-hosted QA agent that turns plain-language behavior into Playwright tests you can read.*
 
