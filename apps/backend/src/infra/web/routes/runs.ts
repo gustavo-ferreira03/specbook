@@ -12,7 +12,6 @@ import { MAX_RUN_LIST_LIMIT, runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
 import { isInside } from "../../../core/repo/safe-fs";
 import { batchReport, runReport } from "../../../core/ci/report";
-import { publicFrontendOrigin } from "../security";
 
 const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
 
@@ -109,14 +108,14 @@ export function createRunsRouter(): Hono {
     router.get("/run-batches/:id/report", access("viewer"), async (c) => {
         const batch = await getRunBatch(c.req.param("id"));
         if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
-        return c.body(await batchReport(batch, publicFrontendOrigin(c)), 200, reportHeaders(c, `${batch.label}-${batch.id.slice(0, 8)}`));
+        return c.body(await batchReport(batch), 200, reportHeaders(c, `${batch.label}-${batch.id.slice(0, 8)}`));
     });
 
     router.get("/runs/:id/report", access("viewer"), async (c) => {
         const run = await runsRepository.getRun(c.req.param("id"));
         const spec = run ? await specsRepository.getSpec(run.specId) : null;
         if (!run || !spec) throw new HTTPException(404, { message: "Run not found" });
-        return c.body(await runReport(run, spec, publicFrontendOrigin(c)), 200, reportHeaders(c, `${spec.title}-${run.id.slice(0, 8)}`));
+        return c.body(await runReport(run, spec), 200, reportHeaders(c, `${spec.title}-${run.id.slice(0, 8)}`));
     });
 
     router.get("/specs/:id/runs", access("viewer"), zValidator("query", runListSchema), async (c) => {

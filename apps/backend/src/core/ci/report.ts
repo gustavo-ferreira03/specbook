@@ -73,7 +73,12 @@ async function logo(): Promise<string> {
 
 const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 const CROSS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const BUG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6zM12 20v-9M6 13H2M22 13h-4M6.5 8.5 4 7M17.5 8.5 20 7M6 17l-2.5 1.5M18 17l2.5 1.5"/></svg>';
 const RETRY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+
+function count(tone: string, label: string, value: number, icon: string): string {
+    return `<div class="count is-${tone}${value === 0 ? " zero" : ""}"><span class="icon">${icon}</span><span><b>${value}</b><small>${label}</small></span></div>`;
+}
 
 function statusOf(item: Item): { tone: "passed" | "failed" | "running"; label: string } {
     if (item.pending) return { tone: "running", label: "Running" };
@@ -102,7 +107,6 @@ function renderSection({ item, path: file, preconditions, expectedResult, steps,
       return `<figure id="${escape(id)}"><a class="zoom" href="#${escape(id)}"><img src="${step.image}" alt="Step ${step.number}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>Step ${step.number}</b> ${escape(step.label)}</figcaption></figure>`;
   }).join("")}</div>` : ""}
   ${video ? `<h3>Recording</h3><video class="recording" controls preload="metadata" src="${video}"></video>` : ""}
-  <a class="open" href="${escape(item.url)}">Open this run in Specbook</a>
 </div>
 </details>`;
 }
@@ -123,9 +127,15 @@ h1{margin:0;font-size:32px;line-height:1.15;letter-spacing:-.02em}
 .meta{margin-top:10px;color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 14px}
 .meta b{color:var(--ink);font-weight:600}
 .verdict.passed{color:var(--success)}.verdict.failed{color:var(--danger)}
-.counts{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 8px}
-.count{border:1px solid var(--strong);border-radius:10px;padding:8px 14px;font-size:13px;color:var(--muted)}
-.count b{display:block;font-size:20px;color:var(--ink);font-variant-numeric:tabular-nums}
+.counts{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 28px}
+.count{--c:var(--muted);display:flex;align-items:center;gap:12px;min-width:150px;padding:10px 16px 10px 12px;background:var(--surface);border:2px solid var(--c);border-radius:12px;box-shadow:3px 3px 0 var(--c)}
+.count.is-passed{--c:var(--success)}.count.is-failed{--c:var(--danger)}.count.is-flaky{--c:var(--warning)}.count.is-known{--c:var(--muted)}
+.count .icon{flex:none;width:34px;height:34px;border-radius:9px;background:var(--c);display:flex;align-items:center;justify-content:center}
+.count .icon svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.count b{display:block;font-size:26px;line-height:1;letter-spacing:-0.03em;color:var(--ink);font-variant-numeric:tabular-nums}
+.count small{display:block;margin-top:3px;font-size:12.5px;color:var(--muted)}
+.count.zero{--c:var(--strong);border-width:1px;padding:11px 17px 11px 13px;box-shadow:none}
+.count.zero .icon{background:var(--soft)}.count.zero .icon svg{stroke:var(--subtle)}.count.zero b{color:var(--subtle)}
 main.wrap{padding-top:32px;padding-bottom:24px}
 .spec{border:1px solid var(--strong);border-radius:12px;background:var(--surface);margin:0 8px 22px 0;box-shadow:4px 4px 0 -1px var(--surface),4px 4px 0 0 var(--strong),8px 8px 0 -1px var(--surface),8px 8px 0 0 var(--strong)}
 .spec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:16px 18px}
@@ -170,7 +180,6 @@ figure:target figcaption{color:#e6e6e6;position:relative;z-index:1}
 figure:target figcaption b{color:#fff}
 figure:target .close{display:block;position:absolute;inset:0;cursor:zoom-out}
 .recording{width:100%;max-width:720px;border:1px solid var(--strong);border-radius:8px;display:block;background:#000}
-.open{display:inline-block;margin-top:18px;font-size:13px;font-weight:600;border:2px solid var(--primary);border-radius:8px;padding:6px 12px;text-decoration:none;box-shadow:2px 2px 0 var(--primary)}
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;
 
@@ -193,7 +202,6 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
         ci?.commitSha ? `<span class="mono">${escape(ci.commitSha.slice(0, 7))}</span>` : "",
         ci?.ref ? `<span class="mono">${escape(ci.ref)}</span>` : "",
         ci?.buildUrl ? `<a href="${escape(ci.buildUrl)}">Build</a>` : "",
-        `<a href="${escape(result.url)}">Open in Specbook</a>`,
     ].filter(Boolean).join("");
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -207,10 +215,10 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
 </div></header>
 <main class="wrap">
   ${options.single ? "" : `<div class="counts">
-    <div class="count"><b>${passed}</b>Passed</div>
-    <div class="count"><b>${failed}</b>Failed</div>
-    <div class="count"><b>${result.qualityGate.flaky}</b>Flaky</div>
-    <div class="count"><b>${result.qualityGate.knownBugs}</b>Known bugs</div>
+    ${count("passed", "Passed", passed, CHECK)}
+    ${count("failed", "Failed", failed, CROSS)}
+    ${count("flaky", "Flaky", result.qualityGate.flaky, RETRY)}
+    ${count("known", "Known bugs", result.qualityGate.knownBugs, BUG)}
   </div>`}
   ${sections.map((entry) => renderSection(entry, options.single)).join("\n")}
 </main>
@@ -218,12 +226,12 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
 </body></html>`;
 }
 
-export async function runReport(run: { id: string; specId: string; status: string; startedAt: string; durationMs: number | null; failReason: string | null; environment?: RunBatch["environment"] | null }, spec: { title: string; projectId: string }, frontendOrigin: string): Promise<string> {
+export async function runReport(run: { id: string; specId: string; status: string; startedAt: string; durationMs: number | null; failReason: string | null; environment?: RunBatch["environment"] | null }, spec: { title: string; projectId: string }): Promise<string> {
     const batch = { id: run.id, label: "Spec run", projectId: spec.projectId, status: run.status, startedAt: run.startedAt, durationMs: run.durationMs, environment: run.environment ?? undefined,
         specs: [{ specId: run.specId, runId: run.id, title: spec.title, status: run.status, durationMs: run.durationMs, failReason: run.failReason }] } as unknown as RunBatch;
-    return htmlReport(await ciResult(batch, frontendOrigin), { single: true });
+    return htmlReport(await ciResult(batch), { single: true });
 }
 
-export async function batchReport(batch: RunBatch, frontendOrigin: string): Promise<string> {
-    return htmlReport(await ciResult(batch, frontendOrigin));
+export async function batchReport(batch: RunBatch): Promise<string> {
+    return htmlReport(await ciResult(batch));
 }

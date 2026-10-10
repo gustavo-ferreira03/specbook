@@ -150,7 +150,7 @@ async function main() {
         qualityGate: { failOnFlaky: flag("SPECBOOK_FAIL_ON_FLAKY"), failOnKnownBugs: flag("SPECBOOK_FAIL_ON_KNOWN_BUGS") },
     };
     let result = await (await request(`/ci/projects/${encodeURIComponent(project)}/runs`, { method: "POST", body: JSON.stringify(input) })).json();
-    console.log(`Specbook: ${redact(result.url)}`);
+    console.log(`Specbook: started batch ${result.batch.id}`);
     const route = `/ci/runs/${encodeURIComponent(result.batch.id)}`;
     while (!result.complete) {
         if (Date.now() >= deadline) throw new Error("Timed out waiting for Specbook results");

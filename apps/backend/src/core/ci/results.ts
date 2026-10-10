@@ -47,9 +47,9 @@ function xml(value: string) {
 export function junitResult(result: CiResult): string {
     const tests = result.results.map((item) => {
         const skipped = item.pending || (!item.failsGate && (item.flaky || ["failed", "error"].includes(item.status)));
-        const detail = item.failsGate ? `<failure message="${xml(item.failReason ?? (item.flaky ? "Passed only after retry" : "Spec failed"))}">${xml(item.url)}</failure>`
+        const detail = item.failsGate ? `<failure message="${xml(item.failReason ?? (item.flaky ? "Passed only after retry" : "Spec failed"))}"/>`
             : skipped ? `<skipped message="${item.pending ? "Still running" : item.flaky ? "Flaky: passed on retry" : "Open bug report"}"/>` : "";
-        return `  <testcase name="${xml(item.title)}" classname="Specbook" time="${((item.durationMs ?? 0) / 1000).toFixed(3)}">${detail}<system-out>${xml(item.url)}</system-out></testcase>`;
+        return `  <testcase name="${xml(item.title)}" classname="Specbook" time="${((item.durationMs ?? 0) / 1000).toFixed(3)}">${detail}</testcase>`;
     });
     if (result.qualityGate.failures > result.results.filter((item) => item.failsGate).length) {
         tests.push(`  <testcase name="Batch execution" classname="Specbook"><failure message="${xml(result.batch.failReason ?? "Batch execution failed")}"/></testcase>`);
@@ -61,14 +61,14 @@ export function junitResult(result: CiResult): string {
 const markdown = (value: string) => value.replace(/[\\`*_{}[\]<>|]/g, "\\$&").replace(/[\r\n]+/g, " ");
 
 export function markdownResult(result: CiResult): string {
-    const lines = [`## Specbook: ${result.status}`, "", `[View results](${result.url})`, ""];
+    const lines = [`## Specbook: ${result.status}`, ""];
     if (result.batch.environment) lines.push(`Environment: ${markdown(result.batch.environment.name)}`, "");
     if (result.batch.ci?.commitSha) lines.push(`Commit: ${markdown(result.batch.ci.commitSha)}`, "");
     if (result.batch.ci?.ref) lines.push(`Ref: ${markdown(result.batch.ci.ref)}`, "");
     lines.push("| Spec | Result |", "| --- | --- |");
     for (const item of result.results) {
         const status = item.pending ? "Running" : item.flaky ? "Flaky (passed on retry)" : item.knownBug && ["failed", "error"].includes(item.status) ? "Known bug" : item.status;
-        lines.push(`| [${markdown(item.title)}](${item.url}) | ${status}${item.failsGate ? " · fails gate" : ""} |`);
+        lines.push(`| ${markdown(item.title)} | ${status}${item.failsGate ? " · fails gate" : ""} |`);
     }
     lines.push("", `Quality gate: ${result.complete ? result.qualityGate.passed ? "passed" : "failed" : "pending"}. ${result.qualityGate.failures} failure(s), ${result.qualityGate.flaky} flaky, ${result.qualityGate.knownBugs} known bug(s).`, "");
     return lines.join("\n");
