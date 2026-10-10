@@ -47,17 +47,28 @@ ${yamlEnv(6)}
         run: |
           ${download}
           node specbook-ci.mjs
-      - name: Publish summary
-        if: always()
-        run: test ! -f specbook-summary.md || cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload report
+        id: report
+        if: always() && hashFiles('specbook-report.html') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: specbook-report.html
+          archive: false
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: specbook-results
           path: |
-            specbook-report.html
             specbook-junit.xml
-            specbook-summary.md`;
+            specbook-summary.md
+          if-no-files-found: ignore
+      - name: Publish summary
+        if: always()
+        env:
+          REPORT_URL: \${{ steps.report.outputs.artifact-url }}
+        run: |
+          if [ -n "$REPORT_URL" ]; then printf '**[Open the Specbook report](%s)**\\n\\n' "$REPORT_URL" >> "$GITHUB_STEP_SUMMARY"; fi
+          test ! -f specbook-summary.md || cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY"`;
         case "gitlab": return `specbook:
   image: node:26
   resource_group: specbook-$SPECBOOK_PROJECT_ID-$CI_MERGE_REQUEST_IID

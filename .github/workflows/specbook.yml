@@ -54,11 +54,6 @@ jobs:
                   SPECBOOK_SUMMARY_PATH: specbook-summary.md
               run: node specbook/ci.mjs
 
-            - name: Publish the summary
-              if: always()
-              run: |
-                  test -f specbook-summary.md && cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY" || true
-                  test -f specbook-report.html && echo "The full report with each Spec's steps and screenshots is in the **specbook-report** artifact (specbook-report.html)." >> "$GITHUB_STEP_SUMMARY" || true
 
             - name: Show container logs
               if: failure()
@@ -66,12 +61,27 @@ jobs:
                   docker logs specbook-tester 2>&1 | tail -n 200
                   docker logs specbook-target 2>&1 | tail -n 200
 
-            - uses: actions/upload-artifact@v4
+            - name: Upload the report
+              id: report
+              if: always() && hashFiles('specbook-report.html') != ''
+              uses: actions/upload-artifact@v7
+              with:
+                  path: specbook-report.html
+                  archive: false
+
+            - uses: actions/upload-artifact@v7
               if: always()
               with:
-                  name: specbook-report
+                  name: specbook-results
                   path: |
-                      specbook-report.html
                       specbook-junit.xml
                       specbook-summary.md
                   if-no-files-found: ignore
+
+            - name: Publish the summary
+              if: always()
+              env:
+                  REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+              run: |
+                  if [ -n "$REPORT_URL" ]; then echo "**[Open the Specbook report]($REPORT_URL)** with each Spec's steps, screenshots and recordings." >> "$GITHUB_STEP_SUMMARY"; echo >> "$GITHUB_STEP_SUMMARY"; fi
+                  test -f specbook-summary.md && cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY" || true
