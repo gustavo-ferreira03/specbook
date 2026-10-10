@@ -35,6 +35,7 @@ import {
 } from "@/lib/api";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
 import { useAuth } from "@/components/AuthProvider";
+import { ProjectIcon } from "@/components/ProjectIcon";
 import { SidebarUser } from "@/components/SidebarUser";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { countLabel } from "@/lib/format";
@@ -493,9 +494,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                         <DropdownMenuTrigger asChild>
                             <Button variant="outline" className="h-10 w-full justify-between gap-2 rounded-lg bg-surface px-2 text-left md:h-9">
                                 <span className="flex min-w-0 items-center gap-2">
-                                    <span className="flex size-5 shrink-0 items-center justify-center rounded-[5px] border border-current/25 text-label uppercase" aria-hidden="true">
-                                        {projectName.trim().charAt(0) || "P"}
-                                    </span>
+                                    <ProjectIcon key={projectId} projectId={projectId} name={projectName} />
                                     <span className="truncate font-medium text-ink">{projectName}</span>
                                 </span>
                                 <ChevronsUpDown size={14} className="text-ink-subtle" />
@@ -506,6 +505,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <DropdownMenuRadioGroup value={projectId} onValueChange={chooseProject}>
                                 {projects.map((project) => (
                                     <DropdownMenuRadioItem key={project.id} value={project.id} className={project.id === projectId ? "font-medium" : undefined}>
+                                        <ProjectIcon projectId={project.id} name={project.name} className="size-4" />
                                         <span className="truncate">{project.name}</span>
                                     </DropdownMenuRadioItem>
                                 ))}

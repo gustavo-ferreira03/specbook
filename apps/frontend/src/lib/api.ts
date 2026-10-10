@@ -384,20 +384,6 @@ export function updateFeature(
     });
 }
 
-export function getContextFile(projectId: string): Promise<{ yaml: string | null; contextSyncError: string | null }> {
-    return api(`/projects/${encodeURIComponent(projectId)}/context-file`);
-}
-
-export function updateContextFile(
-    projectId: string,
-    yaml: string,
-): Promise<{ yaml: string | null; contextSyncError: string | null }> {
-    return api(`/projects/${encodeURIComponent(projectId)}/context-file`, {
-        method: "PUT",
-        body: JSON.stringify({ yaml }),
-    });
-}
-
 export function listCredentialProfiles(projectId: string): Promise<{ profiles: CredentialProfile[] }> {
     return api(`/projects/${encodeURIComponent(projectId)}/credentials`);
 }

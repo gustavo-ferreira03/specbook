@@ -4,7 +4,7 @@ import path from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import { blockChatBrowser, cancelChatBrowserDeletion, removeChatBrowserData } from "./browser/sessions";
 import { beginChatDeletion, cancelChatDeletion, isChatBusy, isChatDeleting, removeChatSession } from "./chat/session";
-import { runsDir } from "./paths";
+import { runsDir, storageRoot } from "./paths";
 import { repoBare } from "./repo/bare";
 import { repoGit } from "./repo/git";
 import { deleteFeatureDirectory, deleteSpecFiles } from "./repo/writer";
@@ -179,6 +179,7 @@ export async function deleteProjectData(id: string): Promise<boolean> {
     });
 
     await fs.rm(path.join(runsDir, "proposals", id), { recursive: true, force: true });
+    await Promise.all([fs.rm(path.join(storageRoot, "favicons", id), { force: true }), fs.rm(path.join(storageRoot, "favicons", `${id}.json`), { force: true })]);
     await removeRunDirectories(runIds).catch((error: unknown) => {
         console.error(`[specbook] removing run artifacts of project ${id} failed:`, error);
     });

@@ -11,7 +11,6 @@ import {
     ChevronRight,
     Compass,
     ExternalLink,
-    FileCode2,
     LoaderCircle,
     PencilLine,
     RefreshCw,
@@ -21,7 +20,6 @@ import {
     X,
 } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
-import { ContextFileCard } from "@/components/ContextFileCard";
 import { ContextReadout } from "@/components/ContextReadout";
 import { DraftReview } from "@/components/DraftReview";
 import { EmptyState } from "@/components/EmptyState";
@@ -207,7 +205,6 @@ function ContextPanel({
     const [discardDiscoveryOpen, setDiscardDiscoveryOpen] = useState(false);
     const [discardDiscoveryError, setDiscardDiscoveryError] = useState("");
     const [updateMode, setUpdateMode] = useState(false);
-    const [yamlMode, setYamlMode] = useState(false);
     const [findState, setFindState] = useState<"idle" | "requesting" | "requested">("idle");
     const [findError, setFindError] = useState("");
     const discardDiscoveryTriggerRef = useRef<HTMLButtonElement>(null);
@@ -259,7 +256,7 @@ function ContextPanel({
 
     if (!draft && !confirmed) {
         return (
-            <section aria-labelledby="overview-context-heading" className="rounded-xl border border-line bg-surface-soft">
+            <section aria-labelledby="overview-context-heading" className="sheet rounded-xl bg-surface-soft">
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:p-6">
                     <span className="hidden size-10 shrink-0 items-center justify-center rounded-full bg-surface text-ink shadow-xs ring-1 ring-line sm:flex">
                         <Compass size={18} aria-hidden="true" />
@@ -300,7 +297,7 @@ function ContextPanel({
 
             {draft && !draftHasProposal && (
                 <section aria-labelledby="overview-context-heading">
-                    <div className="rounded-xl border border-line p-4 sm:p-5">
+                    <div className="sheet rounded-xl p-4 sm:p-5">
                         <div id="overview-context-heading" className="flex items-center gap-2 text-control font-medium text-ink">
                             <LoaderCircle size={14} className="animate-spin text-ink-muted motion-reduce:animate-none" aria-hidden="true" />
                             Discovery in progress
@@ -353,7 +350,7 @@ function ContextPanel({
             {draft && draftHasProposal && (
                 <section aria-labelledby="overview-context-heading">
                     <SectionHeader id="overview-context-heading" title="Review project context" description="Drafted from discovery. Edit anything before confirming." className="mb-3" />
-                    <div className="rounded-xl border border-line p-4 sm:p-5">
+                    <div className="sheet rounded-xl p-4 sm:p-5">
                         {canEdit ? <DraftReview
                             revision={draft}
                             chatHref={draftChatHref}
@@ -380,9 +377,6 @@ function ContextPanel({
                             <Button type="button" variant="ghost" size="sm" disabled={findState === "requesting"} onClick={() => void findUncoveredAreas()}>
                                 <Search size={14} /> {findState === "requesting" ? "Requesting…" : "Find uncovered areas"}
                             </Button>
-                            <Button type="button" variant="ghost" size="sm" onClick={() => setYamlMode((value) => !value)} aria-expanded={yamlMode}>
-                                {yamlMode ? <><X size={14} /> Close YAML</> : <><FileCode2 size={14} /> Edit YAML</>}
-                            </Button>
                             <Button type="button" variant="outline" size="sm" onClick={() => setUpdateMode((value) => !value)} aria-expanded={updateMode}>
                                 {updateMode ? <><X size={14} /> Cancel update</> : <><PencilLine size={14} /> Update context</>}
                             </Button>
@@ -391,7 +385,7 @@ function ContextPanel({
                     />
                     {findState === "requested" && <p className="mb-3 text-body text-ink-muted">Requested. Review suggested Specs in <Link href={`/p/${projectId}`} className="underline underline-offset-2">Overview</Link>.</p>}
                     {findError && <Alert variant="danger" role="alert" className="mb-3"><AlertDescription>{findError}</AlertDescription></Alert>}
-                    <div className="overflow-hidden rounded-xl border border-line">
+                    <div className="overflow-hidden sheet rounded-xl">
                         {updateMode && !draft && (
                             <div className="border-b border-line bg-surface-soft p-4 sm:p-5">
                                 <p className="mb-3 max-w-[64ch] text-control text-ink-muted">
@@ -403,7 +397,6 @@ function ContextPanel({
                         <ConfirmedContextSummary projectId={projectId} context={confirmed.context} coverage={coverage} />
                     </div>
                     {coverage && <p className="mt-2 text-meta text-ink-subtle">{coverage.basis}</p>}
-                    {yamlMode && !draft && <div className="mt-6"><ContextFileCard projectId={projectId} /></div>}
                 </section>
             )}
         </div>

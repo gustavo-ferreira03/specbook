@@ -44,11 +44,6 @@ export async function readFeatureRaw(feature: Feature): Promise<string | null> {
     return readOptionalRepoFile(root, path.join(root, featureYamlFile(feature.path)));
 }
 
-export async function readContextRaw(projectId: string): Promise<string | null> {
-    const root = repoGit.getRepoDir(projectId);
-    return readOptionalRepoFile(root, path.join(root, "context.yml"));
-}
-
 export async function editSpecFiles(spec: Spec, input: { yaml?: string; testSource?: string }): Promise<Spec> {
     return withSpecLock(spec.id, () =>
         repoGit.withRepoLock(spec.projectId, async () => {
@@ -91,14 +86,5 @@ export async function editFeatureFile(feature: Feature, yaml: string): Promise<F
         const updated = await featuresRepository.getFeature(feature.id);
         if (!updated) throw new Error("Feature was removed during reindex");
         return updated;
-    });
-}
-
-export async function editContextFile(projectId: string, yaml: string): Promise<void> {
-    await repoGit.withRepoLock(projectId, async () => {
-        await repoGit.assertRepoWritableUnlocked(projectId);
-        const root = repoGit.getRepoDir(projectId);
-        await writeRepoFile(root, path.join(root, "context.yml"), yaml);
-        await commitAndReindex(projectId, "context: edit");
     });
 }

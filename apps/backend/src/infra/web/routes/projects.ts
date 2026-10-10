@@ -8,10 +8,9 @@ import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
 import { YamlParseError } from "../../../core/repo/yaml";
 import { discoverProjectContext } from "../../../core/chat/discovery";
 import { createProject, publicProject } from "../../../core/projects";
-import { createManualSpec, editContextFile, readContextRaw } from "../../../core/repo/manual";
-import { createAreaFeatures } from "../../../core/repo/writer";
+import { createManualSpec } from "../../../core/repo/manual";
+import { projectFavicon } from "../../../core/network/favicon";
 import { featuresRepository } from "../../repositories/features";
-import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
 import { runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
@@ -35,7 +34,6 @@ const createSpecSchema = z.object({
     title: z.string().min(1),
 });
 
-const contextFileSchema = z.object({ yaml: z.string().min(1) });
 
 function mapManualError(error: unknown): never {
     if (error instanceof HTTPException) throw error;
@@ -71,6 +69,19 @@ export function createProjectsRouter(): Hono {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ project: publicProject(project) });
+    });
+
+    router.get("/projects/:id/favicon", access("viewer"), async (c) => {
+        const project = await projectsRepository.getProject(c.req.param("id"));
+        if (!project) throw new HTTPException(404, { message: "Project not found" });
+        const icon = await projectFavicon(project.id, project.baseUrl).catch(() => null);
+        if (!icon) return c.body(null, 404, { "Cache-Control": "private, max-age=3600" });
+        return c.body(new Uint8Array(icon.body), 200, {
+            "Content-Type": icon.contentType,
+            "Cache-Control": "private, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        });
     });
 
     router.patch("/projects/:id", access("editor"), zValidator("json", updateProjectSchema), async (c) => {
@@ -128,22 +139,6 @@ export function createProjectsRouter(): Hono {
         return c.json({ spec });
     });
 
-    router.get("/projects/:id/context-file", access("viewer"), async (c) => {
-        const project = await projectsRepository.getProject(c.req.param("id"));
-        if (!project) throw new HTTPException(404, { message: "Project not found" });
-        return c.json({ yaml: await readContextRaw(project.id), contextSyncError: project.contextSyncError });
-    });
-
-    router.put("/projects/:id/context-file", access("editor"), zValidator("json", contextFileSchema), async (c) => {
-        const project = await projectsRepository.getProject(c.req.param("id"));
-        if (!project) throw new HTTPException(404, { message: "Project not found" });
-        const previous = await projectContextsRepository.getLatestConfirmedProjectContext(project.id);
-        await editContextFile(project.id, c.req.valid("json").yaml).catch(mapManualError);
-        const confirmed = await projectContextsRepository.getLatestConfirmedProjectContext(project.id);
-        if (confirmed && confirmed.id !== previous?.id) await createAreaFeatures(project.id, confirmed.context).catch(mapManualError);
-        const refreshed = await projectsRepository.getProject(project.id);
-        return c.json({ yaml: await readContextRaw(project.id), contextSyncError: refreshed?.contextSyncError ?? null });
-    });
 
     return router;
 }
