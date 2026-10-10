@@ -21,7 +21,7 @@ export const ciRunSchema = z.object({
 
 export const ciResultQuerySchema = z.object({
     wait: z.enum(["true", "false"]).optional(),
-    format: z.enum(["json", "junit", "markdown"]).default("json"),
+    format: z.enum(["json", "junit", "markdown", "html"]).default("json"),
 });
 
 export const deploySchema = z.object({

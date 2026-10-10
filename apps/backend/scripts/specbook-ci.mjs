@@ -157,7 +157,7 @@ async function main() {
         result = await (await request(`${route}?wait=true`)).json();
     }
     let summary = "";
-    for (const [format, file] of [["junit", process.env.SPECBOOK_JUNIT_PATH ?? "specbook-junit.xml"], ["markdown", process.env.SPECBOOK_SUMMARY_PATH ?? "specbook-summary.md"]]) {
+    for (const [format, file] of [["junit", process.env.SPECBOOK_JUNIT_PATH ?? "specbook-junit.xml"], ["markdown", process.env.SPECBOOK_SUMMARY_PATH ?? "specbook-summary.md"], ["html", process.env.SPECBOOK_REPORT_PATH ?? "specbook-report.html"]]) {
         const body = redact(await (await request(`${route}?format=${format}`)).text());
         await fs.mkdir(path.dirname(file), { recursive: true });
         await fs.writeFile(file, body, "utf8");

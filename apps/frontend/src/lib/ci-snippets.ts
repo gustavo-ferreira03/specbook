@@ -55,6 +55,7 @@ ${yamlEnv(6)}
         with:
           name: specbook-results
           path: |
+            specbook-report.html
             specbook-junit.xml
             specbook-summary.md`;
         case "gitlab": return `specbook:
@@ -80,6 +81,7 @@ ${yamlEnv(4)}
     reports:
       junit: specbook-junit.xml
     paths:
+      - specbook-report.html
       - specbook-summary.md`;
         case "bitbucket": return `image: node:26
 pipelines:
@@ -98,6 +100,7 @@ ${Object.entries(env).map(([key, value]) => `          - export ${key}='${value.
             node specbook-ci.mjs
         artifacts:
           - test-results/specbook.xml
+          - specbook-report.html
           - specbook-summary.md`;
         case "circleci": return `version: 2.1
 jobs:
@@ -119,6 +122,8 @@ ${yamlEnv(6)}
             node specbook-ci.mjs
       - store_test_results:
           path: test-results
+      - store_artifacts:
+          path: specbook-report.html
       - store_artifacts:
           path: specbook-summary.md
 workflows:
@@ -148,7 +153,7 @@ ${Object.entries(env).map(([key, value]) => `    ${key} = '${value.replace(/\\/g
   post {
     always {
       junit testResults: 'specbook-junit.xml', allowEmptyResults: true
-      archiveArtifacts artifacts: 'specbook-summary.md', allowEmptyArchive: true
+      archiveArtifacts artifacts: 'specbook-report.html,specbook-summary.md', allowEmptyArchive: true
     }
   }
 }`;

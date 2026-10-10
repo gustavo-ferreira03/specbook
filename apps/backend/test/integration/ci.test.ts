@@ -81,7 +81,7 @@ describe("CI access and quality gates", () => {
         } });
         assert.equal(response.status, 200);
         const body = await response.json();
-        assert.equal(body.batches[0].url, `http://192.168.0.165:8080/p/${project.id}/settings?tab=ci#ci-batch-${batch.id}`);
+        assert.equal(body.batches[0].url, `http://192.168.0.165:8080/p/${project.id}/settings?tab=automation#ci-batch-${batch.id}`);
         assert.ok(body.batches[0].results[0].url.startsWith(`http://192.168.0.165:8080/p/${project.id}/specs/`));
     });
 
@@ -308,6 +308,7 @@ describe("CI access and quality gates", () => {
                 response.end(failTrigger ? "Unavailable" : JSON.stringify({ batch: { id: "batch-id" }, url: "http://example.com/results", complete: false }));
             } else if (request.url?.includes("format=junit")) response.end('<testsuite tests="1" failures="0"/>');
             else if (request.url?.includes("format=markdown")) response.end("## Specbook: passed");
+            else if (request.url?.includes("format=html")) response.end("<!doctype html><title>Specbook report</title>");
             else {
                 polls++;
                 if (polls === 1) { response.statusCode = 503; response.end("Restarting"); }
@@ -320,7 +321,7 @@ describe("CI access and quality gates", () => {
         const runClient = () => new Promise<{ code: number | null; output: string }>((resolve, reject) => {
             const child = spawn(process.execPath, [path.join(backendRoot, "scripts", "specbook-ci.mjs")], {
                 env: { ...process.env, SPECBOOK_API_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, SPECBOOK_PROJECT_ID: "project-id", SPECBOOK_CI_TOKEN: "test-ci-token", SPECBOOK_TIMEOUT_SECONDS: "20",
-                    SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md") },
+                    SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), SPECBOOK_REPORT_PATH: path.join(directory, "report.html") },
                 stdio: ["ignore", "pipe", "pipe"],
             });
             let output = "";
@@ -336,6 +337,7 @@ describe("CI access and quality gates", () => {
             assert.equal(polls, 3);
             assert.ok(seen.every((authorization) => authorization === "Bearer test-ci-token"));
             assert.match(await fs.readFile(path.join(directory, "junit.xml"), "utf8"), /failures="0"/);
+            assert.match(await fs.readFile(path.join(directory, "report.html"), "utf8"), /Specbook report/);
             assert.match(await fs.readFile(path.join(directory, "summary.md"), "utf8"), /passed/);
             failTrigger = true;
             const rejected = await runClient();

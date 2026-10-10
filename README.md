@@ -25,7 +25,7 @@ Describe a flow in chat, and Specbook explores your app in a real browser, write
 - **An agent that does the legwork**: it maps your app, proposes Specs, signs in with stored credentials and asks only when it is blocked.
 - **Evidence for every run**: screenshots per step, video on failure, diagnostics and run history live next to the Spec.
 - **QA for your coding agent**: Claude Code or any MCP client can ask Specbook to verify a change, as a QA subagent.
-- **Checks on every deploy**: schedules and CI pipelines run saved Specs, with JUnit and Markdown reports and pull request comments.
+- **Checks on every deploy**: schedules and CI pipelines run saved Specs, with a Specbook-styled HTML report, JUnit and pull request comments.
 - **Yours to host**: one container, your model provider, credentials encrypted at rest and projects stored in Git.
 
 ## Get started
@@ -113,7 +113,7 @@ Agent access settings decide whether declared behavior changes can update existi
 
 ## Run checks from CI
 
-Create a CI token under **Settings → Automation → CI access** and copy the pipeline snippet for your provider. The bundled client starts a batch, waits for the result and writes JUnit and Markdown reports; it can also comment on GitHub pull requests and GitLab merge requests.
+Create a CI token under **Settings → Automation → CI access** and copy the pipeline snippet for your provider. The bundled client starts a batch, waits for the result and writes a JUnit file, a Markdown summary and `specbook-report.html`, a self-contained report with each Spec's steps, screenshots and failure; it can also comment on GitHub pull requests and GitLab merge requests.
 
 ```sh
 SPECBOOK_API_URL="https://specbook.example.com/api" \

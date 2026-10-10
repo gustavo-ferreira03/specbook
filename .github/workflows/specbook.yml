@@ -56,7 +56,9 @@ jobs:
 
             - name: Publish the summary
               if: always()
-              run: test -f specbook-summary.md && cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY" || true
+              run: |
+                  test -f specbook-summary.md && cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY" || true
+                  test -f specbook-report.html && echo "The full report with each Spec's steps and screenshots is in the **specbook-report** artifact (specbook-report.html)." >> "$GITHUB_STEP_SUMMARY" || true
 
             - name: Show container logs
               if: failure()
@@ -69,6 +71,7 @@ jobs:
               with:
                   name: specbook-report
                   path: |
+                      specbook-report.html
                       specbook-junit.xml
                       specbook-summary.md
                   if-no-files-found: ignore
