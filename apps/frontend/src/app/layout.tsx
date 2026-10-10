@@ -12,6 +12,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 export const metadata: Metadata = {
     title: "Specbook",
     description: "Living specs for web applications",
+    icons: { icon: "/specbook-icon.svg" },
 };
 
 export const viewport: Viewport = {

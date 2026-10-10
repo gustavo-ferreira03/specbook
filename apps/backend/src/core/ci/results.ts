@@ -55,7 +55,7 @@ export function junitResult(result: CiResult): string {
         tests.push(`  <testcase name="Batch execution" classname="Specbook"><failure message="${xml(result.batch.failReason ?? "Batch execution failed")}"/></testcase>`);
     }
     const skipped = result.results.filter((item) => item.pending || (!item.failsGate && (item.flaky || ["failed", "error"].includes(item.status)))).length;
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="${xml(result.batch.label)}" tests="${tests.length}" failures="${result.qualityGate.failures}" skipped="${skipped}" time="${((result.batch.durationMs ?? 0) / 1000).toFixed(3)}">\n${tests.join("\n")}\n</testsuite>\n`;
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="Specbook" tests="${tests.length}" failures="${result.qualityGate.failures}" skipped="${skipped}" time="${((result.batch.durationMs ?? 0) / 1000).toFixed(3)}">\n${tests.join("\n")}\n</testsuite>\n`;
 }
 
 const markdown = (value: string) => value.replace(/[\\`*_{}[\]<>|]/g, "\\$&").replace(/[\r\n]+/g, " ");

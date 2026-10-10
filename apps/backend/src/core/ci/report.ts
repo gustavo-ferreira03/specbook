@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
 import { backendRoot } from "../paths";
 import { parseSpecYaml } from "../repo/yaml";
@@ -66,8 +67,15 @@ async function section(item: Item): Promise<SpecSection> {
         video: directory && manifest.video ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES) : null };
 }
 
+const publicAsset = (file: string) => fs.readFile(path.join(backendRoot, "..", "frontend", "public", file), "utf8").catch(() => "");
+
+async function favicon(): Promise<string> {
+    const svg = await publicAsset("specbook-icon.svg");
+    return svg ? `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}">` : "";
+}
+
 async function logo(): Promise<string> {
-    const svg = await fs.readFile(path.join(backendRoot, "..", "frontend", "public", "specbook-logo.svg"), "utf8").catch(() => "");
+    const svg = await publicAsset("specbook-logo.svg");
     return svg ? `<img class="logo" alt="" src="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}">` : "";
 }
 
@@ -194,6 +202,8 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
     const ci = batch.ci;
     const elapsed = batch.durationMs;
     const verdict = result.qualityGate.passed ? "passed" : "failed";
+    const project = (await projectsRepository.getProject(batch.projectId))?.name ?? "";
+    const heading = options.single && result.results[0] ? result.results[0].title : `${passed} of ${total} Spec${total === 1 ? "" : "s"} passed`;
     const meta = [
         `<span class="verdict ${verdict}"><b>${verdict === "passed" ? "Quality gate passed" : `Quality gate failed · ${result.qualityGate.failures} failure${result.qualityGate.failures === 1 ? "" : "s"}`}</b></span>`,
         batch.environment?.name ? `<span>Environment <b>${escape(batch.environment.name)}</b></span>` : "",
@@ -205,12 +215,12 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
     ].filter(Boolean).join("");
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Specbook · ${escape(batch.label)}</title><style>${STYLE}</style></head>
+<title>${escape([...new Set([heading, project, "Specbook"].filter(Boolean))].join(" · "))}</title>${await favicon()}<style>${STYLE}</style></head>
 <body>
 <header><div class="wrap top">
   <div class="brand">${await logo()}specbook</div>
-  <p class="kicker mono">${escape(batch.label)}</p>
-  <h1>${options.single && result.results[0] ? escape(result.results[0].title) : `${passed} of ${total} Spec${total === 1 ? "" : "s"} passed`}</h1>
+  ${project ? `<p class="kicker mono">${escape(project)}</p>` : ""}
+  <h1>${escape(heading)}</h1>
   <div class="meta">${meta}</div>
 </div></header>
 <main class="wrap">
