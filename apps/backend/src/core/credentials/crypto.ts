@@ -4,7 +4,6 @@ import path from "node:path";
 import { storageRoot } from "../paths";
 
 export const localKeyPath = path.join(storageRoot, "encryption.key");
-export const legacyKeyPath = path.join(storageRoot, "credentials.key");
 let cachedKey: { source: string; key: Buffer } | null = null;
 
 export function parseEncryptionKey(value: string | Buffer): Buffer {
@@ -33,7 +32,7 @@ export function loadEncryptionKey(): Buffer {
         try { key = parseEncryptionKey(fs.readFileSync(localKeyPath)); }
         catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-            key = fs.existsSync(legacyKeyPath) ? parseEncryptionKey(fs.readFileSync(legacyKeyPath)) : crypto.randomBytes(32);
+            key = crypto.randomBytes(32);
             fs.mkdirSync(storageRoot, { recursive: true, mode: 0o700 });
             try { fs.writeFileSync(localKeyPath, key, { mode: 0o600, flag: "wx" }); }
             catch (writeError) {

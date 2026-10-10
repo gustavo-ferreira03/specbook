@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, runBatch, type DbQuery } from "../../infra/db/client";
 import { piAuthPath, storageRoot } from "../paths";
-import { clearEncryptionKeyCache, decryptWithKey, encryptionKeySource, encryptWithKey, keyFingerprint, legacyKeyPath, loadEncryptionKey, localKeyPath, parseEncryptionKey } from "./crypto";
+import { clearEncryptionKeyCache, decryptWithKey, encryptionKeySource, encryptWithKey, keyFingerprint, loadEncryptionKey, localKeyPath, parseEncryptionKey } from "./crypto";
 import { writeProtectedFile } from "./files";
 import { encryptedColumns, transformSecretColumn } from "./locations";
 
@@ -75,11 +75,10 @@ export async function migrateSecrets(): Promise<void> {
     const pending = await readOptional(rotationPath);
     if (pending) await finishRotation(rotationSchema.parse(JSON.parse(pending)), key);
     const target = loadEncryptionKey();
-    const old = await readOptionalKey(legacyKeyPath);
-    const local = encryptionKeySource() !== "local" ? await readOptionalKey(localKeyPath) : null;
-    await reencryptStoredSecrets(target, [old, local].filter((entry): entry is Buffer => entry !== null));
-    await fs.rm(legacyKeyPath, { force: true });
-    if (encryptionKeySource() !== "local") await fs.rm(localKeyPath, { force: true });
+    if (encryptionKeySource() === "local") return;
+    const local = await readOptionalKey(localKeyPath);
+    if (local) await reencryptStoredSecrets(target, [local]);
+    await fs.rm(localKeyPath, { force: true });
 }
 
 export async function rotateEncryptionKey(next: Buffer): Promise<{ fingerprint: string; requiresConfiguration: boolean }> {

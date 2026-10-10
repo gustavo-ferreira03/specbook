@@ -15,7 +15,7 @@ import { getChatMessages } from "../chat/session-store";
 import { runChatTurn } from "../chat/turn-runner";
 import { createProjectScrubber } from "../credentials/scrub";
 import { AGENT_RULES_VERSION, createJobPolicy } from "./policy";
-import { isInfrastructureFailure, isLegacyTurnFailure } from "./presentation-errors";
+import { isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure, stallJob } from "./retry";
 import { canRunAgentJob, isAgentPaused } from "./pause";
 import { projectsRepository } from "../../infra/repositories/projects";
@@ -90,7 +90,7 @@ async function executeJob(job: Job): Promise<void> {
                 await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date().toISOString(), pendingMessage: unfinished });
             } else if (selected?.specId && selected.runId && selected.status !== "running") {
                 await jobsRepository.transition(job.id, "running", "completed", { systemError: null, errorCode: null, stopReason: null, retryAt: null });
-            } else if (!last || turn?.errorCode && isInfrastructureCode(turn.errorCode) || !turn && isLegacyTurnFailure(last)) {
+            } else if (!last || turn?.errorCode && isInfrastructureCode(turn.errorCode)) {
                 await retryInfrastructure(job, turn?.message ?? last ?? "The agent service could not complete its response.", turn?.errorCode ?? "infrastructure");
             } else if (selected?.status === "running") {
                 await jobsRepository.transition(job.id, "running", "queued", { retryAt: new Date(Date.now() + 15_000).toISOString(),

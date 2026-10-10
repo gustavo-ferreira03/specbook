@@ -81,9 +81,9 @@ export function sanitizeTechnicalDetails(text: string): string {
         .join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 16000);
 }
 
-export function isCredentialFailure(text: string, code?: ErrorCode | null, legacy: "triage" | "prerequisite" = "triage"): boolean {
+export function isCredentialFailure(text: string, code?: ErrorCode | null, context: "triage" | "prerequisite" = "triage"): boolean {
     if (code) return code === "credentials" || code === "credential_origin";
-    return legacy === "triage" ? /credential|session|login|sign.in|authentication|credencia|sessão/i.test(text)
+    return context === "triage" ? /credential|session|login|sign.in|authentication|credencia|sessão/i.test(text)
         : /credential|password|session|sign.?in|authentication/i.test(text);
 }
 
@@ -98,6 +98,3 @@ export function runFailureKind(run: { errorCode?: ErrorCode | null; status: stri
         : /locator|TimeoutError|waiting for|strict mode/i.test(reason) ? "locator" : "failed";
 }
 
-export function isLegacyTurnFailure(text: string | undefined): boolean {
-    return !text || isInfrastructureFailure(text) || /couldn't respond|No LLM model|not authenticated|turn failed/.test(text);
-}

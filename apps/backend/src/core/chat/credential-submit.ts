@@ -29,9 +29,9 @@ export async function submitChatCredentials(chatId: string, requestId: string, b
     }
     const existing = await getProfileByName(pending.projectId, pending.profileName);
     if (pending.kind === "login" && pending.origin) {
-        const legacy = existing && existing.identifier === null ? loginFieldKeys(existing.fields.map((field) => field.key)) : null;
+        const fieldKeys = existing && existing.identifier === null ? loginFieldKeys(existing.fields.map((field) => field.key)) : null;
         const passwordKey = (existing ? loginFieldKeys(existing.fields.map((field) => field.key)).password : undefined) ?? "password";
-        const identifierField = legacy?.identifier;
+        const identifierField = fieldKeys?.identifier;
         inputs = [
             ...(identifierField ? [{ key: identifierField, value: body.values.username }] : []),
             { key: passwordKey, value: body.values.password },

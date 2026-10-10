@@ -13,7 +13,7 @@ export async function knownBugSpecIds(projectId: string): Promise<string[]> {
 
 export async function ciResult(batch: RunBatch, frontendOrigin = process.env.FRONTEND_ORIGIN ?? "") {
     const frontend = frontendOrigin.replace(/\/$/, "");
-    const url = `${frontend}/p/${batch.projectId}/settings?tab=ci#ci-batch-${batch.id}`;
+    const url = `${frontend}/p/${batch.projectId}/settings?tab=automation#ci-batch-${batch.id}`;
     const known = new Set(batch.ci?.knownBugSpecIds ?? []);
     const gate = batch.ci?.qualityGate ?? { failOnFlaky: false, failOnKnownBugs: false };
     const results = await Promise.all(batch.specs.map(async (item) => {

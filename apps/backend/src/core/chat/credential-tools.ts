@@ -178,8 +178,8 @@ export function createCredentialTools(options: CredentialToolOptions) {
         if (typeof resolved === "string") return { success: false, error: `${resolved} Use browser_vault_list.` };
         const { profile } = resolved;
         const keys = loginFieldKeys(profile.fields.map((field) => field.key));
-        const legacyIdentifier = profile.identifier === null ? keys.identifier : undefined;
-        if (!keys.password && !legacyIdentifier) {
+        const identifierField = profile.identifier === null ? keys.identifier : undefined;
+        if (!keys.password && !identifierField) {
             return { success: false, error_type: "not_a_login", error: `Vault item "${handle}" holds no login. Use fill_secret for its fields.` };
         }
         const origin = await activeOrigin(signal);
@@ -192,7 +192,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             const stored = key ? profile.fields.find((field) => field.key === key)?.value : undefined;
             return stored ? decryptSecret(stored) : undefined;
         };
-        const values = { identifier: value(legacyIdentifier), password: value(keys.password) };
+        const values = { identifier: value(identifierField), password: value(keys.password) };
         const mask = createSecretScrubber(Object.values(values).filter((item): item is string => Boolean(item)));
         try {
             const outcome = await fillPage(origin, (controls) => {
