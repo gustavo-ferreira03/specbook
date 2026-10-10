@@ -163,9 +163,9 @@
     --sb-danger-solid: #ba5751;
     --sb-danger-solid-hover: #a84b45;
     --sb-danger-solid-foreground: #ffffff;
-    --sb-warning: #9a6e00;
+    --sb-warning: #f2b705;
     --sb-warning-soft: #fff4d8;
-    --sb-warning-chart: #f4bd4f;
+    --sb-warning-chart: #f2b705;
     --sb-warning-icon: #f2b705;
     --sb-invalid: #aa5f16;
     --sb-invalid-soft: #fff1e4;
@@ -228,7 +228,7 @@
     --sb-danger-solid: oklch(56% 0.16 27);
     --sb-danger-solid-hover: oklch(61% 0.16 27);
     --sb-danger-solid-foreground: oklch(100% 0 0);
-    --sb-warning: oklch(83% 0.13 85);
+    --sb-warning: oklch(80% 0.14 82);
     --sb-warning-soft: oklch(29.5% 0.05 80);
     --sb-warning-chart: oklch(80% 0.14 82);
     --sb-warning-icon: oklch(80% 0.14 82);

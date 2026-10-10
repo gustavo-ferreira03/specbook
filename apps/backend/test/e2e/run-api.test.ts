@@ -206,7 +206,10 @@ test("Store", async ({ page, step, secret }) => {
         assert.deepEqual(evidence.steps.map((step) => step.label), steps);
         assert.equal(evidence.failedStep, "See the store");
         assert.equal(evidence.video, null, "secret runs never record failure videos");
-        assert.equal(evidence.reportUrl, null, "runs that type secrets keep no HTML report");
+        assert.equal(evidence.reportUrl, `/runs/${run.id}/report`, "runs that type secrets still get a report");
+        const report = await app.request(`/runs/${run.id}/report`);
+        assert.equal(report.status, 200);
+        assert.ok(!(await report.text()).includes("s3cret-value"), "the report never contains secrets");
         const screenshot = await app.request(`/runs/${run.id}/artifacts/${evidence.steps[0].file}`);
         assert.equal(screenshot.headers.get("content-type"), "image/png");
         assert.equal(screenshot.headers.get("content-security-policy"), "sandbox");

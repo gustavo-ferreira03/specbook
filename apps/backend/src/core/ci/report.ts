@@ -118,7 +118,7 @@ h1{margin:0;font-size:32px;line-height:1.15;letter-spacing:-.02em}
 .counts{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 8px}
 .count{border:1px solid var(--strong);border-radius:10px;padding:8px 14px;font-size:13px;color:var(--muted)}
 .count b{display:block;font-size:20px;color:var(--ink);font-variant-numeric:tabular-nums}
-main.wrap{padding-top:32px;padding-bottom:64px}
+main.wrap{padding-top:32px;padding-bottom:24px}
 .spec{border:1px solid var(--strong);border-radius:12px;background:var(--surface);margin:0 8px 22px 0;box-shadow:4px 4px 0 -1px var(--surface),4px 4px 0 0 var(--strong),8px 8px 0 -1px var(--surface),8px 8px 0 0 var(--strong)}
 .spec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:16px 18px}
 .spec>summary::-webkit-details-marker{display:none}
@@ -154,7 +154,7 @@ figure{margin:0}
 figure img{width:100%;border:1px solid var(--strong);border-radius:8px;display:block}
 figcaption{font-size:12px;color:var(--muted);margin-top:6px}
 .open{display:inline-block;margin-top:18px;font-size:13px;font-weight:600;border:2px solid var(--primary);border-radius:8px;padding:6px 12px;text-decoration:none;box-shadow:2px 2px 0 var(--primary)}
-footer{color:var(--subtle);font-size:12px;padding:0 0 40px}
+footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;
 
 export async function htmlReport(result: CiResult, options: { single?: boolean } = {}): Promise<string> {

@@ -192,7 +192,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.ok(!results.includes(SECRET));
     });
 
-    test("a failing Spec reports its step, video and HTML report", { timeout: 120_000 }, async () => {
+    test("a failing Spec reports its step and video", { timeout: 120_000 }, async () => {
         const directory = tempDir();
         const outcome = await runPlaywrightSuite({
             directory,
@@ -209,7 +209,6 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.equal(result?.failedStep, "See the greeting");
         assert.match(result?.failReason ?? "", /toHaveText/);
         assert.doesNotMatch(result?.failReason ?? "", /\u001b\[/);
-        assert.ok(existsSync(path.join(directory, "report", "index.html")));
         const evidence = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8"));
         assert.equal(evidence.steps.length, 2);
         assert.equal(evidence.video, "evidence/execution.webm");
