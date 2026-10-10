@@ -16,7 +16,6 @@ apps/backend/storage
 *.log
 **/*.log
 Dockerfile
-docker-compose.yml
 docs
 site
 **/.playwright-mcp

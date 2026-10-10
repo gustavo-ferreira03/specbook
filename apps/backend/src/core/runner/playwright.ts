@@ -113,7 +113,8 @@ function playwrightConfig(options: SuiteOptions, withHtmlReport: boolean, proxyS
             actionTimeout: ACTION_TIMEOUT_MS,
             navigationTimeout: NAVIGATION_TIMEOUT_MS,
             acceptDownloads: false,
-            ...(proxyServer ? { proxy: { server: proxyServer }, serviceWorkers: "block", launchOptions: { args: ["--proxy-bypass-list=<-loopback>", "--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] } } : {}),
+            launchOptions: { args: ["--disable-dev-shm-usage", ...(proxyServer ? ["--proxy-bypass-list=<-loopback>", "--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [])] },
+            ...(proxyServer ? { proxy: { server: proxyServer }, serviceWorkers: "block" } : {}),
         },
         projects,
     };

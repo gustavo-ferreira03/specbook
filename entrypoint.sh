@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-storage="${SPECBOOK_STORAGE_DIR:-/app/apps/backend/storage}"
+storage="${SPECBOOK_STORAGE_DIR:-/data}"
 app_user="node"
 
 if [[ "$(id -u)" == "0" ]]; then

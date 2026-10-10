@@ -51,14 +51,16 @@ COPY --from=build /app/apps/frontend/next.config.ts ./apps/frontend/next.config.
 COPY LICENSE /app/LICENSE
 COPY --chmod=755 entrypoint.sh /app/entrypoint.sh
 RUN rm -rf /app/apps/frontend/.next/cache \
-    && mkdir -p /app/apps/backend/storage \
-    && chown node:node /app/apps/backend/storage
+    && mkdir -p /data \
+    && chown node:node /data
 
 ENV NODE_ENV=production \
-    SPECBOOK_STORAGE_DIR=/app/apps/backend/storage \
+    SPECBOOK_STORAGE_DIR=/data \
+    PI_OAUTH_CALLBACK_HOST=0.0.0.0 \
     HOST=0.0.0.0
 
-EXPOSE 4000 4001 1455 53692
+VOLUME /data
+EXPOSE 4001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl --fail --silent "http://127.0.0.1:${PORT:-4000}/health" || exit 1
