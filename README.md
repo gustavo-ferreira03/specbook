@@ -13,7 +13,7 @@
 
 [Features](#features) • [Get started](#get-started) • [How it works](#how-it-works) • [Coding agents](#connect-your-coding-agent) • [CI](#run-checks-from-ci) • [Configuration](#configuration-and-data) • [Development](#develop-locally)
 
-<img src=".github/assets/specbook-walkthrough.gif" alt="Asking Specbook in chat to check checkout, watching the agent explore the app in a live browser, then opening the Spec it wrote and running it with screenshot evidence for every step">
+<img src=".github/assets/specbook-showcase.gif" alt="Asking Specbook in chat to check checkout, watching the agent explore the app in a live browser, then opening the Spec it wrote and running it with screenshot evidence for every step">
 
 </div>
 
