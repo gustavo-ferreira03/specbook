@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, ChevronDown, CircleHelp, Clock3, ExternalLink, Minus, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, CircleHelp, Clock3, Download, ExternalLink, Minus, RefreshCw } from "lucide-react";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -182,6 +182,7 @@ export function SpecRunDialog({
                 </ScrollArea>
 
                 <DialogFooter className="shrink-0 border-t border-line px-5 py-3">
+                    {reportUrl && <Button asChild variant="outline"><a href={`${reportUrl}?download`} download><Download size={13} aria-hidden="true" />Download report</a></Button>}
                     {reportUrl && <Button asChild variant="outline"><a href={reportUrl} target="_blank" rel="noreferrer">Open report <ExternalLink size={13} /></a></Button>}
                     <DialogClose asChild>
                         <Button type="button" disabled={running}>{running ? "Running…" : "Close"}</Button>

@@ -3,7 +3,7 @@ import { access } from "../access";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { zValidator } from "@hono/zod-validator";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getRunBatch, startSpecBatch } from "../../../core/runner/batch";
@@ -14,7 +14,13 @@ import { isInside } from "../../../core/repo/safe-fs";
 import { batchReport, runReport } from "../../../core/ci/report";
 import { publicFrontendOrigin } from "../security";
 
-const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
+const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
+
+function reportHeaders(c: Context, name: string): Record<string, string> {
+    if (c.req.query("download") === undefined) return REPORT_HEADERS;
+    const file = `specbook-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "report"}.html`;
+    return { ...REPORT_HEADERS, "Content-Disposition": `attachment; filename="${file}"` };
+}
 
 const CONTENT_TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
@@ -103,14 +109,14 @@ export function createRunsRouter(): Hono {
     router.get("/run-batches/:id/report", access("viewer"), async (c) => {
         const batch = await getRunBatch(c.req.param("id"));
         if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
-        return c.body(await batchReport(batch, publicFrontendOrigin(c)), 200, REPORT_HEADERS);
+        return c.body(await batchReport(batch, publicFrontendOrigin(c)), 200, reportHeaders(c, `${batch.label}-${batch.id.slice(0, 8)}`));
     });
 
     router.get("/runs/:id/report", access("viewer"), async (c) => {
         const run = await runsRepository.getRun(c.req.param("id"));
         const spec = run ? await specsRepository.getSpec(run.specId) : null;
         if (!run || !spec) throw new HTTPException(404, { message: "Run not found" });
-        return c.body(await runReport(run, spec, publicFrontendOrigin(c)), 200, REPORT_HEADERS);
+        return c.body(await runReport(run, spec, publicFrontendOrigin(c)), 200, reportHeaders(c, `${spec.title}-${run.id.slice(0, 8)}`));
     });
 
     router.get("/specs/:id/runs", access("viewer"), zValidator("query", runListSchema), async (c) => {

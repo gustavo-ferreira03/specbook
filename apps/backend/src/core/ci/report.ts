@@ -8,7 +8,8 @@ import { readEvidenceManifest } from "../runner/evidence";
 import { ciResult, type CiResult } from "./results";
 import type { RunBatch } from "../runner/batch";
 
-const MAX_IMAGE_BYTES = 600_000;
+const MAX_IMAGE_BYTES = 5_000_000;
+const MAX_VIDEO_BYTES = 8_000_000;
 const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
 
 type Item = CiResult["results"][number];
@@ -20,6 +21,7 @@ interface SpecSection {
     preconditions: string[];
     expectedResult: string;
     steps: { number: number; label: string; state: StepState; image: string | null }[];
+    video: string | null;
 }
 
 function escape(value: string): string {
@@ -31,15 +33,16 @@ function duration(ms: number | null | undefined): string {
     return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
 }
 
-async function image(directory: string, file: string): Promise<string | null> {
-    const type = IMAGE_TYPES[path.extname(file).toLowerCase()];
+async function embed(directory: string, file: string, type: string | undefined, maxBytes: number): Promise<string | null> {
     if (!type) return null;
     const source = path.join(directory, file);
     if (!source.startsWith(directory + path.sep)) return null;
     const stat = await fs.stat(source).catch(() => null);
-    if (!stat?.isFile() || stat.size > MAX_IMAGE_BYTES) return null;
+    if (!stat?.isFile() || stat.size > maxBytes) return null;
     return `data:${type};base64,${(await fs.readFile(source)).toString("base64")}`;
 }
+
+const image = (directory: string, file: string) => embed(directory, file, IMAGE_TYPES[path.extname(file).toLowerCase()], MAX_IMAGE_BYTES);
 
 async function section(item: Item): Promise<SpecSection> {
     const spec = await specsRepository.getSpec(item.specId);
@@ -59,7 +62,8 @@ async function section(item: Item): Promise<SpecSection> {
             : shot ? "passed" : "skipped";
         return { number: index + 1, label: shot?.label.trim() || label, state, image: directory && shot ? await image(directory, shot.file) : null };
     }));
-    return { item, path: spec?.path ? `${spec.path}/spec.yml` : null, preconditions: human?.preconditions ?? [], expectedResult: human?.expectedResult ?? "", steps };
+    return { item, path: spec?.path ? `${spec.path}/spec.yml` : null, preconditions: human?.preconditions ?? [], expectedResult: human?.expectedResult ?? "", steps,
+        video: directory && manifest.video ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES) : null };
 }
 
 async function logo(): Promise<string> {
@@ -77,10 +81,10 @@ function statusOf(item: Item): { tone: "passed" | "failed" | "running"; label: s
     return { tone: "passed", label: "Passed" };
 }
 
-function renderSection({ item, path: file, preconditions, expectedResult, steps }: SpecSection, open = false): string {
+function renderSection({ item, path: file, preconditions, expectedResult, steps, video }: SpecSection, open = false): string {
     const status = statusOf(item);
     const shots = steps.filter((step) => step.image);
-    return `<details class="spec ${status.tone}"${open || status.tone === "failed" ? " open" : ""}>
+    return `<details id="run-${escape(item.runId)}" class="spec ${status.tone}"${open || status.tone === "failed" ? " open" : ""}>
 <summary>
   <span class="seal">${status.tone === "failed" ? CROSS : CHECK}</span>
   <span class="heading"><span class="title">${escape(item.title)}</span>${file ? `<span class="path">${escape(file)}</span>` : ""}</span>
@@ -93,7 +97,11 @@ function renderSection({ item, path: file, preconditions, expectedResult, steps 
   ${steps.length ? `<h3>Steps</h3><ol class="steps">${steps.map((step) => `<li class="${step.state}"><span class="num">${step.number}</span><span class="label">${escape(step.label)}</span><span class="mark">${step.state === "passed" ? CHECK : step.state === "failed" ? CROSS : ""}</span></li>`).join("")}</ol>` : ""}
   ${expectedResult ? `<div class="expected"><h3>Expected result</h3><p>${escape(expectedResult)}</p></div>` : ""}
   ${item.failReason && status.tone === "failed" ? `<div class="failure"><h3>What failed</h3><pre>${escape(item.failReason)}</pre></div>` : ""}
-  ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => `<figure><a href="${step.image}" target="_blank" rel="noopener"><img src="${step.image}" alt="Step ${step.number}: ${escape(step.label)}" loading="lazy"></a><figcaption><b>Step ${step.number}</b> ${escape(step.label)}</figcaption></figure>`).join("")}</div>` : ""}
+  ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => {
+      const id = `shot-${item.runId}-${step.number}`;
+      return `<figure id="${escape(id)}"><a class="zoom" href="#${escape(id)}"><img src="${step.image}" alt="Step ${step.number}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>Step ${step.number}</b> ${escape(step.label)}</figcaption></figure>`;
+  }).join("")}</div>` : ""}
+  ${video ? `<h3>Recording</h3><video class="recording" controls preload="metadata" src="${video}"></video>` : ""}
   <a class="open" href="${escape(item.url)}">Open this run in Specbook</a>
 </div>
 </details>`;
@@ -153,6 +161,15 @@ h3{font-size:13px;margin:18px 0 8px}
 figure{margin:0}
 figure img{width:100%;border:1px solid var(--strong);border-radius:8px;display:block}
 figcaption{font-size:12px;color:var(--muted);margin-top:6px}
+.zoom{display:block;cursor:zoom-in}
+.close{display:none}
+figure:target{position:fixed;inset:0;z-index:10;margin:0;padding:24px;background:rgb(20 20 20/.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+figure:target .zoom{cursor:default;position:relative;z-index:1}
+figure:target img{width:auto;max-width:min(1400px,100%);max-height:calc(100vh - 80px);border-color:#444}
+figure:target figcaption{color:#e6e6e6;position:relative;z-index:1}
+figure:target figcaption b{color:#fff}
+figure:target .close{display:block;position:absolute;inset:0;cursor:zoom-out}
+.recording{width:100%;max-width:720px;border:1px solid var(--strong);border-radius:8px;display:block;background:#000}
 .open{display:inline-block;margin-top:18px;font-size:13px;font-weight:600;border:2px solid var(--primary);border-radius:8px;padding:6px 12px;text-decoration:none;box-shadow:2px 2px 0 var(--primary)}
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;

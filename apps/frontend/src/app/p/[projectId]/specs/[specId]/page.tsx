@@ -5,7 +5,7 @@ import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileCode2, FileX2, Images, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, FileCode2, FileX2, Images, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
@@ -377,6 +377,11 @@ function RunEntry({
                         {reportUrl && (
                             <Button asChild variant="ghost" size="sm" className="h-7 px-2">
                                 <a href={`${API_URL}${reportUrl}`} target="_blank" rel="noreferrer">View report <ExternalLink size={12} aria-hidden="true" /></a>
+                            </Button>
+                        )}
+                        {reportUrl && (
+                            <Button asChild variant="ghost" size="sm" className="h-7 px-2">
+                                <a href={`${API_URL}${reportUrl}?download`} download aria-label={`Download the report for the run ${formatDateTime(run.startedAt)}`}><Download size={12} aria-hidden="true" /></a>
                             </Button>
                         )}
                         <CollapsibleTrigger asChild>
