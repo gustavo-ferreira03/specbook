@@ -79,11 +79,11 @@ function RowAction({ label, tooltip, onClick, disabled, danger, children }: { la
             <TooltipTrigger asChild>
                 <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     size="icon-xs"
                     onClick={onClick}
                     disabled={disabled}
-                    className={`text-ink-subtle ${danger ? "hover:bg-danger-soft hover:text-danger" : "hover:bg-surface-selected hover:text-ink"}`}
+                    className={danger ? "hover:text-danger" : undefined}
                     aria-label={label}
                 >
                     {children}
@@ -224,7 +224,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const homeHref = `/p/${projectId}`;
     const specsHref = `/p/${projectId}/specs`;
     const chatsHref = `/p/${projectId}/chats`;
-    const section: "specs" | "chats" | null = pathname.startsWith(chatsHref) ? "chats" : pathname.startsWith(specsHref) || pathname.startsWith(`/p/${projectId}/features`) ? "specs" : null;
+    const section: "specs" | "chats" | null = pathname.startsWith(chatsHref) ? "chats" : pathname.startsWith(specsHref) ? "specs" : null;
 
     useEffect(() => {
         const activeSpec = specs.find((spec) => pathname === `/p/${projectId}/specs/${spec.id}`);
@@ -331,10 +331,10 @@ export function Sidebar({ projectId }: { projectId: string }) {
     const rowActionsClass = !canEdit ? "hidden" :
         "flex shrink-0 items-center gap-0.5 pr-1 [@media(hover:hover)]:invisible [@media(hover:hover)]:absolute [@media(hover:hover)]:inset-y-0 [@media(hover:hover)]:right-0 [@media(hover:hover)]:bg-linear-to-l [@media(hover:hover)]:from-(--row-bg) [@media(hover:hover)]:from-65% [@media(hover:hover)]:to-transparent [@media(hover:hover)]:pl-7 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-focus-within:visible";
     const rowClass = (selected: boolean) =>
-        `group relative flex min-h-10 w-full min-w-0 items-center rounded-md transition-colors duration-150 md:min-h-8 ${
+        `group relative flex min-h-10 w-full min-w-0 items-center rounded-md [--row-bg:var(--color-sidebar)] md:min-h-8 ${
             selected
-                ? "bg-surface-selected text-ink [--row-bg:var(--color-surface-selected)]"
-                : "text-ink-muted [--row-bg:var(--color-sidebar)] hover:bg-surface-hover hover:text-ink hover:[--row-bg:var(--color-surface-hover)] focus-within:bg-surface-hover focus-within:[--row-bg:var(--color-surface-hover)]"
+                ? "tab-key is-active text-ink"
+                : "tab-key text-ink-muted hover:text-ink has-[:focus-visible]:text-ink"
         }`;
     const rowLinkClass = "flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md text-control outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:min-h-8";
 
@@ -372,9 +372,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     <CollapsibleTrigger asChild>
                         <Button
                             type="button"
-                            variant="ghost"
+                            variant="quiet"
                             size="icon-xs"
-                            className="ml-0.5 size-7 shrink-0 text-ink-subtle hover:bg-transparent! hover:text-ink!"
+                            className="ml-0.5 size-7 shrink-0"
                             aria-label={expanded ? `Collapse ${feature.title}` : `Expand ${feature.title}`}
                         >
                             <ChevronRight size={14} className={`transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} />
@@ -471,11 +471,11 @@ export function Sidebar({ projectId }: { projectId: string }) {
     function renderNavigationContent(mobile = false) {
         const projectMenuOpen = mobile ? mobileProjectMenuOpen : desktopProjectMenuOpen;
         const setProjectMenuOpen = mobile ? setMobileProjectMenuOpen : setDesktopProjectMenuOpen;
-        const brandLabel = <span className="truncate text-section font-semibold tracking-[-0.01em] text-ink">Specbook</span>;
+        const brandLabel = <span className="wordmark truncate text-ink">specbook</span>;
         return (
             <>
                 <div className="flex h-14 shrink-0 items-center gap-2 px-3">
-                    <Link href={`/p/${projectId}`} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <Link href={`/p/${projectId}`} className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <LogoMark className="size-7 dark:invert" />
                         {mobile ? <SheetTitle asChild>{brandLabel}</SheetTitle> : brandLabel}
                     </Link>
@@ -548,7 +548,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             )}
                         </div>
                         <ScrollArea className="min-h-0 flex-1">
-                            <div className="w-full min-w-0 space-y-px px-2 pb-3">
+                            <div className="w-full min-w-0 space-y-px px-2 pt-1 pb-3">
                                 {renderLoading()}
                                 {loaded && rootFeatures.map((feature) => renderFeature(feature))}
                                 {loaded && ungroupedSpecs.map((spec) => renderSpec(spec))}
@@ -561,7 +561,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <span className="font-mono text-meta text-ink-subtle">Recent</span>
                         </div>
                         <ScrollArea className="min-h-0 flex-1">
-                            <div className="w-full min-w-0 space-y-px px-2 pb-3">
+                            <div className="w-full min-w-0 space-y-px px-2 pt-1 pb-3">
                                 {renderLoading()}
                                 {loaded && sortedChats.map((chat) => {
                                     const href = `/p/${projectId}/chats/${chat.id}`;
@@ -588,7 +588,8 @@ export function Sidebar({ projectId }: { projectId: string }) {
                     </>}
                 </div>
 
-                <div className="shrink-0 space-y-1 border-t border-line p-2">
+                {canEdit && <nav aria-label="Project" className="shrink-0 px-2 pb-1">{renderNavLink(settingsHref, "Settings", Settings, onSettings)}</nav>}
+                <div className="shrink-0 space-y-1 px-2 pb-2">
                     {(overview?.summary.paused || overview?.summary.globallyPaused) && <p className="flex items-center gap-2 px-2 py-1 text-meta text-ink-subtle"><Pause size={13} aria-hidden="true" />{overview.summary.globallyPaused ? "Paused across all projects" : "Paused by you"}</p>}
                     {runtimeCopy && <Link
                         href={isAdmin ? "/settings?tab=model" : homeHref}
@@ -600,7 +601,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <span className="block truncate text-meta text-ink-subtle">{runtimeCopy[1]}</span>
                         </span>
                     </Link>}
-                    <SidebarUser settingsHref={canEdit ? settingsHref : undefined} onSettings={onSettings} />
+                    <SidebarUser />
                 </div>
             </>
         );

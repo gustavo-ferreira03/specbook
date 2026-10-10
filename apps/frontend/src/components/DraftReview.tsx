@@ -15,7 +15,7 @@ import {
     AlertDialogDescription,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { confirmProjectContext, discardProjectContext, errorMessage } from "@/lib/api";
 import type { ProjectContextRevision } from "@/lib/types";
 
@@ -167,7 +167,7 @@ export function DraftReview({
                         <AlertDialogCancel disabled={confirming}>Keep editing</AlertDialogCancel>
                         <AlertDialogAction
                             disabled={confirming}
-                            className="border border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary"
+                            className={buttonVariants({ variant: "primary" })}
                             onClick={(event) => {
                                 event.preventDefault();
                                 void confirmDraft();

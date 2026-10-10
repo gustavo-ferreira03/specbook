@@ -13,6 +13,7 @@ import { RawFileEditor } from "@/components/RawFileEditor";
 import { RelativeTime } from "@/components/RelativeTime";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { SectionHeader } from "@/components/SectionHeader";
+import { SpecFolio } from "@/components/SpecFolio";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
 import { ApiRunEvidence } from "@/components/SpecRunDialog";
 import { StatusPill } from "@/components/StatusPill";
@@ -247,37 +248,39 @@ function SpecSection({ title, count, children }: { title: string; count?: number
 
 function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
     return (
-        <div className="space-y-7">
-            {humanSpec.preconditions.length > 0 && <SpecSection title="Preconditions" count={humanSpec.preconditions.length}>
-                <BulletList items={humanSpec.preconditions} />
-            </SpecSection>}
+        <div className="spec-sheet">
+            <div className="relative space-y-7 rounded-xl border border-line-strong bg-surface p-5 sm:p-6">
+                {humanSpec.preconditions.length > 0 && <SpecSection title="Preconditions" count={humanSpec.preconditions.length}>
+                    <BulletList items={humanSpec.preconditions} />
+                </SpecSection>}
 
-            <SpecSection title="Steps" count={humanSpec.steps.length}>
-                {humanSpec.steps.length === 0 ? (
-                    <p className="mt-2 text-body text-ink-subtle">No steps recorded.</p>
-                ) : (
-                    <ol className="mt-3">
-                        {humanSpec.steps.map((step, index) => (
-                            <li key={`${index}-${step}`} className="relative flex gap-3.5 pb-4 last:pb-0">
-                                {index < humanSpec.steps.length - 1 && <span aria-hidden="true" className="absolute top-7 bottom-1 left-3 w-px bg-line" />}
-                                <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-md border border-line-strong bg-surface text-meta font-semibold text-ink-muted tabular">{index + 1}</span>
-                                <span className="min-w-0 pt-0.5 text-body text-ink"><span className="sr-only">Step {index + 1}: </span>{step}</span>
-                            </li>
-                        ))}
-                    </ol>
-                )}
-            </SpecSection>
+                <SpecSection title="Steps" count={humanSpec.steps.length}>
+                    {humanSpec.steps.length === 0 ? (
+                        <p className="mt-2 text-body text-ink-subtle">No steps recorded.</p>
+                    ) : (
+                        <ol className="mt-3">
+                            {humanSpec.steps.map((step, index) => (
+                                <li key={`${index}-${step}`} className="relative flex gap-3.5 pb-4 last:pb-0">
+                                    {index < humanSpec.steps.length - 1 && <span aria-hidden="true" className="absolute top-7 bottom-1 left-3 w-px bg-line" />}
+                                    <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-md border border-line-strong bg-surface text-meta font-semibold text-ink-muted tabular">{index + 1}</span>
+                                    <span className="min-w-0 pt-0.5 text-body text-ink"><span className="sr-only">Step {index + 1}: </span>{step}</span>
+                                </li>
+                            ))}
+                        </ol>
+                    )}
+                </SpecSection>
 
-            {humanSpec.expectedResult && <section aria-labelledby="expected-result-heading" className="rounded-xl border border-line-strong bg-surface px-4 py-3.5">
-                <h3 id="expected-result-heading" className="flex items-center gap-1.5 text-control font-semibold text-ink">
-                    <Target size={14} aria-hidden="true" className="text-ink-muted" /> Expected result
-                </h3>
-                <p className="mt-1.5 text-body font-medium text-ink">{humanSpec.expectedResult}</p>
-            </section>}
+                {humanSpec.expectedResult && <section aria-labelledby="expected-result-heading" className="border-t border-line pt-5">
+                    <h3 id="expected-result-heading" className="flex items-center gap-1.5 text-control font-semibold text-ink">
+                        <Target size={14} aria-hidden="true" className="text-ink-muted" /> Expected result
+                    </h3>
+                    <p className="mt-1.5 text-body font-medium text-ink">{humanSpec.expectedResult}</p>
+                </section>}
 
-            {humanSpec.postconditions.length > 0 && <SpecSection title="Postconditions" count={humanSpec.postconditions.length}>
-                <BulletList items={humanSpec.postconditions} />
-            </SpecSection>}
+                {humanSpec.postconditions.length > 0 && <SpecSection title="Postconditions" count={humanSpec.postconditions.length}>
+                    <BulletList items={humanSpec.postconditions} />
+                </SpecSection>}
+            </div>
         </div>
     );
 }
@@ -789,6 +792,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                             <EmptyState size="compact" tone="warning" icon={FileX2} title="Spec files unavailable" description="Restore or fix the spec.yml and spec.ts files to continue." />
                         </div>
                     )}
+                    {!editing && detail && <SpecFolio projectId={projectId} specId={specId} featureId={detail.spec.featureId} />}
                 </section>
 
                 <section aria-labelledby="verification-heading">

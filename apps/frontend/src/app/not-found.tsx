@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Target, X } from "lucide-react";
-import { LogoMark } from "@/components/LogoMark";
+import { Brand } from "@/components/LogoMark";
 import { SpecGrid } from "@/components/SpecGrid";
 import { Button } from "@/components/ui/button";
 
@@ -12,7 +12,7 @@ export default function NotFound() {
     return (
         <main className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-surface px-6 py-6 sm:px-10">
             <SpecGrid className="-z-10" />
-            <Link href="/" className="flex w-fit items-center gap-2.5 rounded-sm text-section text-ink"><LogoMark className="size-7 dark:invert" /> Specbook</Link>
+            <Link href="/" className="w-fit rounded-sm"><Brand /></Link>
             <div className="mx-auto flex w-full max-w-[460px] flex-1 flex-col justify-center py-12">
                 <p className="truncate font-mono text-meta text-ink-muted">{path}</p>
                 <h1 className="mt-2 text-title text-ink">Page not found</h1>

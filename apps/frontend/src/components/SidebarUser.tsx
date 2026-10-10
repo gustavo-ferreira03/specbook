@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, Link2, LogOut, Monitor, Moon, Settings, SlidersHorizontal, Sun } from "lucide-react";
+import { EllipsisVertical, Link2, LogOut, Monitor, Moon, Settings, Sun, SunMoon } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import {
     DropdownMenu,
@@ -13,9 +13,6 @@ import {
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
     DropdownMenuSeparator,
-    DropdownMenuSub,
-    DropdownMenuSubContent,
-    DropdownMenuSubTrigger,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api, errorMessage } from "@/lib/api";
@@ -26,10 +23,43 @@ function initials(name: string): string {
     return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
 }
 
-export function SidebarUser({ settingsHref, onSettings }: { settingsHref?: string; onSettings?: boolean }) {
+const THEMES = [
+    { value: "light", label: "Light", Icon: Sun },
+    { value: "dark", label: "Dark", Icon: Moon },
+    { value: "system", label: "System", Icon: Monitor },
+] as const;
+
+function Avatar({ name }: { name: string }) {
+    return <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-meta font-semibold text-primary-foreground" aria-hidden="true">{initials(name)}</span>;
+}
+
+function ThemeSwitch() {
+    const theme = useThemePreference();
+    return (
+        <div className="flex min-h-9 items-center justify-between gap-2 pr-1 pl-2.5 text-control text-ink">
+            <span className="flex items-center gap-2"><SunMoon size={14} className="text-ink-subtle" aria-hidden="true" /> Theme</span>
+            <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setThemePreference(value as ThemePreference)} aria-label="Theme" className="flex items-center gap-0.5 rounded-md border border-line p-0.5">
+                {THEMES.map(({ value, label, Icon }) => (
+                    <DropdownMenuRadioItem
+                        key={value}
+                        value={value}
+                        indicator={false}
+                        aria-label={label}
+                        title={label}
+                        onSelect={(event) => event.preventDefault()}
+                        className="size-6 min-h-6 justify-center rounded-[5px] text-ink-muted data-[highlighted]:text-ink data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:data-[highlighted]:bg-primary data-[state=checked]:data-[highlighted]:text-primary-foreground"
+                    >
+                        <Icon size={13} className="text-current" aria-hidden="true" />
+                    </DropdownMenuRadioItem>
+                ))}
+            </DropdownMenuRadioGroup>
+        </div>
+    );
+}
+
+export function SidebarUser() {
     const { user, isAdmin, refresh } = useAuth();
     const router = useRouter();
-    const theme = useThemePreference();
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
     const [ssoEnabled, setSsoEnabled] = useState(false);
@@ -55,35 +85,25 @@ export function SidebarUser({ settingsHref, onSettings }: { settingsHref?: strin
                         aria-label={`Account: ${user.name}`}
                         className="flex w-full min-w-0 items-center gap-2.5 rounded-md p-2 text-left outline-none transition-colors duration-200 hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-surface-hover"
                     >
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-meta font-semibold text-primary-foreground" aria-hidden="true">{initials(user.name)}</span>
+                        <Avatar name={user.name} />
                         <span className="min-w-0 flex-1 leading-tight">
                             <span className="block truncate text-control font-medium text-ink">{user.name}</span>
                             <span className="block truncate text-meta text-ink-muted">{user.email}</span>
                         </span>
-                        <ChevronsUpDown size={14} className="shrink-0 text-ink-subtle" aria-hidden="true" />
+                        <EllipsisVertical size={15} className="shrink-0 text-ink-subtle" aria-hidden="true" />
                     </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-56">
                     <DropdownMenuLabel className="flex items-center gap-2.5 py-2">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-meta font-semibold text-primary-foreground" aria-hidden="true">{initials(user.name)}</span>
+                        <Avatar name={user.name} />
                         <span className="min-w-0 leading-tight">
-                            <span className="block truncate font-medium">{user.name}</span>
+                            <span className="block truncate font-medium text-ink">{user.name}</span>
                             <span className="block truncate text-meta font-normal text-ink-muted">{user.email} · <span className="capitalize">{user.role}</span></span>
                         </span>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    {settingsHref && <DropdownMenuItem asChild className={onSettings ? "font-medium" : undefined}><Link href={settingsHref}><SlidersHorizontal size={14} /> Project settings</Link></DropdownMenuItem>}
                     {isAdmin && <DropdownMenuItem asChild><Link href="/settings"><Settings size={14} /> Instance settings</Link></DropdownMenuItem>}
-                    <DropdownMenuSub>
-                        <DropdownMenuSubTrigger>{theme === "dark" ? <Moon size={14} /> : theme === "light" ? <Sun size={14} /> : <Monitor size={14} />} Theme</DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent>
-                            <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setThemePreference(value as ThemePreference)}>
-                                <DropdownMenuRadioItem value="light"><Sun size={14} /> Light</DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="dark"><Moon size={14} /> Dark</DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="system"><Monitor size={14} /> System</DropdownMenuRadioItem>
-                            </DropdownMenuRadioGroup>
-                        </DropdownMenuSubContent>
-                    </DropdownMenuSub>
+                    <ThemeSwitch />
                     {ssoEnabled && <DropdownMenuItem disabled={busy} onSelect={() => void connectSso()}><Link2 size={14} /> Connect single sign-on</DropdownMenuItem>}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void signOut(); }} disabled={busy}><LogOut size={14} /> {busy ? "Signing out…" : "Sign out"}</DropdownMenuItem>

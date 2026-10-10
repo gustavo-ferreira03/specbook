@@ -41,7 +41,7 @@ function LoginContent() {
         try { const result = await api<{ url: string }>("/auth/oidc/start", { method: "POST", body: JSON.stringify({}) }); window.location.assign(result.url); }
         catch (reason) { setError(errorMessage(reason)); setBusy(false); }
     }
-    return <AuthShell title="Sign in to Specbook" description="Use your account for this Specbook instance." footer="Need an account? Ask your administrator for an invitation link.">
+    return <AuthShell title="Sign in" footer="Need an account? Ask your administrator for an invitation link.">
         {!options && !error ? <Skeleton className="h-44 w-full" /> : <div className="space-y-5">
             {options?.oidcEnabled && <Button variant="outline" className="h-10 w-full" onClick={() => void singleSignOn()} disabled={busy}><KeyRound size={14} /> Continue with single sign-on</Button>}
             {options?.oidcEnabled && options.passwordLoginEnabled && <div className="flex items-center gap-3 text-meta text-ink-subtle"><span className="h-px flex-1 bg-line" />or<span className="h-px flex-1 bg-line" /></div>}

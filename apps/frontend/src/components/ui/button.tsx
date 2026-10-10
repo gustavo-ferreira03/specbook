@@ -12,13 +12,14 @@ const buttonVariants = cva(
     {
         variants: {
             variant: {
-                default: "border border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary hover:[&_*]:text-inherit",
-                primary: "border border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary hover:[&_*]:text-inherit",
-                outline: "border border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
-                secondary: "border border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
-                subtle: "border border-line bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
+                default: "border-(length:--stroke) border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary hover:[&_*]:text-inherit",
+                primary: "border-(length:--stroke) border-primary bg-primary text-primary-foreground hover:bg-transparent hover:text-primary hover:[&_*]:text-inherit",
+                outline: "border-(length:--stroke) border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
+                secondary: "border-(length:--stroke) border-line-strong bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
+                subtle: "border-(length:--stroke) border-line bg-surface text-ink hover:border-primary hover:bg-primary hover:text-primary-foreground hover:[&_*]:text-inherit [&[aria-haspopup]:hover]:border-line-hover [&[aria-haspopup]:hover]:bg-surface [&[aria-haspopup]:hover]:text-ink",
                 ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink",
-                destructive: "border border-danger-solid bg-danger-solid text-danger-solid-foreground hover:bg-transparent hover:text-danger hover:[&_*]:text-inherit",
+                quiet: "text-ink-subtle hover:text-ink",
+                destructive: "border-(length:--stroke) border-danger-solid bg-danger-solid text-danger-solid-foreground hover:bg-transparent hover:text-danger hover:[&_*]:text-inherit",
                 "destructive-soft": "bg-danger-soft text-danger hover:bg-danger-soft-hover",
                 link: "h-auto px-0 text-ink underline-offset-4 hover:underline",
             },

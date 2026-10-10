@@ -7,7 +7,7 @@ import { AlertCircle, ArrowLeft, ArrowRight, BookOpenCheck, Compass, Globe, KeyR
 import { useAuth } from "@/components/AuthProvider";
 import { InstanceHeader } from "@/components/InstanceHeader";
 import { EmptyState } from "@/components/EmptyState";
-import { LogoMark } from "@/components/LogoMark";
+import { Brand } from "@/components/LogoMark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -133,10 +133,7 @@ function HomeContent() {
     return (
         <main className="min-h-dvh bg-canvas">
             <header className="flex h-14 items-center justify-between border-b border-line bg-surface px-4 sm:px-6">
-                <div className="flex items-center gap-2.5">
-                    <LogoMark className="size-7 dark:invert" />
-                    <span className="text-section text-ink">Specbook</span>
-                </div>
+                <Brand />
                 {returnProject && (
                     <Button asChild variant="ghost" size="sm">
                         <Link href={`/p/${returnProject.id}`}><ArrowLeft size={14} /> <span className="max-w-[12rem] truncate">Back to {returnProject.name}</span></Link>

@@ -125,6 +125,9 @@
 
 :root {
     color-scheme: light;
+    --stroke: 2px;
+    --stroke-ink: var(--sb-primary);
+    --dot-ink: color-mix(in oklch, var(--sb-line-strong) 70%, var(--sb-ink-subtle));
     --sb-canvas: oklch(100% 0 0);
     --sb-sidebar: oklch(100% 0 0);
     --sb-surface: oklch(100% 0 0);
@@ -188,6 +191,7 @@
 
 .dark {
     color-scheme: dark;
+    --stroke-ink: oklch(70% 0 0);
     --sb-canvas: oklch(16.5% 0 0);
     --sb-sidebar: oklch(20.5% 0 0);
     --sb-surface: oklch(20.5% 0 0);
@@ -206,8 +210,8 @@
     --sb-inverse: oklch(93% 0 0);
     --sb-inverse-foreground: oklch(20% 0 0);
 
-    --sb-primary: oklch(93% 0 0);
-    --sb-primary-hover: oklch(84% 0 0);
+    --sb-primary: oklch(87% 0 0);
+    --sb-primary-hover: oklch(79% 0 0);
     --sb-primary-foreground: oklch(19% 0 0);
     --sb-primary-soft: oklch(27% 0 0);
     --sb-ring: oklch(88% 0 0);
@@ -364,6 +368,14 @@ summary:focus-visible,
     font-variant-ligatures: none;
 }
 
+.wordmark {
+    font-family: var(--font-sans);
+    font-size: 1.125rem;
+    line-height: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+}
+
 .eyebrow {
     font-size: var(--text-meta);
     line-height: var(--text-meta--line-height);
@@ -505,10 +517,16 @@ summary:focus-visible,
     animation: auth-step-check 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@media (prefers-reduced-motion: reduce) {
+    .auth-step-check {
+        animation: none;
+    }
+}
+
 .spec-grid {
-    --grid-dot: var(--color-line-strong);
+    --grid-dot: var(--dot-ink);
     --grid-spot: var(--color-ink-muted);
-    background-image: radial-gradient(circle at center, var(--grid-dot) 1px, transparent 1.4px);
+    background-image: radial-gradient(circle at center, var(--grid-dot) 1.1px, transparent 1.5px);
     background-size: 24px 24px;
     background-position: center;
 }
@@ -524,7 +542,7 @@ summary:focus-visible,
 }
 
 .spec-grid-inverse {
-    --grid-dot: color-mix(in oklch, var(--panel-fg) 13%, transparent);
+    --grid-dot: color-mix(in oklch, var(--panel-fg) 17%, transparent);
     --grid-spot: color-mix(in oklch, var(--panel-fg) 55%, transparent);
 }
 
@@ -562,6 +580,97 @@ summary:focus-visible,
         opacity: 1;
         transform: scale(1);
     }
+}
+
+.tab-key {
+    position: relative;
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tab-key::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: var(--stroke) solid transparent;
+    border-radius: inherit;
+    pointer-events: none;
+    transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tab-key.is-active,
+.tab-key[data-state="active"] {
+    transform: translate(-1px, -1px);
+}
+
+.tab-key.is-active::after,
+.tab-key[data-state="active"]::after {
+    border-color: var(--stroke-ink);
+    box-shadow: 2px 2px 0 var(--stroke-ink);
+}
+
+.tab-key.is-active:hover,
+.tab-key[data-state="active"]:hover {
+    transform: none;
+}
+
+.tab-key.is-active:hover::after,
+.tab-key[data-state="active"]:hover::after {
+    box-shadow: 0 0 0 var(--stroke-ink);
+}
+
+.dark .tab-key.is-active,
+.dark .tab-key[data-state="active"] {
+    --row-bg: var(--color-surface-raised);
+    background: var(--color-surface-raised);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tab-key,
+    .tab-key::after {
+        transition: none;
+    }
+}
+
+.raised-panel {
+    border: var(--stroke) solid var(--stroke-ink);
+    box-shadow: 3px 3px 0 var(--stroke-ink);
+}
+
+.spec-sheet {
+    position: relative;
+    isolation: isolate;
+    margin: 0 8px 8px 0;
+}
+
+.spec-sheet::before,
+.spec-sheet::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 12px;
+    background: var(--color-surface);
+}
+
+.spec-sheet::before {
+    transform: translate(8px, 8px);
+    z-index: -2;
+}
+
+.spec-sheet::after {
+    transform: translate(4px, 4px);
+    z-index: -1;
+}
+
+.toc-leader {
+    flex: 1;
+    min-width: 1.5rem;
+    height: 2px;
+    align-self: flex-end;
+    margin-bottom: 0.45em;
+    background-image: radial-gradient(circle at center, var(--dot-ink) 1px, transparent 1.2px);
+    background-size: 6px 2px;
+    background-repeat: repeat-x;
 }
 
 .status-stamp {

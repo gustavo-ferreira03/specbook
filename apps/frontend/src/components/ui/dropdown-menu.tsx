@@ -26,17 +26,17 @@ function DropdownMenuItem({ className, inset, variant = "default", ...props }: R
 
 function DropdownMenuCheckboxItem({ className, children, checked, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
     return (
-        <DropdownMenuPrimitive.CheckboxItem data-slot="dropdown-menu-checkbox-item" className={cn("relative flex min-h-8 cursor-default select-none items-center rounded-sm py-1.5 pr-2 pl-8 text-control text-ink outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-surface-hover", className)} checked={checked} {...props}>
+        <DropdownMenuPrimitive.CheckboxItem data-slot="dropdown-menu-checkbox-item" className={cn("relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-control text-ink outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-surface-hover [&_svg:not([class*=text-])]:text-ink-subtle [&_svg]:pointer-events-none [&_svg]:shrink-0", className)} checked={checked} {...props}>
             <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center"><DropdownMenuPrimitive.ItemIndicator><Check size={14} className="text-ink" /></DropdownMenuPrimitive.ItemIndicator></span>
             {children}
         </DropdownMenuPrimitive.CheckboxItem>
     );
 }
 
-function DropdownMenuRadioItem({ className, children, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+function DropdownMenuRadioItem({ className, children, indicator = true, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem> & { indicator?: boolean }) {
     return (
-        <DropdownMenuPrimitive.RadioItem data-slot="dropdown-menu-radio-item" className={cn("relative flex min-h-8 cursor-default select-none items-center rounded-sm py-1.5 pr-2 pl-8 text-control text-ink outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-surface-hover", className)} {...props}>
-            <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center"><DropdownMenuPrimitive.ItemIndicator><Circle className="size-2 fill-current text-ink" /></DropdownMenuPrimitive.ItemIndicator></span>
+        <DropdownMenuPrimitive.RadioItem data-slot="dropdown-menu-radio-item" className={cn("relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm text-control text-ink outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-surface-hover [&_svg:not([class*=text-])]:text-ink-subtle [&_svg]:pointer-events-none [&_svg]:shrink-0", indicator && "py-1.5 pr-2 pl-8", className)} {...props}>
+            {indicator && <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center"><DropdownMenuPrimitive.ItemIndicator><Circle className="size-2 fill-current text-ink" /></DropdownMenuPrimitive.ItemIndicator></span>}
             {children}
         </DropdownMenuPrimitive.RadioItem>
     );
@@ -55,7 +55,7 @@ function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"spa
 }
 
 function DropdownMenuSubTrigger({ className, inset, children, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger> & { inset?: boolean }) {
-    return <DropdownMenuPrimitive.SubTrigger data-slot="dropdown-menu-sub-trigger" data-inset={inset} className={cn("flex min-h-8 cursor-default select-none items-center rounded-sm px-2.5 text-control text-ink outline-none data-[inset]:pl-8 data-[state=open]:bg-surface-hover data-[highlighted]:bg-surface-hover", className)} {...props}>{children}<ChevronRight className="ml-auto size-3.5" /></DropdownMenuPrimitive.SubTrigger>;
+    return <DropdownMenuPrimitive.SubTrigger data-slot="dropdown-menu-sub-trigger" data-inset={inset} className={cn("flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2.5 text-control text-ink outline-none data-[inset]:pl-8 data-[state=open]:bg-surface-hover data-[highlighted]:bg-surface-hover [&_svg:not([class*=text-])]:text-ink-subtle [&_svg]:pointer-events-none [&_svg]:shrink-0", className)} {...props}>{children}<ChevronRight className="ml-auto size-3.5" /></DropdownMenuPrimitive.SubTrigger>;
 }
 
 function DropdownMenuSubContent({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {

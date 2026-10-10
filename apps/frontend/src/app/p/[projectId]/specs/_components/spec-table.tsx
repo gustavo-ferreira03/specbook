@@ -92,11 +92,12 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
                 <div className="flex min-w-0 items-center gap-2">
                     <Link
                         href={`/p/${projectId}/specs/${spec.id}`}
-                        className="min-w-0 flex-1 truncate rounded-sm text-body font-medium text-ink outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+                        className="min-w-0 flex-1 truncate rounded-sm text-body font-medium sm:flex-none text-ink outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                     >
                         {spec.title}
                     </Link>
                     {run?.flaky && <Badge variant="warning" size="sm" title="Failed first, then passed on an automatic retry with no test changes."><RotateCcw size={12} aria-hidden="true" /> Flaky</Badge>}
+                    <span aria-hidden="true" className="toc-leader hidden sm:block" />
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted sm:hidden">
                     <StatusPill status={status} size="sm" />
@@ -134,12 +135,12 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
     );
 }
 
-function GroupHeader({ group, running, onRunGroup }: { group: SpecGroup; running: boolean; onRunGroup?: (group: SpecGroup) => void }) {
+function GroupHeader({ group, chapter, running, onRunGroup }: { group: SpecGroup; chapter?: number; running: boolean; onRunGroup?: (group: SpecGroup) => void }) {
     const { canEdit } = useAuth();
     const runnable = group.specs.filter(canRun);
     return (
         <li className="flex min-h-11 items-center gap-2.5 border-b border-line bg-surface-soft px-4 py-1.5">
-            <Folder size={14} aria-hidden="true" className="shrink-0 text-ink-subtle" />
+            {chapter ? <span aria-hidden="true" className="tabular min-w-3.5 shrink-0 text-control font-semibold text-ink-subtle">{chapter}</span> : <Folder size={14} aria-hidden="true" className="shrink-0 text-ink-subtle" />}
             <h2 className="min-w-0 truncate text-control font-semibold text-ink">
                 {group.title}
             </h2>
@@ -184,10 +185,10 @@ export function SpecTable({
                 <span className="w-7 shrink-0" />
             </div>
             <ul aria-label={label} className="[&>li:last-child>ul>li:last-child]:border-b-0">
-                {groups.map((group) => (
+                {groups.map((group, index) => (
                     <li key={group.id} id={`feature-${group.id}`} className="scroll-mt-4">
                         <ul aria-label={typeof group.title === "string" ? group.title : undefined}>
-                            <GroupHeader group={group} running={running} onRunGroup={onRunGroup} />
+                            <GroupHeader group={group} chapter={group.id === "__orphans__" ? undefined : index + 1} running={running} onRunGroup={onRunGroup} />
                             {group.specs.length === 0 ? (
                                 <li className="border-b border-line px-4 py-3 text-control text-ink-subtle">{group.emptyText ?? "No Specs yet."}</li>
                             ) : (
