@@ -29,7 +29,7 @@ export interface LocalRun {
 export async function runLocal(workspace: string, selector?: string, options: { signal?: AbortSignal } = {}): Promise<LocalRun> {
     const config = await loadConfig(workspace);
     const specs = await listSpecs(workspace, selector);
-    if (!specs.length) throw new Error("No Specs found; use specbook spec new or specbook create");
+    if (!specs.length) throw new Error("No Specs found; use specbook spec new or specbook chat");
     const policy = await localNetworkPolicy(config.baseUrl);
     const secrets = await resolveRunSecrets(specs.flatMap((spec) => spec.analysis.secretRefs), config.baseUrl);
     await ensureChromium();

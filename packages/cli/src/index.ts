@@ -8,7 +8,8 @@ import { checkSpecs } from "./check";
 import { runLocal } from "./run";
 import { generateReport } from "./report";
 import { browse, startBrowserDaemon } from "./browser";
-import { createBehavior } from "./agent";
+import { sendMessage, listConversations, runChatWorker, printReply } from "./chat";
+import { chatReplySchema, chatReplyJsonSchema, type ChatReply } from "./chat-model";
 import { runMcpServer } from "./mcp";
 
 const help = `specbook — local behavior contracts and browser evidence
@@ -25,8 +26,11 @@ const help = `specbook — local behavior contracts and browser evidence
   browse snapshot | inspect <ref> | click <ref>
   browse fill <ref> <text> | fill <ref> --secret profile.field
   browse close
-  create "<behavior>" [--agent claude|codex] [--timeout <seconds>]
-  verify "<behavior>" [--agent claude|codex] [--timeout <seconds>]
+  chat "<message>" [--agent claude|codex] [--timeout <seconds>] [--no-wait]
+  chat <id> "<reply>"
+  chat <id> --select 1,2
+  chat <id> --wait
+  chats
 
 Every command accepts --json. Credentials JSON comes from stdin, never arguments.
 SPECBOOK_HOME overrides the user configuration directory.
@@ -90,14 +94,19 @@ async function main(): Promise<void> {
         await runMcpServer(raw[1], raw[2]);
         return;
     }
+    if (raw[0] === "--chat-worker") {
+        await runChatWorker(raw[1], raw[2], raw[3]);
+        return;
+    }
     const { values, positionals } = parseArgs({ args: raw, allowPositionals: true, options: {
         json: { type: "boolean" }, help: { type: "boolean", short: "h" }, version: { type: "boolean" },
         "base-url": { type: "string" }, agent: { type: "string" }, feature: { type: "string" },
         secret: { type: "string" }, headed: { type: "boolean" }, timeout: { type: "string" },
         "stdin-json": { type: "boolean" }, origin: { type: "string", multiple: true },
+        select: { type: "string" }, wait: { type: "boolean" }, "no-wait": { type: "boolean" },
     } });
     const [command, action, argument] = positionals;
-    if (values.help || (!command && !values.version)) { stdout.write(values.json ? JSON.stringify({ help }) + "\n" : help); return; }
+    if (values.help || (!command && !values.version)) { stdout.write(values.json ? JSON.stringify({ help, chatReplySchema: chatReplyJsonSchema }) + "\n" : help); return; }
     if (values.version) { stdout.write(values.json ? '{"version":"0.1.0"}\n' : "0.1.0\n"); return; }
     const selectedAgent = values.agent ? z.enum(["claude", "codex"]).parse(values.agent) : undefined;
     const abort = new AbortController();
@@ -141,14 +150,17 @@ async function main(): Promise<void> {
         else if (command === "browse") {
             const config = await loadConfig(workspace);
             result = await browse(action, { workspace, baseUrl: config.baseUrl, url: action === "open" ? argument : undefined, ref: action === "open" ? undefined : argument, value: positionals[3], secret: values.secret, headed: values.headed });
-        } else if (command === "create" || command === "verify") {
-            if (!action) throw new Error("Describe the behavior to verify");
+        } else if (command === "chat") {
             const timeout = values.timeout === undefined ? 600 : Number(values.timeout);
-            if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 3600) throw new Error("--timeout must be between 1 and 3600 seconds");
-            result = await createBehavior(workspace, action, { verify: command === "verify", agent: selectedAgent, timeoutMs: timeout * 1000, json: values.json, signal: abort.signal });
-            if ((result as { status?: string }).status && (result as { status: string }).status !== "passed") process.exitCode = 1;
+            result = chatReplySchema.parse(await sendMessage(workspace, positionals.slice(1), { agent: selectedAgent, timeoutMs: timeout * 1000, signal: abort.signal, wait: values.wait, noWait: values["no-wait"], select: values.select }));
+            if ((result as ChatReply).status === "failed" || (result as ChatReply).specs?.some((spec) => spec.status !== "passed")) process.exitCode = 1;
+        } else if (command === "chats") {
+            if (positionals.length !== 1) throw new Error("Use specbook chats without arguments");
+            result = await listConversations(workspace);
         } else throw new Error(`Unknown command: ${command}${action ? ` ${action}` : ""}. Use --help.`);
     }
+    if (command === "chat") { stdout.write((values.json ? JSON.stringify(result) : printReply(result as ChatReply)) + "\n"); return; }
+    if (command === "chats") { stdout.write(JSON.stringify(result, null, values.json ? undefined : 2) + "\n"); return; }
     const safe = await scrub(JSON.stringify(result, null, values.json ? undefined : 2));
     stdout.write(safe + "\n");
 }
@@ -157,7 +169,12 @@ main().catch(async (error) => {
     const message = error instanceof Error ? error.message : String(error);
     let safe: string;
     try { safe = await scrub(message); } catch { safe = "Could not read credentials securely; check SPECBOOK_HOME and file permissions"; }
-    if (process.argv.includes("--json")) stdout.write(JSON.stringify({ ok: false, error: safe }) + "\n");
+    if (process.argv.includes("--json")) {
+        const raw = process.argv.slice(2);
+        const chat = raw.includes("chat");
+        const id = raw.find((item) => /^c-[a-f0-9]{8}$/.test(item)) ?? "";
+        stdout.write(JSON.stringify(chat ? chatReplySchema.parse({ id, status: "failed", message: safe, error: safe }) : { ok: false, error: safe }) + "\n");
+    }
     else process.stderr.write(`specbook: ${safe}\n`);
     process.exitCode = 1;
 });
