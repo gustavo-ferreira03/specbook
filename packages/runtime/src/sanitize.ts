@@ -8,4 +8,3 @@ export function sanitizeTechnicalDetails(text: string): string {
             .replace(/(?:\.\.[\\/])+(?:src|storage)[^\s"'`<>)]*/g, "[server path]"))
         .join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 16000);
 }
-

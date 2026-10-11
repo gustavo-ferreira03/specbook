@@ -1,0 +1,31 @@
+{
+  "name": "specbook",
+  "version": "0.1.0",
+  "description": "Local Specbook behavior contracts and browser evidence",
+  "type": "module",
+  "bin": { "specbook": "dist/index.js" },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@babel/parser": "7.29.9",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@playwright/test": "1.62.0",
+    "playwright-core": "1.62.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@specbook/runtime": "workspace:*",
+    "@babel/types": "7.29.8",
+    "@types/node": "^26.6.4",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "7.0.2"
+  }
+}

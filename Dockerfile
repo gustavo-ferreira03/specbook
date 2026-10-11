@@ -21,6 +21,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/backend/package.json ./apps/backend/
 COPY apps/frontend/package.json ./apps/frontend/
 COPY packages/runtime/package.json ./packages/runtime/
+COPY packages/cli/package.json ./packages/cli/
 RUN corepack install
 
 FROM base AS build
