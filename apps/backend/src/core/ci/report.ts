@@ -92,6 +92,14 @@ async function favicon(): Promise<string> {
     return svg ? `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}">` : "";
 }
 
+async function fonts(): Promise<string> {
+    const face = async (family: string, file: string, weight: string) => {
+        const font = await fs.readFile(path.join(backendRoot, "..", "frontend", "public", "fonts", file)).catch(() => null);
+        return font ? `@font-face{font-family:"${family}";font-weight:${weight};font-display:swap;src:url(data:font/woff2;base64,${font.toString("base64")}) format("woff2")}` : "";
+    };
+    return (await face("Recursive", "recursive-latin.woff2", "300 1000")) + (await face("Geist", "geist-bold-latin.woff2", "700"));
+}
+
 async function logo(): Promise<string> {
     const svg = await publicAsset("specbook-logo.svg");
     return svg ? `<img class="logo" alt="" src="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}">` : "";
@@ -143,13 +151,13 @@ function renderSection({ item, tone, path: file, preconditions, expectedResult, 
 const STYLE = `
 :root{--ink:#2b2b2b;--muted:#6b6b6b;--subtle:#8f8f8f;--line:#ebebeb;--strong:#d6d6d6;--surface:#fff;--soft:#fafafa;--primary:#262626;--success:#1f7a4d;--success-soft:#e9f6ef;--danger:#bd5149;--danger-soft:#fff0ed;--warning:#f2b705;--dot:#c9c9c9}
 *{box-sizing:border-box}
-body{margin:0;background:var(--surface);color:var(--ink);font:15px/1.55 Geist,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+body{margin:0;background:var(--surface);color:var(--ink);font:15px/1.55 Recursive,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-variation-settings:"CASL" .35}
 code,pre,.path,.time,.mono{font-family:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-ligatures:none}
 a{color:inherit}
 header{background-image:radial-gradient(circle,var(--dot) 1.1px,transparent 1.5px);background-size:24px 24px;border-bottom:1px solid var(--line)}
 .wrap{max-width:960px;margin:0 auto;padding:0 24px}
 .top{padding-top:28px;padding-bottom:32px;background:linear-gradient(to right,var(--surface) 45%,transparent)}
-.brand{display:flex;align-items:center;gap:6px;font-weight:700;font-size:18px;letter-spacing:-.04em}
+.brand{display:flex;align-items:center;gap:6px;font-family:Geist,ui-sans-serif,system-ui,sans-serif;font-weight:700;font-size:18px;letter-spacing:-.04em}
 .logo{width:26px;height:26px}
 .kicker{margin:22px 0 4px;color:var(--muted);font-size:13px}
 h1{margin:0;font-size:32px;line-height:1.15;letter-spacing:-.02em}
@@ -271,7 +279,7 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
   </div>`;
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escape([...new Set([heading, project, "Specbook"].filter(Boolean))].join(" · "))}</title>${await favicon()}<style>${STYLE}</style></head>
+<title>${escape([...new Set([heading, project, "Specbook"].filter(Boolean))].join(" · "))}</title>${await favicon()}<style>${await fonts()}${STYLE}</style></head>
 <body>
 <header><div class="wrap top">
   <div class="brand">${await logo()}specbook</div>

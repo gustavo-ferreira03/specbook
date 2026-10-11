@@ -13,7 +13,7 @@ import { specsRepository } from "../../repositories/specs";
 import { isInside } from "../../../core/repo/safe-fs";
 import { batchReport, runReport } from "../../../core/ci/report";
 
-const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
+const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
 
 function reportHeaders(c: Context, name: string): Record<string, string> {
     if (c.req.query("download") === undefined) return REPORT_HEADERS;
