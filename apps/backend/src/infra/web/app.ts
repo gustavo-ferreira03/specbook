@@ -1,5 +1,3 @@
-import { createAgentAccessRouter } from "./routes/agent-access";
-import { createMcpRouter } from "./routes/mcp";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { access, accessGate } from "./access";
@@ -59,8 +57,6 @@ export function createApp(): Hono {
     app.route("/", createJobsRouter());
     app.route("/", createStewardRouter());
     app.route("/", createCiRouter());
-    app.route("/", createMcpRouter());
-    app.route("/", createAgentAccessRouter());
     app.route("/", createCiSettingsRouter());
     app.route("/", createSchedulesRouter());
     app.route("/", createSpecsRouter());

@@ -182,8 +182,6 @@ export interface ChatContextRevision {
 }
 
 export interface Chat {
-    source?: "mcp" | null;
-    sourceClient?: string | null;
     id: string;
     title: string;
     createdAt: string;
@@ -198,8 +196,6 @@ export interface ChatCredentialRequest {
 }
 
 export interface ChatState {
-    source?: "mcp" | null;
-    sourceClient?: string | null;
     title: string;
     messages: ChatMessage[];
     toolSteps: ChatToolStep[];

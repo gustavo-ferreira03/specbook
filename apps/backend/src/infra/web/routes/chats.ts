@@ -62,8 +62,6 @@ export function createChatsRouter(): Hono {
         const pendingCredential = getPendingCredentialRequest(id);
         return c.json({
             title: view.title,
-            source: row.source,
-            sourceClient: row.sourceClient,
             messages: view.messages,
             toolSteps: view.toolSteps,
             busy: isChatBusy(id),

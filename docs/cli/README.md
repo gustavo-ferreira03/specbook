@@ -234,7 +234,7 @@ Node SEA also requires bundling or extracting runtime modules and assets. The cu
 Gaps and scope
 --------------
 
-This work implements the local mode. It doesn't connect to a remote server or implement `publish`, `ci`, a private-network runner, or `serve`. The backend imports the same runtime package, leaving server mode open for a later phase. Conversation statuses follow the server's `send_message`, `wait_for_reply` and `respond_to_action` contract; local commands don't route to those server tools yet.
+This work implements the local mode. It doesn't connect to a remote server or implement `publish`, `ci`, a private-network runner, or `serve`. The backend imports the same runtime package, leaving server mode open for a later phase. In connected mode, `specbook chat` will talk to a server conversation with the same statuses, so callers keep the same contract.
 
 Conversation cancellation, deletion and queued follow-ups aren't implemented. A working turn rejects new input with `working`; send it again after the turn finishes. Conversation histories stay on disk under the ignored `chats/` directory, and credential metadata stays in history after a request. Authentication copies disappear after each turn, while agent session files remain for resumption. The CLI rejects known stored secrets in messages and redacts reply prose, while preserving structural ids and statuses. It can't identify a secret that was never saved in the credential store; never paste one into chat.
 

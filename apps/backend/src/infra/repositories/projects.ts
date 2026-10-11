@@ -4,7 +4,7 @@ import { db, runBatch } from "../db/client";
 import { environments, projects } from "../db/schema";
 
 type ProjectRow = typeof projects.$inferSelect;
-export type Project = Omit<ProjectRow, "agentContractPolicy" | "agentsMayProvideCredentials"> & Partial<Pick<ProjectRow, "agentContractPolicy" | "agentsMayProvideCredentials">>;
+export type Project = ProjectRow;
 
 class ProjectsRepository {
     async createProject(name: string, baseUrl: string): Promise<Project> {
@@ -18,8 +18,6 @@ class ProjectsRepository {
             gitAccessTokenCreatedAt: null,
             gitAccessTokenLastUsedAt: null,
             gitExternalSyncError: null,
-            agentContractPolicy: "apply_declared",
-            agentsMayProvideCredentials: true,
             createdAt: new Date().toISOString(),
         };
         await runBatch([db.insert(projects).values(row), db.insert(environments).values({ id: crypto.randomUUID(), projectId: row.id, name: "Production", baseUrl, allowedOrigins: [], credentialOverrides: {} })]);
@@ -53,7 +51,7 @@ class ProjectsRepository {
         await db.update(projects).set({ gitAccessTokenLastUsedAt: usedAt }).where(eq(projects.id, id));
     }
 
-    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl" | "agentContractPolicy" | "agentsMayProvideCredentials">>): Promise<void> {
+    async updateProject(id: string, patch: Partial<Pick<Project, "name" | "baseUrl">>): Promise<void> {
         await runBatch([db.update(projects).set(patch).where(eq(projects.id, id)), ...(patch.baseUrl ? [db.update(environments).set({ baseUrl: patch.baseUrl }).where(and(eq(environments.projectId, id), eq(environments.name, "Production")))] : [])]);
     }
 

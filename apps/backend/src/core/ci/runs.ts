@@ -1,5 +1,4 @@
 import type { z } from "zod";
-import { agentAccessRepository } from "../../infra/repositories/agent-access";
 import { ciRepository } from "../../infra/repositories/ci";
 import { featuresRepository } from "../../infra/repositories/features";
 import { projectsRepository } from "../../infra/repositories/projects";
@@ -18,8 +17,7 @@ export class CiRequestError extends Error {
 }
 
 export async function acceptCiTrigger(projectId: string, authorization: string, target?: string, name?: string) {
-    const tokens = authorization.startsWith("Bearer sbag_") ? agentAccessRepository : ciRepository;
-    if (!await tokens.consumeRequest(projectId, tokenHash(authorization.slice("Bearer ".length)))) {
+    if (!await ciRepository.consumeRequest(projectId, tokenHash(authorization.slice("Bearer ".length)))) {
         throw new CiRequestError("CI trigger limit reached. Retry after the current minute.", 429, 60 - Math.floor(Date.now() / 1000) % 60);
     }
     const project = await projectsRepository.getProject(projectId);

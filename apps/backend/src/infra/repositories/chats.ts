@@ -6,8 +6,6 @@ export type ChatRow = typeof chats.$inferSelect;
 
 export interface ChatMetadata {
     contextRevisionId?: string | null;
-    source?: "mcp" | null;
-    sourceClient?: string | null;
 }
 
 class ChatsRepository {
@@ -20,8 +18,6 @@ class ChatsRepository {
             id,
             projectId,
             contextRevisionId: metadata.contextRevisionId ?? null,
-            source: metadata.source ?? null,
-            sourceClient: metadata.sourceClient ?? null,
             createdAt: new Date().toISOString(),
         };
         await db.insert(chats).values(row);

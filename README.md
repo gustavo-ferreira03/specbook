@@ -11,7 +11,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
-[Features](#features) • [Get started](#get-started) • [How it works](#how-it-works) • [Coding agents](#connect-your-coding-agent) • [CI](#run-checks-from-ci) • [Configuration](#configuration-and-data) • [Development](#develop-locally)
+[Features](#features) • [Get started](#get-started) • [How it works](#how-it-works) • [CLI](#use-the-cli-with-your-coding-agent) • [CI](#run-checks-from-ci) • [Configuration](#configuration-and-data) • [Development](#develop-locally)
 
 <img src=".github/assets/specbook-showcase.gif" alt="Asking Specbook in chat to check that the cart survives a logout, watching the agent explore the app in a live browser and write a passing Spec, then opening and running that Spec with screenshot evidence for every step">
 
@@ -24,7 +24,7 @@ Describe a flow in chat, and Specbook explores your app in a real browser, write
 - **Specs people can read**: every check is a `spec.yml` with steps and an expected result, paired with an executable `spec.ts`.
 - **An agent that does the legwork**: it maps your app, proposes Specs, signs in with stored credentials and asks only when it is blocked.
 - **Evidence for every run**: screenshots per step, video on failure, diagnostics and run history live next to the Spec.
-- **QA for your coding agent**: Claude Code or any MCP client can ask Specbook to verify a change, as a QA subagent.
+- **QA for your coding agent**: the `specbook` CLI lets Claude Code or Codex talk to Specbook in a conversation and create and verify Specs against your local app, with no server and no model to configure.
 - **Checks on every deploy**: schedules and CI pipelines run saved Specs, with a Specbook-styled HTML report, JUnit and pull request comments.
 - **Yours to host**: one container, your model provider, credentials encrypted at rest and projects stored in Git.
 
@@ -52,7 +52,7 @@ OpenAI device-code login and Anthropic's copy-the-code login work out of the box
 1. Create a project with your app's URL and describe a behavior in chat.
 2. Pick the Specs the agent proposes. When it needs to sign in, it asks through a secure form, never in the chat.
 3. Open a Spec to run it and inspect the evidence. On a failure, the agent investigates and proposes a repair.
-4. Keep it running from **Settings → Automation**, with schedules, CI access and agent access.
+4. Keep it running from **Settings → Automation**, with schedules and CI access.
 
 A Spec pairs the contract with its test, and the step titles match in both files:
 
@@ -88,28 +88,18 @@ test("Open the application", async ({ page, step }) => {
 
 Tests use the supported `specbook` methods for browser and API checks, and Specbook validates them before they run.
 
-## Connect your coding agent
+## Use the CLI with your coding agent
 
-Create an agent token under **Settings → Automation → Agent access** and copy the connection command. For Claude Code it looks like this:
+The `specbook` CLI runs Specs on your machine, including against `localhost`, with no Specbook server. Its brain is the coding agent you already use (Claude Code or Codex), so there is no model to configure in Specbook.
 
 ```sh
-claude mcp add --transport http specbook \
-  "http://localhost:4001/api/mcp/projects/YOUR_PROJECT_ID" \
-  --header "Authorization: Bearer YOUR_AGENT_TOKEN"
+specbook init --base-url http://localhost:3000 --agent claude
+specbook chat "a shopper can remove an item from the cart"
 ```
 
-Any MCP client can use the same endpoint and header. Conversations started this way show up in the project's Chats.
+Creating Specs is a conversation. Each reply ends in a status your agent can act on: `waiting_for_reply` (a question), `waiting_for_selection` (proposed Specs to pick with `--select`), `needs_credentials` (a login to add with `specbook credentials add`, outside the conversation), `working` or `done`. Secret values never enter the conversation.
 
-| Tool | What it does |
-| --- | --- |
-| `send_message` | Describe a change or continue a QA conversation. |
-| `wait_for_reply` | Wait for progress, a reply or an action that needs an answer. |
-| `respond_to_action` | Provide access, select Specs, approve a contract change or hand the action to a human. |
-| `list_conversations` | Find recent conversations for the project. |
-| `run_specs` | Run saved Specs without a model conversation. |
-| `get_run_results` | Read a batch's results, failed steps and flaky status. |
-
-Agent access settings decide whether declared behavior changes can update existing contracts and whether the external agent may provide credentials. Secret values never enter chat messages or model context.
+`specbook init` installs a short skill so your agent knows this workflow. Specs live in `.specbook/` in the same format the server uses, and `specbook run` and `specbook report` produce the same evidence and HTML report as CI. See [docs/cli/README.md](docs/cli/README.md) for every command.
 
 ## Run checks from CI
 
