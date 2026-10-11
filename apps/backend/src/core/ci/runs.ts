@@ -6,7 +6,7 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
 import { tokenHash } from "../accounts/tokens";
 import { resolveRunEnvironment } from "../environments";
-import { NetworkTargetError } from "../network/targets";
+import { NetworkTargetError } from "@specbook/runtime/network/targets";
 import { startSpecBatch } from "../runner/batch";
 import { ResourceBusyError } from "../specs/lifecycle";
 import { knownBugSpecIds } from "./results";

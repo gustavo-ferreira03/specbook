@@ -1,5 +1,6 @@
 packages:
     - "apps/*"
+    - "packages/*"
 
 # Patched transitive versions; keep each dependency on its existing major.
 overrides:

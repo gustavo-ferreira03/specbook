@@ -8,7 +8,7 @@ import { featuresRepository } from "../../infra/repositories/features";
 import { repoGit } from "../repo/git";
 import { readSpecRawFiles } from "../repo/manual";
 import { createFeatureInRepo, createSpecInRepo, updateSpecInRepo, validateSpec, sourceHashOf } from "../repo/writer";
-import { parseSpecYaml } from "../repo/yaml";
+import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { withSpecLock } from "../specs/lifecycle";
 import { featureProposalSchema, fixProposalSchema, newSpecProposalSchema } from "./schemas";
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isHttpTarget } from "../network/targets";
+import { isHttpTarget } from "@specbook/runtime/network/targets";
 
 export const httpUrlSchema = z.string().url().max(2048).refine(isHttpTarget, "Use an HTTP(S) URL without credentials");
 

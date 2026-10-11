@@ -1,10 +1,10 @@
-import type { ErrorCode } from "../errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 import { specBatchOf, payloadOf, verificationOf } from "./schemas";
 import { jobsRepository, type Job } from "../../infra/repositories/jobs";
 import { createProjectScrubber } from "../credentials/scrub";
 import { specsRepository } from "../../infra/repositories/specs";
 import { isAgentPaused } from "./pause";
-import { sanitizeTechnicalDetails } from "./presentation-errors";
+import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 
 export const MAX_SAFETY_RETRIES = 2;
 

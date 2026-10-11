@@ -1,4 +1,4 @@
-import type { ErrorCode } from "../../core/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 import crypto from "node:crypto";
 import { and, desc, eq, inArray, lt, max, or } from "drizzle-orm";
 import { db } from "../db/client";

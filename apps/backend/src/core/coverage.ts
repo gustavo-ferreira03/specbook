@@ -5,10 +5,10 @@ import { featuresRepository, type Feature } from "../infra/repositories/features
 import { projectContextsRepository } from "../infra/repositories/project-contexts";
 import { specsRepository, type Spec } from "../infra/repositories/specs";
 import { repoGit } from "./repo/git";
-import { readRepoFile } from "./repo/safe-fs";
+import { readRepoFile } from "@specbook/runtime/safe-fs";
 import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "./repo/writer";
-import { parseSpecYaml } from "./repo/yaml";
-import { validateSpecSource } from "./runner/validate";
+import { parseSpecYaml } from "@specbook/runtime/yaml";
+import { validateSpecSource } from "@specbook/runtime/validate";
 
 type CoverageStatus = "covered" | "partial" | "uncovered";
 export interface CoverageArea {

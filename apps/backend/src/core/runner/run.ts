@@ -1,7 +1,7 @@
 import { withSpecLock } from "../specs/lifecycle";
 import { executeSingleSpecBatch } from "./batch";
 import type { ExecutedRun, RunOptions } from "./execution";
-import { stopActiveProcesses } from "./process";
+import { stopActiveProcesses } from "@specbook/runtime/process";
 
 export { analyzeForRun, MAX_FAIL_REASON_CHARS, MAX_FAILED_STEP_CHARS, RUN_TIMEOUT_MS, StaleRunError } from "./execution";
 export type { ExecutedRun } from "./execution";

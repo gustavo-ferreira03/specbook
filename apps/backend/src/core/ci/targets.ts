@@ -2,12 +2,9 @@ import { isIP } from "node:net";
 import type { RunEnvironment } from "../../infra/db/schema";
 import { resolveRunEnvironment } from "../environments";
 import { projectsRepository, type Project } from "../../infra/repositories/projects";
-import { httpTarget, isPrivateAddress, NetworkTargetError, resolveTarget, type AddressResolver } from "../network/targets";
+import { httpTarget, isPrivateAddress, NetworkTargetError, resolveTarget, type AddressResolver, type RunNetworkPolicy } from "@specbook/runtime/network/targets";
 
-export interface RunNetworkPolicy {
-    origins: string[];
-    allowPrivate: boolean;
-}
+export type { RunNetworkPolicy } from "@specbook/runtime/network/targets";
 
 export async function projectRunPolicy(project: Project, baseUrl: string, resolver?: AddressResolver, environment?: RunEnvironment): Promise<RunNetworkPolicy> {
     const target = httpTarget(baseUrl);

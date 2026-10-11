@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { RunStatus } from "../../infra/db/schema";
-import type { SpecFileResult } from "./report";
-import { API_STEP_ATTACHMENT_PREFIX, STEP_ATTACHMENT_PREFIX } from "./specbook/guard";
+import type { RunStatus } from "./types.ts";
+import type { SpecFileResult } from "./report.ts";
+import { API_STEP_ATTACHMENT_PREFIX, STEP_ATTACHMENT_PREFIX } from "./specbook/guard.ts";
 
 export interface EvidenceStep {
     number: number;

@@ -1,19 +1,19 @@
-import type { ErrorCode } from "../errors";
+import type { ErrorCode } from "./errors.ts";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RunEnvironment, RunStatus } from "../../infra/db/schema";
-import { runNetworkPolicy } from "../ci/targets";
-import { createRunProxy } from "../network/proxy";
-import { sanitizeTechnicalDetails } from "../jobs/presentation-errors";
-import { runNodeCli } from "./process";
-import { parsePlaywrightReport, stripAnsi, type SpecFileResult } from "./report";
-import { RUNTIME_ENV, type SecretOriginPolicy, type SpecbookRuntime } from "./specbook/guard";
-import type { SpecAnalysis } from "./validate";
-import { isInside } from "../repo/safe-fs";
-import { writeRunEvidence } from "./evidence";
+import type { RunStatus } from "./types.ts";
+import type { RunNetworkPolicy } from "./network/targets.ts";
+import { createRunProxy } from "./network/proxy.ts";
+import { sanitizeTechnicalDetails } from "./sanitize.ts";
+import { runNodeCli } from "./process.ts";
+import { parsePlaywrightReport, stripAnsi, type SpecFileResult } from "./report.ts";
+import { RUNTIME_ENV, type SecretOriginPolicy, type SpecbookRuntime } from "./specbook/guard.ts";
+import type { SpecAnalysis } from "./validate.ts";
+import { isInside } from "./safe-fs.ts";
+import { writeRunEvidence } from "./evidence.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -44,8 +44,7 @@ export interface SuiteOutcome {
 }
 
 export interface SuiteOptions {
-    projectId?: string;
-    environment?: RunEnvironment;
+    networkPolicy?: RunNetworkPolicy;
     signal?: AbortSignal;
     directory: string;
     baseUrl: string;
@@ -64,9 +63,10 @@ export function specbookModulePath(): string {
     const candidates = [
         new URL("./specbook-fixtures.mjs", import.meta.url),
         new URL("./specbook/fixtures.ts", import.meta.url),
+        new URL("./specbook/fixtures.js", import.meta.url),
     ].map((url) => fileURLToPath(url));
     const found = candidates.find((candidate) => existsSync(candidate));
-    if (!found) throw new Error("The specbook test module was not found; run pnpm --filter backend build");
+    if (!found) throw new Error("The specbook test module was not found; build @specbook/runtime");
     return found;
 }
 
@@ -80,8 +80,9 @@ function playwrightConfig(options: SuiteOptions, proxyServer?: string): Record<s
     const file = (spec: SuiteSpec) => `${spec.key}.spec.ts`;
     const plain = options.specs.filter((spec) => spec.analysis.secretRefs.length === 0).map(file);
     const secret = options.specs.filter((spec) => spec.analysis.secretRefs.length > 0).map(file);
+    const hasSecrets = Object.values(options.secretEnv).some(Boolean);
     const projects = [
-        plain.length ? { name: "specbook", testMatch: plain, use: { trace: "retain-on-failure" } } : null,
+        plain.length ? { name: "specbook", testMatch: plain, use: { trace: hasSecrets ? "off" : "retain-on-failure", ...(hasSecrets ? { video: "off" } : {}) } } : null,
         secret.length ? { name: "specbook-secrets", testMatch: secret, use: { trace: "off", video: "off" } } : null,
     ].filter(Boolean);
     const reporter: unknown[] = [["line"], ["json", { outputFile: "results.json" }]];
@@ -143,7 +144,7 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
     const directory = options.directory;
     const workDir = path.join(directory, "work");
     await fs.rm(workDir, { recursive: true, force: true });
-    const policy = options.projectId ? await runNetworkPolicy(options.projectId, options.baseUrl, options.environment) : undefined;
+    const policy = options.networkPolicy;
     const proxy = policy ? await createRunProxy(policy.allowPrivate ? policy.origins : []) : undefined;
     const runtime: SpecbookRuntime = { baseURL: options.baseUrl, secretOrigins: options.secretOrigins, navigationOrigins: policy?.origins };
     const results = new Map<string, SuiteSpecResult>();

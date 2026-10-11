@@ -1,4 +1,4 @@
-import { CodedError } from "../errors";
+import { CodedError } from "@specbook/runtime/errors";
 import { getActiveTabUrl, readBrowserSnapshot, type BrowserMcp, type BrowserToolPolicy } from "../browser/mcp";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { consumeVaultSubmit } from "./credential-tools";

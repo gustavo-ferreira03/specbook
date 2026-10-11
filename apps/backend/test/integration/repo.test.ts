@@ -1,3 +1,4 @@
+import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { existsSync } from "node:fs";
@@ -1353,7 +1354,7 @@ describe("plain-language autonomous presentation", () => {
 
     test("keeps internal browser failures out of Inbox and removes source frames from optional diagnostics", async () => {
         const { projectPresentation } = await import("../../src/core/jobs/presentation");
-        const { sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
+        const { isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
         const { jobsRepository } = await import("../../src/infra/repositories/jobs");
         const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
         const projectId = await createProject("Service recovery");

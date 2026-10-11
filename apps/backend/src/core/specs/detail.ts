@@ -1,5 +1,5 @@
-import { UnsafeRepoPathError } from "../repo/safe-fs";
-import { parseSpecYaml } from "../repo/yaml";
+import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
+import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { readSpecRawFiles } from "../repo/manual";
 import type { HumanSpec } from "../../infra/db/schema";
 import { featuresRepository } from "../../infra/repositories/features";

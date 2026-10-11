@@ -20,7 +20,7 @@ import { createSecretScrubber, registerTransientSecret } from "../credentials/sc
 import { generateTotp } from "../credentials/totp";
 import type { CredentialProfileRow } from "../../infra/repositories/credentials";
 import type { RunEnvironment } from "../../infra/db/schema";
-import { SECRET_NAME_PATTERN } from "../runner/specbook/guard";
+import { SECRET_NAME_PATTERN } from "@specbook/runtime/specbook/guard";
 
 // Ported from Hermes Agent tools/browser_vault_tool.py (MIT, Copyright (c) 2025 Nous Research).
 

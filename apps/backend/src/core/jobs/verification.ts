@@ -1,4 +1,5 @@
-import { CodedError } from "../errors";
+import { runNetworkPolicy } from "../ci/targets";
+import { CodedError } from "@specbook/runtime/errors";
 import { payloadOf } from "./schemas";
 import crypto from "node:crypto";
 import { jobBaseUrl, jobEnvironment } from "./environment";
@@ -11,17 +12,17 @@ import { repoGit } from "../repo/git";
 import { specsRepository } from "../../infra/repositories/specs";
 import { readSpecRawFiles } from "../repo/manual";
 import { sourceHashOf } from "../repo/writer";
-import { parseSpecYaml } from "../repo/yaml";
+import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { resolveSecretEnv } from "../credentials/profiles";
 import { projectSecretScrubber } from "../credentials/scrub";
-import { runPlaywrightSuite } from "../runner/playwright";
+import { runPlaywrightSuite } from "@specbook/runtime/playwright";
 import { reviewRunEvidence, type EvidenceReview } from "../runner/evidence-review";
-import { withRunSlot } from "../runner/process";
-import { analyzeSpecSource, stepTitlesError } from "../runner/validate";
+import { withRunSlot } from "@specbook/runtime/process";
+import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
 import { resolveSecretOriginPolicy } from "../runner/secrets";
 import { fixProposalSchema } from "./schemas";
 import { isAgentPaused } from "./pause";
-import { readEvidenceManifest } from "../runner/evidence";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
 
 export interface ProposalVerification {
     id: string;
@@ -32,7 +33,7 @@ export interface ProposalVerification {
     sourceHash: string;
     baseUrl: string;
     screenshots: string[];
-    errorCode?: import("../errors").ErrorCode | null;
+    errorCode?: import("@specbook/runtime/errors").ErrorCode | null;
     review?: EvidenceReview | null;
 }
 
@@ -77,7 +78,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         if (!current || current.status !== "running" || await isAgentPaused(job.projectId)) throw new Error("Job is no longer running");
         const remaining = current.limits.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
         if (remaining <= 0) throw new Error("The investigation has not reached a confirmed result");
-        return runPlaywrightSuite({ projectId: job.projectId, directory, baseUrl, environment,
+        return runPlaywrightSuite({ networkPolicy: await runNetworkPolicy(job.projectId, baseUrl, environment), directory, baseUrl,
             specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, outputDir: directory }],
             timeoutMs: Math.min(120_000, remaining), secretEnv, secretOrigins, scrub, signal });
     }, signal);

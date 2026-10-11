@@ -1,7 +1,7 @@
 import { payloadOf } from "./schemas";
 import type { InboxItem } from "../../infra/repositories/jobs";
 import { specsRepository } from "../../infra/repositories/specs";
-import { parseSpecYaml, serializeFeatureYaml, serializeSpecYaml } from "../repo/yaml";
+import { parseSpecYaml, serializeFeatureYaml, serializeSpecYaml } from "@specbook/runtime/yaml";
 import { featureProposalSchema, fixProposalSchema, newSpecProposalSchema } from "./schemas";
 
 interface ProposalFile {

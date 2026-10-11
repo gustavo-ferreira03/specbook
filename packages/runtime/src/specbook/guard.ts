@@ -1,7 +1,7 @@
-import { CodedError } from "../../errors";
-import { LOCATOR_FACTORIES, LOCATOR_REFINERS, RUNTIME_LOCATOR_ACTIONS as LOCATOR_ACTIONS } from "./allowlist";
-import type { ApiRequestEvidence } from "../evidence";
-export type { ApiRequestEvidence } from "../evidence";
+import { CodedError } from "../errors.ts";
+import { LOCATOR_FACTORIES, LOCATOR_REFINERS, RUNTIME_LOCATOR_ACTIONS as LOCATOR_ACTIONS } from "./allowlist.ts";
+import type { ApiRequestEvidence } from "../evidence.ts";
+export type { ApiRequestEvidence } from "../evidence.ts";
 
 export interface SecretOriginPolicy {
     defaultOrigins: string[];

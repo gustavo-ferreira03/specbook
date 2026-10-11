@@ -1,4 +1,4 @@
-import { errorCodeOf, isInfrastructureCode, type ErrorCode } from "../errors";
+import { errorCodeOf, isInfrastructureCode, type ErrorCode } from "@specbook/runtime/errors";
 import { loadPrompt } from "../chat/prompt-loader";
 import { logger } from "../../infra/logger";
 import { createSelectedSpec, selectedSpecResult } from "./spec-batches";

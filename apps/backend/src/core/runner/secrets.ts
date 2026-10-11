@@ -2,9 +2,9 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { credentialsRepository } from "../../infra/repositories/credentials";
 import type { RunEnvironment } from "../../infra/db/schema";
 import { IDENTIFIER_FIELD } from "../credentials/profiles";
-import { secretEnvName, type SecretOriginPolicy } from "./specbook/guard";
+import { secretEnvName, type SecretOriginPolicy } from "@specbook/runtime/specbook/guard";
 
-export type { SecretOriginPolicy } from "./specbook/guard";
+export type { SecretOriginPolicy } from "@specbook/runtime/specbook/guard";
 
 export async function resolveSecretOriginPolicy(
     projectId: string,

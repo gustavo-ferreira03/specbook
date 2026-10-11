@@ -1,6 +1,6 @@
 import http from "node:http";
 import https from "node:https";
-import { httpTarget, resolveTarget, type AddressResolver } from "./targets";
+import { httpTarget, resolveTarget, type AddressResolver } from "@specbook/runtime/network/targets";
 
 export async function postWebhook(value: string, payload: Record<string, unknown>, options: { allowPrivate: boolean; signal: AbortSignal; resolver?: AddressResolver }): Promise<number> {
     const url = httpTarget(value);

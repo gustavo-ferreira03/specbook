@@ -4,7 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { automationSettingsSchema, publicAutomation, updateAutomation } from "../../../core/jobs/schedules";
-import { NetworkTargetError } from "../../../core/network/targets";
+import { NetworkTargetError } from "@specbook/runtime/network/targets";
 import { schedulesRepository } from "../../repositories/schedules";
 
 export function createSchedulesRouter(): Hono {

@@ -4,7 +4,7 @@ import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { withSpecLock } from "../specs/lifecycle";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
-import { readOptionalRepoFile, writeRepoFile } from "./safe-fs";
+import { readOptionalRepoFile, writeRepoFile } from "@specbook/runtime/safe-fs";
 import { createSpecInRepo, featureYamlFile, specTestFile, specYamlFile } from "./writer";
 
 async function commitAndReindex(projectId: string, message: string): Promise<void> {

@@ -4,7 +4,7 @@ import https from "node:https";
 import { isIP } from "node:net";
 import path from "node:path";
 import { storageRoot } from "../paths";
-import { httpTarget, isPrivateAddress, resolveTarget } from "./targets";
+import { httpTarget, isPrivateAddress, resolveTarget } from "@specbook/runtime/network/targets";
 
 const faviconsDir = path.join(storageRoot, "favicons");
 const MAX_PAGE_BYTES = 262_144;

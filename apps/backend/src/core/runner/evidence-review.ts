@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getSecuritySettings } from "../chat/safety-settings";
 import { configuredModel, modelRuntimePromise } from "../llm/runtime";
 import { logger } from "../../infra/logger";
-import { readEvidenceManifest, isStepScreenshot } from "./evidence";
+import { readEvidenceManifest, isStepScreenshot } from "@specbook/runtime/evidence";
 
 const verdictSchema = z.object({
     verdict: z.enum(["matches", "weak", "assertion_wrong", "app_differs", "contradicts", "unclear"]),

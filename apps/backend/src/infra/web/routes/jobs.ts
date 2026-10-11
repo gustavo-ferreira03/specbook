@@ -20,8 +20,8 @@ import { jobsRepository, type InboxItem, type Job } from "../../repositories/job
 import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
 import { chatTitle, createChat, startChatTurn } from "../../../core/chat/session";
-import { sanitizeTechnicalDetails } from "../../../core/jobs/presentation-errors";
-import { isStepScreenshot } from "../../../core/runner/evidence";
+import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
+import { isStepScreenshot } from "@specbook/runtime/evidence";
 
 
 async function projectJob(projectId: string, jobId: string) {

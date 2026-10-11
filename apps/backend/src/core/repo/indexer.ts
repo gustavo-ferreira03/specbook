@@ -11,7 +11,7 @@ import { specsRepository, type Spec, type SpecPatch } from "../../infra/reposito
 import { runsDir } from "../paths";
 import { repoBare } from "./bare";
 import { repoGit } from "./git";
-import { readOptionalRepoFile, UnsafeRepoPathError } from "./safe-fs";
+import { readOptionalRepoFile, UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
 import { humanizeSlug } from "./slug";
 import {
     featureYamlFile,
@@ -28,7 +28,7 @@ import {
     parseYamlTitle,
     sameProjectContext,
     YamlParseError,
-} from "./yaml";
+} from "@specbook/runtime/yaml";
 
 export interface ReindexResult {
     specsSeen: number;

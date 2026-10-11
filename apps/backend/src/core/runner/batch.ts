@@ -1,4 +1,5 @@
-import { CodedError, errorCodeOf, type ErrorCode } from "../errors";
+import { runNetworkPolicy } from "../ci/targets";
+import { CodedError, errorCodeOf, type ErrorCode } from "@specbook/runtime/errors";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
@@ -15,11 +16,11 @@ import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "../rep
 import { resolveSecretEnv } from "../credentials/profiles";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { acquireSpecLocks, ResourceBusyError } from "../specs/lifecycle";
-import { runPlaywrightSuite } from "./playwright";
-import { withRunSlot } from "./process";
+import { runPlaywrightSuite } from "@specbook/runtime/playwright";
+import { withRunSlot } from "@specbook/runtime/process";
 import { analyzeForRun, MAX_FAIL_REASON_CHARS, MAX_FAILED_STEP_CHARS, RUN_TIMEOUT_MS, StaleRunError, type ExecutedRun, type RunOptions } from "./execution";
 import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
-import type { SpecAnalysis } from "./validate";
+import type { SpecAnalysis } from "@specbook/runtime/validate";
 
 type FinalRunStatus = Exclude<RunStatus, "running">;
 export type RunBatchTrigger = "deploy" | "ci" | "schedule" | "manual" | "spec_change";
@@ -225,13 +226,12 @@ async function executeBatch(
             ]);
         }
         const timeout = Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(RUN_TIMEOUT_MS, prepared.length * RUN_TIMEOUT_MS));
-        const outcome = await withRunSlot(() => {
+        const outcome = await withRunSlot(async () => {
             started = Date.now();
             return runPlaywrightSuite({
-                projectId: batch.projectId,
+                networkPolicy: await runNetworkPolicy(batch.projectId, baseUrl, batch.environment),
                 directory,
                 baseUrl,
-                environment: batch.environment,
                 specs: prepared.map((entry) => ({ key: entry.run.id, source: entry.testSource, analysis: entry.analysis, outputDir: path.join(runsDir, entry.run.id) })),
                 timeoutMs: timeout,
                 secretEnv: secrets.env,

@@ -5,7 +5,7 @@ import {
     credentialsRepository,
     type CredentialProfileRow,
 } from "../../infra/repositories/credentials";
-import { secretEnvName, SECRET_NAME_PATTERN } from "../runner/specbook/guard";
+import { secretEnvName, SECRET_NAME_PATTERN } from "@specbook/runtime/specbook/guard";
 import { decryptSecret, encryptSecret } from "./crypto";
 
 const NAME_PATTERN = SECRET_NAME_PATTERN;

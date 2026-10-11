@@ -156,8 +156,8 @@ describe("CI access and quality gates", () => {
     });
 
     test("blocks reserved addresses and DNS rebinding while pinning proxy connections", async () => {
-        const { resolveTarget, isPrivateAddress } = await import("../../src/core/network/targets");
-        const { createRunProxy } = await import("../../src/core/network/proxy");
+        const { resolveTarget, isPrivateAddress } = await import("@specbook/runtime/network/targets");
+        const { createRunProxy } = await import("@specbook/runtime/network/proxy");
         for (const address of ["0.0.0.0", "10.1.2.3", "100.64.0.1", "127.0.0.1", "169.254.169.254", "172.16.1.1", "192.168.1.1", "224.0.0.1", "::1", "::ffff:127.0.0.1", "fc00::1", "fe80::1", "2002:7f00:1::1"]) assert.equal(isPrivateAddress(address), true, address);
         for (const address of ["8.8.8.8", "1.1.1.1", "2001:4860:4860::8888", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) assert.equal(isPrivateAddress(address), false, address);
         await assert.rejects(() => resolveTarget("https://mixed.test", false, async () => [{ address: "8.8.8.8", family: 4 }, { address: "127.0.0.1", family: 4 }]), /not allowed/);

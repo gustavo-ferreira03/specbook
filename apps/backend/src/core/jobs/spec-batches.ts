@@ -15,7 +15,7 @@ import { executeSpec } from "../runner/run";
 import { provesExpectedResult, reviewNextStep, reviewRunEvidence } from "../runner/evidence-review";
 import { runsDir } from "../paths";
 import path from "node:path";
-import { sanitizeTechnicalDetails } from "./presentation-errors";
+import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 import { isAgentPaused } from "./pause";
 import { finishedAt } from "./shared";
 import { jobLimitsSchema, newSpecProposalSchema, specBatchProposalSchema, specBatchOf, payloadOf, type SpecBatch, type SpecBatchCandidate as Candidate } from "./schemas";

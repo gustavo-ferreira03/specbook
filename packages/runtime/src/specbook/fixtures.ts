@@ -1,4 +1,4 @@
-import { specErrorCode } from "../../errors.ts";
+import { specErrorCode } from "../errors.ts";
 import fs from "node:fs/promises";
 import { expect as baseExpect, test as base, type ConsoleMessage, type Page, type Request, type Response } from "@playwright/test";
 import type { RunDiagnostic } from "../evidence.ts";
@@ -25,6 +25,51 @@ hardenFunctionConstructors();
 
 const runtime = parseRuntime(process.env[RUNTIME_ENV]);
 const guard = createGuard({ runtime, readSecret: (name) => process.env[name] });
+
+const secretValues = [...new Set(Object.entries(process.env)
+    .filter(([name, value]) => name.startsWith("SPECBOOK_SECRET_") && value)
+    .map(([, value]) => value!))];
+
+async function screenshot(page: Page, file: string): Promise<void> {
+    if (!secretValues.length) {
+        await page.screenshot({ path: file, timeout: 5000 });
+        return;
+    }
+    const attribute = "data-specbook-evidence-mask";
+    const marker = crypto.randomUUID();
+    const frames = page.frames();
+    try {
+        const masks = await Promise.all(frames.map(async (frame) => {
+            const candidates = await frame.evaluate(({ attribute, marker }) => {
+                const roots: (Document | ShadowRoot)[] = [document];
+                const candidates: { id: string; value: string; text: string; children: string[]; alt: string }[] = [];
+                for (const root of roots) for (const element of root.querySelectorAll("*")) {
+                    if (element.shadowRoot) roots.push(element.shadowRoot);
+                    const id = `${marker}-${candidates.length}`;
+                    element.setAttribute(attribute, id);
+                    candidates.push({ id,
+                        value: element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement ? element.value : "",
+                        text: element.textContent ?? "", children: [...element.children].map((child) => child.textContent ?? ""),
+                        alt: element.getAttribute("alt") ?? "" });
+                }
+                return candidates;
+            }, { attribute, marker });
+            const selectors = candidates.filter((candidate) => secretValues.some((secret) => candidate.value.includes(secret) || candidate.alt.includes(secret)
+                || candidate.text.includes(secret) && !candidate.children.some((text) => text.includes(secret))))
+                .map((candidate) => `[${attribute}="${candidate.id}"]`);
+            return selectors.length ? [frame.locator(selectors.join(","))] : [];
+        }));
+        await page.screenshot({ path: file, timeout: 5000, mask: masks.flat(), maskColor: "#777777" });
+    } finally {
+        await Promise.all(frames.map((frame) => frame.evaluate(({ attribute, marker }) => {
+            const roots: (Document | ShadowRoot)[] = [document];
+            for (const root of roots) for (const element of root.querySelectorAll("*")) {
+                if (element.shadowRoot) roots.push(element.shadowRoot);
+                if (element.getAttribute(attribute)?.startsWith(marker + "-")) element.removeAttribute(attribute);
+            }
+        }, { attribute, marker }).catch(() => undefined)));
+    }
+}
 
 function diagnosticUrl(value: string): string | undefined {
     try {
@@ -130,7 +175,7 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvide
                 const file = testInfo.outputPath(`${STEP_ATTACHMENT_PREFIX}${number}.png`);
                 try {
                     if (!real) throw new Error("This step has no browser page");
-                    await real.screenshot({ path: file, timeout: 5000 });
+                    await screenshot(real, file);
                     await testInfo.attach(`${STEP_ATTACHMENT_PREFIX}${number}`, { path: file, contentType: "image/png" });
                 } catch {}
             }

@@ -1,4 +1,4 @@
-import { CodedError, errorCodeOf, type ErrorCode } from "../errors";
+import { CodedError, errorCodeOf, type ErrorCode } from "@specbook/runtime/errors";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";

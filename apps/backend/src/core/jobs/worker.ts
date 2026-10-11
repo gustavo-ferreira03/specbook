@@ -1,4 +1,4 @@
-import { errorCodeOf, isInfrastructureCode } from "../errors";
+import { errorCodeOf, isInfrastructureCode } from "@specbook/runtime/errors";
 import { payloadOf, verificationOf } from "./schemas";
 import { processProjectSteward } from "../steward/engine";
 import { discoverPendingProjectContexts } from "../chat/discovery";

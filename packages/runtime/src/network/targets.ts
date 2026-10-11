@@ -1,4 +1,4 @@
-import { CodedError } from "../errors";
+import { CodedError } from "../errors.ts";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
@@ -63,4 +63,17 @@ export async function resolveTarget(value: string | URL, allowPrivate = false, r
         throw new NetworkTargetError("Private, loopback and link-local targets are not allowed");
     }
     return addresses[0]!;
+}
+
+export interface RunNetworkPolicy {
+    origins: string[];
+    allowPrivate: boolean;
+}
+
+export async function localNetworkPolicy(baseUrl: string, resolver?: AddressResolver): Promise<RunNetworkPolicy> {
+    const target = httpTarget(baseUrl);
+    const hostname = target.hostname.replace(/^\[|\]$/g, "");
+    const allowPrivate = isIP(hostname) ? isPrivateAddress(hostname) : hostname === "localhost" || hostname.endsWith(".localhost");
+    await resolveTarget(target, allowPrivate, resolver);
+    return { origins: [target.origin], allowPrivate };
 }

@@ -12,7 +12,7 @@ import { decryptWithKey, keyFingerprint, parseEncryptionKey } from "../credentia
 import { encryptedColumns, transformSecretColumn } from "../credentials/locations";
 import { writeProtectedFile } from "../credentials/files";
 import { storageRoot } from "../paths";
-import { isInside } from "../repo/safe-fs";
+import { isInside } from "@specbook/runtime/safe-fs";
 
 const exec = promisify(execFile);
 const manifestName = "backup-manifest.json";

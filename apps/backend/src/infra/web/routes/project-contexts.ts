@@ -6,7 +6,7 @@ import { z } from "zod";
 import { projectContextSchema } from "../../../core/chat/context-tools";
 import { contextProposalProblem, DEFAULT_DISCOVERY_GOAL, startContextDiscovery } from "../../../core/chat/discovery";
 import { configuredModel } from "../../../core/llm/runtime";
-import { UnsafeRepoPathError } from "../../../core/repo/safe-fs";
+import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
 import { createAreaFeatures, writeContextToRepo } from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";

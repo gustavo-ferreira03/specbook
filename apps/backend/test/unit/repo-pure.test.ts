@@ -10,7 +10,7 @@ import {
     readRepoFile,
     UnsafeRepoPathError,
     writeRepoFile,
-} from "../../src/core/repo/safe-fs";
+} from "@specbook/runtime/safe-fs";
 import { humanizeSlug, slugify, uniqueSlug } from "../../src/core/repo/slug";
 import {
     parseContextYaml,
@@ -22,7 +22,7 @@ import {
     serializeFeatureYaml,
     serializeSpecYaml,
     YamlParseError,
-} from "../../src/core/repo/yaml";
+} from "@specbook/runtime/yaml";
 import { tempDir } from "../helpers/storage";
 
 describe("slug", () => {

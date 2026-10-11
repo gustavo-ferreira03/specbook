@@ -14,7 +14,7 @@ import { isCredentialFailure, isInfrastructureFailure } from "./presentation-err
 import { retryInfrastructure } from "./retry";
 import { matchesCurrentSpec } from "./current-run";
 import { reviewRunEvidence } from "../runner/evidence-review";
-import { readEvidenceManifest, isStepScreenshot } from "../runner/evidence";
+import { readEvidenceManifest, isStepScreenshot } from "@specbook/runtime/evidence";
 
 export class StaleTriageError extends Error {}
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { analyzeSpecSource, secretEnvRefs, stepTitlesError, validateSpecSource } from "../../src/core/runner/validate";
+import { analyzeSpecSource, secretEnvRefs, stepTitlesError, validateSpecSource } from "@specbook/runtime/validate";
 import { VALID_SPEC } from "../helpers/storage";
 
 const LOGIN_SPEC = `import { test, expect } from "specbook";
@@ -358,8 +358,8 @@ describe("named steps", () => {
 
 describe("agent instructions", () => {
     test("the spec.ts examples in the standard system prompt pass the validator", async () => {
-        const { readFile } = await import("node:fs/promises");
-        const prompt = await readFile(new URL("../../src/core/chat/prompts/standard-system-prompt.txt", import.meta.url), "utf8");
+        const { specWritingRules } = await import("@specbook/runtime/writing-rules");
+        const prompt = specWritingRules();
         const lines = prompt.split("\n");
         const starts = lines.map((line, index) => /^- (?:API example|Drawing example|Example)/.test(line) ? index : -1).filter((index) => index >= 0);
         assert.equal(starts.length, 3);

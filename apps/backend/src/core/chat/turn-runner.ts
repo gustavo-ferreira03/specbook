@@ -1,4 +1,4 @@
-import { errorCodeOf, providerErrorCode, type ErrorCode } from "../errors";
+import { errorCodeOf, providerErrorCode, type ErrorCode } from "@specbook/runtime/errors";
 import { mcpChatPrompt, mcpChatTools } from "../mcp/policy";
 import path from "node:path";
 import type { TurnPolicy } from "../jobs/policy";

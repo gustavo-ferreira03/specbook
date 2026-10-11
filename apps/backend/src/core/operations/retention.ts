@@ -13,7 +13,7 @@ import { getRunBatch } from "../runner/batch";
 import { areSpecsLocked, withSpecLock } from "../specs/lifecycle";
 import { withFileQueue } from "./file-queue";
 import type { RetentionCleanup, RetentionSettings } from "./schemas";
-import { readEvidenceManifest } from "../runner/evidence";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
 
 const DAY_MS = 86_400_000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

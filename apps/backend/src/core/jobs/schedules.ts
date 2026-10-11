@@ -1,4 +1,4 @@
-import { CodedError, errorCodeOf } from "../errors";
+import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
 import { recordBatch } from "./schedule-batches";
 export { recordScheduledBatch } from "./schedule-batches";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
 import { schedulesRepository, type ProjectAutomation } from "../../infra/repositories/schedules";
 import { specsRepository } from "../../infra/repositories/specs";
-import { isHttpTarget, NetworkTargetError, resolveTarget } from "../network/targets";
+import { isHttpTarget, NetworkTargetError, resolveTarget } from "@specbook/runtime/network/targets";
 import { createKeyedLock } from "../operations/keyed-lock";
 import { postWebhook } from "../network/webhook";
 import { decryptSecret } from "../credentials/crypto";

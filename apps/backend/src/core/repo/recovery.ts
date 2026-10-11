@@ -1,11 +1,11 @@
-import { CodedError } from "../errors";
+import { CodedError } from "@specbook/runtime/errors";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
-import { assertRepoPathSafe, readOptionalRepoFile } from "./safe-fs";
+import { assertRepoPathSafe, readOptionalRepoFile } from "@specbook/runtime/safe-fs";
 
 export class RepositoryRecoveryError extends CodedError {
     constructor(message: string) { super("repository_dirty", message); }

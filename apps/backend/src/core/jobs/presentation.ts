@@ -1,4 +1,4 @@
-import type { ErrorCode } from "../errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 import { payloadOf, verificationOf, specBatchOf } from "./schemas";
 import path from "node:path";
 import { featuresRepository } from "../../infra/repositories/features";
@@ -13,10 +13,11 @@ import { runsDir } from "../paths";
 import { readSpecRawFiles } from "../repo/manual";
 import { sourceHashOf } from "../repo/writer";
 import { proposalFiles } from "./preview";
-import { isInfrastructureFailure, sanitizeTechnicalDetails } from "./presentation-errors";
+import { isInfrastructureFailure } from "./presentation-errors";
+import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 import { presentSpecBatch } from "./spec-batches";
 import { ACTIVE_JOB_STATUSES, oldestFirst } from "./shared";
-import { readEvidenceManifest, isStepScreenshot } from "../runner/evidence";
+import { readEvidenceManifest, isStepScreenshot } from "@specbook/runtime/evidence";
 
 interface Subject { type: "spec" | "feature" | "deployment" | "project"; id?: string; name: string }
 interface Screenshot { url: string; label: string }

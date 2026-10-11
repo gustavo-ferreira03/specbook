@@ -1,6 +1,6 @@
 import http from "node:http";
 import net, { type AddressInfo, type Socket } from "node:net";
-import { httpTarget, resolveTarget, type AddressResolver } from "./targets";
+import { httpTarget, resolveTarget, type AddressResolver } from "./targets.ts";
 
 export async function createRunProxy(privateOrigins: string[], resolver?: AddressResolver) {
     const sockets = new Set<Socket>();

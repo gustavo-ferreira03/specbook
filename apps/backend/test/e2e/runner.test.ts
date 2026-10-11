@@ -6,8 +6,8 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { createSecretScrubber } from "../../src/core/credentials/scrub";
-import { runPlaywrightSuite, type SuiteSpec } from "../../src/core/runner/playwright";
-import { analyzeSpecSource } from "../../src/core/runner/validate";
+import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright";
+import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { tempDir } from "../helpers/storage";
 
 const SECRET = "correct-horse-battery";
@@ -308,7 +308,7 @@ describe("exploratory page scan", { skip: !available }, () => {
         const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
         const { chromium } = await import("@playwright/test");
         const { scanPage } = await import("../../src/core/chat/exploration-tools");
-        const { minimalChildEnv } = await import("../../src/core/runner/process");
+        const { minimalChildEnv } = await import("@specbook/runtime/process");
         const require = createRequire(import.meta.url);
         const directory = tempDir("specbook-exploration-");
         const configPath = path.join(directory, "mcp.json");
@@ -346,7 +346,7 @@ describe("browser display ownership", { skip: process.env.SPECBOOK_TEST_VNC !== 
         const { spawn } = await import("node:child_process");
         const net = await import("node:net");
         const { startVncStack, stopVncStack, getVncSession } = await import("../../src/core/browser/vnc");
-        const { minimalChildEnv } = await import("../../src/core/runner/process");
+        const { minimalChildEnv } = await import("@specbook/runtime/process");
         const stacks: Awaited<ReturnType<typeof startVncStack>>[] = [];
         let owner: ReturnType<typeof spawn> | undefined;
         const listening = (port: number): Promise<boolean> => new Promise((resolve) => {

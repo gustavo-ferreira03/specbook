@@ -1,15 +1,8 @@
+import { type HumanSpec, type RunStatus, type ProjectContext } from "@specbook/runtime/types";
+export { EMPTY_PROJECT_CONTEXT, type HumanSpec, type RunStatus, type ProjectContext } from "@specbook/runtime/types";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-export interface HumanSpec {
-    preconditions: string[];
-    steps: string[];
-    expectedResult: string;
-    postconditions: string[];
-}
-
 export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
-export type RunStatus = "running" | "passed" | "failed" | "error";
-
 export interface RunEnvironment {
     configuredBaseUrl: string;
     id: string;
@@ -32,30 +25,6 @@ export interface DiscoveryBrief {
     startUrl: string;
     safetyNotes: string[];
 }
-
-export interface ProjectContext {
-    summary: string;
-    areas: { name: string; routes: string[]; description: string }[];
-    terminology: { term: string; meaning: string }[];
-    roles: { name: string; capabilities: string[] }[];
-    businessRules: string[];
-    uiPatterns: string[];
-    executionNotes: string[];
-    unknowns: string[];
-    sources: { url: string; note: string }[];
-}
-
-export const EMPTY_PROJECT_CONTEXT: ProjectContext = {
-    summary: "",
-    areas: [],
-    terminology: [],
-    roles: [],
-    businessRules: [],
-    uiPatterns: [],
-    executionNotes: [],
-    unknowns: [],
-    sources: [],
-};
 
 export const projects = sqliteTable("projects", {
     id: text("id").primaryKey(),
@@ -158,7 +127,7 @@ export const runs = sqliteTable(
         startedAt: text("started_at").notNull(),
         durationMs: integer("duration_ms"),
         failReason: text("fail_reason"),
-        errorCode: text("error_code").$type<import("../../core/errors").ErrorCode>(),
+        errorCode: text("error_code").$type<import("@specbook/runtime/errors").ErrorCode>(),
         automationPending: integer("automation_pending", { mode: "boolean" }).notNull().default(false),
         healOnFailure: integer("heal_on_failure", { mode: "boolean" }).notNull().default(true),
         retryOf: text("retry_of"),
@@ -294,7 +263,7 @@ export const jobs = sqliteTable("jobs", {
     safetyRetries: integer("safety_retries").notNull().default(0),
     retryAt: text("retry_at"),
     systemError: text("system_error"),
-    errorCode: text("error_code").$type<import("../../core/errors").ErrorCode>(),
+    errorCode: text("error_code").$type<import("@specbook/runtime/errors").ErrorCode>(),
     infrastructureRetries: integer("infrastructure_retries").notNull().default(0),
     startedAt: text("started_at"),
     heartbeatAt: text("heartbeat_at"),

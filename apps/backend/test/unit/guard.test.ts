@@ -4,8 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createGuard, createSecret, isSafeRelativePath, isSecret, parseRuntime, unwrap, type RawPage, type ApiRequestEvidence, type RawRequest } from "../../src/core/runner/specbook/guard";
-import { runNodeCli, withRunSlot } from "../../src/core/runner/process";
+import { createGuard, createSecret, isSafeRelativePath, isSecret, parseRuntime, unwrap, type RawPage, type ApiRequestEvidence, type RawRequest } from "@specbook/runtime/specbook/guard";
+import { runNodeCli, withRunSlot } from "@specbook/runtime/process";
 import { tempDir } from "../helpers/storage";
 
 const BASE = "https://app.example.com/shop/";
@@ -277,7 +277,7 @@ describe("specbook API proxy", () => {
 
 describe("function constructor hardening", () => {
     test("fn.constructor cannot compile code after the specbook module hardens the worker", () => {
-        const guardUrl = new URL("../../src/core/runner/specbook/guard.ts", import.meta.url).href;
+        const guardUrl = import.meta.resolve("@specbook/runtime/specbook/guard");
         const script = `
             const { hardenFunctionConstructors } = await import(${JSON.stringify(guardUrl)});
             hardenFunctionConstructors();

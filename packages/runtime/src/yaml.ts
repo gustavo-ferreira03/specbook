@@ -1,5 +1,5 @@
 import { parse, stringify } from "yaml";
-import { EMPTY_PROJECT_CONTEXT, type HumanSpec, type ProjectContext } from "../../infra/db/schema";
+import { EMPTY_PROJECT_CONTEXT, type HumanSpec, type ProjectContext } from "./types.ts";
 
 export class YamlParseError extends Error {}
 

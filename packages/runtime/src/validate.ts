@@ -1,9 +1,9 @@
 import { parse } from "@babel/parser";
 import type * as t from "@babel/types";
-import type { HumanSpec } from "../../infra/db/schema";
-import { isSafeRelativePath, SECRET_NAME_PATTERN, secretEnvName } from "./specbook/guard";
-import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, STATIC_LOCATOR_REFINERS as LOCATOR_REFINERS } from "./specbook/allowlist";
-export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist";
+import type { HumanSpec } from "./types.ts";
+import { isSafeRelativePath, SECRET_NAME_PATTERN, secretEnvName } from "./specbook/guard.ts";
+import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, STATIC_LOCATOR_REFINERS as LOCATOR_REFINERS } from "./specbook/allowlist.ts";
+export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist.ts";
 
 export type SpecSourceValidation = { ok: true } | { ok: false; error: string };
 

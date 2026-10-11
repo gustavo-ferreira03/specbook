@@ -6,18 +6,18 @@ import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { projectContextsRepository, type ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
-import { validateSpecSource, type SpecSourceValidation } from "../runner/validate";
+import { validateSpecSource, type SpecSourceValidation } from "@specbook/runtime/validate";
 import { acquireSpecLocks, areSpecsLocked, ResourceBusyError, withSpecLock } from "../specs/lifecycle";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
-import { assertRepoPathSafe, readOptionalRepoFile, readRepoFile, writeRepoFile } from "./safe-fs";
+import { assertRepoPathSafe, readOptionalRepoFile, readRepoFile, writeRepoFile } from "@specbook/runtime/safe-fs";
 import { uniqueSlug } from "./slug";
 import {
     parseSpecYaml,
     serializeContextYaml,
     serializeFeatureYaml,
     serializeSpecYaml,
-} from "./yaml";
+} from "@specbook/runtime/yaml";
 
 export type SpecValidation = SpecSourceValidation;
 

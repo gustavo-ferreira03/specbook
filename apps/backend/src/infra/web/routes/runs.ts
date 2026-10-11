@@ -10,7 +10,7 @@ import { getRunBatch, startSpecBatch } from "../../../core/runner/batch";
 import { executeSpec } from "../../../core/runner/run";
 import { MAX_RUN_LIST_LIMIT, runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
-import { isInside } from "../../../core/repo/safe-fs";
+import { isInside } from "@specbook/runtime/safe-fs";
 import { batchReport, runReport } from "../../../core/ci/report";
 
 const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };

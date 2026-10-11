@@ -205,7 +205,7 @@ test("coverage gives each confirmed area the Specs of its feature and of its tes
     const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
     const { projectCoverage } = await import("../../src/core/coverage");
     const { createAreaFeatures, sourceHashOf, markdownHashOf } = await import("../../src/core/repo/writer");
-    const { serializeSpecYaml } = await import("../../src/core/repo/yaml");
+    const { serializeSpecYaml } = await import("@specbook/runtime/yaml");
     const { createCoverageRouter } = await import("../../src/infra/web/routes/coverage");
     const project = await newProject();
     const feature = await featuresRepository.createFeature(project.id, null, "Checkout", "", "checkout");

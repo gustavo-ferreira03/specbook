@@ -1,3 +1,4 @@
+import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BrowserMcp } from "../../src/core/browser/mcp";
@@ -63,7 +64,7 @@ describe("environment credential profiles", () => {
 
 describe("conversation failure messages", () => {
     test("provider and browser errors give a next step without exposing their raw response", async () => {
-        const { providerFailure, oauthFailureMessage, browserFailureMessage, sanitizeTechnicalDetails, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
+        const { providerFailure, oauthFailureMessage, browserFailureMessage, isInfrastructureFailure } = await import("../../src/core/jobs/presentation-errors");
         for (const [input, code] of [["429 quota exceeded", "provider_limit"], ["401 invalid API key sk-secret", "provider_auth"], ["model_not_found", "provider_model"], ["ETIMEDOUT /home/server/private", "provider_connection"]]) {
             const failure = providerFailure(input);
             assert.equal(failure.code, code);
@@ -353,7 +354,7 @@ describe("browser tool execution", () => {
 
 describe("typed orchestration data", () => {
     test("failure codes take precedence over localized prose", async () => {
-        const { CodedError, errorCodeOf, providerErrorCode } = await import("../../src/core/errors");
+        const { CodedError, errorCodeOf, providerErrorCode } = await import("@specbook/runtime/errors");
         const { isInfrastructureFailure, isCredentialFailure, runFailureKind } = await import("../../src/core/jobs/presentation-errors");
         assert.equal(isInfrastructureFailure("Password rejected", "provider_auth"), true);
         assert.equal(isInfrastructureFailure("No LLM model; Xvfb failed", "environment"), false);

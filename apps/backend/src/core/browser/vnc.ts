@@ -1,4 +1,4 @@
-import { CodedError } from "../errors";
+import { CodedError } from "@specbook/runtime/errors";
 import crypto from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
@@ -6,7 +6,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { WebSocket } from "ws";
-import { minimalChildEnv } from "../runner/process";
+import { minimalChildEnv } from "@specbook/runtime/process";
 import { browserFailureMessage } from "../jobs/presentation-errors";
 
 export const SCREEN_WIDTH = 1280;

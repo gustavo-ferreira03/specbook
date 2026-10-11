@@ -47,6 +47,9 @@ importers:
       '@playwright/test':
         specifier: 1.62.0
         version: 1.62.0
+      '@specbook/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       axe-core:
         specifier: ^4.14.0
         version: 4.14.0
@@ -168,6 +171,34 @@ importers:
         version: 1.4.0
       typescript:
         specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/runtime:
+    dependencies:
+      '@babel/parser':
+        specifier: 7.29.9
+        version: 7.29.9
+      '@playwright/test':
+        specifier: 1.62.0
+        version: 1.62.0
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@babel/types':
+        specifier: 7.29.8
+        version: 7.29.8
+      '@types/node':
+        specifier: ^26.6.4
+        version: 26.6.5
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      typescript:
+        specifier: 7.0.2
         version: 7.0.2
 
 packages:

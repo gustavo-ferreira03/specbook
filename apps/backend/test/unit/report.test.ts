@@ -3,10 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { createSecretScrubber } from "../../src/core/credentials/scrub";
-import { isStepScreenshot, readEvidenceManifest, writeRunEvidence } from "../../src/core/runner/evidence";
-import { executableSource } from "../../src/core/runner/playwright";
-import { parsePlaywrightReport, stripAnsi } from "../../src/core/runner/report";
-import { analyzeSpecSource } from "../../src/core/runner/validate";
+import { isStepScreenshot, readEvidenceManifest, writeRunEvidence } from "@specbook/runtime/evidence";
+import { executableSource } from "@specbook/runtime/playwright";
+import { parsePlaywrightReport, stripAnsi } from "@specbook/runtime/report";
+import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { tempDir, VALID_SPEC } from "../helpers/storage";
 
 function report(suites: unknown[], errors: unknown[] = []): string {

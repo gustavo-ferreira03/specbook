@@ -1,3 +1,4 @@
+import { specWritingRules } from "@specbook/runtime/writing-rules";
 import { loadPrompt } from "./prompt-loader";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import type { Project } from "../../infra/repositories/projects";
@@ -22,6 +23,7 @@ function standardSystemPrompt(
     const base = fillTemplate(STANDARD_SYSTEM_PROMPT_TEMPLATE, {
         baseUrl: project.baseUrl,
         credentialRules: CREDENTIAL_RULES,
+        specWritingRules: specWritingRules(),
     });
     if (confirmedContext) {
         return [

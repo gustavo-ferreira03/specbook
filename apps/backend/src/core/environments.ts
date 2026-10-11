@@ -3,7 +3,7 @@ import type { RunEnvironment } from "../infra/db/schema";
 import { credentialsRepository } from "../infra/repositories/credentials";
 import { environmentsRepository } from "../infra/repositories/environments";
 import { httpUrlSchema } from "./ci/schemas";
-import { NetworkTargetError } from "./network/targets";
+import { NetworkTargetError } from "@specbook/runtime/network/targets";
 
 export const environmentSchema = z.object({
     name: z.string().trim().min(1).max(80),

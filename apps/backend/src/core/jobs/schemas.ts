@@ -1,4 +1,4 @@
-import { errorCodeSchema } from "../errors";
+import { errorCodeSchema } from "@specbook/runtime/errors";
 import { z } from "zod";
 
 export const jobLimitsSchema = z.object({

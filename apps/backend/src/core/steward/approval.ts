@@ -8,7 +8,7 @@ import { fixProposalSchema } from "../jobs/schemas";
 import { provesExpectedResult } from "../runner/evidence-review";
 import { isAgentPaused } from "../jobs/pause";
 import { recordAgentMetric } from "../jobs/metrics";
-import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, LOCATOR_REFINERS } from "../runner/specbook/allowlist";
+import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, LOCATOR_REFINERS } from "@specbook/runtime/specbook/allowlist";
 
 export function isLocatorOnlyFix(item: InboxItem): boolean {
     if (item.kind !== "spec_fix" || !payloadOf(item).requiresVerification) return false;

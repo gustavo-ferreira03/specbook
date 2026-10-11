@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
+import { INSPECT_ELEMENT, redactUrls } from "@specbook/runtime/browser";
 import { getActiveTabUrl, type BrowserMcp } from "../browser/mcp";
 import { DESTRUCTIVE_CLICK_PATTERN } from "./discovery-policy";
 
@@ -29,22 +30,6 @@ function evaluationResult(result: Record<string, unknown>): unknown {
     const section = text.match(/(?:^|\n)### Result\n([\s\S]*?)(?=\n### |$)/)?.[1] ?? text;
     try { return JSON.parse(section.trim()); }
     catch { throw new Error("The browser did not return a page scan result"); }
-}
-
-function redactUrls(value: unknown): unknown {
-    if (Array.isArray(value)) return value.map(redactUrls);
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactUrls(item)]));
-    if (typeof value !== "string") return value;
-    return value.replace(/https?:\/\/[^\s"'<>]+/g, (value) => {
-        try {
-            const url = new URL(value);
-            url.username = "";
-            url.password = "";
-            for (const key of [...url.searchParams.keys()]) url.searchParams.set(key, "[redacted]");
-            url.hash = "";
-            return url.toString();
-        } catch { return "[invalid URL]"; }
-    });
 }
 
 export async function scanPage(options: ExplorationToolOptions, signal?: AbortSignal): Promise<string> {
@@ -135,26 +120,6 @@ export async function scanPage(options: ExplorationToolOptions, signal?: AbortSi
 const inspectElementSchema = z.object({
     target: z.string().trim().min(1).max(500).describe("Element reference from the latest browser_snapshot (like e43) or a unique CSS selector (like [data-shape-type='arrow'])"),
 }).strict();
-
-const INSPECT_ELEMENT = `(element) => {
-    const clean = (node) => {
-        const copy = node.cloneNode(true);
-        for (const field of [copy, ...copy.querySelectorAll("*")]) {
-            field.removeAttribute("value");
-            if (field.matches("input, textarea, select")) field.textContent = "";
-        }
-        return copy;
-    };
-    const openingTag = (node) => clean(node.cloneNode(false)).outerHTML.replace(/<\\/[^>]+>$/, "").slice(0, 600);
-    const ancestors = [];
-    for (let node = element.parentElement; node && ancestors.length < 4; node = node.parentElement) ancestors.push(openingTag(node));
-    const style = getComputedStyle(element);
-    return JSON.stringify({
-        html: clean(element).outerHTML.slice(0, 6000),
-        ancestors,
-        computed: { color: style.color, backgroundColor: style.backgroundColor, fill: style.fill, stroke: style.stroke },
-    });
-}`;
 
 export function createExplorationTools(options: ExplorationToolOptions) {
     return [defineTool({
