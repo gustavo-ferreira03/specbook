@@ -35,8 +35,12 @@ export async function createRunProxy(privateOrigins: string[], resolver?: Addres
     server.on("connection", track);
     server.on("connect", (request, socket, head) => {
         void (async () => {
+            // Browsers tunnel WebSockets through CONNECT even for ws:// origins, so a private
+            // target is allowed when either its http or https origin is.
             const target = httpTarget(`https://${request.url}`);
-            const address = await resolveTarget(target, privateOrigins.includes(target.origin), resolver);
+            const plain = httpTarget(`http://${request.url}`);
+            const allowed = privateOrigins.includes(target.origin) || privateOrigins.includes(plain.origin);
+            const address = await resolveTarget(target, allowed, resolver);
             if (socket.destroyed) return;
             const upstream = track(net.connect({ host: address.address, port: Number(target.port || 443) }));
             upstream.on("connect", () => {
