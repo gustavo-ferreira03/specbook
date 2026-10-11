@@ -1,3 +1,4 @@
+import { logger } from "../../infra/logger";
 import { enqueueJob } from "./queue";
 import crypto from "node:crypto";
 import { featuresRepository } from "../../infra/repositories/features";
@@ -121,7 +122,8 @@ export async function selectSpecBatch(item: InboxItem, candidateIds: string[]): 
 export async function recoverSpecBatches(): Promise<void> {
     for (const project of await projectsRepository.listProjects()) {
         for (const item of await jobsRepository.itemsByKind(project.id, "spec_batch", ["approved"])) {
-            if (item.kind === "spec_batch" && item.status === "approved") await enqueueSelected(item);
+            if (item.kind !== "spec_batch" || item.status !== "approved") continue;
+            await enqueueSelected(item).catch((error) => logger.error("could not recover a selected Spec batch", { itemId: item.id, error }));
         }
     }
 }

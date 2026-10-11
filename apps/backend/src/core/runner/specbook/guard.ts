@@ -20,6 +20,22 @@ export const API_STEP_ATTACHMENT_PREFIX = "specbook-api-step-";
 export const FAILED_STEP_ANNOTATION = "specbook-failed-step";
 export const SECRET_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
+const STRICT_SETTLE_MS = 5000;
+
+// Playwright fails at once when a locator matches several elements, even while a page is mid-transition
+// (a single-page app changes the URL before it re-renders). Retry until the match settles or time runs out.
+export async function settleStrict<T>(run: () => Promise<T>, timeoutMs = STRICT_SETTLE_MS): Promise<T> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        try {
+            return await run();
+        } catch (error) {
+            if (!/strict mode violation/.test(error instanceof Error ? error.message : String(error)) || Date.now() >= deadline) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+    }
+}
+
 const SECRET_ORIGIN_ERROR = "Refusing to type a secret: the current page origin is not allowed for this credential.";
 
 function envSegment(name: string): string {
@@ -232,21 +248,21 @@ export function createGuard(options: GuardOptions) {
         }
         for (const name of LOCATOR_ACTIONS) {
             methods[name] = async (...args: unknown[]) => {
-                await locator[name](...sanitizeAll(args));
+                await settleStrict(() => locator[name](...sanitizeAll(args)));
             };
         }
         methods.dragTo = async (target: unknown, dragOptions?: unknown) => {
             const real = unwrap(target, ["locator"]);
             if (!real) throw new Error("dragTo() takes a locator");
-            await locator.dragTo(real, sanitize(dragOptions));
+            await settleStrict(() => locator.dragTo(real, sanitize(dragOptions)));
         };
         methods.fill = async (value: unknown, fillOptions?: unknown) => {
             const text = await textArgument(page, value, locator);
-            await locator.fill(text, sanitize(fillOptions));
+            await settleStrict(() => locator.fill(text, sanitize(fillOptions)));
         };
         methods.pressSequentially = async (value: unknown, typeOptions?: unknown) => {
             const text = await textArgument(page, value, locator);
-            await locator.pressSequentially(text, sanitize(typeOptions));
+            await settleStrict(() => locator.pressSequentially(text, sanitize(typeOptions)));
         };
         return frozen("locator", methods, locator);
     }

@@ -11,13 +11,14 @@ export function setJobQueueWakeup(callback: () => void): void { wakeup = callbac
 export function requestJobDrain(): void { wakeup(); }
 
 export async function enqueueJob(projectId: string, input: unknown = {}, id?: string, options: { sourceChatId?: string | null } = {}): Promise<Job> {
-    if (options.sourceChatId) {
-        const source = await chatsRepository.getChatRow(options.sourceChatId);
-        if (!source || source.projectId !== projectId) throw new Error("The source conversation must belong to this project.");
-    }
     if (id) {
         const existing = await jobsRepository.get(id);
         if (existing) return existing;
+    }
+    if (options.sourceChatId) {
+        const source = await chatsRepository.getChatRow(options.sourceChatId);
+        if (source && source.projectId !== projectId) throw new Error("The source conversation must belong to this project.");
+        if (!source) options = { ...options, sourceChatId: null };
     }
     const parsed = createJobSchema.parse(input);
     let pendingMessage = parsed.goal;

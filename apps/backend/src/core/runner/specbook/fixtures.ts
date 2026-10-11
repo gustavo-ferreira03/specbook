@@ -10,6 +10,7 @@ import {
     hardenFunctionConstructors,
     parseRuntime,
     RUNTIME_ENV,
+    settleStrict,
     STEP_ATTACHMENT_PREFIX,
     unwrap,
     type RawPage,
@@ -140,9 +141,22 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvide
     },
 });
 
+function settlingMatchers<T extends object>(matchers: T): T {
+    return new Proxy(matchers, {
+        get(target, key, receiver) {
+            const value = Reflect.get(target, key, receiver);
+            if (key === "not" && value && typeof value === "object") return settlingMatchers(value as object);
+            if (typeof value !== "function") return value;
+            return (...args: unknown[]) => settleStrict(() => Promise.resolve((value as (...a: unknown[]) => unknown).apply(target, args)));
+        },
+    });
+}
+
 export function expect(target: unknown, ...rest: unknown[]) {
     if (rest.length > 0) throw new Error("expect() takes one page, locator or API response value");
-    const real = unwrap(target, ["page", "locator", "apiResponse"]);
+    const locator = unwrap(target, ["locator"]);
+    if (locator) return settlingMatchers(baseExpect(locator as never));
+    const real = unwrap(target, ["page", "apiResponse"]);
     if (real) return baseExpect(real as never);
     if (target === null || ["string", "number", "boolean"].includes(typeof target) || Array.isArray(target) || (typeof target === "object" && target !== null && [Object.prototype, null].includes(Object.getPrototypeOf(target)))) {
         return baseExpect(target as never);
