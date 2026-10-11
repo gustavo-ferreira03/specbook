@@ -1,4 +1,5 @@
 import { specDirectories, readSpec } from "./workspace";
+import { checkLiveLocators } from "./browser";
 import { scrub } from "./credentials";
 
 export async function checkSpecs(workspace: string, selector?: string) {
@@ -6,7 +7,7 @@ export async function checkSpecs(workspace: string, selector?: string) {
     for (const path of await specDirectories(workspace, selector)) {
         try {
             const spec = await readSpec(workspace, path);
-            const locators: { status: string }[] = [];
+            const locators = await checkLiveLocators(workspace, spec.source);
             specs.push({ path, ok: !locators.some((locator: { status: string }) => locator.status !== "matched"), locators });
         } catch (error) {
             specs.push({ path, ok: false, error: await scrub(error instanceof Error ? error.message : String(error)), locators: [] });

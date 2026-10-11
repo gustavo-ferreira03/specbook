@@ -7,6 +7,7 @@ import { addProfile, listProfiles, removeProfile, scrub } from "./credentials";
 import { checkSpecs } from "./check";
 import { runLocal } from "./run";
 import { generateReport } from "./report";
+import { browse, startBrowserDaemon } from "./browser";
 
 const help = `specbook — local behavior contracts and browser evidence
 
@@ -18,6 +19,10 @@ const help = `specbook — local behavior contracts and browser evidence
   credentials add <profile> [--stdin-json] [--origin <url>]
   credentials list
   credentials remove <profile>
+  browse open [url] [--headed]
+  browse snapshot | inspect <ref> | click <ref>
+  browse fill <ref> <text> | fill <ref> --secret profile.field
+  browse close
 
 Every command accepts --json. Credentials JSON comes from stdin, never arguments.
 SPECBOOK_HOME overrides the user configuration directory.
@@ -73,6 +78,10 @@ async function credentialInput(): Promise<{ fields: Record<string, string>; orig
 
 async function main(): Promise<void> {
     const raw = process.argv.slice(2);
+    if (raw[0] === "--browse-daemon") {
+        await startBrowserDaemon(raw[1], raw[2], raw.includes("--headed"));
+        return;
+    }
     const { values, positionals } = parseArgs({ args: raw, allowPositionals: true, options: {
         json: { type: "boolean" }, help: { type: "boolean", short: "h" }, version: { type: "boolean" },
         "base-url": { type: "string" }, agent: { type: "string" }, feature: { type: "string" },
@@ -121,7 +130,10 @@ async function main(): Promise<void> {
             if (run.status !== "passed") process.exitCode = 1;
             result = run;
         } else if (command === "report") result = await generateReport(workspace, action);
-        else throw new Error(`Unknown command: ${command}${action ? ` ${action}` : ""}. Use --help.`);
+        else if (command === "browse") {
+            const config = await loadConfig(workspace);
+            result = await browse(action, { workspace, baseUrl: config.baseUrl, url: action === "open" ? argument : undefined, ref: action === "open" ? undefined : argument, value: positionals[3], secret: values.secret, headed: values.headed });
+        } else throw new Error(`Unknown command: ${command}${action ? ` ${action}` : ""}. Use --help.`);
     }
     const safe = await scrub(JSON.stringify(result, null, values.json ? undefined : 2));
     stdout.write(safe + "\n");
