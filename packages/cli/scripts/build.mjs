@@ -11,3 +11,4 @@ await build({
 await fs.copyFile('../runtime/dist/specbook-fixtures.mjs', 'dist/specbook-fixtures.mjs');
 await fs.cp('../runtime/dist/assets', 'dist/assets', { recursive: true });
 await fs.chmod('dist/index.js', 0o755);
+await fs.copyFile('../../docs/cli/README.md', 'dist/README.md');
