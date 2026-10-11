@@ -72,29 +72,29 @@ export function AuthSpecReel() {
     const shown = still ? SPECS[0] : spec;
     const doneCount = still ? shown.steps.length : done;
     return (
-        <div className={cn("w-full max-w-[420px] transition-opacity duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)]", visible || still ? "opacity-100" : "opacity-0")}>
-            <p className="font-mono text-meta text-(--panel-fg)/60">{shown.path}</p>
-            <h2 className="mt-3 text-title text-(--panel-fg)">{shown.title}</h2>
-            <ol className="mt-8 space-y-3">
+        <div className={cn("w-full max-w-[560px] transition-opacity duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)]", visible || still ? "opacity-100" : "opacity-0")}>
+            <p className="font-mono text-sm text-(--panel-fg)/60">{shown.path}</p>
+            <h2 className="mt-3 text-[2rem] font-semibold leading-tight tracking-[-0.025em] text-(--panel-fg)">{shown.title}</h2>
+            <ol className="mt-9 space-y-4">
                 {shown.steps.map((step, index) => {
                     const state = index < doneCount ? "done" : index === doneCount ? "running" : "pending";
                     return (
-                        <li key={`${shown.path}-${index}`} className={cn("flex items-start gap-3 text-body transition-colors duration-300", state === "pending" ? "text-(--panel-fg)/45" : "text-(--panel-fg)/85")}>
-                            <span className="tabular flex size-6 shrink-0 items-center justify-center rounded-md border border-(--panel-fg)/25 text-meta">{index + 1}</span>
+                        <li key={`${shown.path}-${index}`} className={cn("flex items-start gap-3.5 text-[1.0625rem] transition-colors duration-300", state === "pending" ? "text-(--panel-fg)/45" : "text-(--panel-fg)/85")}>
+                            <span className="tabular flex size-7 shrink-0 items-center justify-center rounded-md border border-(--panel-fg)/25 text-sm">{index + 1}</span>
                             <span className="flex-1 pt-0.5">{step}</span>
-                            <span className="mt-1 flex size-[15px] shrink-0 items-center justify-center">
-                                {state === "done" && <Check size={15} strokeWidth={2.5} aria-hidden="true" className="auth-step-check text-(--panel-fg)" />}
-                                {state === "running" && <LoaderCircle size={14} aria-hidden="true" className="animate-spin text-(--panel-fg)/60" />}
+                            <span className="mt-1.5 flex size-[17px] shrink-0 items-center justify-center">
+                                {state === "done" && <Check size={17} strokeWidth={2.5} aria-hidden="true" className="auth-step-check text-(--panel-fg)" />}
+                                {state === "running" && <LoaderCircle size={16} aria-hidden="true" className="animate-spin text-(--panel-fg)/60" />}
                             </span>
                         </li>
                     );
                 })}
             </ol>
-            <div className="mt-8 rounded-xl border border-(--panel-fg)/20 px-4 py-3.5">
-                <p className="flex items-center gap-1.5 text-control font-semibold text-(--panel-fg)"><Target size={14} aria-hidden="true" /> Expected result</p>
-                <p className="mt-1.5 text-body text-(--panel-fg)/85">{shown.expected}</p>
+            <div className="mt-9 rounded-xl border border-(--panel-fg)/20 px-5 py-4">
+                <p className="flex items-center gap-2 text-[0.9375rem] font-semibold text-(--panel-fg)"><Target size={16} aria-hidden="true" /> Expected result</p>
+                <p className="mt-2 text-base text-(--panel-fg)/85">{shown.expected}</p>
             </div>
-            <p className={cn("tabular mt-6 flex items-center gap-2 text-meta text-(--panel-fg)/60 transition-opacity duration-300", still || finished ? "opacity-100" : "opacity-0")}>
+            <p className={cn("tabular mt-7 flex items-center gap-2 text-sm text-(--panel-fg)/60 transition-opacity duration-300", still || finished ? "opacity-100" : "opacity-0")}>
                 <Check size={13} strokeWidth={2.5} aria-hidden="true" /> Passed · {shown.duration}
             </p>
         </div>

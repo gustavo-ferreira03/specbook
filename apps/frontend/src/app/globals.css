@@ -85,7 +85,7 @@
     --shadow-dialog: var(--sb-shadow-dialog);
     --shadow-composer: var(--sb-shadow-composer);
 
-    --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+    --font-sans: var(--font-recursive), ui-sans-serif, system-ui, sans-serif;
     --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
     --text-label: 0.75rem;
     --text-label--line-height: 1rem;
@@ -274,6 +274,7 @@ body {
     background: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
+    font-variation-settings: "CASL" 0.35;
     font-size: var(--text-body);
     line-height: 1.55;
     font-kerning: normal;
@@ -371,11 +372,16 @@ summary:focus-visible,
 }
 
 .wordmark {
-    font-family: var(--font-sans);
+    font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
     font-size: 1.125rem;
     line-height: 1.5rem;
     font-weight: 700;
     letter-spacing: -0.04em;
+}
+
+.wordmark.wordmark-lg {
+    font-size: 1.5rem;
+    line-height: 2rem;
 }
 
 .eyebrow {
@@ -686,6 +692,17 @@ summary:focus-visible,
     .slab-lift:active {
         translate: none;
     }
+}
+
+.auth-form input:not([type="checkbox"]):not([type="radio"]) {
+    height: 3rem;
+    padding-inline: 0.875rem;
+    font-size: 1rem;
+}
+
+.auth-form button[type="submit"] {
+    height: 3rem;
+    font-size: 1rem;
 }
 
 .raised-panel {
