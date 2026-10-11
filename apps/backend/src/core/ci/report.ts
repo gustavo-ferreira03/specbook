@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { featuresRepository } from "../../infra/repositories/features";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
 import { backendRoot } from "../paths";
@@ -15,9 +16,20 @@ const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "imag
 
 type Item = CiResult["results"][number];
 type StepState = "passed" | "failed" | "skipped";
+type Tone = "failed" | "known" | "flaky" | "running" | "passed";
+
+const TONES: { tone: Tone; label: string; tally: (n: number) => string }[] = [
+    { tone: "failed", label: "Failed", tally: (n) => `${n} failed` },
+    { tone: "known", label: "Known bugs", tally: (n) => `${n} known bug${n === 1 ? "" : "s"}` },
+    { tone: "flaky", label: "Flaky", tally: (n) => `${n} flaky` },
+    { tone: "running", label: "Running", tally: (n) => `${n} running` },
+    { tone: "passed", label: "Passed", tally: (n) => `${n} passed` },
+];
 
 interface SpecSection {
     item: Item;
+    tone: Tone;
+    feature: string;
     path: string | null;
     preconditions: string[];
     expectedResult: string;
@@ -45,7 +57,13 @@ async function embed(directory: string, file: string, type: string | undefined, 
 
 const image = (directory: string, file: string) => embed(directory, file, IMAGE_TYPES[path.extname(file).toLowerCase()], MAX_IMAGE_BYTES);
 
-async function section(item: Item): Promise<SpecSection> {
+function toneOf(item: Item): Tone {
+    if (item.pending) return "running";
+    if (["failed", "error"].includes(item.status)) return item.knownBug ? "known" : "failed";
+    return item.flaky ? "flaky" : "passed";
+}
+
+async function section(item: Item, features: Map<string, string>): Promise<SpecSection> {
     const spec = await specsRepository.getSpec(item.specId);
     const directory = await realRunDirectory(item.runId);
     const human = directory
@@ -63,7 +81,7 @@ async function section(item: Item): Promise<SpecSection> {
             : shot ? "passed" : "skipped";
         return { number: index + 1, label: shot?.label.trim() || label, state, image: directory && shot ? await image(directory, shot.file) : null };
     }));
-    return { item, path: spec?.path ? `${spec.path}/spec.yml` : null, preconditions: human?.preconditions ?? [], expectedResult: human?.expectedResult ?? "", steps,
+    return { item, tone: toneOf(item), feature: (spec?.featureId && features.get(spec.featureId)) || "Other Specs", path: spec?.path ? `${spec.path}/spec.yml` : null, preconditions: human?.preconditions ?? [], expectedResult: human?.expectedResult ?? "", steps,
         video: directory && manifest.video ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES) : null };
 }
 
@@ -82,34 +100,37 @@ async function logo(): Promise<string> {
 const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 const CROSS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const BUG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6zM12 20v-9M6 13H2M22 13h-4M6.5 8.5 4 7M17.5 8.5 20 7M6 17l-2.5 1.5M18 17l2.5 1.5"/></svg>';
+const ALL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>';
 const RETRY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
 
-function count(tone: string, label: string, value: number, icon: string): string {
-    return `<div class="count is-${tone}${value === 0 ? " zero" : ""}"><span class="icon">${icon}</span><span><b>${value}</b><small>${label}</small></span></div>`;
+const ICONS: Record<Tone, string> = { failed: CROSS, known: BUG, flaky: RETRY, running: RETRY, passed: CHECK };
+const RANK: Record<Tone, number> = { failed: 0, known: 1, flaky: 2, running: 3, passed: 4 };
+
+function filter(tone: Tone | "all", label: string, value: number, checked: boolean): string {
+    const id = `filter-${tone}`;
+    return `<input type="radio" name="filter" id="${id}" class="filter-input"${checked ? " checked" : ""}${value === 0 ? " disabled" : ""}><label for="${id}" class="count is-${tone}${value === 0 ? " zero" : ""}"><span class="icon">${tone === "all" ? ALL : ICONS[tone]}</span><span><b>${value}</b><small>${label}</small></span></label>`;
 }
 
-function statusOf(item: Item): { tone: "passed" | "failed" | "running"; label: string } {
-    if (item.pending) return { tone: "running", label: "Running" };
-    if (["failed", "error"].includes(item.status)) return { tone: "failed", label: item.knownBug ? "Failed · known bug" : item.status === "error" ? "Error" : "Failed" };
-    return { tone: "passed", label: "Passed" };
+function stateLabel(item: Item, tone: Tone): string {
+    if (tone === "failed") return item.status === "error" ? "Error" : "Failed";
+    return { known: "Known bug", flaky: "Passed on retry", running: "Running", passed: "Passed" }[tone] ?? "";
 }
 
-function renderSection({ item, path: file, preconditions, expectedResult, steps, video }: SpecSection, open = false): string {
-    const status = statusOf(item);
+function renderSection({ item, tone, path: file, preconditions, expectedResult, steps, video }: SpecSection, open = false, showPath = false): string {
+    const failing = tone === "failed" || tone === "known";
     const shots = steps.filter((step) => step.image);
-    return `<details id="run-${escape(item.runId)}" class="spec ${status.tone}"${open || status.tone === "failed" ? " open" : ""}>
+    return `<details id="run-${escape(item.runId)}" class="spec is-${tone}"${open || tone === "failed" ? " open" : ""}>
 <summary>
-  <span class="seal">${status.tone === "failed" ? CROSS : CHECK}</span>
-  <span class="heading"><span class="title">${escape(item.title)}</span>${file ? `<span class="path">${escape(file)}</span>` : ""}</span>
-  ${item.flaky ? `<span class="flaky">${RETRY}Flaky</span>` : ""}
-  <span class="state">${escape(status.label)}</span>
+  <span class="seal">${ICONS[tone]}</span>
+  <span class="heading"><span class="title">${escape(item.title)}</span>${showPath && file ? `<span class="path">${escape(file)}</span>` : ""}</span>
+  <span class="state">${escape(stateLabel(item, tone))}</span>
   <span class="time">${escape(duration(item.durationMs))}</span>
 </summary>
 <div class="body">
   ${preconditions.length ? `<h3>Preconditions</h3><ul class="bullets">${preconditions.map((entry) => `<li>${escape(entry)}</li>`).join("")}</ul>` : ""}
   ${steps.length ? `<h3>Steps</h3><ol class="steps">${steps.map((step) => `<li class="${step.state}"><span class="num">${step.number}</span><span class="label">${escape(step.label)}</span><span class="mark">${step.state === "passed" ? CHECK : step.state === "failed" ? CROSS : ""}</span></li>`).join("")}</ol>` : ""}
   ${expectedResult ? `<div class="expected"><h3>Expected result</h3><p>${escape(expectedResult)}</p></div>` : ""}
-  ${item.failReason && status.tone === "failed" ? `<div class="failure"><h3>What failed</h3><pre>${escape(item.failReason)}</pre></div>` : ""}
+  ${item.failReason && failing ? `<div class="failure"><h3>What failed</h3><pre>${escape(item.failReason)}</pre></div>` : ""}
   ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => {
       const id = `shot-${item.runId}-${step.number}`;
       return `<figure id="${escape(id)}"><a class="zoom" href="#${escape(id)}"><img src="${step.image}" alt="Step ${step.number}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>Step ${step.number}</b> ${escape(step.label)}</figcaption></figure>`;
@@ -135,31 +156,48 @@ h1{margin:0;font-size:32px;line-height:1.15;letter-spacing:-.02em}
 .meta{margin-top:10px;color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 14px}
 .meta b{color:var(--ink);font-weight:600}
 .verdict.passed{color:var(--success)}.verdict.failed{color:var(--danger)}
-.counts{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 28px}
-.count{--c:var(--muted);display:flex;align-items:center;gap:12px;min-width:150px;padding:10px 16px 10px 12px;background:var(--surface);border:2px solid var(--c);border-radius:12px;box-shadow:3px 3px 0 var(--c)}
-.count.is-passed{--c:var(--success)}.count.is-failed{--c:var(--danger)}.count.is-flaky{--c:var(--warning)}.count.is-known{--c:var(--muted)}
+main.wrap{padding-top:32px;padding-bottom:24px}
+.filters{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 36px}
+.filter-input{position:absolute;opacity:0;pointer-events:none}
+.count{--c:var(--muted);display:flex;align-items:center;gap:12px;min-width:140px;padding:10px 16px 10px 12px;background:var(--surface);border:2px solid var(--c);border-radius:12px;cursor:pointer;user-select:none;transition:transform .12s ease,box-shadow .12s ease}
+.count.is-all{--c:var(--primary)}.count.is-passed{--c:var(--success)}.count.is-failed{--c:var(--danger)}.count.is-flaky{--c:var(--warning)}.count.is-known{--c:var(--muted)}.count.is-running{--c:var(--subtle)}
 .count .icon{flex:none;width:34px;height:34px;border-radius:9px;background:var(--c);display:flex;align-items:center;justify-content:center}
 .count .icon svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
 .count b{display:block;font-size:26px;line-height:1;letter-spacing:-0.03em;color:var(--ink);font-variant-numeric:tabular-nums}
 .count small{display:block;margin-top:3px;font-size:12.5px;color:var(--muted)}
-.count.zero{--c:var(--strong);border-width:1px;padding:11px 17px 11px 13px;box-shadow:none}
+.count:hover{transform:translate(-1px,-1px);box-shadow:2px 2px 0 var(--c)}
+main:has(#filter-all:checked) label[for=filter-all],main:has(#filter-failed:checked) label[for=filter-failed],main:has(#filter-known:checked) label[for=filter-known],main:has(#filter-flaky:checked) label[for=filter-flaky],main:has(#filter-running:checked) label[for=filter-running],main:has(#filter-passed:checked) label[for=filter-passed]{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--c)}
+.filter-input:focus-visible+.count{outline:2px solid var(--c);outline-offset:3px}
+.count.zero{--c:var(--strong);border-width:1px;padding:11px 17px 11px 13px;cursor:default}
+.count.zero:hover{transform:none;box-shadow:none}
 .count.zero .icon{background:var(--soft)}.count.zero .icon svg{stroke:var(--subtle)}.count.zero b{color:var(--subtle)}
-main.wrap{padding-top:32px;padding-bottom:24px}
-.spec{border:1px solid var(--strong);border-radius:12px;background:var(--surface);margin:0 8px 22px 0;box-shadow:4px 4px 0 -1px var(--surface),4px 4px 0 0 var(--strong),8px 8px 0 -1px var(--surface),8px 8px 0 0 var(--strong)}
-.spec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:16px 18px}
+main:has(#filter-failed:checked) .spec:not(.is-failed),main:has(#filter-failed:checked) .feature:not(.has-failed){display:none}
+main:has(#filter-known:checked) .spec:not(.is-known),main:has(#filter-known:checked) .feature:not(.has-known){display:none}
+main:has(#filter-flaky:checked) .spec:not(.is-flaky),main:has(#filter-flaky:checked) .feature:not(.has-flaky){display:none}
+main:has(#filter-running:checked) .spec:not(.is-running),main:has(#filter-running:checked) .feature:not(.has-running){display:none}
+main:has(#filter-passed:checked) .spec:not(.is-passed),main:has(#filter-passed:checked) .feature:not(.has-passed){display:none}
+.feature{margin:0 8px 34px 0}
+.feature-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 12px}
+.feature-head h2{margin:0;font-size:19px;letter-spacing:-.02em}
+.feature-count{font-size:13px;color:var(--muted)}
+.tallies{margin-left:auto;display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--muted)}
+.tally{display:inline-flex;align-items:center;gap:6px}.tally i{width:8px;height:8px;border-radius:2px;background:var(--c)}
+.tally.is-passed{--c:var(--success)}.tally.is-failed{--c:var(--danger)}.tally.is-flaky{--c:var(--warning)}.tally.is-known{--c:var(--muted)}.tally.is-running{--c:var(--subtle)}
+.feature-sheet{border:1px solid var(--strong);border-radius:12px;background:var(--surface);box-shadow:4px 4px 0 -1px var(--surface),4px 4px 0 0 var(--strong),8px 8px 0 -1px var(--surface),8px 8px 0 0 var(--strong);overflow:hidden}
+.spec+.spec{border-top:1px solid var(--line)}
+.spec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:14px 18px}
+.spec>summary:hover{background:var(--soft)}
 .spec>summary::-webkit-details-marker{display:none}
-.seal{flex:none;display:flex;width:36px;height:36px;border-radius:8px;align-items:center;justify-content:center;color:#fff}
-.passed .seal{background:var(--success)}.failed .seal{background:var(--danger)}.running .seal{background:var(--subtle)}
-.seal svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.seal{flex:none;display:flex;width:32px;height:32px;border-radius:8px;align-items:center;justify-content:center;color:#fff}
+.is-passed .seal{background:var(--success)}.is-failed .seal{background:var(--danger)}.is-flaky .seal{background:var(--warning)}.is-known .seal{background:var(--muted)}.is-running .seal{background:var(--subtle)}
+.seal svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}
 .heading{flex:1;min-width:0;display:flex;flex-direction:column}
 .title{font-weight:600}
 .path{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .state{font-size:13px;font-weight:600}
-.passed .state{color:var(--success)}.failed .state{color:var(--danger)}.running .state{color:var(--muted)}
+.is-passed .state{color:var(--success)}.is-failed .state{color:var(--danger)}.is-flaky .state{color:#8a6a00}.is-known .state,.is-running .state{color:var(--muted)}
 .time{font-size:12px;color:var(--subtle);min-width:48px;text-align:right}
-.flaky{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;border:2px solid var(--warning);border-radius:999px;padding:1px 9px;box-shadow:2px 2px 0 var(--warning)}
-.flaky svg{width:12px;height:12px;fill:none;stroke:var(--warning);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
-.body{border-top:1px solid var(--line);padding:6px 18px 18px}
+.body{border-top:1px solid var(--line);padding:6px 18px 18px;background:var(--surface)}
 h3{font-size:13px;margin:18px 0 8px}
 .bullets{margin:0;padding-left:18px}
 .steps{list-style:none;margin:0;padding:0}
@@ -191,14 +229,28 @@ figure:target .close{display:block;position:absolute;inset:0;cursor:zoom-out}
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;
 
+function renderFeature(name: string, entries: SpecSection[], single: boolean): string {
+    const tones = TONES.filter(({ tone }) => entries.some((entry) => entry.tone === tone));
+    const summary = tones.map(({ tone, tally }) => `<span class="tally is-${tone}"><i></i>${tally(entries.filter((entry) => entry.tone === tone).length)}</span>`).join("");
+    return `<section class="feature ${tones.map(({ tone }) => `has-${tone}`).join(" ")}">
+  <div class="feature-head"><h2>${escape(name)}</h2><span class="feature-count">${entries.length} Spec${entries.length === 1 ? "" : "s"}</span><span class="tallies">${summary}</span></div>
+  <div class="feature-sheet">${entries.map((entry) => renderSection(entry, single, single)).join("\n")}</div>
+</section>`;
+}
+
 export async function htmlReport(result: CiResult, options: { single?: boolean } = {}): Promise<string> {
-    const sections = await Promise.all(result.results.map(section));
-    const order = (entry: SpecSection) => (["failed", "error"].includes(entry.item.status) ? 0 : entry.item.flaky ? 1 : 2);
-    sections.sort((a, b) => order(a) - order(b));
+    const batch = result.batch;
+    const features = new Map((await featuresRepository.listFeatures(batch.projectId)).map((feature) => [feature.id, feature.title]));
+    const sections = await Promise.all(result.results.map((item) => section(item, features)));
+    const byFeature = new Map<string, SpecSection[]>();
+    for (const entry of sections) byFeature.set(entry.feature, [...(byFeature.get(entry.feature) ?? []), entry]);
+    const groups = [...byFeature].map(([name, entries]) => ({
+        name, entries: entries.sort((a, b) => RANK[a.tone] - RANK[b.tone] || a.item.title.localeCompare(b.item.title)),
+        rank: Math.min(...entries.map((entry) => RANK[entry.tone])),
+    })).sort((a, b) => a.rank - b.rank || Number(a.name === "Other Specs") - Number(b.name === "Other Specs") || a.name.localeCompare(b.name));
     const total = result.results.length;
     const passed = result.results.filter((item) => item.status === "passed").length;
-    const failed = result.results.filter((item) => ["failed", "error"].includes(item.status)).length;
-    const batch = result.batch;
+    const tally = (tone: Tone) => sections.filter((entry) => entry.tone === tone).length;
     const ci = batch.ci;
     const elapsed = batch.durationMs;
     const verdict = result.qualityGate.passed ? "passed" : "failed";
@@ -213,6 +265,10 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
         ci?.ref ? `<span class="mono">${escape(ci.ref)}</span>` : "",
         ci?.buildUrl ? `<a href="${escape(ci.buildUrl)}">Build</a>` : "",
     ].filter(Boolean).join("");
+    const filters = options.single ? "" : `<div class="filters" role="radiogroup" aria-label="Filter Specs by status">
+    ${filter("all", "All Specs", total, true)}
+    ${TONES.filter(({ tone }) => tone !== "running" || tally("running") > 0).map(({ tone, label }) => filter(tone, label, tally(tone), false)).join("\n    ")}
+  </div>`;
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape([...new Set([heading, project, "Specbook"].filter(Boolean))].join(" · "))}</title>${await favicon()}<style>${STYLE}</style></head>
@@ -224,13 +280,8 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
   <div class="meta">${meta}</div>
 </div></header>
 <main class="wrap">
-  ${options.single ? "" : `<div class="counts">
-    ${count("passed", "Passed", passed, CHECK)}
-    ${count("failed", "Failed", failed, CROSS)}
-    ${count("flaky", "Flaky", result.qualityGate.flaky, RETRY)}
-    ${count("known", "Known bugs", result.qualityGate.knownBugs, BUG)}
-  </div>`}
-  ${sections.map((entry) => renderSection(entry, options.single)).join("\n")}
+  ${filters}
+  ${groups.map((group) => renderFeature(group.name, group.entries, Boolean(options.single))).join("\n")}
 </main>
 <footer class="wrap">Generated by Specbook.</footer>
 </body></html>`;
