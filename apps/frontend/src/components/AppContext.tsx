@@ -8,6 +8,7 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
     AlertCircle,
+    ChevronDown,
     ChevronRight,
     Compass,
     ExternalLink,
@@ -143,44 +144,53 @@ function DiscoveryStartForm({
     );
 }
 
-const coverageLabels: Record<CoverageArea["coverage"], string> = { covered: "Covered", partial: "Partially covered", uncovered: "Uncovered" };
+const coverageLabels: Record<CoverageArea["coverage"], string> = { covered: "Covered", partial: "Partly covered", uncovered: "Not covered" };
+const coverageDot: Record<CoverageArea["coverage"], string> = { covered: "bg-success", partial: "bg-warning-icon", uncovered: "bg-ink-subtle" };
 
-function AreaCoverage({ projectId, area }: { projectId: string; area: CoverageArea }) {
-    const { data: overview } = useProjectOverview();
+function AreaStatus({ area }: { area: CoverageArea }) {
     return (
-        <div className="mt-3 border-t border-line pt-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-                <span className={cn("inline-flex items-center gap-1.5 text-meta font-medium", area.coverage === "covered" ? "text-success" : area.coverage === "partial" ? "text-ink" : "text-ink-muted")}>
-                    <span aria-hidden="true" className={cn("size-1.5 rounded-full", area.coverage === "covered" ? "bg-success" : area.coverage === "partial" ? "bg-warning-icon" : "bg-ink-subtle")} />
-                    {coverageLabels[area.coverage]}
-                </span>
-                <span className="text-meta text-ink-muted">{area.reason}</span>
-            </div>
-            {area.specs.length > 0 && (
-                <ul className="mt-2 space-y-1">
+        <span className="inline-flex items-center gap-1.5 text-meta text-ink-muted" title={area.reason}>
+            <span aria-hidden="true" className={cn("size-1.5 rounded-full", coverageDot[area.coverage])} />
+            {coverageLabels[area.coverage]}
+        </span>
+    );
+}
+
+function AreaSpecs({ projectId, area }: { projectId: string; area: CoverageArea }) {
+    const { data: overview } = useProjectOverview();
+    const missing = area.specs.length > 0 && area.uncoveredRoutes.length > 0 && area.uncoveredRoutes.length < area.routes.length;
+    if (area.specs.length === 0) return <p className="mt-2 text-meta text-ink-subtle">No Specs yet.</p>;
+    return (
+        <Collapsible className="mt-1.5">
+            <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="group/specs -ml-2.5 h-7 px-2.5">
+                    {countLabel(area.specs.length, "Spec")} <ChevronDown size={13} aria-hidden="true" className="transition-transform group-data-[state=open]/specs:rotate-180 motion-reduce:transition-none" />
+                </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+                <ul className="mt-2 grid gap-x-8 gap-y-1.5 md:grid-cols-2">
                     {area.specs.map((spec) => (
-                        <li key={spec.id} className="flex min-w-0 items-center gap-1.5">
+                        <li key={spec.id} className="flex min-w-0 items-center gap-1.5 text-control">
                             <StatusDot status={overview?.specHealth[spec.id]?.status ?? "unverified"} size={13} />
-                            <Link href={`/p/${projectId}/specs/${spec.id}`} className="min-w-0 truncate text-ink-muted hover:text-ink hover:underline">{spec.title}</Link>
+                            <Link href={`/p/${projectId}/specs/${spec.id}`} className="link-bold min-w-0 truncate text-ink-muted" title={spec.title}>{spec.title}</Link>
                         </li>
                     ))}
                 </ul>
-            )}
-            {area.specs.length > 0 && area.uncoveredRoutes.length > 0 && area.uncoveredRoutes.length < area.routes.length && (
-                <p className="mt-2 text-meta text-ink-subtle [overflow-wrap:anywhere]">No Spec opens <span className="font-mono">{area.uncoveredRoutes.join("  ·  ")}</span></p>
-            )}
-        </div>
+                {missing && <p className="mt-2 text-meta text-ink-subtle [overflow-wrap:anywhere]">No Spec opens <span className="font-mono">{area.uncoveredRoutes.join("  ·  ")}</span></p>}
+            </CollapsibleContent>
+        </Collapsible>
     );
 }
 
 function ConfirmedContextSummary({ projectId, context, coverage }: { projectId: string; context: ProjectContext; coverage?: CoverageResponse | null }) {
     const areas = new Map(coverage?.areas.map((area) => [area.name, area]));
     return (
-        <div className="px-4 py-4 sm:px-5">
-            <ContextReadout context={context} renderArea={coverage ? (name) => {
-                const area = areas.get(name);
-                return area && <AreaCoverage projectId={projectId} area={area} />;
-            } : undefined} />
+        <div className="px-5 py-6 sm:px-7 sm:py-7">
+            <ContextReadout
+                context={context}
+                renderAreaStatus={coverage ? (name) => { const area = areas.get(name); return area && <AreaStatus area={area} />; } : undefined}
+                renderArea={coverage ? (name) => { const area = areas.get(name); return area && <AreaSpecs projectId={projectId} area={area} />; } : undefined}
+            />
         </div>
     );
 }

@@ -705,6 +705,17 @@ summary:focus-visible,
     font-size: 1rem;
 }
 
+.link-bold {
+    transition: color 150ms ease-out, -webkit-text-stroke-color 150ms ease-out;
+    -webkit-text-stroke: 0.35px transparent;
+}
+
+.link-bold:hover,
+.link-bold:focus-visible {
+    color: var(--color-ink);
+    -webkit-text-stroke-color: currentColor;
+}
+
 .raised-panel {
     border: var(--stroke) solid var(--stroke-ink);
     box-shadow: 3px 3px 0 var(--stroke-ink);
