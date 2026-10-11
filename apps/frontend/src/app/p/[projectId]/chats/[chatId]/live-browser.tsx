@@ -50,7 +50,7 @@ export function LiveBrowser({ sessionId, origin, variant }: { sessionId: string;
                 {origin && <span className="min-w-0 truncate font-mono text-meta text-ink-subtle" title={origin}>{origin}</span>}
                 <span className="ml-auto flex shrink-0 items-center gap-1.5 text-meta text-ink-muted" role="status">
                     <span className={cn("size-1.5 rounded-full", copy.dot)} aria-hidden="true" />
-                    {copy.label}
+                    <span className={status === "connected" ? "sr-only" : undefined}>{copy.label}</span>
                 </span>
             </header>
             <div className={cn("w-full bg-browser", pane ? "min-h-0 flex-1" : "aspect-[16/10] max-h-[340px]")}>
