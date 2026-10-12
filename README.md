@@ -105,7 +105,10 @@ Tests use the supported `specbook` methods for browser and API checks, and Specb
 
 The `specbook` CLI runs Specs on your machine, including against `localhost`, with no Specbook server. Its brain is the coding agent you already use (Claude Code or Codex), so there is no model to configure in Specbook.
 
+Install the CLI tarball from your team's Specbook server, or [pack this checkout locally](docs/cli/README.md):
+
 ```sh
+npm install -g https://specbook.example.com/api/cli/specbook.tgz
 specbook init --base-url http://localhost:3000 --agent claude
 specbook chat "a shopper can remove an item from the cart"
 ```
@@ -130,11 +133,13 @@ Login asks for the token without echoing it and stores it outside the repository
 Create a project CI token under **Settings → Automation → CI access** and copy the pipeline snippet for your provider. The CLI starts a batch, waits for the result and writes `specbook-junit.xml`, `specbook-summary.md` and `specbook-report.html`, a self-contained report with each Spec's steps, screenshots and failure. It can also comment on GitHub pull requests and GitLab merge requests.
 
 ```sh
-export SPECBOOK_URL="https://specbook.example.com"
+export SPECBOOK_URL="https://specbook.example.com/api"
 export SPECBOOK_PROJECT="YOUR_PROJECT_ID"
 # Configure SPECBOOK_TOKEN in your pipeline's secret store.
-npx --yes specbook ci --environment Staging
+npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci --environment Staging
 ```
+
+The server serves its own CLI package at `/api/cli/specbook.tgz`, without authentication. Docker builds include the tarball; development servers return 404 until you [build and pack it](docs/cli/README.md).
 
 Preview URLs supplied with `--base-url` must belong to the chosen environment's allowed origins. Quality gates can fail the build on flaky results or known bugs; awaiting-deploy failures appear separately and don't fail the pipeline. CI needs no local workspace. Use `--json` for a stable machine-readable result; tokens never appear in it.
 

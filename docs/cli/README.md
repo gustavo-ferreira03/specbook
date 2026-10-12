@@ -3,7 +3,16 @@ Specbook CLI: local verification and team publishing
 
 Specbook keeps readable behavior contracts beside restricted Playwright tests. Start a `chat` with the behavior you want covered; Specbook uses your installed, authenticated Claude Code or Codex as its brain, asks for missing details, and creates or runs Specs. The local CLI needs no Specbook server and no model configured in Specbook.
 
-Build this checkout with Node.js 22 or newer and pnpm:
+Install the CLI from your team's Specbook server with Node.js 22 or newer:
+
+```sh
+npm install -g https://specbook.example.com/api/cli/specbook.tgz
+specbook init --base-url http://localhost:3000 --agent codex
+```
+
+The server serves its own CLI tarball without authentication at `/api/cli/specbook.tgz` through the frontend, or `/cli/specbook.tgz` on the backend. The package bundles the shared runtime, its test fixtures, report fonts, writing rules and this document at `dist/README.md`; it doesn't need the monorepo after installation.
+
+To build this checkout and run the CLI directly:
 
 ```sh
 pnpm install
@@ -13,16 +22,20 @@ node apps/cli/dist/index.js --help
 node /absolute/path/to/specbook/apps/cli/dist/index.js --help
 ```
 
-For another project, pack the CLI and install its tarball. The package bundles the shared runtime, its test fixtures, report fonts, writing rules and this document at `dist/README.md`; it doesn't need the monorepo after installation.
+Docker builds and packs the CLI into `apps/backend/dist/specbook.tgz`. A development server returns 404 from the download route until that file exists. Generate it from the repository root, then install the same tarball for local use:
 
 ```sh
-pnpm --filter specbook pack --pack-destination /tmp
+pnpm --filter @specbook/runtime build
+mkdir -p apps/backend/dist
+pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz
+npm install -g ./apps/backend/dist/specbook.tgz
 cd /path/to/your/app
-npm install -g /tmp/specbook-0.1.0.tgz
 specbook init --base-url http://localhost:3000 --agent codex
 ```
 
-The package name and bin are both `specbook`; after an npm release, `npx specbook` runs the same program. This branch doesn't publish a release. Chromium downloads on the first browser command if it isn't installed. On Linux, missing platform libraries may require `npx playwright install-deps chromium`. By default each command prints a colored summary with the next commands to run (built on commander, @clack/prompts and picocolors; `NO_COLOR` disables color). Spinners and prompts go to stderr. `--json` emits one JSON result on stdout, including errors, and never prompts. Failed checks, runs, or conversation turns return a nonzero exit status.
+Packing runs the CLI build through its `prepack` script. You can also run the downloaded package without installing it globally with `npx --yes --package="https://specbook.example.com/api/cli/specbook.tgz" specbook --help`. The executable is named `specbook`; the tarball URL selects this project's package.
+
+Chromium downloads on the first browser command if it isn't installed. On Linux, missing platform libraries may require `npx playwright install-deps chromium`. By default each command prints a colored summary with the next commands to run (built on commander, @clack/prompts and picocolors; `NO_COLOR` disables color). Spinners and prompts go to stderr. `--json` emits one JSON result on stdout, including errors, and never prompts. Failed checks, runs, or conversation turns return a nonzero exit status.
 
 Each command
 ------------
@@ -99,12 +112,14 @@ Remote CI
 Create a project CI token in **Project settings → Automation → CI access**. Personal tokens are for connecting, pulling and publishing; pipelines use the project CI token.
 
 ```sh
-export SPECBOOK_URL=https://specbook.example.com
+export SPECBOOK_URL=https://specbook.example.com/api
 export SPECBOOK_PROJECT=YOUR_PROJECT_ID
 # Supply SPECBOOK_TOKEN from your pipeline's secret store.
-npx --yes specbook ci --environment Staging
-npx --yes specbook ci --environment Preview --base-url https://preview.example.com
+npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci --environment Staging
+npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci --environment Preview --base-url https://preview.example.com
 ```
+
+Set `SPECBOOK_URL` to the API root, including `/api` when using the frontend, so the package URL and CLI requests use the same server. `npx` downloads that server's CLI tarball; the public package route doesn't need the project token.
 
 CI needs no `.specbook` workspace or saved personal login. `--url`, `--project` and `--token` override the corresponding variables; prefer the environment for the token so it doesn't enter shell history. Select a feature with `--feature-id <remote-id>` or Specs with `--spec-ids <id,id>`; omit both to run all Specs. The environment defaults to Production. Preview origins must be allowed by that environment.
 
@@ -314,7 +329,7 @@ Single-executable investigation
 
 The executable probe used Bun 1.3.14 and the repository's Playwright 1.62.0. A direct `bun build --compile` failed on optional `chromium-bidi` imports; excluding those imports produced a binary that successfully launched Chromium and read a page. That wasn't enough for the Spec runtime: it resolves `@playwright/test/cli` from disk, writes test modules and fixtures to disk, and starts Playwright with `process.execPath`. In a Bun-compiled program, that path is the compiled application; the runner probe invoked itself recursively instead of the Playwright CLI. The probe processes were stopped.
 
-Node SEA also requires bundling or extracting runtime modules and assets. The current Playwright child-process protocol needs a dedicated embedded-runner entry mode plus filesystem extraction before either option can support the shared runner reliably. This task ships an npm package instead of claiming a portable binary. Windows and macOS binary packaging remain unverified. References: [Bun executable documentation](https://bun.sh/docs/bundler/executables) and [Node SEA documentation](https://nodejs.org/download/release/latest-jod/docs/api/single-executable-applications.html).
+Node SEA also requires bundling or extracting runtime modules and assets. The current Playwright child-process protocol needs a dedicated embedded-runner entry mode plus filesystem extraction before either option can support the shared runner reliably. Specbook distributes an installable tarball served by its backend. Windows and macOS binary packaging remain unverified. References: [Bun executable documentation](https://bun.sh/docs/bundler/executables) and [Node SEA documentation](https://nodejs.org/download/release/latest-jod/docs/api/single-executable-applications.html).
 
 Gaps and scope
 --------------
@@ -373,10 +388,10 @@ Earlier phase verification
 
 `pnpm -r build` and each package's `tsc --noEmit` passed. Existing backend tests finished with 326 of 327 passing; the only failure was the documented OpenAI subscription sign-in test because callback port 1455 was occupied.
 
-The built CLI and an independently installed npm tarball ran the handwritten login Specs against SauceDemo and a localhost page. Checks covered initialization, scaffolding, credentials add/list/remove with a 0600 store, static validation, fresh signed-out runs, evidence, and self-contained reports. A deliberate nonsecret failure produced its per-step screenshot, failed-step context and failure video; secret runs disabled video and masked inputs, reflected text and shadow-root text. Text artifacts contained none of the configured credential values.
+The built CLI and an independently installed package tarball ran the handwritten login Specs against SauceDemo and a localhost page. Checks covered initialization, scaffolding, credentials add/list/remove with a 0600 store, static validation, fresh signed-out runs, evidence, and self-contained reports. A deliberate nonsecret failure produced its per-step screenshot, failed-step context and failure video; secret runs disabled video and masked inputs, reflected text and shadow-root text. Text artifacts contained none of the configured credential values.
 
 Browser checks on both targets covered persistent sessions, snapshot refs, secret filling, inspection, clicks, origin blocking, cleanup, and locator counts of zero, one and several matches. Credentials containing quotes and backslashes also stayed out of valid JSON responses.
 
-Real authenticated Codex created a Cart Spec in one run. The final restricted Codex and Claude adapters each verified that existing Spec in one run with no writes. The loopback request-inventory script confirmed their available tools and checked credential redaction, forbidden writes, path traversal, symlinks and the three-run limit after an MCP restart. Timeout and cancellation checks returned the expected statuses and killed descendants that ignored SIGTERM. Run that unbilled adapter probe with `pnpm --filter specbook exec tsx scripts/check-agent-wiring.mjs`; it needs the supported agents installed and a local login or API key so the adapters can initialize authentication, while all model requests go to its loopback stub.
+Real authenticated Codex created a Cart Spec in one run. The final restricted Codex and Claude adapters each verified that existing Spec in one run with no writes. The loopback request-inventory script confirmed their available tools and checked credential redaction, forbidden writes, path traversal, symlinks and the three-run limit after an MCP restart. Timeout and cancellation checks returned the expected statuses and killed descendants that ignored SIGTERM. Run that unbilled adapter probe with `pnpm --dir apps/cli exec tsx scripts/check-agent-wiring.mjs`; it needs the supported agents installed and a local login or API key so the adapters can initialize authentication, while all model requests go to its loopback stub.
 
-All disposable workspaces and credential stores used `/tmp`, and the checks left the developer servers on ports 4000 and 4001 alone. Docker wiring was updated for the shared runtime; this environment did not build a container image. The npm package was packed and installed locally, and `npx --package <local-tarball> specbook --version --json` passed. The installed tarball also verified the existing Cart Spec through Codex in one run with no writes. Nothing was published. Windows and macOS behavior remains untested.
+All disposable workspaces and credential stores used `/tmp`, and the checks left the developer servers on ports 4000 and 4001 alone. Docker wiring was updated for the shared runtime; this environment did not build a container image. The CLI tarball was packed and installed locally, and `npx --package <local-tarball> specbook --version --json` passed. The installed tarball also verified the existing Cart Spec through Codex in one run with no writes. Nothing was published. Windows and macOS behavior remains untested.
