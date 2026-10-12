@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, count, eq, gt, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { RunnerPayload } from "@specbook/runtime/runner-protocol";
 import { HTTPException } from "hono/http-exception";
 import { db } from "../db/client";
@@ -8,6 +8,12 @@ import { runnerInstances, runnerJobs, runnerTokens } from "../db/schema";
 export type RunnerToken = typeof runnerTokens.$inferSelect;
 export type RunnerJob = typeof runnerJobs.$inferSelect;
 export type RunnerInstance = typeof runnerInstances.$inferSelect;
+export const MAX_RUNNER_ATTEMPTS = 3;
+export const RUNNER_QUEUE_GRACE_MS = 60_000;
+
+export function runnerJobDeadline(job: RunnerJob): number {
+    return Date.parse(job.createdAt) + job.payload.timeoutMs + RUNNER_QUEUE_GRACE_MS;
+}
 
 class RunnersRepository {
     async instance(id: string): Promise<RunnerInstance | null> {
@@ -96,7 +102,8 @@ class RunnersRepository {
     }
 
     async reclaim(now = new Date().toISOString()): Promise<void> {
-        await db.update(runnerJobs).set({ status: "queued", runnerId: null, leaseId: null, leaseExpiresAt: null, updatedAt: now })
+        await db.update(runnerJobs).set({ status: "queued", runnerId: null, runnerInstanceId: null, leaseId: null, leaseExpiresAt: null,
+            lastFailure: "Runner lease expired before completion.", updatedAt: now })
             .where(and(eq(runnerJobs.status, "leased"), or(lte(runnerJobs.leaseExpiresAt, now), isNull(runnerJobs.runnerId))));
     }
 
@@ -104,11 +111,12 @@ class RunnersRepository {
         await this.reclaim();
         const instance = await this.instance(instanceId);
         if (!instance || instance.runnerId !== runner.id || instance.mode !== "runner" || instance.disconnectedAt) return null;
-        const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerInstanceId, instanceId), eq(runnerJobs.status, "leased")));
+        const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerInstanceId, instanceId), inArray(runnerJobs.status, ["leased", "completing"])));
         if (active >= instance.concurrency) return null;
         const matchingGroup = runner.group ? eq(runnerJobs.group, runner.group) : isNull(runnerJobs.group);
         const matchingProjects = runner.projectIds === null ? undefined : sql`${runnerJobs.projectId} in (select value from json_each(${JSON.stringify(runner.projectIds)}))`;
-        const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), matchingGroup, matchingProjects)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];
+        const beforeDeadline = sql`(julianday(${runnerJobs.createdAt}) + (json_extract(${runnerJobs.payload}, '$.timeoutMs') + ${RUNNER_QUEUE_GRACE_MS}) / 86400000.0) > julianday(${new Date().toISOString()})`;
+        const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), lt(runnerJobs.attempts, MAX_RUNNER_ATTEMPTS), beforeDeadline, matchingGroup, matchingProjects)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];
         if (!candidate) return null;
         const updated = await db.update(runnerJobs).set({ status: "leased", runnerId: runner.id, runnerInstanceId: instanceId, leaseId: crypto.randomUUID(),
             leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(), attempts: sql`${runnerJobs.attempts} + 1`, updatedAt: new Date().toISOString() })
@@ -120,20 +128,34 @@ class RunnersRepository {
         const now = new Date().toISOString();
         const expires = new Date(Date.now() + leaseMs).toISOString();
         const rows = await db.update(runnerJobs).set({ leaseExpiresAt: expires, updatedAt: now })
-            .where(and(eq(runnerJobs.id, id), eq(runnerJobs.status, "leased"), eq(runnerJobs.leaseId, leaseId), eq(runnerJobs.runnerId, runnerId), sql`${runnerJobs.leaseExpiresAt} > ${now}`))
+            .where(and(eq(runnerJobs.id, id), inArray(runnerJobs.status, ["leased", "completing"]), eq(runnerJobs.leaseId, leaseId), eq(runnerJobs.runnerId, runnerId), sql`${runnerJobs.leaseExpiresAt} > ${now}`))
             .returning({ leaseExpiresAt: runnerJobs.leaseExpiresAt });
         return rows.length ? expires : null;
     }
 
     async release(id: string, leaseId: string, runnerId: string): Promise<boolean> {
-        const rows = await db.update(runnerJobs).set({ status: "queued", runnerId: null, leaseId: null, leaseExpiresAt: null, updatedAt: new Date().toISOString() })
+        const rows = await db.update(runnerJobs).set({ status: "queued", runnerId: null, runnerInstanceId: null, leaseId: null, leaseExpiresAt: null, updatedAt: new Date().toISOString() })
             .where(and(eq(runnerJobs.id, id), eq(runnerJobs.status, "leased"), eq(runnerJobs.leaseId, leaseId), eq(runnerJobs.runnerId, runnerId)))
             .returning({ id: runnerJobs.id });
         return rows.length > 0;
     }
 
-    async complete(id: string): Promise<void> {
-        await db.update(runnerJobs).set({ status: "completed", leaseExpiresAt: null, updatedAt: new Date().toISOString() })
+    async reserveCompletion(id: string): Promise<void> {
+        await db.update(runnerJobs).set({ status: "completing", updatedAt: new Date().toISOString() }).where(eq(runnerJobs.id, id));
+    }
+
+    async restoreLease(id: string, leaseId: string): Promise<void> {
+        await db.update(runnerJobs).set({ status: "leased", updatedAt: new Date().toISOString() })
+            .where(and(eq(runnerJobs.id, id), eq(runnerJobs.status, "completing"), eq(runnerJobs.leaseId, leaseId)));
+    }
+
+    async recordFailure(id: string, reason: string): Promise<void> {
+        await db.update(runnerJobs).set({ lastFailure: reason }).where(eq(runnerJobs.id, id));
+    }
+
+    async complete(id: string, failed = false): Promise<void> {
+        await db.update(runnerJobs).set({ status: "completed", leaseExpiresAt: null, updatedAt: new Date().toISOString(),
+            ...(failed ? { runnerId: null, runnerInstanceId: null, leaseId: null } : { lastFailure: null }) })
             .where(eq(runnerJobs.id, id));
     }
 

@@ -67,7 +67,7 @@ export type RunnerClaim = z.infer<typeof runnerClaimResponseSchema>;
 
 export const runnerHeartbeatSchema = z.object({ leaseId: id, ...runnerVersionFields }).strict();
 export const runnerHeartbeatResponseSchema = z.object({ leaseExpiresAt: z.string().datetime() }).strict();
-export const runnerReleaseSchema = z.object({ leaseId: id }).strict();
+export const runnerReleaseSchema = z.object({ leaseId: id, reason: z.string().trim().min(1).max(2000).optional() }).strict();
 export const runnerDisconnectSchema = z.object({ instanceId: id }).strict();
 
 export const runnerCompleteRequestSchema = z.object({

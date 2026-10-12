@@ -7,6 +7,7 @@ import { isStepScreenshot, readEvidenceManifest, writeRunEvidence } from "@specb
 import { executableSource } from "@specbook/runtime/playwright";
 import { parsePlaywrightReport, stripAnsi } from "@specbook/runtime/report";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
+import { prepareReportSection } from "@specbook/runtime/html-report";
 import { tempDir, VALID_SPEC } from "../helpers/storage";
 
 function report(suites: unknown[], errors: unknown[] = []): string {
@@ -88,6 +89,26 @@ describe("parsePlaywrightReport", () => {
 });
 
 describe("run evidence", () => {
+    test("reports historical execution order by title and normalizes failed step titles", async () => {
+        const directory = tempDir();
+        await fs.mkdir(path.join(directory, "evidence"));
+        for (const number of [1, 2]) await fs.writeFile(path.join(directory, "evidence", `step-0${number}.png`), "png");
+        await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({
+            steps: [{ number: 1, label: "Open the page", file: "evidence/step-01.png" }, { number: 2, label: "The page is shown", file: "evidence/step-02.png" }],
+            failedStep: "  THE page   is shown.;", video: null,
+        }));
+        const section = await prepareReportSection({ directory, item: { runId: "history", title: "History", status: "failed", durationMs: 1, failReason: "Failed" },
+            humanSpec: { preconditions: ["An account exists"], steps: ["Open the page"], expectedResult: "The page is shown", postconditions: ["Sign out"] } });
+        assert.deepEqual(section.steps.map(({ label, kind, ordinal, state }) => ({ label, kind, ordinal, state })), [
+            { label: "Open the page", kind: "step", ordinal: 1, state: "passed" },
+            { label: "The page is shown", kind: "expected", ordinal: null, state: "failed" },
+        ]);
+        await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [{ number: 1, label: "Historical action", file: "evidence/step-01.png" }], video: null, failedStep: null }));
+        const fallback = await prepareReportSection({ directory, item: section.item, humanSpec: { preconditions: ["An account exists"], steps: ["Open the page"], expectedResult: "The page is shown", postconditions: [] } });
+        assert.equal(fallback.steps[0].kind, "step");
+        assert.equal(fallback.steps[0].ordinal, 1);
+    });
+
     test("validates stored manifests and supports older step entries", async () => {
         const directory = tempDir();
         const file = path.join(directory, "evidence.json");

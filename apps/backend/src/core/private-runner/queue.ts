@@ -3,7 +3,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import { HTTPException } from "hono/http-exception";
 import { runnerPayloadSchema, type RunnerCompletion, type RunnerPayload } from "@specbook/runtime/runner-protocol";
-import { runnersRepository, type RunnerJob, type RunnerToken } from "../../infra/repositories/runners";
+import { MAX_RUNNER_ATTEMPTS, RUNNER_QUEUE_GRACE_MS, runnerJobDeadline, runnersRepository, type RunnerJob, type RunnerToken } from "../../infra/repositories/runners";
 import { runsDir } from "../paths";
 import { createKeyedLock } from "../operations/keyed-lock";
 import { logger } from "../../infra/logger";
@@ -11,9 +11,12 @@ import { issuePrefixedToken } from "../accounts/tokens";
 import { publicRunner } from "./tokens";
 
 const withQueueLock = createKeyedLock().run;
+const jobLocks = createKeyedLock();
+const activeCompletions = new Set<string>();
 const events = new EventEmitter();
 events.setMaxListeners(0);
 let monitor: NodeJS.Timeout | undefined;
+let maintenance: Promise<void> | undefined;
 
 export function runnerLeaseMs(): number {
     const seconds = Number(process.env.SPECBOOK_RUNNER_LEASE_SECONDS ?? 60);
@@ -44,6 +47,7 @@ function waitForWork(signal: AbortSignal, milliseconds: number): Promise<void> {
 export async function claimRunnerWork(runner: RunnerToken, signal: AbortSignal, instanceId: string): Promise<RunnerJob | null> {
     const deadline = Date.now() + 25_000;
     while (!signal.aborted) {
+        await maintainRunnerQueue();
         const job = await withQueueLock("queue", async () => {
             const current = await runnersRepository.get(runner.id);
             if (!current) throw new HTTPException(401, { message: "Runner token was revoked" });
@@ -84,7 +88,7 @@ function leaseMatches(job: RunnerJob | null, runnerId: string, leaseId: string):
 }
 
 function requireLease(job: RunnerJob | null, runnerId: string, leaseId: string): RunnerJob {
-    if (!leaseMatches(job, runnerId, leaseId) || job.status !== "leased" || !job.leaseExpiresAt || Date.parse(job.leaseExpiresAt) <= Date.now()) {
+    if (!leaseMatches(job, runnerId, leaseId) || job.status !== "leased" || !job.leaseExpiresAt || Date.parse(job.leaseExpiresAt) <= Date.now() || runnerJobDeadline(job) <= Date.now()) {
         throw new HTTPException(409, { message: "Runner lease expired or this work was reassigned" });
     }
     return job;
@@ -99,26 +103,38 @@ export async function heartbeatRunnerWork(jobId: string, runnerId: string, lease
     });
 }
 
-export async function releaseRunnerWork(jobId: string, runnerId: string, leaseId: string): Promise<void> {
-    await withQueueLock("queue", async () => {
-        if (!await runnersRepository.get(runnerId)) throw new HTTPException(401, { message: "Runner token was revoked" });
-        requireLease(await runnersRepository.job(jobId), runnerId, leaseId);
-        await runnersRepository.release(jobId, leaseId, runnerId);
+export async function releaseRunnerWork(jobId: string, runnerId: string, leaseId: string, reason?: string): Promise<void> {
+    await jobLocks.run(jobId, async () => {
+        const job = await withQueueLock("queue", async () => {
+            if (!await runnersRepository.get(runnerId)) throw new HTTPException(401, { message: "Runner token was revoked" });
+            const job = requireLease(await runnersRepository.job(jobId), runnerId, leaseId);
+            if (reason) await runnersRepository.reserveCompletion(jobId);
+            else await runnersRepository.release(jobId, leaseId, runnerId);
+            return job;
+        });
+        if (reason) await failRunnerJob(job, reason);
     });
     events.emit("work");
 }
 
 export async function completeRunnerWork(jobId: string, runnerId: string, completion: RunnerCompletion): Promise<void> {
-    await withQueueLock("queue", async () => {
-        if (!await runnersRepository.get(runnerId)) throw new HTTPException(401, { message: "Runner token was revoked" });
-        const row = await runnersRepository.job(jobId);
-        if (leaseMatches(row, runnerId, completion.leaseId) && row.status === "completed") return;
-        const job = requireLease(row, runnerId, completion.leaseId);
-        const expected = new Set(job.payload.specs.map((spec) => spec.runId));
-        const reported = new Set(completion.results.map((result) => result.runId));
-        if (reported.size !== completion.results.length || expected.size !== reported.size || [...reported].some((id) => !expected.has(id))) {
-            throw new HTTPException(400, { message: "Report one result for each Spec in the runner work" });
-        }
+    await jobLocks.run(jobId, async () => {
+        const job = await withQueueLock("queue", async () => {
+            if (!await runnersRepository.get(runnerId)) throw new HTTPException(401, { message: "Runner token was revoked" });
+            const row = await runnersRepository.job(jobId);
+            if (leaseMatches(row, runnerId, completion.leaseId) && row.status === "completed") return null;
+            const job = requireLease(row, runnerId, completion.leaseId);
+            const expected = new Set(job.payload.specs.map((spec) => spec.runId));
+            const reported = new Set(completion.results.map((result) => result.runId));
+            if (reported.size !== completion.results.length || expected.size !== reported.size || [...reported].some((id) => !expected.has(id))) {
+                throw new HTTPException(400, { message: "Report one result for each Spec in the runner work" });
+            }
+            // Accepted uploads finish once even if their token is revoked during storage.
+            await runnersRepository.reserveCompletion(jobId);
+            activeCompletions.add(jobId);
+            return job;
+        });
+        if (!job) return;
         const staging = path.join(runsDir, `.runner-upload-${job.id}-${completion.leaseId}`);
         let bytes = 0;
         try {
@@ -155,7 +171,11 @@ export async function completeRunnerWork(jobId: string, runnerId: string, comple
             const { finishRunnerBatch } = await import("../runner/batch");
             await finishRunnerBatch(job.batchId, completion);
             await runnersRepository.complete(job.id);
+        } catch (error) {
+            await withQueueLock("queue", () => runnersRepository.restoreLease(job.id, completion.leaseId));
+            throw error;
         } finally {
+            activeCompletions.delete(jobId);
             await fs.rm(staging, { recursive: true, force: true });
         }
     });
@@ -180,13 +200,49 @@ export async function rotateRunnerToken(id: string) {
 }
 
 export async function cancelRunnerBatch(batchId: string): Promise<boolean> {
-    return withQueueLock("queue", () => runnersRepository.cancelBatch(batchId));
+    const job = (await runnersRepository.pending()).find((row) => row.batchId === batchId);
+    if (!job) return false;
+    return jobLocks.run(job.id, () => withQueueLock("queue", () => runnersRepository.cancelBatch(batchId)));
+}
+
+async function failRunnerJob(job: RunnerJob, reason: string): Promise<void> {
+    const { finishRunnerBatch } = await import("../runner/batch");
+    await runnersRepository.recordFailure(job.id, reason);
+    await finishRunnerBatch(job.batchId, { leaseId: job.leaseId ?? crypto.randomUUID(), durationMs: Math.max(0, Date.now() - Date.parse(job.createdAt)), processFailure: reason,
+        results: job.payload.specs.map((spec) => ({ runId: spec.runId, status: "error", durationMs: null, failReason: reason, failedStep: null, errorCode: "infrastructure", artifacts: [] })) });
+    await runnersRepository.complete(job.id, true);
+}
+
+function failureReason(job: RunnerJob): string | null {
+    if (runnerJobDeadline(job) <= Date.now()) return `Runner work expired after ${Math.round((job.payload.timeoutMs + RUNNER_QUEUE_GRACE_MS) / 1000)}s.${job.lastFailure ? ` ${job.lastFailure}` : ` No runner completed this work${job.group ? ` in group ${job.group}` : ""}.`}`;
+    if (job.status === "queued" && job.attempts >= MAX_RUNNER_ATTEMPTS) return `Runner work stopped after ${MAX_RUNNER_ATTEMPTS} attempts.${job.lastFailure ? ` ${job.lastFailure}` : " Runners repeatedly disconnected before completion."}`;
+    return null;
+}
+
+export function maintainRunnerQueue(): Promise<void> {
+    if (maintenance) return maintenance;
+    maintenance = (async () => {
+        await withQueueLock("queue", () => runnersRepository.reclaim());
+        const jobs = (await runnersRepository.pending()).filter((job) => !activeCompletions.has(job.id) && !jobLocks.has(job.id) && failureReason(job));
+        const results = await Promise.allSettled(jobs.map((job) => jobLocks.run(job.id, async () => {
+            const current = await withQueueLock("queue", async () => {
+                const row = await runnersRepository.job(job.id);
+                if (!row || row.status === "completed" || !failureReason(row)) return null;
+                await runnersRepository.reserveCompletion(row.id);
+                return row;
+            });
+            if (current) await failRunnerJob(current, failureReason(current)!);
+        })));
+        for (const result of results) if (result.status === "rejected") throw result.reason;
+        events.emit("work");
+    })().finally(() => { maintenance = undefined; });
+    return maintenance;
 }
 
 export function startRunnerLeaseMonitor(): void {
     if (monitor) return;
     monitor = setInterval(() => {
-        void withQueueLock("queue", () => runnersRepository.reclaim()).then(() => events.emit("work"))
+        void maintainRunnerQueue()
             .catch((error: unknown) => logger.error("could not reclaim runner leases", { error }));
     }, 1000);
     monitor.unref();

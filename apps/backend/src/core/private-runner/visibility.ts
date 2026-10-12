@@ -5,9 +5,10 @@ import { environments, projects, runs } from "../../infra/db/schema";
 import { runnersRepository } from "../../infra/repositories/runners";
 import type { Run } from "../../infra/repositories/runs";
 import { hasTunnel, pendingTunnelRunIds, tunnelQueueEntries } from "../tunnel/registry";
+import { maintainRunnerQueue } from "./queue";
 
 export async function runnerQueueSnapshot() {
-    await runnersRepository.reclaim();
+    await maintainRunnerQueue();
     const [configured, jobs, runners, instances] = await Promise.all([
         db.select({ environment: environments, projectName: projects.name }).from(environments)
             .innerJoin(projects, eq(projects.id, environments.projectId)),
@@ -54,11 +55,14 @@ export async function runnerQueueSnapshot() {
             && runners.some((runner) => runner.id === instance.runnerId && runner.group === entry.group
                 && (!runner.projectIds || runner.projectIds.includes(entry.projectId))));
         entry.onlineRunners = online.length;
-        entry.busyRunners = online.filter((instance) => jobs.filter((job) => job.status === "leased" && job.runnerInstanceId === instance.id).length >= instance.concurrency).length;
+        entry.busyRunners = online.filter((instance) => jobs.filter((job) => (job.status === "leased" || job.status === "completing") && job.runnerInstanceId === instance.id).length >= instance.concurrency).length;
         entry.oldestWaitMs = entry.oldestQueuedAt ? Math.max(0, Date.now() - Date.parse(entry.oldestQueuedAt)) : 0;
         if (entry.queued) {
             entry.reason = !online.length ? `No runner online${entry.group ? ` in group ${entry.group}` : ""}.`
                 : entry.busyRunners === online.length ? "All runners busy." : "Waiting for a runner to claim work.";
+            const retry = jobs.find((job) => job.status === "queued" && job.projectId === entry.projectId && job.group === entry.group
+                && byRun.get(job.payload.specs[0].runId)?.id === entry.environmentId && job.lastFailure);
+            if (retry) entry.reason = `${retry.lastFailure} ${entry.reason}`;
         }
     }
     for (const queue of await tunnelQueueEntries()) {

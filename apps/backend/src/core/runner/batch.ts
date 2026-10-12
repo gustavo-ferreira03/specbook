@@ -16,7 +16,7 @@ import { prepareRunRepositoryUnlocked } from "../repo/recovery";
 import { markdownHashOf, sourceHashOf, specTestFile, specYamlFile } from "../repo/writer";
 import { resolveSecretEnv } from "../credentials/profiles";
 import { projectSecretScrubber } from "../credentials/scrub";
-import { acquireSpecLocks, ResourceBusyError } from "../specs/lifecycle";
+import { acquireSpecLocks, ResourceBusyError, withSpecLock } from "../specs/lifecycle";
 import { runPlaywrightSuite } from "@specbook/runtime/playwright";
 import { withRunSlot } from "@specbook/runtime/process";
 import { analyzeForRun, MAX_FAIL_REASON_CHARS, MAX_FAILED_STEP_CHARS, RUN_TIMEOUT_MS, StaleRunError, type ExecutedRun, type RunOptions } from "./execution";
@@ -24,7 +24,7 @@ import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import type { SpecAnalysis } from "@specbook/runtime/validate";
 import type { RunnerCompletion } from "@specbook/runtime/runner-protocol";
-import { cancelRunnerBatch, enqueueRunnerBatch, pendingRunnerBatchIds } from "../private-runner/queue";
+import { cancelRunnerBatch, enqueueRunnerBatch, maintainRunnerQueue, pendingRunnerBatchIds } from "../private-runner/queue";
 import { createEnvironmentTunnelProxy, TunnelWaitInterrupted, waitForTunnel } from "../tunnel/registry";
 
 type FinalRunStatus = Exclude<RunStatus, "running">;
@@ -176,6 +176,14 @@ async function finishPreparedSpec(
     options?: RunOptions,
     failedStep: string | null = null,
 ): Promise<void> {
+    const current = await specsRepository.getSpec(prepared.item.specId);
+    const awaitingDeploy = current ? await specEnvironmentsRepository.awaiting(current, prepared.run.environment?.id) : false;
+    if (awaitingDeploy && outcome.status !== "passed") {
+        await runsRepository.markAwaitingDeploy(prepared.run.id);
+        prepared.run.awaitingDeploy = true;
+        prepared.run.automationPending = false;
+        prepared.item.awaitingDeploy = true;
+    }
     const result = {
         ...outcome,
         failReason: outcome.failReason === null || options && outcome.status === "passed" ? null : scrub(outcome.failReason).slice(0, MAX_FAIL_REASON_CHARS),
@@ -202,9 +210,9 @@ async function finishPreparedSpec(
         }
     }
     if (options?.updateSpecStatus !== false && (options?.persistFailures !== false || result.status === "passed") && (result.status === "passed" || result.status === "failed")) {
-        const current = await specsRepository.getSpec(prepared.item.specId);
         if (current && current.sourceHash === prepared.item.sourceHash && current.markdownHash === prepared.item.markdownHash
-            && (!prepared.run.awaitingDeploy || result.status === "passed")) {
+            && (!awaitingDeploy || result.status === "passed" && prepared.run.baseUrl === prepared.run.environment?.configuredBaseUrl)
+            && (!prepared.run.awaitingDeploy || result.status === "passed" && prepared.run.baseUrl === prepared.run.environment?.configuredBaseUrl)) {
             if (prepared.run.environment) await specEnvironmentsRepository.set(current, prepared.run.environment.id, result.status);
             else await specsRepository.updateSpecStatusForContent(current.id, current.sourceHash, current.markdownHash, result.status);
         }
@@ -497,7 +505,7 @@ export async function finishRunnerBatch(batchId: string, completion: RunnerCompl
             fs.readFile(path.join(directory, "spec.ts"), "utf8"),
         ]);
         const prepared: PreparedSpec = { run, projectId: batch.projectId, markdown, testSource, analysis: analyzeForRun(item.title, testSource, markdown), item };
-        await finishPreparedSpec(batch.id, prepared, result, (text) => text, batch.runnerOptions, result.failedStep);
+        await withSpecLock(item.specId, () => finishPreparedSpec(batch.id, prepared, result, (text) => text, batch.runnerOptions, result.failedStep));
     }
     batch.status = completion.processFailure ? "error" : batch.specs.some((entry) => entry.status === "failed" || entry.status === "error") ? "failed" : "passed";
     batch.durationMs = completion.durationMs;
@@ -511,6 +519,7 @@ async function waitRunnerBatch(batch: RunBatch, signal?: AbortSignal): Promise<R
             signal?.throwIfAborted();
             const completed = await getRunBatch(batch.id);
             if (completed && completed.status !== "running") return completed;
+            await maintainRunnerQueue();
             await new Promise<void>((resolve) => setTimeout(resolve, 500));
         }
     } catch (error) {
@@ -555,23 +564,31 @@ export async function verifyRunnerCandidate(input: { specId: string; testSource:
 
 export async function executeSingleSpecBatch(specId: string, options: RunOptions): Promise<ExecutedRun> {
     options.signal?.throwIfAborted();
-    const spec = await specsRepository.getSpec(specId);
-    if (!spec) throw new Error("Spec not found");
-    const project = await projectsRepository.getProject(spec.projectId);
-    if (!project) throw new Error("Project not found");
-    const { batch, prepared, secrets } = await prepareSpecBatch(project.id, [specId], spec.title, "", options.healOnFailure !== false, undefined, "manual", undefined, options);
-    if (batch.environment?.executor === "runner") {
-        await dispatchRunnerBatch(batch, prepared);
-        const completed = await waitRunnerBatch(batch, options.signal);
-        const stored = await runsRepository.getRun(prepared[0].run.id);
-        const item = completed.specs[0];
-        const run = stored ?? { ...prepared[0].run, status: item.status, durationMs: item.durationMs, failReason: item.failReason };
-        const manifest = await readEvidenceManifest(path.join(runsDir, run.id));
-        return { ...run, failedStep: manifest.failedStep };
-    }
-    await executeBatch(batch, prepared, batch.baseUrl!, secrets, options);
-    if (!prepared[0].finished) throw new TunnelWaitInterrupted("Backend stopped while waiting for a tunnel");
-    return prepared[0].finished!;
+    const release = await acquireSpecLocks([specId]);
+    let released = false;
+    try {
+        const spec = await specsRepository.getSpec(specId);
+        if (!spec) throw new Error("Spec not found");
+        const project = await projectsRepository.getProject(spec.projectId);
+        if (!project) throw new Error("Project not found");
+        const environment = typeof options.environment === "object" ? options.environment : await resolveRunEnvironment(project.id, options.environment, options.baseUrl);
+        if (environment.executor === "runner" && await runsRepository.hasRunningRuns([specId])) throw new ResourceBusyError("This Spec already has a runner run queued or in progress; retry after it finishes");
+        const { batch, prepared, secrets } = await prepareSpecBatch(project.id, [specId], spec.title, "", options.healOnFailure !== false, undefined, "manual", undefined, { ...options, environment });
+        if (batch.environment?.executor === "runner") {
+            await dispatchRunnerBatch(batch, prepared);
+            await release();
+            released = true;
+            const completed = await waitRunnerBatch(batch, options.signal);
+            const stored = await runsRepository.getRun(prepared[0].run.id);
+            const item = completed.specs[0];
+            const run = stored ?? { ...prepared[0].run, status: item.status, durationMs: item.durationMs, failReason: item.failReason };
+            const manifest = await readEvidenceManifest(path.join(runsDir, run.id));
+            return { ...run, failedStep: manifest.failedStep };
+        }
+        await executeBatch(batch, prepared, batch.baseUrl!, secrets, options);
+        if (!prepared[0].finished) throw new TunnelWaitInterrupted("Backend stopped while waiting for a tunnel");
+        return prepared[0].finished!;
+    } finally { if (!released) await release(); }
 }
 
 export async function startSpecBatch(projectId: string, specIds: string[], label: string, options: { environment?: string | RunEnvironment; baseUrl?: string; ci?: CiBatchMetadata; trigger?: RunBatchTrigger; healFailures?: boolean; rejectIfBusy?: boolean; onPrepared?: (batch: RunBatch) => Promise<void> } = {}): Promise<RunBatch> {

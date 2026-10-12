@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { executionPlan, type ExecutionStepKind, type HumanSpec } from "./types.ts";
 import { readEvidenceManifest } from "./evidence.ts";
+import { analyzeSpecSource, sameStepTitle } from "./validate.ts";
 
 const MAX_IMAGE_BYTES = 5_000_000;
 const MAX_VIDEO_BYTES = 8_000_000;
@@ -81,19 +82,22 @@ export async function prepareReportSection(options: {
     const { item, directory, humanSpec: human } = options;
     const manifest = directory ? await readEvidenceManifest(directory) : { steps: [], video: null, failedStep: null };
     const shots = new Map(manifest.steps.map((step) => [step.number, step]));
-    const planned = human?.steps.length
-        ? executionPlan(human)
-        : manifest.steps.map((step, index) => ({ title: step.label, kind: "step" as const, ordinal: index + 1 }));
-    const labels = planned.map((entry) => entry.title);
-    const failedIndex = manifest.failedStep ? labels.findIndex((label) => label.trim() === manifest.failedStep!.trim()) : -1;
+    const planned = human ? executionPlan(human) : [];
+    const source = directory ? await fs.readFile(path.join(directory, "spec.ts"), "utf8").catch(() => null) : null;
+    const analysis = source ? analyzeSpecSource(source) : null;
+    const executed = analysis?.ok ? analysis.analysis.steps.map((title, index) => ({ number: index + 1, title }))
+        : manifest.steps.length ? manifest.steps.map((step) => ({ number: step.number, title: step.label }))
+        : planned.map((entry, index) => ({ number: index + 1, title: entry.title }));
+    const failedIndex = manifest.failedStep ? executed.findIndex((entry) => sameStepTitle(entry.title, manifest.failedStep!)) : -1;
     const failed = ["failed", "error"].includes(item.status);
-    const steps = await Promise.all(labels.map(async (label, index) => {
-        const shot = shots.get(index + 1);
+    const steps = await Promise.all(executed.map(async ({ number, title }, index) => {
+        const shot = shots.get(number);
+        const label = shot?.label.trim() || title;
         const state: StepState = !failed ? "passed"
             : failedIndex >= 0 ? (index < failedIndex ? "passed" : index === failedIndex ? "failed" : "skipped")
             : shot ? "passed" : "skipped";
-        const { kind, ordinal } = planned[index]!;
-        return { number: index + 1, ordinal, kind, label: shot?.label.trim() || label, state, image: directory && shot ? await image(directory, shot.file) : null };
+        const matching = planned.find((entry) => sameStepTitle(entry.title, label));
+        return { number, ordinal: matching?.ordinal ?? (matching ? null : number), kind: matching?.kind ?? "step", label, state, image: directory && shot ? await image(directory, shot.file) : null };
     }));
     return { item, tone: toneOf(item), feature: options.feature || "Other Specs", path: options.path ?? null, expectedResult: human?.expectedResult ?? "", steps,
         video: directory && manifest.video ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES) : null };

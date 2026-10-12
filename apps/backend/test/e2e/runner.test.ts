@@ -57,6 +57,8 @@ before(async () => {
             request.on("end", () => {
                 response.end(JSON.stringify({ ok: true, method: request.method, token: request.headers["x-token"], data: body ? JSON.parse(body) : null }));
             });
+        } else if (request.url === "/slow-cleanup") {
+            setTimeout(() => response.end("Cleaned"), 6000).unref();
         } else if (request.url === "/api/redirect-out") {
             response.writeHead(307, { location: `${origin(evil)}/api/secret-target` });
             response.end();
@@ -259,6 +261,21 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
 });
 
 describe("Playwright runner (API)", () => {
+    test("slow cleanup has a separate budget and leaves a passing result intact", { timeout: 30_000 }, async () => {
+        const directory = tempDir();
+        const source = 'import { test, expect } from "specbook"; test("Cleanup budget", async ({ request, step, cleanup }) => { await cleanup(async () => { await request.get("/slow-cleanup"); }); await step("Check the page", async () => { const response = await request.get("/"); await expect(response).toBeOK(); }); });';
+        const write = fs.writeFile;
+        fs.writeFile = async (file, contents, options) => write(file, String(file).endsWith("playwright.config.mjs") ? String(contents).replace('"timeout": 100000', '"timeout": 3000') : contents, options);
+        let outcome;
+        try {
+            outcome = await runPlaywrightSuite({ directory, baseUrl: origin(app), specs: [suiteSpec("cleanup", source, path.join(directory, "output"))], timeoutMs: 25_000,
+                secretEnv: {}, secretOrigins: { defaultOrigins: [], byRef: {} }, scrub: (value) => value });
+        } finally { fs.writeFile = write; }
+        assert.equal(outcome.processFailure, null);
+        assert.equal(outcome.results.get("cleanup")?.status, "passed");
+        assert.ok(explorationRequests.includes("GET /slow-cleanup"), "registered cleanup runs after the check");
+    });
+
     test("uses no browser page, redacts secret request/response evidence and rejects off-origin redirects", { timeout: 90_000 }, async () => {
         const directory = tempDir("specbook-api-");
         const passDir = path.join(directory, "pass");

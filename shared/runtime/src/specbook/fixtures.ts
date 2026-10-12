@@ -25,6 +25,7 @@ type EvidenceState = { page?: Page; apiRequests: ApiRequestEvidence[] };
 hardenFunctionConstructors();
 
 const runtime = parseRuntime(process.env[RUNTIME_ENV]);
+const CLEANUP_BUDGET_MS = 5000;
 const guard = createGuard({ runtime, readSecret: (name) => process.env[name] });
 
 const secretValues = [...new Set(Object.entries(process.env)
@@ -187,14 +188,21 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
     },
     // Hidden teardown that resets data the Spec created: it runs after the test even when a step failed,
     // records no evidence and never changes the result. Depending on page and request keeps both open until it ends.
-    cleanup: async ({ page: _page, request: _request }, use) => {
+    cleanup: async ({ page: _page, request: _request }, use, testInfo) => {
         let registered: (() => Promise<void>) | undefined;
         await use(async (body) => {
             if (typeof body !== "function") throw new Error("cleanup() needs an async function");
             registered = body;
         });
         if (!registered) return;
-        await registered().catch(() => undefined);
+        testInfo.setTimeout(testInfo.timeout + CLEANUP_BUDGET_MS + 1000);
+        let timer: NodeJS.Timeout | undefined;
+        try {
+            await Promise.race([
+                Promise.resolve().then(registered).catch(() => undefined),
+                new Promise<void>((resolve) => { timer = setTimeout(resolve, CLEANUP_BUDGET_MS); }),
+            ]);
+        } finally { clearTimeout(timer); }
     },
 });
 

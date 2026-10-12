@@ -99,6 +99,10 @@ class RunsRepository {
         await db.update(runs).set({ automationPending: false }).where(eq(runs.id, id));
     }
 
+    async markAwaitingDeploy(id: string): Promise<void> {
+        await db.update(runs).set({ awaitingDeploy: true, automationPending: false }).where(eq(runs.id, id));
+    }
+
     async getRun(id: string): Promise<Run | null> {
         const rows = await db.select().from(runs).where(eq(runs.id, id));
         return rows[0] ?? null;

@@ -115,7 +115,8 @@ export function createRunnersRouter(): Hono {
         return c.json({ ok: true });
     });
     router.post("/runner/jobs/:id/release", access("runner-token", verifyRunner), zValidator("json", runnerReleaseSchema), async (c) => {
-        await releaseRunnerWork(c.req.param("id"), c.get("runner").id, c.req.valid("json").leaseId);
+        const input = c.req.valid("json");
+        await releaseRunnerWork(c.req.param("id"), c.get("runner").id, input.leaseId, input.reason);
         return c.json({ ok: true });
     });
     router.post("/runner/jobs/:id/complete", access("runner-token", verifyRunner), zValidator("json", runnerCompleteRequestSchema), async (c) => {

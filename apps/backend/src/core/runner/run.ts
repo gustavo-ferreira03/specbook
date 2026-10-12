@@ -1,4 +1,3 @@
-import { withSpecLock } from "../specs/lifecycle";
 import { executeSingleSpecBatch } from "./batch";
 import type { ExecutedRun, RunOptions } from "./execution";
 import { stopActiveProcesses } from "@specbook/runtime/process";
@@ -8,7 +7,7 @@ export type { ExecutedRun } from "./execution";
 
 export async function executeSpec(specId: string, options: RunOptions = {}): Promise<ExecutedRun> {
     options.signal?.throwIfAborted();
-    return withSpecLock(specId, () => executeSingleSpecBatch(specId, options));
+    return executeSingleSpecBatch(specId, options);
 }
 
 export function stopActiveRunProcesses(): void {

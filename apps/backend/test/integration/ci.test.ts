@@ -265,6 +265,10 @@ describe("CI access and quality gates", () => {
         await assert.rejects(() => completeRunnerWork(lease.id, officeRow.id, completion), /expired/);
         await assert.rejects(() => completeRunnerWork(lease.id, officeRow.id, { ...completion, leaseId: replacement.leaseId!, results: [] }), /each Spec/);
         await releaseRunnerWork(replacement.id, officeRow.id, replacement.leaseId!);
+        assert.equal(await runnersRepository.claim(officeRow, 60_000), null, "the third abandoned attempt cannot be leased again");
+        await runnersRepository.cancelBatch(payload.batchId);
+        const revokeBatch = crypto.randomUUID();
+        await enqueueRunnerBatch(revokeBatch, project.id, "office", { ...payload, batchId: revokeBatch });
         const finalLease = (await runnersRepository.claim(officeRow, 60_000))!;
         await revokeRunnerToken(officeRow.id);
         assert.equal((await runnersRepository.job(finalLease.id))!.status, "queued");
@@ -287,7 +291,7 @@ describe("CI access and quality gates", () => {
         const feature = await featuresRepository.createFeature(project.id, null, "Private", "", "features/private");
         const spec = await specsRepository.createSpecRecord({ projectId: project.id, featureId: feature.id, title: "Open the application", description: "", path: "specs/private", sourceHash: sourceHashOf(VALID_SPEC), markdownHash: markdownHashOf(markdown) });
         await specEnvironmentsRepository.set(spec, environment.id, "awaiting_deploy");
-        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: "sha", awaitingDeploy: true, environment });
+        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: "sha", awaitingDeploy: true, baseUrl: environment.baseUrl, environment });
         const batch = { id: crypto.randomUUID(), projectId: project.id, label: "Private checks", environment, baseUrl: environment.baseUrl,
             status: "running" as const, startedAt: new Date().toISOString(), durationMs: null, failReason: null,
             specs: [{ runId: run.id, specId: spec.id, commitSha: "sha", sourceHash: spec.sourceHash, markdownHash: spec.markdownHash, title: spec.title,

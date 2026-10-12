@@ -6,6 +6,7 @@ import { runsRepository } from "../../infra/repositories/runs";
 import { runsDir } from "../paths";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { readEvidenceManifest, type EvidenceManifest } from "@specbook/runtime/evidence";
+import { sameStepTitle } from "@specbook/runtime/validate";
 export { isInside } from "@specbook/runtime/safe-fs";
 
 
@@ -54,7 +55,7 @@ export async function readRunEvidence(runId: string) {
     const steps = manifest.steps.flatMap((item) => {
         if (!available.has(item.file)) return [];
         const number = item.number;
-        const planned = plan[number - 1];
+        const planned = plan.find((entry) => sameStepTitle(entry.title, item.label));
         return [{
             number,
             kind: planned?.kind ?? "step",
