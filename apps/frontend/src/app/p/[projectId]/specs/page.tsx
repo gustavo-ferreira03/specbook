@@ -32,6 +32,7 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
     { value: "all", label: "All" },
     { value: "failed", label: "Failing" },
     { value: "invalid", label: "Invalid" },
+    { value: "awaiting_deploy", label: "Waiting for deploy" },
     { value: "unverified", label: "Not run" },
     { value: "passed", label: "Passing" },
 ];
@@ -39,6 +40,7 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
 const RUN_SUBSETS: { status: SpecStatus; label: string }[] = [
     { status: "failed", label: "Failing" },
     { status: "unverified", label: "Not run" },
+    { status: "awaiting_deploy", label: "Waiting for deploy" },
 ];
 
 function plural(count: number, noun: string) {

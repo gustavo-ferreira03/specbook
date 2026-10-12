@@ -75,7 +75,7 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
 function LastRunText({ run }: { run: Run | null | undefined }) {
     if (run === undefined) return <Skeleton className="ml-auto h-3 w-20" />;
     if (run === null) return <span className="text-ink-subtle" aria-label="Not run">—</span>;
-    return <span className="inline-flex flex-wrap items-center gap-x-1.5 sm:flex-col sm:items-end"><RelativeTime value={run.startedAt} />{environmentLabel(run.environment?.name) && <span className="text-meta text-ink-subtle" title={run.baseUrl ?? undefined}>{run.environment!.name}</span>}</span>;
+    return <span className="inline-flex flex-wrap items-center gap-x-1.5 lg:flex-col lg:items-end"><RelativeTime value={run.startedAt} />{environmentLabel(run.environment?.name) && <span className="text-meta text-ink-subtle" title={run.baseUrl ?? undefined}>{run.environment!.name}</span>}</span>;
 }
 
 function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; spec: SpecSummary; run: Run | null | undefined; running: boolean; onRun?: (spec: SpecSummary) => void }) {
@@ -84,30 +84,30 @@ function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; 
     const status = useDisplayStatus(spec);
     return (
         <li className="group/row relative flex items-center gap-3 border-b border-line px-4 py-2.5 transition-colors duration-150 hover:bg-surface-soft sm:gap-4">
-            <span className="hidden w-24 shrink-0 sm:flex">
+            <span className="hidden w-40 shrink-0 lg:flex">
                 <StatusPill status={status} size="sm" />
             </span>
             <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                     <Link
                         href={`/p/${projectId}/specs/${spec.id}`}
-                        className="min-w-0 flex-1 truncate rounded-sm text-body font-medium sm:flex-none text-ink outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+                        className="min-w-0 flex-1 truncate rounded-sm text-body font-medium lg:flex-initial text-ink outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                     >
                         {spec.title}
                     </Link>
                     {run?.flaky && <StatusPill status="flaky" size="sm" />}
-                    <span aria-hidden="true" className="toc-leader hidden sm:block" />
+                    <span aria-hidden="true" className="toc-leader hidden lg:block" />
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted sm:hidden">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted lg:hidden">
                     <StatusPill status={status} size="sm" />
                     <LastRunText run={run} />
                     {duration && <><span aria-hidden="true" className="text-ink-disabled">·</span><span className="tabular">{duration}</span></>}
                 </div>
             </div>
-            <span className="hidden w-32 shrink-0 text-right text-meta text-ink-muted sm:block">
+            <span className="hidden w-32 shrink-0 text-right text-meta text-ink-muted lg:block">
                 <LastRunText run={run} />
             </span>
-            <span className="hidden w-14 shrink-0 text-right text-meta text-ink-subtle tabular sm:block">
+            <span className="hidden w-14 shrink-0 text-right text-meta text-ink-subtle tabular lg:block">
                 {duration ?? (run === undefined ? "" : "—")}
             </span>
             <span className="relative z-10 flex w-7 shrink-0 justify-end">
@@ -176,8 +176,8 @@ export function SpecTable({
 }) {
     return (
         <div className={cn("sheet overflow-hidden rounded-xl bg-surface", className)}>
-            <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-meta font-semibold text-ink-subtle sm:flex">
-                <span className="w-24 shrink-0">Status</span>
+            <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-meta font-semibold text-ink-subtle lg:flex">
+                <span className="w-40 shrink-0">Status</span>
                 <span className="flex-1">Spec</span>
                 <span className="w-32 shrink-0 text-right">Last run</span>
                 <span className="w-14 shrink-0 text-right">Duration</span>
