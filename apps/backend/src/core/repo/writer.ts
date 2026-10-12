@@ -38,6 +38,8 @@ export class SpecRevisionConflict extends Error {
     }
 }
 
+export class SpecPublishValidationError extends Error {}
+
 export interface PublishedSpecInput {
     path: string;
     baseRevision: string | null;
@@ -62,21 +64,21 @@ export async function readProjectSpecFiles(projectId: string) {
 
 export async function publishSpecsInRepo(projectId: string, environmentId: string, inputs: PublishedSpecInput[]) {
     for (const input of inputs) {
-        if (!/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/.test(input.path)) throw new Error("Use a Spec path inside specs/<feature>/<slug>");
+        if (!/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/.test(input.path)) throw new SpecPublishValidationError("Use a Spec path inside specs/<feature>/<slug>");
         const document = parseSpecYaml(input.files["spec.yml"]);
-        if (!document.title) throw new Error("Every Spec needs a title in spec.yml");
+        if (!document.title) throw new SpecPublishValidationError("Every Spec needs a title in spec.yml");
         const validation = validateSpec(input.files["spec.ts"], document.humanSpec);
-        if (!validation.ok) throw new Error(`${input.path}: ${validation.error}`);
-        if (!parseFeatureYaml(input.feature.source).title) throw new Error("Every Feature needs a title in feature.yml");
-        if (path.posix.dirname(input.path) !== input.feature.path) throw new Error("The Feature path must be the Spec's parent directory");
+        if (!validation.ok) throw new SpecPublishValidationError(`${input.path}: ${validation.error}`);
+        if (!parseFeatureYaml(input.feature.source).title) throw new SpecPublishValidationError("Every Feature needs a title in feature.yml");
+        if (path.posix.dirname(input.path) !== input.feature.path) throw new SpecPublishValidationError("The Feature path must be the Spec's parent directory");
     }
     const paths = new Set(inputs.map((input) => input.path));
-    if (paths.size !== inputs.length) throw new Error("Publish each Spec only once per request");
+    if (paths.size !== inputs.length) throw new SpecPublishValidationError("Publish each Spec only once per request");
     const existing = (await specsRepository.listSpecs(projectId)).filter((spec) => paths.has(spec.path));
     const lockedIds = new Set(existing.map((spec) => spec.id));
     return withSpecLocks(existing.map((spec) => spec.id), () => repoGit.withRepoLock(projectId, async () => {
         await repoGit.assertRepoWritableUnlocked(projectId);
-        if (!(await environmentsRepository.list(projectId)).some((environment) => environment.id === environmentId)) throw new Error("The target environment was removed. Connect to an existing environment before publishing.");
+        if (!(await environmentsRepository.list(projectId)).some((environment) => environment.id === environmentId)) throw new SpecPublishValidationError("The target environment was removed. Connect to an existing environment before publishing.");
         const conflicts: SpecRevisionConflict["conflicts"] = [];
         const changed = new Set<string>();
         const existingFeatures = new Set((await featuresRepository.listFeatures(projectId)).map((feature) => feature.path));
@@ -88,9 +90,9 @@ export async function publishSpecsInRepo(projectId: string, environmentId: strin
             const revision = yaml !== null && source !== null ? specRevision(yaml, source) : null;
             if (input.baseRevision !== revision || (!current && (yaml !== null || source !== null))) conflicts.push({ path: input.path, revision });
             if (revision !== specRevision(input.files["spec.yml"], input.files["spec.ts"])) changed.add(input.path);
-            if (existingFeatures.has(input.path)) throw new Error("A Feature already uses this Spec path");
+            if (existingFeatures.has(input.path)) throw new SpecPublishValidationError("A Feature already uses this Spec path");
             for (let parent = input.feature.path; parent !== "specs"; parent = path.posix.dirname(parent)) {
-                if (currentSpecs.has(parent) || paths.has(parent)) throw new Error("A Spec cannot contain Features or other Specs");
+                if (currentSpecs.has(parent) || paths.has(parent)) throw new SpecPublishValidationError("A Spec cannot contain Features or other Specs");
             }
         }
         if (conflicts.length) throw new SpecRevisionConflict(conflicts);

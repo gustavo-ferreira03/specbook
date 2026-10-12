@@ -7,10 +7,10 @@ import { recordAudit } from "../../../core/accounts/audit";
 import { beginOidc, finishOidc, validateIssuer } from "../../../core/accounts/oidc";
 import { hashPassword, verifyPassword } from "../../../core/accounts/passwords";
 import { acceptInvitationSchema, accessTokenSchema, adminSchema, invitationSchema, loginSchema, memberSchema, ssoSchema, tokenSchema } from "../../../core/accounts/schemas";
-import { authEvents, clearCookies, cookieToken, publicUser, randomToken, requestOrigin, revokeUserSessions, startSession, tokenHash } from "../../../core/accounts/sessions";
+import { authEvents, clearCookies, cookieToken, publicUser, randomToken, requestOrigin, revokeUserSessions, sessionFromHeaders, startSession, tokenHash } from "../../../core/accounts/sessions";
 import { encryptSecret } from "../../../core/credentials/crypto";
 import { accountsRepository, withAccountsLock, type User } from "../../repositories/accounts";
-import { access, requireRole } from "../access";
+import { access, browserSession, requireBrowserSession, requireRole } from "../access";
 import { logger } from "../../logger";
 
 const attempts = new Map<string, { count: number; resets: number }>();
@@ -45,14 +45,19 @@ export function createAccountsRouter(): Hono {
     });
     router.get("/auth/me", access("viewer"), (c) => c.json({ user: publicUser(requireRole(c, "viewer")) }));
 
-    router.get("/auth/access-tokens", access("viewer"), async (c) => {
+    router.get("/auth/access-tokens", access("viewer"), browserSession, async (c) => {
         return c.json({ tokens: await accountsRepository.accessTokens(requireRole(c, "viewer").id) });
     });
     router.post("/auth/access-tokens", access("viewer"), zValidator("json", accessTokenSchema), async (c) => {
         if (c.get("authentication") !== "session") throw new HTTPException(403, { message: "Sign in to the web app to create access tokens." });
         const user = requireRole(c, "viewer");
         const token = `sb_pat_${randomToken()}`;
-        const accessToken = await accountsRepository.createAccessToken(user.id, c.req.valid("json").name, tokenHash(token));
+        const { name, expiresAt } = c.req.valid("json");
+        const accessToken = await withAccountsLock(async () => {
+            const session = await sessionFromHeaders(c.req.raw.headers);
+            if (!session || session.user.id !== user.id) throw new HTTPException(401, { message: "Your session was revoked. Sign in again before creating a token." });
+            return accountsRepository.createAccessToken(user.id, name, tokenHash(token), expiresAt);
+        });
         await recordAudit("auth.access_token.created", { id: accessToken.id, name: accessToken.name });
         c.header("Cache-Control", "no-store");
         return c.json({ token, accessToken }, 201);
@@ -97,9 +102,9 @@ export function createAccountsRouter(): Hono {
         await recordAudit("auth.login", {}, undefined, actor(current));
         return c.json({ user: publicUser(current) });
     });
-    router.post("/auth/logout", access("viewer"), async (c) => {
+    router.post("/auth/logout", access("viewer"), browserSession, async (c) => {
         const token = cookieToken(c.req.raw.headers);
-        if (token) { await accountsRepository.deleteSession(tokenHash(token)); authEvents.emit("session", tokenHash(token)); }
+        if (token) { await withAccountsLock(() => accountsRepository.revokeSession(tokenHash(token))); authEvents.emit("session", tokenHash(token)); }
         clearCookies(c);
         await recordAudit("auth.logout");
         return c.json({ ok: true });
@@ -191,7 +196,9 @@ export function createAccountsRouter(): Hono {
     }));
     router.post("/auth/oidc/start", access("public"), zValidator("json", z.object({ link: z.boolean().optional() }).strict()), async (c) => {
         limit("oidc-start", 30);
-        return c.json({ url: await beginOidc(c, c.req.valid("json").link === true) });
+        const link = c.req.valid("json").link === true;
+        if (link) requireBrowserSession(c);
+        return c.json({ url: await beginOidc(c, link) });
     });
     router.get("/auth/oidc/callback", access("public"), async (c) => {
         try { return c.redirect(await finishOidc(c)); }

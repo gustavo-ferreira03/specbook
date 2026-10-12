@@ -14,6 +14,8 @@ import { featuresRepository } from "../../repositories/features";
 import { projectsRepository } from "../../repositories/projects";
 import { runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
+import { changesPrivateDestination, withProjectEnvironmentLock } from "../../../core/environments";
+import { environmentsRepository } from "../../repositories/environments";
 
 const createProjectSchema = z.object({
     name: z.string().min(1),
@@ -84,14 +86,20 @@ export function createProjectsRouter(): Hono {
         });
     });
 
-    router.patch("/projects/:id", access("editor"), zValidator("json", updateProjectSchema), async (c) => {
+    router.patch("/projects/:id", access("editor"), zValidator("json", updateProjectSchema), async (c) => withProjectEnvironmentLock(c.req.param("id"), async () => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) throw new HTTPException(404, { message: "Project not found" });
+        const input = c.req.valid("json");
+        const environment = (await environmentsRepository.list(project.id)).find((row) => row.name === "Production");
+        if (input.baseUrl && environment && changesPrivateDestination(environment, { ...environment, baseUrl: input.baseUrl })
+            && (c.get("user")?.role !== "admin" || c.get("authentication") !== "session")) {
+            throw new HTTPException(403, { message: "Only administrators signed in to the web app can change runner or tunnel destinations." });
+        }
         await projectsRepository.updateProject(project.id, c.req.valid("json"));
         const updated = await projectsRepository.getProject(project.id);
         if (!updated) throw new HTTPException(404, { message: "Project not found" });
         return c.json({ project: publicProject(updated) });
-    });
+    }));
 
     router.delete("/projects/:id", access("editor"), async (c) => {
         try {

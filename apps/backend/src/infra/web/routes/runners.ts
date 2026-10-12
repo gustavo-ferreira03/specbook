@@ -48,7 +48,7 @@ export function createRunnersRouter(): Hono {
         const { group, format } = c.req.valid("query");
         const runner = c.get("runner");
         const queues = (await runnerQueueSnapshot()).queues.filter((entry) =>
-            (!runner || ((!entry.group || entry.group === runner.group) && (!runner.projectIds || runner.projectIds.includes(entry.projectId))))
+            (!runner || (entry.group === runner.group && (!runner.projectIds || runner.projectIds.includes(entry.projectId))))
             && (group === undefined || (entry.group ?? "") === group));
         const metrics = queueMetrics(queues);
         c.header("Cache-Control", "no-store");

@@ -9,10 +9,11 @@ import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
 import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
 import { YamlParseError } from "@specbook/runtime/yaml";
 import { editSpecFiles } from "../../../core/repo/manual";
-import { publishSpecsInRepo, readProjectSpecFiles, SpecRevisionConflict, updateSpecWithLock } from "../../../core/repo/writer";
+import { publishSpecsInRepo, readProjectSpecFiles, SpecPublishValidationError, SpecRevisionConflict, updateSpecWithLock } from "../../../core/repo/writer";
 import { resolveRunEnvironment } from "../../../core/environments";
 import { projectsRepository } from "../../repositories/projects";
 import { specsRepository } from "../../repositories/specs";
+import { NetworkTargetError } from "@specbook/runtime/network/targets";
 
 const editFilesSchema = z
     .object({
@@ -82,7 +83,8 @@ export function createSpecsRouter(): Hono {
         } catch (error) {
             if (error instanceof SpecRevisionConflict) return c.json({ error: error.message, code: "revision_conflict", conflicts: error.conflicts, command: "specbook pull" }, 409);
             if (error instanceof ResourceBusyError || error instanceof UnsafeRepoPathError) throw new HTTPException(409, { message: error.message });
-            if (error instanceof Error) throw new HTTPException(400, { message: error.message });
+            if (error instanceof SpecPublishValidationError || error instanceof YamlParseError || error instanceof NetworkTargetError) throw new HTTPException(400, { message: error.message });
+            if (error instanceof z.ZodError) throw new HTTPException(400, { message: "Provide valid Spec and Feature YAML before publishing." });
             throw error;
         }
     });

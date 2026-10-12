@@ -1,5 +1,5 @@
 import { acceptCiTrigger, CiRequestError, startCiRun } from "../../../core/ci/runs";
-import { access, type BearerVerifier } from "../access";
+import { access, browserSession, type BearerVerifier } from "../access";
 import { loadProject } from "../load-project";
 import { publicFrontendOrigin } from "../security";
 import { zValidator } from "@hono/zod-validator";
@@ -54,19 +54,19 @@ async function acceptTrigger(c: Context, projectId: string, target?: string, nam
 
 export function createCiSettingsRouter(): Hono {
     const router = new Hono();
-    router.get("/projects/:id/ci", access("viewer"), async (c) => {
+    router.get("/projects/:id/ci", access("viewer"), browserSession, async (c) => {
         const id = c.req.param("id");
         const project = await loadProject(id);
         c.header("Cache-Control", "no-store");
         return c.json({ environments: await environmentsRepository.list(id), token: await ciTokenInfo(id), batches: await Promise.all((await listCiBatches(id)).map((batch) => ciResult(batch, publicFrontendOrigin(c)))) });
     });
-    router.post("/projects/:id/ci/token", access("editor"), async (c) => {
+    router.post("/projects/:id/ci/token", access("editor"), browserSession, async (c) => {
         const id = c.req.param("id");
         await loadProject(id);
         c.header("Cache-Control", "no-store");
         return c.json(await issueCiToken(id));
     });
-    router.delete("/projects/:id/ci/token", access("editor"), async (c) => {
+    router.delete("/projects/:id/ci/token", access("editor"), browserSession, async (c) => {
         await loadProject(c.req.param("id"));
         await ciRepository.revokeToken(c.req.param("id"));
         return c.body(null, 204);

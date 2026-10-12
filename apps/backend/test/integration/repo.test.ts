@@ -1991,7 +1991,7 @@ describe("accounts, roles and session security", () => {
         assert.equal((await call("GET", "/projects", undefined, viewer.cookie)).status, 401);
     });
 
-    test("personal tokens are one-time secrets, follow current roles and can only be revoked by their owner", async () => {
+    test("personal tokens are one-time secrets and membership changes revoke them", async () => {
         const { accountsRepository } = await import("../../src/infra/repositories/accounts");
         const { db } = await import("../../src/infra/db/client");
         const { personalAccessTokens } = await import("../../src/infra/db/schema");
@@ -2008,6 +2008,7 @@ describe("accounts, roles and session security", () => {
         assert.match(token, /^sb_pat_[a-f0-9]{64}$/);
         assert.equal(accessToken.name, "Work laptop");
         assert.equal(accessToken.lastUsedAt, null);
+        assert.equal(accessToken.expiresAt, null);
         const stored = (await db.select().from(personalAccessTokens)).find((row) => row.id === accessToken.id)!;
         assert.equal(stored.tokenHash, tokenHash(token));
         assert.ok(!JSON.stringify(stored).includes(token));
@@ -2018,23 +2019,126 @@ describe("accounts, roles and session security", () => {
         assert.ok(!JSON.stringify(list).includes(token));
         assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status, 404);
         assert.equal((await call("POST", "/auth/access-tokens", { name: "More tokens" }, "", headers)).status, 403);
+        assert.equal((await call("GET", "/auth/access-tokens", undefined, "", headers)).status, 403);
         const bearerWrite = await secured.request("http://localhost:4000/projects", { method: "POST", headers: { host: "localhost:4000", "content-type": "application/json", ...headers }, body: JSON.stringify({ name: "Bearer project", baseUrl: "https://example.com" }) });
         assert.equal(bearerWrite.status, 200, await bearerWrite.clone().text());
         assert.equal((await call("PATCH", `/settings/members/${member.id}`, { role: "viewer" })).status, 200);
-        assert.equal((await call("POST", "/projects", { name: "Forbidden", baseUrl: "https://example.com" }, "", headers)).status, 403);
+        assert.equal((await call("POST", "/projects", { name: "Forbidden", baseUrl: "https://example.com" }, "", headers)).status, 401);
         assert.equal((await call("PATCH", `/settings/members/${member.id}`, { disabled: true })).status, 200);
         assert.equal((await call("GET", "/auth/me", undefined, "", headers)).status, 401);
         assert.equal((await call("PATCH", `/settings/members/${member.id}`, { disabled: false })).status, 200);
         assert.equal((await call("GET", "/auth/me", undefined, adminCookie, { authorization: "Bearer invalid" })).status, 401);
         await accountsRepository.createSession(tokenHash(session), member.id, new Date(Date.now() + 60_000).toISOString());
-        assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`, undefined, cookie)).status, 200);
+        assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`, undefined, cookie)).status, 404);
         assert.equal((await call("GET", "/auth/me", undefined, "", headers)).status, 401);
         const audit = await (await call("GET", "/settings/audit?limit=100")).json();
         assert.ok(!JSON.stringify(audit).includes(token));
         assert.ok(audit.events.some((event: { actorId: string; action: string }) => event.actorId === member.id && event.action === "auth.access_token.created"));
     });
 
-    test("last usable administrator is protected and session revocation closes active streams", async () => {
+    test("personal tokens expire and cannot manage accounts or instance settings", async () => {
+        const { db } = await import("../../src/infra/db/client");
+        const { personalAccessTokens } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const projectId = await createProject("Browser-only management");
+        const expiresAt = new Date(Date.now() + 60_000).toISOString().replace(/\.\d+Z$/, "Z");
+        assert.equal((await call("POST", "/auth/access-tokens", { name: "Expired", expiresAt: "2000-01-01T00:00:00.000Z" })).status, 400);
+        const created = await call("POST", "/auth/access-tokens", { name: "Short-lived admin CLI", expiresAt });
+        assert.equal(created.status, 201);
+        const { token, accessToken } = await created.json();
+        assert.equal(accessToken.expiresAt, new Date(expiresAt).toISOString());
+        const headers = { authorization: `Bearer ${token}` };
+        assert.equal((await call("GET", "/projects", undefined, "", headers)).status, 200);
+        const routes: [string, string, unknown?][] = [
+            ["GET", "/settings/members"], ["GET", "/settings/sso"], ["DELETE", "/settings/invitations/00000000-0000-4000-8000-000000000000"],
+            ["POST", "/settings/invitations", { email: "refused@example.com", role: "viewer" }],
+            ["GET", "/runners"], ["POST", "/runners", { name: "Refused" }], ["DELETE", "/runners/00000000-0000-4000-8000-000000000000"],
+            ["GET", `/projects/${projectId}/ci`], ["POST", `/projects/${projectId}/ci/token`], ["DELETE", `/projects/${projectId}/ci/token`],
+            ["POST", "/auth/logout"],
+            ["POST", "/auth/oidc/start", { link: true }],
+        ];
+        for (const [method, url, body] of routes) {
+            const response = await call(method, url, body, "", headers);
+            assert.equal(response.status, 403, `${method} ${url}: ${await response.text()}`);
+        }
+        await db.update(personalAccessTokens).set({ expiresAt: "2000-01-01T00:00:00.000Z" }).where(eq(personalAccessTokens.id, accessToken.id));
+        assert.equal((await call("GET", "/auth/me", undefined, "", headers)).status, 401);
+        assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status, 200);
+    });
+
+    test("token issuance rechecks a session revoked after request authentication", async (t) => {
+        const { accountsRepository, withAccountsLock } = await import("../../src/infra/repositories/accounts");
+        const { tokenHash } = await import("../../src/core/accounts/tokens");
+        const member = await accountsRepository.createSsoUser("revocation-race@example.com", "Revocation race", "editor", "https://revocation.example.com", "editor");
+        const token = crypto.randomBytes(32).toString("hex");
+        await accountsRepository.createSession(tokenHash(token), member.id, new Date(Date.now() + 60_000).toISOString());
+        const original = accountsRepository.session.bind(accountsRepository);
+        let checked = false;
+        t.mock.method(accountsRepository, "session", async (hash: string) => {
+            const result = await original(hash);
+            if (hash === tokenHash(token) && !checked) {
+                checked = true;
+                await withAccountsLock(() => accountsRepository.revokeUserSessions(member.id));
+            }
+            return result;
+        });
+        try {
+            assert.equal((await call("POST", "/auth/access-tokens", { name: "Revoked session" }, `specbook_session=${token}`)).status, 401);
+            assert.deepEqual(await accountsRepository.accessTokens(member.id), []);
+        } finally { t.mock.restoreAll(); }
+    });
+
+    test("only browser administrators can configure runner and tunnel destinations", async () => {
+        const { accountsRepository } = await import("../../src/infra/repositories/accounts");
+        const { tokenHash } = await import("../../src/core/accounts/tokens");
+        const member = await accountsRepository.createSsoUser("destination-editor@example.com", "Destination editor", "editor", "https://destinations.example.com", "editor");
+        const session = crypto.randomBytes(32).toString("hex");
+        await accountsRepository.createSession(tokenHash(session), member.id, new Date(Date.now() + 60_000).toISOString());
+        const cookie = `specbook_session=${session}`;
+        const projectId = await createProject("Protected runner destinations");
+        const { environments } = await (await call("GET", `/projects/${projectId}/environments`)).json();
+        const environment = environments.find((entry: { name: string }) => entry.name === "Production");
+        const url = `/projects/${projectId}/environments/${environment.id}`;
+        const input = { name: "Production", baseUrl: "https://app.example.com", allowedOrigins: [], credentialOverrides: {}, executor: "server", runnerGroup: null };
+        assert.equal((await call("PUT", url, input, cookie)).status, 200);
+        const privateInput = { ...input, executor: "runner", runnerGroup: "lab" };
+        assert.equal((await call("PUT", url, privateInput, cookie)).status, 403);
+        assert.equal((await call("POST", `/projects/${projectId}/environments`, { ...privateInput, name: "Private" }, cookie)).status, 403);
+        assert.equal((await call("PUT", url, privateInput)).status, 200);
+        assert.equal((await call("PUT", url, privateInput, cookie)).status, 200);
+        for (const change of [{ baseUrl: "https://other.example.com" }, { allowedOrigins: ["https://other.example.com"] }, { runnerGroup: "other" }, { executor: "server", runnerGroup: null }, { executor: "tunnel" }]) {
+            assert.equal((await call("PUT", url, { ...privateInput, ...change }, cookie)).status, 403);
+        }
+        assert.equal((await call("PATCH", `/projects/${projectId}`, { baseUrl: "https://other.example.com" }, cookie)).status, 403);
+        const { token, accessToken } = await (await call("POST", "/auth/access-tokens", { name: "Admin destination test" })).json();
+        const headers = { authorization: `Bearer ${token}` };
+        assert.equal((await call("PUT", url, { ...privateInput, baseUrl: "https://other.example.com" }, "", headers)).status, 403);
+        assert.equal((await call("PATCH", `/projects/${projectId}`, { baseUrl: "https://other.example.com" }, "", headers)).status, 403);
+        assert.equal((await call("PUT", url, { ...privateInput, executor: "tunnel" })).status, 200);
+        assert.equal((await call("PUT", url, { ...privateInput, executor: "tunnel", baseUrl: "https://other.example.com" }, cookie)).status, 403);
+        assert.equal((await call("PATCH", `/projects/${projectId}`, { baseUrl: "https://other.example.com" })).status, 200);
+        assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status, 200);
+    });
+
+    test("publish maps validation failures and hides unexpected internal errors", async () => {
+        const { serializeSpecYaml } = await import("@specbook/runtime/yaml");
+        const projectId = await createProject("Safe publish failures");
+        const input = { path: "specs/store/open-application", baseRevision: null, files: { "spec.yml": serializeSpecYaml({ title: "Open application", description: "", humanSpec: HUMAN_SPEC }), "spec.ts": VALID_SPEC }, feature: { path: "specs/store", source: "title: Store\ndescription: Browsing\n" } };
+        const url = `/projects/${projectId}/specs/publish`;
+        const invalid = await call("POST", url, { specs: [{ ...input, files: { ...input.files, "spec.ts": "import forbidden from 'node:fs';" } }] });
+        assert.equal(invalid.status, 400, await invalid.clone().text());
+        const original = specsRepository.listSpecs;
+        specsRepository.listSpecs = async () => { throw new Error("private filesystem marker"); };
+        try {
+            const response = await call("POST", url, { specs: [input] });
+            assert.equal(response.status, 500, await response.clone().text());
+            const body = await response.json();
+            assert.ok(body.errorId);
+            assert.doesNotMatch(JSON.stringify(body), /private filesystem marker/);
+        } finally { specsRepository.listSpecs = original; }
+    });
+
+    test("last usable administrator is protected and session revocation closes active streams and tokens", async () => {
         const { accountsRepository } = await import("../../src/infra/repositories/accounts");
         const { watchSession } = await import("../../src/core/accounts/sessions");
         await accountsRepository.createSsoUser("unlinked-admin@example.com", "No active SSO", "admin", "https://inactive.example", "subject");
@@ -2043,6 +2147,7 @@ describe("accounts, roles and session security", () => {
         const signedIn = await call("POST", "/auth/login", { email: admin.email, password }, "");
         assert.equal(signedIn.status, 200);
         const cookie = cookieOf(signedIn);
+        const { token } = await (await call("POST", "/auth/access-tokens", { name: "Logout revocation" }, cookie)).json();
         const projectId = await createProject("Authenticated stream");
         const { createChat } = await import("../../src/core/chat/session-store");
         const chat = await createChat(projectId);
@@ -2057,6 +2162,7 @@ describe("accounts, roles and session security", () => {
             assert.equal(closed, true);
             assert.equal((await reader.read()).done, true, "logout closes the live SSE response");
             assert.equal((await call("GET", "/auth/me", undefined, cookie)).status, 401);
+            assert.equal((await call("GET", "/auth/me", undefined, "", { authorization: `Bearer ${token}` })).status, 401);
         } finally { stop(); await reader.cancel(); }
     });
 
@@ -2106,6 +2212,12 @@ describe("accounts, roles and session security", () => {
         };
         assert.equal((await call("PUT", "/settings/sso", config)).status, 200);
         try {
+            const { token: ssoToken, accessToken } = await (await call("POST", "/auth/access-tokens", { name: "SSO requires a browser" })).json();
+            const linkedWithToken = await begin(true);
+            const rejected = await call("GET", linkedWithToken.path, undefined, linkedWithToken.cookie, { authorization: `Bearer ${ssoToken}` });
+            assert.match(rejected.headers.get("location")!, /\/login\?error=sso_failed$/);
+            assert.equal(exchanges, 0, "personal tokens cannot complete account linking");
+            assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status, 200);
             const bound = await begin();
             await failed({ ...bound, cookie: adminCookie });
             assert.equal(exchanges, 0, "a different browser cannot exchange the code");

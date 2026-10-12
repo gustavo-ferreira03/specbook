@@ -26,12 +26,13 @@ jobs:
                   RELEASE_TAG: ${{ github.ref_name }}
               run: node --input-type=module -e 'import fs from "node:fs"; const { version } = JSON.parse(fs.readFileSync("apps/cli/package.json", "utf8")); if (process.env.RELEASE_TAG !== `v${version}`) throw new Error("Release tag must match the CLI package version");'
             - run: pnpm install --frozen-lockfile
-            - run: pnpm -r build
-            - name: Package CLI and UI
+            - run: pnpm --filter @specbook/runtime --filter backend --filter frontend build
+            - name: Package UI and embed its checksum in the CLI
               run: |
                   mkdir -p dist/release
-                  pnpm --dir apps/cli pack --out ../../dist/release/specbook.tgz
                   node apps/frontend/scripts/package-ui.mjs dist/release
+                  export SPECBOOK_UI_RELEASE_SHA256="$(cut -d ' ' -f 1 dist/release/specbook-ui-*.tar.gz.sha256)"
+                  pnpm --dir apps/cli pack --out ../../dist/release/specbook.tgz
                   cd dist/release
                   sha256sum specbook.tgz > specbook.tgz.sha256
             - name: Attach release artifacts

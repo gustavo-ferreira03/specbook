@@ -4,6 +4,16 @@ import { credentialsRepository } from "../infra/repositories/credentials";
 import { environmentsRepository } from "../infra/repositories/environments";
 import { httpUrlSchema } from "./ci/schemas";
 import { NetworkTargetError } from "@specbook/runtime/network/targets";
+import { createKeyedLock } from "./operations/keyed-lock";
+
+export const withProjectEnvironmentLock = createKeyedLock().run;
+type EnvironmentDestination = Pick<RunEnvironment, "baseUrl" | "allowedOrigins" | "executor" | "runnerGroup">;
+
+export function changesPrivateDestination(previous: EnvironmentDestination | undefined, next: EnvironmentDestination): boolean {
+    if ((previous?.executor ?? "server") !== (next.executor ?? "server") || (previous?.runnerGroup ?? null) !== (next.runnerGroup ?? null)) return true;
+    if (![previous?.executor, next.executor].some((executor) => executor === "runner" || executor === "tunnel")) return false;
+    return previous?.baseUrl !== next.baseUrl || JSON.stringify([...new Set(previous?.allowedOrigins ?? [])].sort()) !== JSON.stringify([...new Set(next.allowedOrigins)].sort());
+}
 
 export const environmentSchema = z.object({
     name: z.string().trim().min(1).max(80),

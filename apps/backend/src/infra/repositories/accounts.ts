@@ -44,22 +44,30 @@ export const accountsRepository = {
         return row ?? null;
     },
     async deleteSession(tokenHash: string) { await db.delete(userSessions).where(eq(userSessions.tokenHash, tokenHash)); },
-    async revokeUserSessions(userId: string) { await db.delete(userSessions).where(eq(userSessions.userId, userId)); },
+    async revokeSession(hash: string) {
+        await db.batch([
+            db.delete(personalAccessTokens).where(sql`${personalAccessTokens.userId} in (select ${userSessions.userId} from ${userSessions} where ${userSessions.tokenHash} = ${hash})`),
+            db.delete(userSessions).where(eq(userSessions.tokenHash, hash)),
+        ]);
+    },
+    async revokeUserSessions(userId: string) {
+        await db.batch([db.delete(userSessions).where(eq(userSessions.userId, userId)), db.delete(personalAccessTokens).where(eq(personalAccessTokens.userId, userId))]);
+    },
     async accessTokens(userId: string) {
-        return db.select({ id: personalAccessTokens.id, name: personalAccessTokens.name, createdAt: personalAccessTokens.createdAt, lastUsedAt: personalAccessTokens.lastUsedAt })
+        return db.select({ id: personalAccessTokens.id, name: personalAccessTokens.name, createdAt: personalAccessTokens.createdAt, lastUsedAt: personalAccessTokens.lastUsedAt, expiresAt: personalAccessTokens.expiresAt })
             .from(personalAccessTokens).where(eq(personalAccessTokens.userId, userId)).orderBy(desc(personalAccessTokens.createdAt), asc(personalAccessTokens.id));
     },
-    async createAccessToken(userId: string, name: string, tokenHash: string) {
-        const [token] = await db.insert(personalAccessTokens).values({ id: crypto.randomUUID(), userId, name, tokenHash, createdAt: now() })
-            .returning({ id: personalAccessTokens.id, name: personalAccessTokens.name, createdAt: personalAccessTokens.createdAt, lastUsedAt: personalAccessTokens.lastUsedAt });
+    async createAccessToken(userId: string, name: string, tokenHash: string, expiresAt: string | null = null) {
+        const [token] = await db.insert(personalAccessTokens).values({ id: crypto.randomUUID(), userId, name, tokenHash, createdAt: now(), expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null })
+            .returning({ id: personalAccessTokens.id, name: personalAccessTokens.name, createdAt: personalAccessTokens.createdAt, lastUsedAt: personalAccessTokens.lastUsedAt, expiresAt: personalAccessTokens.expiresAt });
         return token!;
     },
     async accessTokenUser(tokenHash: string): Promise<User | null> {
         const row = (await db.select({ user: users, tokenId: personalAccessTokens.id }).from(personalAccessTokens)
             .innerJoin(users, eq(users.id, personalAccessTokens.userId))
-            .where(and(eq(personalAccessTokens.tokenHash, tokenHash), isNull(users.disabledAt))))[0];
+            .where(and(eq(personalAccessTokens.tokenHash, tokenHash), isNull(users.disabledAt), or(isNull(personalAccessTokens.expiresAt), gt(personalAccessTokens.expiresAt, now())))))[0];
         if (!row) return null;
-        const used = await db.update(personalAccessTokens).set({ lastUsedAt: now() }).where(eq(personalAccessTokens.id, row.tokenId)).returning({ id: personalAccessTokens.id });
+        const used = await db.update(personalAccessTokens).set({ lastUsedAt: now() }).where(and(eq(personalAccessTokens.id, row.tokenId), or(isNull(personalAccessTokens.expiresAt), gt(personalAccessTokens.expiresAt, now())))).returning({ id: personalAccessTokens.id });
         return used.length ? row.user : null;
     },
     async revokeAccessToken(userId: string, id: string) {

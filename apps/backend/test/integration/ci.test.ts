@@ -34,6 +34,7 @@ const { enqueueRunnerBatch, completeRunnerWork, heartbeatRunnerWork, pendingRunn
 before(runMigrations);
 const app = new Hono();
 app.use("*", hostGuard(buildHostAllowlist(4000, {})), csrfGuard(), jsonBodyLimit());
+app.use("*", async (c, next) => { c.set("authentication", c.req.header("X-Specbook-Request") === "1" ? "session" : null); await next(); });
 app.route("/", createCiRouter());
 app.route("/", createCiSettingsRouter());
 app.route("/", createEnvironmentsRouter());
@@ -234,6 +235,10 @@ describe("CI access and quality gates", () => {
         const firstJob = (await runnersRepository.claim(officeRow, 60_000, firstInstance))!;
         const secondJob = (await runnersRepository.claim(officeRow, 60_000, secondInstance))!;
         assert.ok(firstJob && secondJob, "replicas sharing one token have independent capacity");
+        const ungroupedBatch = crypto.randomUUID();
+        await enqueueRunnerBatch(ungroupedBatch, project.id, null, { ...payload, batchId: ungroupedBatch });
+        assert.equal(await runnersRepository.claim(officeRow, 60_000), null, "a grouped runner must not claim ungrouped work");
+        await runnersRepository.cancelBatch(ungroupedBatch);
         assert.equal(await runnersRepository.claim(officeRow, 60_000, firstInstance), null);
         await runnersRepository.disconnect(officeRow.id, firstInstance);
         await runnersRepository.disconnect(officeRow.id, secondInstance);

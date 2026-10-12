@@ -10,7 +10,10 @@ export const adminSchema = z.object({ name: nameSchema, email: emailSchema, pass
 export const loginSchema = z.object({ email: emailSchema, password: z.string().min(1).max(128) }).strict();
 export const invitationSchema = z.object({ email: emailSchema, role: roleSchema }).strict();
 export const tokenSchema = z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
-export const accessTokenSchema = z.object({ name: nameSchema }).strict();
+export const accessTokenSchema = z.object({
+    name: nameSchema,
+    expiresAt: z.iso.datetime().refine((value) => Date.parse(value) > Date.now(), "Choose an expiry in the future").nullable().optional().default(null),
+}).strict();
 export const acceptInvitationSchema = tokenSchema.extend({ name: nameSchema, password: passwordSchema });
 export const memberSchema = z.object({ role: roleSchema.optional(), disabled: z.boolean().optional() }).strict()
     .refine((value) => value.role !== undefined || value.disabled !== undefined, "Choose a role or account status");

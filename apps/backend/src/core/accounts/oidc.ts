@@ -68,6 +68,7 @@ export async function finishOidc(c: Context): Promise<string> {
     const pending = await accountsRepository.takeOidcState(tokenHash(state), tokenHash(browser));
     clearCookies(c, "specbook_oidc");
     if (!pending) throw new Error("The single sign-on request expired. Start again.");
+    if (pending.linkUserId && c.get("authentication") !== "session") throw new Error("Sign in to the web app before connecting single sign-on.");
     const settings = await accountsRepository.getSso();
     if (!settings.enabled || settings.issuer !== pending.issuer || settings.clientId !== pending.clientId) throw new Error("Single sign-on settings changed. Start again.");
     const config = await configuration(settings);

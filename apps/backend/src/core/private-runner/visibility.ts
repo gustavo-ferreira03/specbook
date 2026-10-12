@@ -51,7 +51,7 @@ export async function runnerQueueSnapshot() {
     for (const entry of entries.values()) {
         if (entry.executor === "tunnel") continue;
         const online = instances.filter((instance) => instance.mode === "runner" && !instance.disconnectedAt && Date.now() - Date.parse(instance.lastSeenAt) < 90_000
-            && runners.some((runner) => runner.id === instance.runnerId && (!entry.group || runner.group === entry.group)
+            && runners.some((runner) => runner.id === instance.runnerId && runner.group === entry.group
                 && (!runner.projectIds || runner.projectIds.includes(entry.projectId))));
         entry.onlineRunners = online.length;
         entry.busyRunners = online.filter((instance) => jobs.filter((job) => job.status === "leased" && job.runnerInstanceId === instance.id).length >= instance.concurrency).length;

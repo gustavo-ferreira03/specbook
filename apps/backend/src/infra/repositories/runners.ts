@@ -82,7 +82,7 @@ class RunnersRepository {
     async enqueue(batchId: string, projectId: string, group: string | null, payload: RunnerPayload): Promise<RunnerJob> {
         const now = new Date().toISOString();
         const row: RunnerJob = { id: crypto.randomUUID(), batchId, projectId, group, payload, status: "queued", runnerId: null, runnerInstanceId: null, leaseId: null,
-            leaseExpiresAt: null, attempts: 0, createdAt: now, updatedAt: now };
+            leaseExpiresAt: null, attempts: 0, lastFailure: null, createdAt: now, updatedAt: now };
         await db.insert(runnerJobs).values(row);
         return row;
     }
@@ -106,7 +106,7 @@ class RunnersRepository {
         if (!instance || instance.runnerId !== runner.id || instance.mode !== "runner" || instance.disconnectedAt) return null;
         const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerInstanceId, instanceId), eq(runnerJobs.status, "leased")));
         if (active >= instance.concurrency) return null;
-        const matchingGroup = runner.group ? or(isNull(runnerJobs.group), eq(runnerJobs.group, runner.group)) : isNull(runnerJobs.group);
+        const matchingGroup = runner.group ? eq(runnerJobs.group, runner.group) : isNull(runnerJobs.group);
         const matchingProjects = runner.projectIds === null ? undefined : sql`${runnerJobs.projectId} in (select value from json_each(${JSON.stringify(runner.projectIds)}))`;
         const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), matchingGroup, matchingProjects)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];
         if (!candidate) return null;

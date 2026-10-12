@@ -14,6 +14,8 @@ const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageDirectory = path.resolve(moduleDirectory, "..");
 const MAX_UI_DOWNLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_UI_EXTRACTED_BYTES = 1024 * 1024 * 1024;
+declare const SPECBOOK_UI_RELEASE_SHA256: string;
+const expectedUiSha256 = typeof SPECBOOK_UI_RELEASE_SHA256 === "undefined" ? "" : SPECBOOK_UI_RELEASE_SHA256;
 
 export interface ServeOptions { port?: string; host?: string; data?: string; ui?: string; signal?: AbortSignal }
 export type ServeEvent =
@@ -46,10 +48,7 @@ async function response(url: string, signal?: AbortSignal): Promise<Response> {
 }
 
 async function downloadUi(currentVersion: string, target: string, url: string, signal?: AbortSignal): Promise<void> {
-    const checksumResponse = await response(`${url}.sha256`, signal);
-    const checksumText = await checksumResponse.text();
-    const checksum = checksumText.trim().split(/\s+/)[0];
-    if (checksumText.length > 4096 || !/^[a-fA-F0-9]{64}$/.test(checksum)) throw new Error("The UI release checksum is invalid");
+    if (!/^[a-f0-9]{64}$/.test(expectedUiSha256)) throw new Error("This CLI build has no trusted UI release checksum; use a release CLI or provide an extracted UI with --ui");
     const parent = path.dirname(target);
     await fs.mkdir(parent, { recursive: true, mode: 0o700 });
     const temporary = await fs.mkdtemp(path.join(parent, `.ui-${currentVersion}-`));
@@ -66,7 +65,7 @@ async function downloadUi(currentVersion: string, target: string, url: string, s
             callback(null, chunk);
         } });
         await pipeline(Readable.fromWeb(downloaded.body as unknown as import("node:stream/web").ReadableStream<Uint8Array>), measured, createWriteStream(archive, { flags: "wx", mode: 0o600 }), ...(signal ? [{ signal }] : []));
-        if (hash.digest("hex") !== checksum.toLowerCase()) throw new Error("UI release checksum verification failed");
+        if (hash.digest("hex") !== expectedUiSha256) throw new Error("UI release checksum verification failed");
         const extracted = path.join(temporary, "ui");
         await fs.mkdir(extracted, { mode: 0o700 });
         const tar = await import("tar");
@@ -104,6 +103,7 @@ export async function resolveUi(options: Pick<ServeOptions, "ui" | "signal">, em
     if (await uiEntry(directory)) return { directory, source: "cache" };
     const release = process.env.SPECBOOK_UI_RELEASE_URL ?? "https://github.com/gustavo-ferreira03/specbook/releases/download/v{version}/specbook-ui-{version}.tar.gz";
     const url = normalizeServerUrl(release.replaceAll("{version}", currentVersion));
+    if (new URL(url).protocol !== "https:") throw new Error("SPECBOOK_UI_RELEASE_URL must use HTTPS");
     await emit({ event: "downloading_ui", version: currentVersion });
     try {
         await downloadUi(currentVersion, directory, url, options.signal);

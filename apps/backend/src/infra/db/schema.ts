@@ -71,12 +71,13 @@ export const runnerJobs = sqliteTable("runner_jobs", {
     projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
     group: text("group"),
     payload: text("payload", { mode: "json" }).$type<import("@specbook/runtime/runner-protocol").RunnerPayload>().notNull(),
-    status: text("status").$type<"queued" | "leased" | "completed">().notNull().default("queued"),
+    status: text("status").$type<"queued" | "leased" | "completing" | "completed">().notNull().default("queued"),
     runnerId: text("runner_id").references(() => runnerTokens.id, { onDelete: "set null" }),
     runnerInstanceId: text("runner_instance_id"),
     leaseId: text("lease_id"),
     leaseExpiresAt: text("lease_expires_at"),
     attempts: integer("attempts").notNull().default(0),
+    lastFailure: text("last_failure"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (table) => [index("runner_jobs_status_group").on(table.status, table.group), index("runner_jobs_lease_expiry").on(table.leaseExpiresAt)]);
@@ -259,6 +260,7 @@ export const personalAccessTokens = sqliteTable("personal_access_tokens", {
     tokenHash: text("token_hash").notNull().unique(),
     createdAt: text("created_at").notNull(),
     lastUsedAt: text("last_used_at"),
+    expiresAt: text("expires_at"),
 }, (table) => [index("personal_access_tokens_user").on(table.userId)]);
 
 export const userInvites = sqliteTable("user_invites", {

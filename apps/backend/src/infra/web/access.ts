@@ -29,6 +29,12 @@ export function access(rule: AccessRule, verify?: BearerVerifier): MiddlewareHan
 
 export const routePolicy = (handler: Function) => policies.get(handler);
 
+export function requireBrowserSession(c: Context): void {
+    if (c.get("authentication") !== "session") throw new HTTPException(403, { message: "Sign in to the web app to manage account or instance settings." });
+}
+
+export const browserSession: MiddlewareHandler = async (c, next) => { requireBrowserSession(c); await next(); };
+
 export function requireRole(c: Context, role: UserRole): User {
     const user = c.get("user");
     if (!user) throw new HTTPException(401, { message: "Sign in to continue." });
@@ -50,6 +56,7 @@ export function accessGate(): MiddlewareHandler {
         c.set("authentication", user ? tokenRequest ? "token" : "session" : null);
         if (!declared.length) throw new HTTPException(user ? 403 : 401, { message: "This endpoint is not available to your account." });
         if (required) requireRole(c, required);
+        if (required === "admin") requireBrowserSession(c);
         if (bearer) {
             const verify = handlers.map((handler) => verifiers.get(handler)).find(Boolean);
             if (!verify) throw new HTTPException(401, { message: "This endpoint requires a verified token." });
