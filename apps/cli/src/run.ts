@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { runPlaywrightSuite, type SuiteSpec, type SuiteSpecResult } from "@specbook/runtime/playwright";
 import { localNetworkPolicy } from "@specbook/runtime/network/targets";
 import { serializeSpecYaml } from "@specbook/runtime/yaml";
@@ -14,6 +14,7 @@ export interface LocalRunResult extends SuiteSpecResult {
     title: string;
     feature: string;
     evidencePath: string;
+    hashes?: { specTs: string; specYaml: string };
 }
 export interface LocalRun {
     id: string;
@@ -55,6 +56,7 @@ export async function runLocal(workspace: string, selector?: string, options: { 
     const results = specs.map((spec, index) => ({
         ...outcome.results.get(selected[index].key)!, path: spec.path, title: secrets.scrub(spec.title), feature: secrets.scrub(spec.feature),
         evidencePath: path.join(directory, spec.path),
+        hashes: { specTs: createHash("sha256").update(spec.source).digest("hex"), specYaml: createHash("sha256").update(spec.yaml).digest("hex") },
     }));
     const status = results.every((result) => result.status === "passed") ? "passed" : results.some((result) => result.status === "error") ? "error" : "failed";
     const run: LocalRun = { id, directory, startedAt, baseUrl: config.baseUrl, status, durationMs: Date.now() - Date.parse(startedAt), results, report: path.join(directory, "report.html") };

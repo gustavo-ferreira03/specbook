@@ -12,6 +12,9 @@ import { browse, startBrowserDaemon } from "./browser";
 import { sendMessage, listConversations, runChatWorker } from "./chat";
 import { chatReplySchema, chatReplyJsonSchema, type ChatReply } from "./chat-model";
 import { runMcpServer } from "./mcp";
+import { login, logout, connectionChoices, environmentChoices, connect, pull, publish, rememberToken, scrubTokens, redactTokens, RemoteError } from "./remote";
+import { runCi, type CiOptions } from "./ci";
+import { scrubCi } from "./ci-comment";
 import * as ui from "./ui";
 
 const json = process.argv.includes("--json");
@@ -21,7 +24,7 @@ const agentOption = () => new Option("--agent <agent>", "local coding agent that
 
 // Human output and JSON share one call site so secrets are scrubbed on every path.
 async function print(result: unknown, render: () => string): Promise<void> {
-    stdout.write(await scrub(json ? JSON.stringify(result) : render()) + "\n");
+    stdout.write(scrubCi(await scrubTokens(await scrub(json ? JSON.stringify(result) : render()))) + "\n");
 }
 
 async function working<T>(label: string, task: (spinner?: ReturnType<typeof clack.spinner>) => Promise<T>, indicator: "dots" | "timer" = "dots"): Promise<T> {
@@ -110,7 +113,7 @@ const program = new Command("specbook")
         styleDescriptionText: (text) => pc.dim(text),
     })
     .configureOutput({
-        writeErr: (text) => { if (!json) stderr.write(text); },
+        writeErr: (text) => { if (!json) stderr.write(scrubCi(redactTokens(text))); },
         outputError: (text, write) => write(ui.failure(text.replace(/^error: /, "")) + "\n"),
     })
     .exitOverride()
@@ -184,6 +187,108 @@ program.command("init")
         }
         const result = await initWorkspace(process.cwd(), baseUrl, agent) as Parameters<typeof ui.renderInit>[0];
         await print(result, () => ui.renderInit(result));
+    });
+
+program.command("login")
+    .helpGroup("Connect to a team:")
+    .description("verify and save a personal access token on this machine")
+    .argument("<server-url>", "the hosted Specbook URL or backend API URL")
+    .option("--stdin", "read the token from stdin")
+    .action(async (url: string, options: { stdin?: boolean }) => {
+        let token = "";
+        if (options.stdin) {
+            for await (const chunk of stdin) {
+                token += chunk.toString();
+                if (token.length > 4096) throw new Error("Token input is too large");
+            }
+            token = token.trim();
+        } else {
+            if (!interactive) throw new Error("Use --stdin to provide a personal access token non-interactively");
+            token = answer(await clack.password({ message: "Personal access token", output: stderr }));
+        }
+        rememberToken(token);
+        const result = await working("Verifying access token", () => login(url, token));
+        await print(result, () => ui.renderLogin(result));
+    });
+
+program.command("logout")
+    .helpGroup("Connect to a team:")
+    .description("remove a saved server login; defaults to the most recent")
+    .argument("[url]", "server URL to remove")
+    .action(async (url?: string) => {
+        const result = await logout(url);
+        await print(result, () => ui.renderLogout(result));
+    });
+
+program.command("connect")
+    .helpGroup("Connect to a team:")
+    .description("link this workspace to a remote project and environment")
+    .argument("[project]", "project id or name; select interactively when omitted")
+    .option("--server <url>", "saved server URL; defaults to the most recent login")
+    .option("--environment <name>", "environment name or id; defaults to Production")
+    .action(async (selected: string | undefined, options: { server?: string; environment?: string }) => {
+        const workspace = await workspaceDirectory();
+        const { server, projects } = await working("Loading projects", () => connectionChoices(options.server));
+        if (!projects.length) throw new Error("No projects are available to this user");
+        if (!selected) {
+            if (!interactive) throw new Error("Provide a project id or name when running non-interactively");
+            selected = answer(await clack.select({ message: "Connect to which project?", output: stderr, options: projects.map((project) => ({ value: project.id, label: project.name, hint: project.baseUrl })) }));
+        }
+        const matches = projects.filter((project) => project.id === selected || project.name.toLowerCase() === selected!.toLowerCase());
+        if (matches.length !== 1) throw new Error(matches.length ? "Project name is ambiguous; use its id" : "Project not found or access denied");
+        const project = matches[0]!;
+        const environments = await environmentChoices(server, project.id);
+        const name = options.environment ?? "Production";
+        const environment = environments.find((entry) => entry.id === name || entry.name.toLowerCase() === name.toLowerCase());
+        if (!environment) throw new Error("Environment not found; use --environment with an existing name or id");
+        const result = await connect(workspace, server, project, environment);
+        await print(result, () => ui.renderConnect(result));
+    });
+
+program.command("pull")
+    .helpGroup("Connect to a team:")
+    .description("download remote Specs, preserving local unpublished edits")
+    .action(async () => {
+        const result = await working("Pulling remote Specs", async () => pull(await workspaceDirectory()));
+        if (result.conflicts.length) process.exitCode = 1;
+        await print(result, () => ui.renderPull(result));
+    });
+
+program.command("publish")
+    .helpGroup("Connect to a team:")
+    .description("publish locally passing Specs with a remote revision check")
+    .argument("[selector]", "a Spec or feature path; all Specs when omitted")
+    .option("--run", "run the selected Specs before publishing")
+    .option("--environment <name>", "target environment; defaults to the connected environment")
+    .action(async (selector: string | undefined, options: { run?: boolean; environment?: string }) => {
+        const result = await working(options.run ? "Running and publishing Specs" : "Publishing Specs", async () => publish(await workspaceDirectory(), selector, options), options.run ? "timer" : "dots");
+        await print(result, () => ui.renderPublish(result));
+    });
+
+program.command("ci")
+    .helpGroup("Verify:")
+    .description("run remote Specs with a project CI token and save reports")
+    .option("--url <url>", "Specbook server URL; defaults to SPECBOOK_URL")
+    .option("--token <token>", "project CI token; prefer SPECBOOK_TOKEN")
+    .option("--project <id>", "project id; defaults to SPECBOOK_PROJECT")
+    .option("--environment <name>", "target server environment")
+    .option("--base-url <url>", "preview base URL for this run")
+    .option("--feature-id <id>", "run one remote feature")
+    .option("--spec-ids <ids>", "comma-separated remote Spec ids")
+    .option("--timeout <seconds>", "maximum wait; defaults to 3600 seconds")
+    .option("--report <path>", "HTML report path; defaults to specbook-report.html")
+    .option("--junit <path>", "JUnit path; defaults to specbook-junit.xml")
+    .option("--summary <path>", "Markdown summary path; defaults to specbook-summary.md")
+    .option("--commit-sha <sha>", "commit associated with this run")
+    .option("--ref <ref>", "branch or tag associated with this run")
+    .option("--build-url <url>", "pipeline URL")
+    .option("--fail-on-flaky", "include flaky Specs in the quality gate")
+    .option("--fail-on-known-bugs", "include known bugs in the quality gate")
+    .addOption(new Option("--comment <provider>", "publish a pipeline summary comment").choices(["github", "gitlab", "none"]))
+    .action(async (options: CiOptions) => {
+        const result = await working("Waiting for remote Specs", () => runCi(options), "timer");
+        if (!result.qualityGate.passed) process.exitCode = 1;
+        await print(result, () => ui.renderCi(result));
     });
 
 const spec = program.command("spec").description("scaffold and validate Specs").helpGroup("Write Specs by hand:");
@@ -306,16 +411,17 @@ main().catch(async (error) => {
     if (error instanceof CommanderError) {
         if (["commander.helpDisplayed", "commander.version", "commander.help"].includes(error.code)) return;
         process.exitCode = error.exitCode || 1;
-        if (json) stdout.write(JSON.stringify({ ok: false, error: error.message.replace(/^error: /, "") }) + "\n");
+        if (json) await print({ ok: false, error: error.message.replace(/^error: /, "") }, () => "");
         return;
     }
     const message = error instanceof Error ? error.message : String(error);
     let safe: string;
-    try { safe = await scrub(message); } catch { safe = "Could not read credentials securely; check SPECBOOK_HOME and file permissions"; }
+    try { safe = scrubCi(await scrubTokens(await scrub(message))); } catch { safe = "Could not read saved credentials securely; check SPECBOOK_HOME and file permissions"; }
     if (json) {
         const raw = process.argv.slice(2);
         const id = raw.find((item) => /^c-[a-f0-9]{8}$/.test(item)) ?? "";
-        stdout.write(JSON.stringify(raw.includes("chat") ? chatReplySchema.parse({ id, status: "failed", message: safe, error: safe }) : { ok: false, error: safe }) + "\n");
+        const detail = error instanceof RemoteError ? error.detail : undefined;
+        stdout.write(scrubCi(redactTokens(JSON.stringify(raw.includes("chat") ? chatReplySchema.parse({ id, status: "failed", message: safe, error: safe }) : { ok: false, error: safe, ...detail }))) + "\n");
     } else stderr.write(ui.failure(safe) + "\n");
     process.exitCode = 1;
 });

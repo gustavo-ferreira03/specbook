@@ -3,6 +3,8 @@ import pc from "picocolors";
 import type { ChatReply, ChatSpec } from "./chat-model";
 import type { LocalRun } from "./run";
 import type { LocatorCheck } from "./locators";
+import type { login, logout, connect, pull, publish } from "./remote";
+import type { CiResult } from "./ci";
 
 type Status = "passed" | "failed" | "error" | "changed_after_run" | "not_run";
 
@@ -227,4 +229,39 @@ export function renderConversations(result: { conversations: { id: string; statu
         [pc.dim("ID"), pc.dim("STATUS"), pc.dim("AGENT"), pc.dim("UPDATED"), pc.dim("SPECS")],
         ...result.conversations.map((chat) => [pc.bold(chat.id), colored(chat.status), chat.agent, pc.dim(ago(chat.updatedAt)), specs(chat.specs)]),
     ]);
+}
+
+export function renderLogin(result: Awaited<ReturnType<typeof login>>) {
+    return [success(`Logged in as ${pc.bold(result.user.name)}`), "", fields([["Server", result.url], ["Role", result.user.role], ["Default", "this server"]]), next("specbook connect <project>")].join("\n");
+}
+
+export function renderLogout(result: Awaited<ReturnType<typeof logout>>) {
+    return [result.removed ? success(`Logged out of ${result.url}`) : pc.dim("No saved login to remove"), result.defaultUrl ? `\n${fields([["Default", result.defaultUrl]])}` : ""].join("");
+}
+
+export function renderConnect(result: Awaited<ReturnType<typeof connect>>) {
+    return [success(`Connected to ${pc.bold(result.project.name)}`), "", fields([["Server", result.url], ["Project", result.project.id], ["Environment", result.environment]]), next("specbook pull", "specbook publish --run")].join("\n");
+}
+
+export function renderPull(result: Awaited<ReturnType<typeof pull>>) {
+    const head = result.conflicts.length ? `${pc.yellow("▲")} Pulled ${result.pulled.length} Specs; ${result.conflicts.length} local conflict${result.conflicts.length === 1 ? "" : "s"}` : success(`Pulled ${result.pulled.length} Spec${result.pulled.length === 1 ? "" : "s"}`);
+    return [head, "", ...result.pulled.map((spec) => `  ${pc.green("✔")} ${spec.path}`), ...result.conflicts.map((item) => `  ${pc.yellow("▲")} ${item.path} ${pc.dim("· unpublished edits preserved")}`), result.conflicts.length ? `\n${pc.dim("Save or resolve local edits, then run specbook pull again.")}` : next("specbook run")].join("\n");
+}
+
+export function renderPublish(result: Awaited<ReturnType<typeof publish>>) {
+    return [success(`Published ${result.specs.length} Spec${result.specs.length === 1 ? "" : "s"}`), "", fields([["Server", result.url], ["Environment", result.environment], ["Commit", result.commitSha]]), "", ...result.specs.map((spec) => `  ${spec.status === "awaiting_deploy" ? pc.yellow("◷") : pc.green("✔")} ${spec.path} ${pc.dim(`· ${spec.status === "awaiting_deploy" ? "waiting for deploy" : spec.status}`)}`), `\n${pc.dim("A passing server run makes each waiting Spec a regular acceptance check.")}`].join("\n");
+}
+
+export function renderCi(result: CiResult) {
+    const passed = result.results.filter((item) => item.status === "passed").length;
+    return [
+        `${badge(result.qualityGate.passed ? "passed" : "failed")} ${passed} of ${result.results.length} Specs passed ${pc.dim(`· ${duration(result.durationMs)}${result.environment ? ` · ${result.environment}` : ""}`)}`, "",
+        ...result.results.map((item) => {
+            const waiting = item.awaitingDeploy && item.status !== "passed";
+            const label = waiting ? "waiting for deploy" : item.flaky ? "flaky" : item.knownBug && item.status !== "passed" ? "known bug" : item.status;
+            const line = `  ${waiting ? pc.yellow("◷") : icon(item.status)} ${item.title} ${pc.dim(`· ${label}`)}`;
+            return item.failsGate ? `${line}\n${indent(pc.red(briefReason(item.failReason)), 6)}` : line;
+        }), "",
+        fields([["Failures", String(result.qualityGate.failures)], ["Waiting", String(result.qualityGate.awaitingDeploy)], ["Report", relative(result.report)], ["JUnit", relative(result.junit)], ["Summary", relative(result.summary)], ["Run", result.url]]),
+    ].join("\n");
 }

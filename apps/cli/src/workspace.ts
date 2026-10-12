@@ -7,7 +7,8 @@ import { analyzeSpecSource, stepTitlesError, type SpecAnalysis } from "@specbook
 import { parseSpecYaml, parseFeatureYaml, serializeFeatureYaml, serializeSpecYaml } from "@specbook/runtime/yaml";
 import type { HumanSpec } from "@specbook/runtime/types";
 
-export const configSchema = z.object({ version: z.literal(1).default(1), baseUrl: z.string().url(), agent: z.enum(["claude", "codex"]).optional() }).strict();
+export const remoteConfigSchema = z.object({ url: z.string().url(), projectId: z.string().uuid(), environment: z.string().min(1) }).strict();
+export const configSchema = z.object({ version: z.literal(1).default(1), baseUrl: z.string().url(), agent: z.enum(["claude", "codex"]).optional(), remote: remoteConfigSchema.optional() }).strict();
 export type LocalConfig = z.infer<typeof configSchema>;
 export interface LocalSpec {
     path: string;
@@ -16,6 +17,7 @@ export interface LocalSpec {
     description: string;
     humanSpec: HumanSpec;
     source: string;
+    yaml: string;
     analysis: SpecAnalysis;
     feature: string;
 }
@@ -115,14 +117,13 @@ export async function newSpec(workspace: string, title: string, feature: string)
 export async function specDirectories(workspace: string, selector?: string): Promise<string[]> {
     const root = await safeWorkspacePath(workspace, "specs");
     const directories: string[] = [];
-    for (const feature of await fs.readdir(root, { withFileTypes: true })) {
-        if (feature.isSymbolicLink()) throw new Error("Symlinks are not allowed inside specs");
-        if (!feature.isDirectory()) continue;
-        for (const spec of await fs.readdir(path.join(root, feature.name), { withFileTypes: true })) {
-            if (spec.isSymbolicLink()) throw new Error("Symlinks are not allowed inside specs");
-            if (spec.isDirectory()) directories.push(`specs/${feature.name}/${spec.name}`);
-        }
-    }
+    const visit = async (directory: string, relative: string): Promise<void> => {
+        const entries = await fs.readdir(directory, { withFileTypes: true });
+        if (entries.some((entry) => entry.isSymbolicLink())) throw new Error("Symlinks are not allowed inside specs");
+        if (entries.some((entry) => entry.name === "spec.yml" || entry.name === "spec.ts")) { directories.push(relative); return; }
+        for (const entry of entries) if (entry.isDirectory()) await visit(path.join(directory, entry.name), `${relative}/${entry.name}`);
+    };
+    await visit(root, "specs");
     if (!selector) return directories.sort();
     let selected = selector.replace(/\\/g, "/").replace(/\/$/, "").replace(/\/(spec\.ts|spec\.yml)$/, "");
     if (path.isAbsolute(selected)) selected = path.relative(workspace, selected).replace(/\\/g, "/");
@@ -134,7 +135,8 @@ export async function specDirectories(workspace: string, selector?: string): Pro
 }
 
 export async function readSpec(workspace: string, relative: string): Promise<LocalSpec> {
-    const yaml = parseSpecYaml(await fs.readFile(await safeWorkspacePath(workspace, `${relative}/spec.yml`), "utf8"));
+    const yamlSource = await fs.readFile(await safeWorkspacePath(workspace, `${relative}/spec.yml`), "utf8");
+    const yaml = parseSpecYaml(yamlSource);
     const source = await fs.readFile(await safeWorkspacePath(workspace, `${relative}/spec.ts`), "utf8");
     const analyzed = analyzeSpecSource(source);
     if (!analyzed.ok) throw new Error(analyzed.error);
@@ -142,9 +144,10 @@ export async function readSpec(workspace: string, relative: string): Promise<Loc
     const mismatch = stepTitlesError(analysis.steps, yaml.humanSpec);
     if (mismatch) throw new Error(mismatch);
     if (!yaml.title) throw new Error("spec.yml needs a title");
-    const featureSlug = relative.split("/")[1];
-    const feature = parseFeatureYaml(await fs.readFile(await safeWorkspacePath(workspace, `specs/${featureSlug}/feature.yml`), "utf8"));
-    return { path: relative, directory: path.join(workspace, relative), title: yaml.title, description: yaml.description, humanSpec: yaml.humanSpec, source, analysis, feature: feature.title ?? featureSlug };
+    const featurePath = path.posix.dirname(relative);
+    const featureSlug = path.posix.basename(featurePath);
+    const feature = parseFeatureYaml(await fs.readFile(await safeWorkspacePath(workspace, `${featurePath}/feature.yml`), "utf8"));
+    return { path: relative, directory: path.join(workspace, relative), title: yaml.title, description: yaml.description, humanSpec: yaml.humanSpec, source, yaml: yamlSource, analysis, feature: feature.title ?? featureSlug };
 }
 
 export async function listSpecs(workspace: string, selector?: string): Promise<LocalSpec[]> {
