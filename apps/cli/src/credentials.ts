@@ -5,6 +5,8 @@ import { z } from "zod";
 import { SECRET_NAME_PATTERN, secretEnvName } from "@specbook/runtime/specbook/guard";
 import type { SecretRef } from "@specbook/runtime/validate";
 import { httpTarget } from "@specbook/runtime/network/targets";
+import { CodedError } from "@specbook/runtime/errors";
+import { providerFields } from "./secret-provider";
 
 const nameSchema = z.string().regex(SECRET_NAME_PATTERN);
 const profileSchema = z.object({
@@ -15,6 +17,11 @@ const profileSchema = z.object({
 });
 const storeSchema = z.record(nameSchema, profileSchema);
 type Store = z.infer<typeof storeSchema>;
+const runnerSecretValues = new Set<string>();
+
+function rememberEnvironmentSecrets(): void {
+    for (const [name, value] of Object.entries(process.env)) if (name.startsWith("SPECBOOK_SECRET_") && value) runnerSecretValues.add(value);
+}
 
 export function configHome(): string {
     return path.resolve(process.env.SPECBOOK_HOME ?? path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "specbook"));
@@ -106,8 +113,37 @@ export async function resolveRunSecrets(refs: SecretRef[], baseUrl: string) {
     return { secretEnv, secretOrigins: { defaultOrigins: [new URL(baseUrl).origin], byRef }, scrub: scrubber(store) };
 }
 
+export async function resolveRunnerSecrets(refs: SecretRef[], baseUrl: string, options: { command?: string; signal?: AbortSignal } = {}) {
+    rememberEnvironmentSecrets();
+    const store = await readStore();
+    const provided = new Map<string, Record<string, string>>();
+    if (options.command) {
+        for (const profile of new Set(refs.filter((ref) => process.env[secretEnvName(ref.profile, ref.field)] === undefined).map((ref) => ref.profile))) {
+            const fields = await providerFields(options.command, profile, options.signal);
+            provided.set(profile, fields);
+            for (const value of Object.values(fields)) runnerSecretValues.add(value);
+        }
+    }
+    const secretEnv: Record<string, string> = {};
+    const byRef: Record<string, string[]> = {};
+    const baseOrigin = new URL(baseUrl).origin;
+    for (const ref of refs) {
+        const envName = secretEnvName(ref.profile, ref.field);
+        const environment = process.env[envName];
+        const provider = provided.get(ref.profile)?.[ref.field];
+        const profile = store[ref.profile];
+        const value = environment ?? provider ?? profile?.fields[ref.field];
+        if (!value) throw new CodedError("credentials", `Credential field ${ref.profile}.${ref.field} is not configured; set ${envName}, configure --secrets-command, or run specbook credentials add ${ref.profile}`);
+        runnerSecretValues.add(value);
+        secretEnv[envName] = value;
+        byRef[ref.envName] = environment === undefined && provider === undefined && profile?.origins.length ? profile.origins : [baseOrigin];
+    }
+    return { secretEnv, secretOrigins: { defaultOrigins: [baseOrigin], byRef }, scrub: scrubber(store) };
+}
+
 function textScrubber(store: Store): (text: string) => string {
-    const values = [...new Set(Object.values(store).flatMap((profile) => Object.values(profile.fields)))];
+    rememberEnvironmentSecrets();
+    const values = [...new Set([...Object.values(store).flatMap((profile) => Object.values(profile.fields)), ...runnerSecretValues])];
     const variants = [...new Set(values.flatMap((value) => {
         const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         return [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1), escaped, escaped.replace(/"/g, "&quot;").replace(/'/g, "&#39;"), escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;")];

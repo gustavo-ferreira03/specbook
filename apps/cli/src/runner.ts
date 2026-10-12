@@ -6,20 +6,20 @@ import { z } from "zod";
 import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
 import { httpTarget, resolveTarget } from "@specbook/runtime/network/targets";
 import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright";
-import { analyzeSpecSource, stepTitlesError, type SecretRef } from "@specbook/runtime/validate";
+import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 import {
     runnerArtifactPathSchema, runnerClaimResponseSchema, runnerCompleteRequestSchema,
     runnerHeartbeatResponseSchema, type RunnerClaim, type RunnerCompletion,
     RUNNER_CLI_VERSION, RUNNER_PROTOCOL_VERSION,
 } from "@specbook/runtime/runner-protocol";
-import { listProfiles, resolveRunSecrets, scrub } from "./credentials";
+import { resolveRunnerSecrets, scrub } from "./credentials";
 import { ensureChromium } from "./browsers";
 import { normalizeServerUrl, redactTokens, rememberToken, RemoteError } from "./remote";
 import { remoteFetch } from "./network";
 
 type Lease = NonNullable<RunnerClaim["lease"]>;
-export interface RunnerOptions { url: string; token: string; concurrency?: number; once?: boolean; drainAfter?: number; signal?: AbortSignal }
+export interface RunnerOptions { url: string; token: string; concurrency?: number; once?: boolean; drainAfter?: number; secretsCommand?: string; signal?: AbortSignal }
 export type RunnerEvent =
     | { event: "connected"; url: string; runner: RunnerClaim["runner"]; concurrency: number }
     | { event: "claimed"; jobId: string; batchId: string; specs: number }
@@ -35,19 +35,6 @@ async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
         signal.addEventListener("abort", done, { once: true });
         if (signal.aborted) done();
     });
-}
-
-async function requiredProfiles(refs: SecretRef[]): Promise<void> {
-    const profiles = await listProfiles();
-    const missing = new Map<string, Set<string>>();
-    for (const ref of refs) {
-        if (profiles.find((profile) => profile.name === ref.profile)?.fields.includes(ref.field)) continue;
-        if (!missing.has(ref.profile)) missing.set(ref.profile, new Set());
-        missing.get(ref.profile)!.add(ref.field);
-    }
-    if (missing.size) throw new CodedError("credentials", [...missing].map(([profile, fields]) =>
-        `Local credential profile "${profile}" is missing required fields: ${[...fields].join(", ")}. Run specbook credentials add ${profile}.`,
-    ).join(" "));
 }
 
 async function artifacts(directory: string, scrubText: (text: string) => string): Promise<RunnerCompletion["results"][number]["artifacts"]> {
@@ -66,7 +53,7 @@ async function artifacts(directory: string, scrubText: (text: string) => string)
     return result;
 }
 
-async function execute(lease: Lease, signal: AbortSignal): Promise<RunnerCompletion> {
+async function execute(lease: Lease, signal: AbortSignal, secretsCommand?: string): Promise<RunnerCompletion> {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "specbook-runner-"));
     const started = Date.now();
     const results: RunnerCompletion["results"] = [];
@@ -76,13 +63,11 @@ async function execute(lease: Lease, signal: AbortSignal): Promise<RunnerComplet
     let safeText = scrubText;
     try {
         // Capture the local scrubber before validation so even preparation failures are safe.
-        const secrets = await resolveRunSecrets([], lease.work.baseUrl);
+        const secrets = await resolveRunnerSecrets([], lease.work.baseUrl);
         safeText = (text) => scrubText(secrets.scrub(text));
         for (const spec of lease.work.specs) {
             const outputDir = path.join(directory, spec.runId);
             await fs.mkdir(outputDir, { mode: 0o700 });
-            await fs.writeFile(path.join(outputDir, "spec.ts"), safeText(spec.files["spec.ts"]), { mode: 0o600 });
-            await fs.writeFile(path.join(outputDir, "spec.yml"), safeText(spec.files["spec.yml"]), { mode: 0o600 });
             const analyzed = analyzeSpecSource(spec.files["spec.ts"]);
             if (!analyzed.ok) throw new CodedError("invalid_spec", `Spec "${spec.title}" is invalid: ${analyzed.error}`);
             const titlesError = stepTitlesError(analyzed.analysis.steps, parseSpecYaml(spec.files["spec.yml"]).humanSpec);
@@ -90,8 +75,13 @@ async function execute(lease: Lease, signal: AbortSignal): Promise<RunnerComplet
             selected.push({ key: spec.runId, source: spec.files["spec.ts"], analysis: analyzed.analysis, outputDir });
         }
         const refs = selected.flatMap((spec) => spec.analysis.secretRefs);
-        await requiredProfiles(refs);
-        const resolved = await resolveRunSecrets(refs, lease.work.baseUrl);
+        const resolved = await resolveRunnerSecrets(refs, lease.work.baseUrl, { command: secretsCommand, signal });
+        safeText = (text) => scrubText(resolved.scrub(text));
+        for (const spec of lease.work.specs) {
+            const outputDir = path.join(directory, spec.runId);
+            await fs.writeFile(path.join(outputDir, "spec.ts"), safeText(spec.files["spec.ts"]), { mode: 0o600 });
+            await fs.writeFile(path.join(outputDir, "spec.yml"), safeText(spec.files["spec.yml"]), { mode: 0o600 });
+        }
         const target = httpTarget(lease.work.baseUrl);
         if (!lease.work.networkPolicy.origins.includes(target.origin)) throw new CodedError("environment", "The run base URL is outside the environment's network policy");
         await resolveTarget(target, lease.work.networkPolicy.allowPrivate);
@@ -110,7 +100,7 @@ async function execute(lease: Lease, signal: AbortSignal): Promise<RunnerComplet
     } catch (error) {
         if (signal.aborted) throw signal.reason;
         let reason = error instanceof Error ? error.message : String(error);
-        try { reason = redactTokens(await scrub(reason)); } catch { reason = "Could not read local credentials securely; check SPECBOOK_HOME and file permissions"; }
+        try { reason = safeText(await scrub(reason)); } catch { reason = "Could not read local credentials securely; check SPECBOOK_HOME and file permissions"; }
         processFailure = reason.slice(0, 2000);
         results.length = 0;
         for (const spec of lease.work.specs) {
@@ -220,7 +210,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
         })();
         try {
             await emit({ event: "claimed", jobId: lease.jobId, batchId: lease.work.batchId, specs: lease.work.specs.length });
-            const completion = await execute(lease, jobSignal);
+            const completion = await execute(lease, jobSignal, options.secretsCommand);
             while (!jobSignal.aborted) {
                 try {
                     const response = await send(`/runner/jobs/${lease.jobId}/complete`, completion, jobSignal);

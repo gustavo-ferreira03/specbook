@@ -299,8 +299,9 @@ program.command("runner")
     .option("--concurrency <number>", "jobs executed at the same time; defaults to SPECBOOK_RUNNER_CONCURRENCY or 1")
     .option("--once", "finish one claimed run, then exit")
     .option("--drain-after <number>", "finish this many claimed runs, then exit")
-    .addHelpText("after", `\n${pc.dim("Set SPECBOOK_RUNNER_TOKEN from your secret store. Credentials resolve from local profiles.")}`)
-    .action(async (options: { url?: string; server?: string; concurrency?: string; once?: boolean; drainAfter?: string }) => {
+    .option("--secrets-command <command>", "JSON secret provider; defaults to SPECBOOK_SECRETS_COMMAND")
+    .addHelpText("after", `\n${pc.dim("Set SPECBOOK_RUNNER_TOKEN from your secret store. Secrets resolve from environment variables, a provider command, then local profiles.")}`)
+    .action(async (options: { url?: string; server?: string; concurrency?: string; once?: boolean; drainAfter?: string; secretsCommand?: string }) => {
         const url = options.url ?? options.server ?? process.env.SPECBOOK_URL;
         if (!url) throw new Error("SPECBOOK_URL or --url is required");
         let token = process.env.SPECBOOK_RUNNER_TOKEN;
@@ -318,7 +319,8 @@ program.command("runner")
             const once = options.once ?? process.env.SPECBOOK_RUNNER_ONCE === "true";
             const drainAfter = options.drainAfter ?? process.env.SPECBOOK_RUNNER_DRAIN_AFTER;
             await runRunner({ url, token, concurrency: Number(options.concurrency ?? process.env.SPECBOOK_RUNNER_CONCURRENCY ?? 1),
-                once, drainAfter: drainAfter === undefined ? undefined : Number(drainAfter), signal: abort.signal },
+                once, drainAfter: drainAfter === undefined ? undefined : Number(drainAfter),
+                secretsCommand: options.secretsCommand ?? process.env.SPECBOOK_SECRETS_COMMAND, signal: abort.signal },
                 (event) => print(event, () => ui.renderRunnerEvent(event)));
         } finally {
             process.removeListener("SIGINT", cancel);
