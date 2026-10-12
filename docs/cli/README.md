@@ -1,5 +1,5 @@
-Specbook CLI: standalone local mode
-==================================
+Specbook CLI: local verification and team publishing
+===================================================
 
 Specbook keeps readable behavior contracts beside restricted Playwright tests. Start a `chat` with the behavior you want covered; Specbook uses your installed, authenticated Claude Code or Codex as its brain, asks for missing details, and creates or runs Specs. The local CLI needs no Specbook server and no model configured in Specbook.
 
@@ -30,6 +30,12 @@ Each command
 | Command | Behavior |
 | --- | --- |
 | `init --base-url <url> [--agent claude\|codex]` | Create the workspace, detect installed agents, and install coding-agent instructions. Without `--base-url`, prompt on a terminal. Existing config and agent skill files aren't overwritten. |
+| `login <server-url> [--stdin]` | Verify a personal access token and save this server login outside the workspace. Use a hidden terminal prompt or stdin. The most recent login becomes the default. |
+| `logout [url]` | Remove a saved login; default to the most recent server. This doesn't revoke the token on the server. |
+| `connect [project] [--server <url>] [--environment <name>]` | Link the workspace to a visible project by id, name or interactive selection. Default to the latest server login and the project's Production environment. |
+| `pull` | Download remote features and Specs with their revisions. Preserve unpublished local edits and report conflicts with exit status 1. |
+| `publish [spec\|feature] [--run] [--environment <name>]` | Publish selected Specs after a passing local run of their exact current files. Check their base revisions and start changed Specs as awaiting deployment in one environment. |
+| `ci [--environment <name>] [--base-url <url>]` | Trigger remote acceptance checks with a project CI token, wait for results and write HTML, JUnit and Markdown artifacts. |
 | `spec new "<title>" --feature <name>` | Scaffold a readable contract and a valid one-step Playwright test, creating `feature.yml` when needed. Existing Specs aren't overwritten. |
 | `spec check [path]` | Validate source and YAML step titles with the same runtime as the server. With an open exploration session, count every locator on the current page and report missing or ambiguous matches. |
 | `run [spec\|feature]` | Run selected Specs in fresh browser contexts, then save results, per-step evidence and an HTML report. With no selector, run every Spec. |
@@ -51,6 +57,84 @@ Each command
 | `chats` | List conversations with status, last update and Specs created. |
 
 Every command supports `--json`. Selectors accept `feature/slug`, `specs/feature/slug`, `.specbook/specs/feature/slug/spec.ts`, an absolute Spec path, a unique slug, or a feature slug. The run command validates source before starting Playwright; a live locator check describes the exploration page's current state, so a locator used after navigation may correctly match nothing now.
+
+Connecting and publishing
+-------------------------
+
+Create a named personal token under **Settings → Access tokens** in the hosted web app. Copy it when shown; the server stores its hash and shows creation and last-use times. Revoking it stops future requests immediately. A token has the user's current permissions, including changes to their role or account access.
+
+```sh
+specbook init --base-url http://localhost:3000
+specbook login https://specbook.example.com
+# For automation, pass the personal token through stdin:
+password-manager-command | specbook login https://specbook.example.com --stdin
+specbook connect "Shop" --environment Staging
+specbook pull
+specbook run login/sign-in
+specbook publish login/sign-in
+# Or verify and publish in one command:
+specbook publish login --run
+```
+
+`login` accepts the web app's URL, an explicit `/api` URL or a direct backend URL. It saves the resolved API URL and token in `$SPECBOOK_HOME/servers.json` with mode 0600 on Unix. New configuration directories use mode 0700. Log in to several servers and use `connect --server <url>` to choose one; logging in again makes that server the default. `logout [url]` removes only the local login. Revoke a lost token in the web app.
+
+The connection lives in `.specbook/config.yml` as `remote: { url, projectId, environment }`. It doesn't change the local `baseUrl`; local runs can keep targeting localhost while publishing to Staging or Production. Credentials remain separate: a local `secret("shop", "password")` resolves from the local profile, and server runs resolve the project's vault and environment overrides. This phase doesn't synchronize vault values.
+
+`pull` downloads `feature.yml`, `spec.yml` and `spec.ts`, including nested features. `.specbook/remote.json` records each Spec's base revision and downloaded file hashes. If a local file changed or disappeared since that baseline, pull reports `local_changes` and leaves it alone. An existing untracked Spec also conflicts unless its files already match the remote copy. New local Specs remain in place.
+
+`publish` uses the latest saved run for each selected Spec. That run must pass, and its SHA-256 hashes for both `spec.ts` and `spec.yml` must match the current files; edits to either file require another run. Older run records without hashes require a fresh run too. Use `--run` to verify before sending. Publication sends the base revision recorded by pull or a previous publish; new Specs send no base revision. The server checks every selected Spec before writing, validates the shared Spec format and commits through the app's repository writer, attributed to the token's user. Existing feature metadata stays as saved on the server; a new feature uses the local `feature.yml`.
+
+A stale base produces `revision_conflict` and asks for `specbook pull`. Pull never discards your unpublished work to resolve that conflict. Save a copy of your edits, restore the last pulled/published files, pull the current remote revision, then reapply your changes and run again. A successful publish records the returned revisions locally.
+
+Awaiting deployment
+-------------------
+
+A changed Spec published through the CLI starts as `awaiting_deploy` in the chosen environment. The app and run reports display a clock icon and **Waiting for deploy**. Failed runs retain screenshots and failure details without starting retries, failure triage or Inbox items, and they don't count as failing health or fail CI's quality gate. JUnit marks these failures as skipped with `Waiting for deploy`.
+
+The first passing run in that environment promotes the Spec to regular passing status. Later failures follow the usual acceptance-check workflow. A passing run in another environment doesn't promote it. Publishing changed files resets the chosen environment to awaiting deployment; publishing identical files doesn't reset an already promoted Spec. Historical runs retain their original classification. Local CLI runs skip model-based evidence review; existing server evidence review still applies where configured.
+
+Remote CI
+---------
+
+Create a project CI token in **Project settings → Automation → CI access**. Personal tokens are for connecting, pulling and publishing; pipelines use the project CI token.
+
+```sh
+export SPECBOOK_URL=https://specbook.example.com
+export SPECBOOK_PROJECT=YOUR_PROJECT_ID
+# Supply SPECBOOK_TOKEN from your pipeline's secret store.
+npx --yes specbook ci --environment Staging
+npx --yes specbook ci --environment Preview --base-url https://preview.example.com
+```
+
+CI needs no `.specbook` workspace or saved personal login. `--url`, `--project` and `--token` override the corresponding variables; prefer the environment for the token so it doesn't enter shell history. Select a feature with `--feature-id <remote-id>` or Specs with `--spec-ids <id,id>`; omit both to run all Specs. The environment defaults to Production. Preview origins must be allowed by that environment.
+
+The command writes `specbook-report.html`, `specbook-junit.xml` and `specbook-summary.md`, including on a failed quality gate. The HTML report embeds its fonts and evidence for offline use. Override their paths with `--report`, `--junit`, `--summary` or `SPECBOOK_REPORT_PATH`, `SPECBOOK_JUNIT_PATH`, `SPECBOOK_SUMMARY_PATH`. Exit status is 0 when the quality gate passes, 1 for a failed gate or request/report error. Awaiting-deploy failures appear separately and don't fail the gate.
+
+`--timeout <seconds>` or `SPECBOOK_TIMEOUT_SECONDS` limits waiting (default 3600). GET requests retry transient server/connection errors; a run trigger isn't retried. `--commit-sha`, `--ref` and `--build-url` accept pipeline metadata, also available as `SPECBOOK_COMMIT_SHA`, `SPECBOOK_REF`, `SPECBOOK_BUILD_URL`. `SPECBOOK_ENVIRONMENT`, `SPECBOOK_BASE_URL`, `SPECBOOK_FEATURE_ID` and `SPECBOOK_SPEC_IDS` provide the corresponding defaults. Set `--fail-on-flaky` / `SPECBOOK_FAIL_ON_FLAKY=true` or `--fail-on-known-bugs` / `SPECBOOK_FAIL_ON_KNOWN_BUGS=true` for stricter gates; awaiting-deploy failures remain excluded.
+
+Optional `--comment github|gitlab|none` (or `SPECBOOK_COMMENT_PROVIDER`) updates a single pipeline summary comment per project. GitHub uses `GITHUB_TOKEN`, `GITHUB_REPOSITORY` and the pull-request event or `SPECBOOK_PR_NUMBER`. GitLab uses `SPECBOOK_GITLAB_TOKEN` with API scope and the merge-request job variables; `CI_JOB_TOKEN` cannot publish notes. Provider tokens go only to their provider, and missing PR/MR context skips commenting. Report files remain available if commenting fails. The server's run, result and deploy HTTP APIs remain available; the downloaded `client.mjs` has been removed.
+
+Remote JSON results
+-------------------
+
+Each new command emits one JSON object with `--json`, never the token or credential values. These are the stable fields:
+
+```text
+login:   { url, user: { id, name, email, role }, default: true }
+logout:  { url: string|null, removed, defaultUrl: string|null }
+connect: { url, project: { id, name }, environment, workspace }
+pull:    { url, projectId, pulled: [{ path, revision }],
+           conflicts: [{ path, reason: "local_changes" }] }
+publish: { url, projectId, environment, commitSha,
+           specs: [{ id, path, revision, status }], verified: [{ path, runId }] }
+ci:      { batchId, status, environment: string|null, durationMs: number|null,
+           qualityGate: { passed, failures, flaky, knownBugs, awaitingDeploy },
+           results: [{ specId, runId, title, status, failReason?, durationMs?,
+                       flaky, knownBug, failsGate, awaitingDeploy, url }],
+           report, junit, summary, url }
+```
+
+The CI result preserves raw execution status (`failed` or `error`) alongside `awaitingDeploy`; use `failsGate` for a pipeline decision. `qualityGate.awaitingDeploy` counts waiting failures. Local `run` results now include `hashes: { specTs, specYaml }` on each Spec result. Most errors return `{ ok: false, error }` and exit 1; a stale publish adds `{ code: "revision_conflict", conflicts: [{ path, revision: string|null }], command: "specbook pull" }`. Pull conflicts return the normal pull result with exit 1.
 
 Conversations
 -------------
@@ -94,7 +178,8 @@ Workspace files
 
 ```text
 .specbook/
-  config.yml                 # version, baseUrl, agent
+  config.yml                 # version, baseUrl, agent, optional remote connection
+  remote.json                # remote revisions and file hashes; no credentials
   .gitignore                 # excludes runs/ and chats/
   SKILL.md
   spec-writing-rules.md
@@ -234,11 +319,29 @@ Node SEA also requires bundling or extracting runtime modules and assets. The cu
 Gaps and scope
 --------------
 
-This work implements the local mode. It doesn't connect to a remote server or implement `publish`, `ci`, a private-network runner, or `serve`. The backend imports the same runtime package, leaving server mode open for a later phase. In connected mode, `specbook chat` will talk to a server conversation with the same statuses, so callers keep the same contract.
+The CLI supports local verification, remote publishing and CI. Conversations still use the installed local coding agent in connected workspaces. Server-hosted conversations, a private-network runner and `serve` remain outside this phase.
 
 Conversation cancellation, deletion and queued follow-ups aren't implemented. A working turn rejects new input with `working`; send it again after the turn finishes. Conversation histories stay on disk under the ignored `chats/` directory, and credential metadata stays in history after a request. Authentication copies disappear after each turn, while agent session files remain for resumption. The CLI rejects known stored secrets in messages and redacts reply prose, while preserving structural ids and statuses. It can't identify a secret that was never saved in the credential store; never paste one into chat.
 
 Remote vault synchronization, encrypted credential storage and additional browsers remain outside this task. Agent availability, authentication, subscription limits and supported CLI flags depend on the installed coding-agent versions; unsupported restricted-mode configurations fail without granting broader tools. Windows and macOS conversation behavior remains untested.
+
+Remote phase verification
+-------------------------
+
+The 2026-10-12 verification used this worktree's backend on `127.0.0.1:4100`, its production frontend on `127.0.0.2:4101`, storage at `/tmp/specbook-connect-storage`, and disposable CLI home/workspace directories under `/tmp`. An existing listener occupied `127.0.0.1:4101`; ports 4000/4001 and the main checkout's data stayed untouched. Setup created an admin, the SauceDemo project and its Production environment. Browser checks also created and revoked a separate personal token, confirmed its one-time display and last-use metadata, and received 401 after revocation.
+
+| Check | Observed result |
+| --- | --- |
+| Login, connect and local run | Login resolved the frontend `/api` URL; `servers.json` had mode 0600. The sign-in Spec passed against a localhost fixture on port 4110. |
+| Publish | A matching saved run allowed publication; Git recorded `Connect Admin <connect@example.test>` and `spec: publish 1 from CLI`. The API returned `awaiting_deploy`. Publication before running was rejected. |
+| Waiting failure and promotion | Wrong remote credentials produced a failed run with `awaitingDeploy: true`, `automationPending: false`, zero triage jobs, zero Inbox items and zero failing checks. Restoring the credentials produced a passing run and a passing Spec. |
+| Revision conflict and pull | A server edit made stale publication return `revision_conflict`. Pull downloaded the edit, then preserved a new unpublished local edit as `local_changes`. `publish --run` succeeded after verification. |
+| CI | Waiting failure: exit 0, zero gate failures, one JUnit skip. Passing Spec: exit 0. Ordinary failing Spec: exit 1, one gate failure and one JUnit failure. Every case wrote HTML, JUnit and Markdown artifacts. |
+| Package and UI | An independently installed tarball exposed all commands and ran CI through `npx`. Playwright screenshots cover access tokens, the Specs list, Spec page and overview, including the waiting status. |
+
+`pnpm -r build` and `npx tsc --noEmit` in all four touched packages passed. The existing backend suites finished with 332 of 333 tests passing; only the allowed OpenAI subscription sign-in test failed because callback port 1455 was occupied. The CI suite separately passed all 14 tests, including provider comments, token separation, GET retries and historical waiting reports. A scan of the verification transcripts, reports and local run text artifacts found no configured token or credential values.
+
+Transcripts, reports and check logs are under `/tmp/specbook-connect-verification/`; screenshots are under `/tmp/specbook-connect-shots/`. The development frontend's custom temporary output directory produced an invalid bundle during the first browser attempt; the production build completed the UI verification. No model was configured for these live runs, so model evidence review wasn't exercised. No package, branch or container image was published, and hosted pipeline execution remains unverified.
 
 Conversation verification
 -------------------------

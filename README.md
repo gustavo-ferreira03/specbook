@@ -25,7 +25,7 @@ Describe a flow in chat, and Specbook explores your app in a real browser, write
 - **An agent that does the legwork**: it maps your app, proposes Specs, signs in with stored credentials and asks only when it is blocked.
 - **Evidence for every run**: screenshots per step, video on failure, diagnostics and run history live next to the Spec.
 - **QA for your coding agent**: the `specbook` CLI lets Claude Code or Codex talk to Specbook in a conversation and create and verify Specs against your local app, with no server and no model to configure.
-- **Checks on every deploy**: schedules and CI pipelines run saved Specs, with a Specbook-styled HTML report, JUnit and pull request comments.
+- **Checks on every deploy**: publish locally verified Specs to your team, then run them through schedules and the CLI in CI, with HTML evidence, JUnit and pull request comments.
 - **Yours to host**: one container, your model provider, credentials encrypted at rest and projects stored in Git.
 
 ## Get started
@@ -114,18 +114,29 @@ Creating Specs is a conversation. Each reply ends in a status your agent can act
 
 `specbook init` installs a short skill so your agent knows this workflow. Specs live in `.specbook/` in the same format the server uses, and `specbook run` and `specbook report` produce the same evidence and HTML report as CI. See [docs/cli/README.md](docs/cli/README.md) for every command.
 
-## Run checks from CI
-
-Create a CI token under **Settings → Automation → CI access** and copy the pipeline snippet for your provider. The bundled client starts a batch, waits for the result and writes a JUnit file, a Markdown summary and `specbook-report.html`, a self-contained report with each Spec's steps, screenshots and failure; it can also comment on GitHub pull requests and GitLab merge requests.
+To share a verified Spec, create a personal token in **Settings → Access tokens**, then connect the workspace to your team's server:
 
 ```sh
-SPECBOOK_API_URL="https://specbook.example.com/api" \
-SPECBOOK_PROJECT_ID="YOUR_PROJECT_ID" \
-SPECBOOK_CI_TOKEN="YOUR_CI_TOKEN" \
-node apps/backend/scripts/specbook-ci.mjs --environment Staging
+specbook login https://specbook.example.com
+specbook connect "Shop" --environment Staging
+specbook pull
+specbook publish login/sign-in --run
 ```
 
-Preview URLs must belong to the chosen environment's allowed origins. Quality gates can fail the build on flaky results or known bugs.
+Login asks for the token without echoing it and stores it outside the repository with 0600 permissions. Publish requires a passing local run of the current files and checks the remote revision before committing as your user. Changed Specs start as **Waiting for deploy** in the target environment: failures retain evidence without triage, Inbox items or failing health, until the first passing server run promotes them. Pull preserves unpublished local edits and reports conflicts.
+
+## Run checks from CI
+
+Create a project CI token under **Settings → Automation → CI access** and copy the pipeline snippet for your provider. The CLI starts a batch, waits for the result and writes `specbook-junit.xml`, `specbook-summary.md` and `specbook-report.html`, a self-contained report with each Spec's steps, screenshots and failure. It can also comment on GitHub pull requests and GitLab merge requests.
+
+```sh
+export SPECBOOK_URL="https://specbook.example.com"
+export SPECBOOK_PROJECT="YOUR_PROJECT_ID"
+# Configure SPECBOOK_TOKEN in your pipeline's secret store.
+npx --yes specbook ci --environment Staging
+```
+
+Preview URLs supplied with `--base-url` must belong to the chosen environment's allowed origins. Quality gates can fail the build on flaky results or known bugs; awaiting-deploy failures appear separately and don't fail the pipeline. CI needs no local workspace. Use `--json` for a stable machine-readable result; tokens never appear in it.
 
 ## Configuration and data
 
@@ -169,4 +180,4 @@ The frontend runs on port 4001 and proxies `/api` to the backend on port 4000. D
 
 `pnpm check` runs the type checks and tests. Browser tests need Chromium installed, and the VNC tests also need `SPECBOOK_TEST_VNC=1`.
 
-Specbook also tests itself. [`specbook/`](specbook) holds its own Specs, written by the agent against a Specbook instance. On every push, the [Specbook workflow](.github/workflows/specbook.yml) builds the image, restores a target instance from [`specbook/fixtures`](specbook/fixtures), pushes the Specs to a second instance through its Git remote and runs them with the CI client.
+Specbook also tests itself. [`specbook/`](specbook) holds its own Specs, written by the agent against a Specbook instance. On every push, the [Specbook workflow](.github/workflows/specbook.yml) builds the image and CLI, restores a target instance from [`specbook/fixtures`](specbook/fixtures), pushes the Specs to a second instance through its Git remote and runs them with `specbook ci`.
