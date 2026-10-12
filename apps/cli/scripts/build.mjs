@@ -8,7 +8,9 @@ await build({
   external: Object.keys(manifest.dependencies),
   banner: { js: '#!/usr/bin/env node' },
 });
-await fs.copyFile('../runtime/dist/specbook-fixtures.mjs', 'dist/specbook-fixtures.mjs');
-await fs.cp('../runtime/dist/assets', 'dist/assets', { recursive: true });
+// The workspace dependency link points at the runtime package wherever it lives in the monorepo.
+const runtime = await fs.realpath('node_modules/@specbook/runtime');
+await fs.copyFile(`${runtime}/dist/specbook-fixtures.mjs`, 'dist/specbook-fixtures.mjs');
+await fs.cp(`${runtime}/dist/assets`, 'dist/assets', { recursive: true });
 await fs.chmod('dist/index.js', 0o755);
 await fs.copyFile('../../docs/cli/README.md', 'dist/README.md');

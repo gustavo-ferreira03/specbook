@@ -20,8 +20,8 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/backend/package.json ./apps/backend/
 COPY apps/frontend/package.json ./apps/frontend/
-COPY packages/runtime/package.json ./packages/runtime/
-COPY packages/cli/package.json ./packages/cli/
+COPY shared/runtime/package.json ./shared/runtime/
+COPY apps/cli/package.json ./apps/cli/
 RUN corepack install
 
 FROM base AS build
@@ -46,7 +46,7 @@ RUN pnpm --filter backend browser:install:docker \
     && mkdir -p /tmp/.X11-unix \
     && chmod 1777 /tmp/.X11-unix
 
-COPY --from=build /app/packages/runtime/dist ./packages/runtime/dist
+COPY --from=build /app/shared/runtime/dist ./shared/runtime/dist
 COPY --from=build /app/apps/backend/dist ./apps/backend/dist
 COPY --from=build /app/apps/backend/drizzle ./apps/backend/drizzle
 COPY --from=build /app/apps/frontend/.next ./apps/frontend/.next
