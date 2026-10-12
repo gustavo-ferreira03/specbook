@@ -5,6 +5,7 @@ import { handleRequestError } from "./errors";
 import { buildHostAllowlist, csrfGuard, hostGuard, jsonBodyLimit, REQUEST_HEADER, requestLogger } from "./security";
 import { createAccountsRouter } from "./routes/accounts";
 import { createCiRouter, createCiSettingsRouter } from "./routes/ci";
+import { createCliRouter } from "./routes/cli";
 import { createStewardRouter } from "./routes/steward";
 import { createJobsRouter } from "./routes/jobs";
 import { createSchedulesRouter } from "./routes/schedules";
@@ -46,6 +47,7 @@ export function createApp(): Hono {
     app.use("*", jsonBodyLimit());
     app.onError(handleRequestError);
     app.get("/health", access("public"), (c) => c.json({ ok: true }));
+    app.route("/", createCliRouter());
     app.route("/", createAccountsRouter());
     app.route("/", createSafetySettingsRouter());
     app.route("/", createOperationsRouter());

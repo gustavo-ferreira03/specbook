@@ -1,10 +1,36 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { test } from "node:test";
+import { Hono } from "hono";
 import { useTempStorage } from "../helpers/storage";
 
-useTempStorage();
+const storage = useTempStorage();
 const { createApp } = await import("../../src/infra/web/app");
-const { routePolicy } = await import("../../src/infra/web/access");
+const { accessGate, routePolicy } = await import("../../src/infra/web/access");
+const { createCliRouter } = await import("../../src/infra/web/routes/cli");
+
+test("CLI downloads are public and read-only, with actionable missing-package errors", async () => {
+    const file = path.join(storage, "specbook.tgz");
+    const app = new Hono().use("*", accessGate()).route("/", createCliRouter(file));
+    const missing = await app.request("/cli/specbook.tgz");
+    assert.equal(missing.status, 404);
+    const { error } = await missing.json();
+    assert.match(error, /CLI package is not built/);
+    assert.match(error, /pnpm --dir apps\/cli pack --out \.\.\/backend\/dist\/specbook.tgz/);
+
+    const archive = Buffer.from([0x1f, 0x8b, 0x08, 0x00]);
+    await fs.writeFile(file, archive);
+    const download = await app.request("/cli/specbook.tgz");
+    assert.equal(download.status, 200);
+    assert.equal(download.headers.get("Content-Type"), "application/gzip");
+    assert.equal(download.headers.get("Content-Disposition"), 'attachment; filename="specbook.tgz"');
+    assert.equal(download.headers.get("Cache-Control"), "no-cache");
+    assert.equal(download.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), archive);
+    assert.notEqual((await app.request("/cli/specbook.tgz", { method: "POST", body: "replacement" })).status, 200);
+    assert.deepEqual(await fs.readFile(file), archive);
+});
 
 test("every endpoint declares access and protected routes deny anonymous requests before their handlers", async () => {
     const app = createApp();

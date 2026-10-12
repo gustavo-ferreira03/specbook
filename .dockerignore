@@ -16,7 +16,10 @@ apps/backend/storage
 *.log
 **/*.log
 Dockerfile
-docs
+docs/*
+!docs/cli/
+docs/cli/*
+!docs/cli/README.md
 site
 specbook
 **/.playwright-mcp

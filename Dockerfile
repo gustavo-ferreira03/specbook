@@ -33,6 +33,7 @@ COPY . .
 
 RUN pnpm --filter @specbook/runtime build \
     && pnpm --filter backend build \
+    && pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz \
     && pnpm --filter frontend build
 
 FROM base AS runtime

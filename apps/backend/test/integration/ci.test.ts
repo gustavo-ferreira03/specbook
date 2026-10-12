@@ -143,7 +143,9 @@ describe("CI access and quality gates", () => {
         assert.equal((await app.request(`/ci/projects/${project.id}/client.mjs`, { headers })).status, 404);
     });
 
-    test("restricts CI origins and private targets, deduplicates SHA-less deploys and persists token limits", async () => {
+    test("restricts CI origins and private targets, deduplicates SHA-less deploys and persists token limits", async (t) => {
+        const at = Date.now();
+        t.mock.method(Date, "now", () => at);
         const project = await projectsRepository.createProject("Public deployment", "https://8.8.8.8");
         const { token } = await issueCiToken(project.id);
         const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
@@ -502,6 +504,13 @@ describe("CI access and quality gates", () => {
     test("CI snippets parse and include merge-request pipelines without duplicate push jobs", async () => {
         const { ciSnippet } = await import("../../../frontend/src/lib/ci-snippets");
         const { parse } = await import("yaml");
+        for (const provider of ["github", "gitlab", "bitbucket", "circleci", "jenkins"] as const) {
+            const snippet = ciSnippet(provider, "https://specbook.example.com/api/", "project", false, false);
+            assert.ok(snippet.includes('npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci'), provider);
+            assert.ok(snippet.includes("https://specbook.example.com/api"), provider);
+            assert.ok(!snippet.includes("https://specbook.example.com/api/"), provider);
+            assert.doesNotMatch(snippet, /npx (?:--yes )?specbook\b/);
+        }
         for (const provider of ["github", "gitlab", "bitbucket", "circleci"] as const) {
             assert.ok(parse(ciSnippet(provider, "https://specbook.example.com/api", "<project-id>", false, false)));
         }
