@@ -10,7 +10,7 @@ export type CiProvider = typeof CI_PROVIDERS[number][0];
 
 export function ciSnippet(provider: CiProvider, apiUrl: string, projectId: string, failOnFlaky: boolean, failOnKnownBugs: boolean, environment = "production"): string {
     const env = {
-        SPECBOOK_URL: apiUrl,
+        SPECBOOK_URL: apiUrl.replace(/\/+$/, ""),
         SPECBOOK_PROJECT: projectId,
         SPECBOOK_ENVIRONMENT: environment,
         SPECBOOK_FAIL_ON_FLAKY: String(failOnFlaky),
@@ -44,7 +44,7 @@ ${yamlEnv(6)}
           node-version: 26
       - name: Verify application
         run: |
-          npx --yes specbook ci
+          npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci
       - name: Upload report
         id: report
         if: always() && hashFiles('specbook-report.html') != ''
@@ -83,7 +83,7 @@ ${yamlEnv(4)}
     SPECBOOK_COMMENT_PROVIDER: "gitlab"
   script:
     - |
-      npx --yes specbook ci
+      npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci
   artifacts:
     when: always
     reports:
@@ -104,7 +104,7 @@ ${Object.entries(env).map(([key, value]) => `          - export ${key}='${value.
           - mkdir -p test-results
           - export SPECBOOK_JUNIT_PATH="test-results/specbook.xml"
           - |
-            npx --yes specbook ci
+            npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci
         artifacts:
           - test-results/specbook.xml
           - specbook-report.html
@@ -125,7 +125,7 @@ ${yamlEnv(6)}
             export SPECBOOK_REF="$CIRCLE_BRANCH"
             export SPECBOOK_BUILD_URL="$CIRCLE_BUILD_URL"
             mkdir -p test-results
-            npx --yes specbook ci
+            npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci
       - store_test_results:
           path: test-results
       - store_artifacts:
@@ -150,7 +150,7 @@ ${Object.entries(env).map(([key, value]) => `    ${key} = '${value.replace(/\\/g
           export SPECBOOK_COMMIT_SHA="$GIT_COMMIT"
           export SPECBOOK_REF="$BRANCH_NAME"
           export SPECBOOK_BUILD_URL="$BUILD_URL"
-          npx --yes specbook ci
+          npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci
         '''
       }
     }

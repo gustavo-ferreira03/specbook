@@ -191,7 +191,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                 {(error || notice) && <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : { type: "success", text: notice }} />} />}
             </SettingsSection>
 
-            <SettingsSection id="ci-pipeline-heading" title="Pipeline setup" description="Run this after a deployment is ready. The runner needs access to your Specbook server.">
+            <SettingsSection id="ci-pipeline-heading" title="Pipeline setup" description="Run this after a deployment is ready. Your server provides the matching CLI version through a public download that requires no token.">
                 <SettingsRow label="CI provider" htmlFor="ci-provider">
                     <Select value={provider} onValueChange={(value) => { setProvider(value as CiProvider); setCopied(null); setCopyError(null); }}><SelectTrigger id="ci-provider"><SelectValue /></SelectTrigger><SelectContent>{CI_PROVIDERS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
                 </SettingsRow>
