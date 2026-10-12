@@ -77,7 +77,7 @@ Every command supports `--json`. Selectors accept `feature/slug`, `specs/feature
 Connecting and publishing
 -------------------------
 
-Create a named personal token under **Settings → Access tokens** in the hosted web app. Copy it when shown; the server stores its hash and shows creation and last-use times. Revoking it stops future requests immediately. A token has the user's current permissions, including changes to their role or account access.
+Create a named personal token under **Settings → Access tokens** in the hosted web app, with an optional expiry. Copy it when shown; the server stores its hash and shows creation, expiry and last-use times. Revoking it stops future requests immediately. Personal tokens support workspace operations; account, instance, CI-token and runner-token management requires a browser session. Signing out or revoking a user's sessions also revokes their personal tokens, including when their role changes or their account is disabled.
 
 ```sh
 specbook init --base-url http://localhost:3000
@@ -113,6 +113,8 @@ Remote CI
 ---------
 
 Create a project CI token in **Project settings → Automation → CI access**. Personal tokens are for connecting, pulling and publishing; pipelines use the project CI token.
+
+Use an HTTPS Specbook URL for CI. An HTTP server URL makes the generated `npx` snippet download and execute the CLI archive without transport authentication, and sends the CI token over an unencrypted connection. Configure HTTPS before using that snippet outside a trusted local test.
 
 ```sh
 export SPECBOOK_URL=https://specbook.example.com/api
@@ -187,6 +189,8 @@ specbook runner --drain-after 10 --concurrency 2
 
 `--once` completes one claimed batch, then exits. `--drain-after <n>` completes at most n claimed batches, including all their Specs, then exits after the active slots finish. These flags are mutually exclusive. A batch's failed Spec still counts as completed work; no matching work means the runner keeps polling. Container defaults can use `SPECBOOK_RUNNER_ONCE=true` or `SPECBOOK_RUNNER_DRAIN_AFTER=10`.
 
+Queued and leased work must finish within the run timeout plus a 60-second grace. After three claims interrupted by expired leases or disconnects, the batch fails with a process failure instead of requeuing indefinitely. The waiting run retains the reason. A runner's origin refusal terminates that work immediately with its refusal reason.
+
 Build the runner image from this checkout without publishing it:
 
 ```sh
@@ -255,7 +259,7 @@ Runner JSON output uses newline-delimited events:
 { event: "stopped", url, completedJobs, failedJobs }
 ```
 
-Fatal errors use `{ ok: false, error }` and exit 1. Completed Spec failures remain in the uploaded results; a normally drained runner exits 0. Saved evidence, triage and candidate verification work for runner environments; live chat exploration requires server browsers.
+Rejected jobs emit `{ event: "rejected", jobId, batchId, reason }`; the runner releases them and continues claiming work. If evidence exceeds the server upload limit, it retries once without video. Authentication failures use `{ ok: false, error }` and exit 1. Completed Spec failures remain in the uploaded results; a normally drained runner exits 0. Saved evidence, triage and candidate verification work for runner environments; live chat exploration requires server browsers.
 
 Server browsers through a tunnel
 --------------------------------

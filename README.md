@@ -52,7 +52,7 @@ OpenAI device-code login and Anthropic's copy-the-code login work out of the box
 1. Create a project with your app's URL and describe a behavior in chat.
 2. Pick the Specs the agent proposes. When it needs to sign in, it asks through a secure form, never in the chat.
 3. Open a Spec to run it and inspect the evidence. On a failure, the agent investigates and proposes a repair.
-4. Keep it running from **Settings → Automation**, with schedules and CI access.
+4. Keep it running from **Project settings → Automation**, with schedules and CI access.
 
 A Spec pairs the contract with its test. Preconditions, steps, the expected result and any postconditions each become a named `step()`, in that order, so every run keeps a screenshot of the expected result. A hidden `cleanup()` removes data the Spec creates:
 
@@ -130,7 +130,9 @@ Login asks for the token without echoing it and stores it outside the repository
 
 ## Run checks from CI
 
-Create a project CI token under **Settings → Automation → CI access** and copy the pipeline snippet for your provider. The CLI starts a batch, waits for the result and writes `specbook-junit.xml`, `specbook-summary.md` and `specbook-report.html`, a self-contained report with each Spec's steps, screenshots and failure. It can also comment on GitHub pull requests and GitLab merge requests.
+Create a project CI token under **Project settings → Automation → CI access** and copy the pipeline snippet for your provider. The CLI starts a batch, waits for the result and writes `specbook-junit.xml`, `specbook-summary.md` and `specbook-report.html`, a self-contained report with each Spec's steps, screenshots and failure. It can also comment on GitHub pull requests and GitLab merge requests.
+
+Use HTTPS for CI. An HTTP snippet downloads and executes the CLI archive without transport authentication and sends the CI token over an unencrypted connection. The CI settings warn when the server URL uses HTTP.
 
 ```sh
 export SPECBOOK_URL="https://specbook.example.com/api"
@@ -148,13 +150,18 @@ An admin creates a token under **Settings → Runners**, with an optional group 
 ```sh
 export SPECBOOK_HOME=/var/lib/specbook-runner
 export SPECBOOK_URL=https://specbook.example.com/api
+export SPECBOOK_RUNNER_ALLOWED_ORIGINS=https://private-app.example.com
 # Set SPECBOOK_RUNNER_TOKEN through your secret store.
 specbook runner --concurrency 1
 # Ephemeral worker:
 specbook runner --once
 ```
 
-Runner secrets resolve from `SPECBOOK_SECRET_<PROFILE>_<FIELD>` environment variables, a JSON provider command (`--secrets-command` / `SPECBOOK_SECRETS_COMMAND`), then local profiles. Leases and heartbeats return unfinished work to the queue after a crash or shutdown. Runner environments support saved evidence and verification; live chat exploration uses server browsers.
+Production runners require an origin allowlist set by their operator, using `--allow-origin` or `SPECBOOK_RUNNER_ALLOWED_ORIGINS`. Jobs outside it fail before secrets or browsers open. Grouped runners claim only their own group, and ungrouped runners claim ungrouped work. Only an admin signed in to the web app can change executors, groups or private destinations.
+
+Runner secrets resolve from `SPECBOOK_SECRET_<PROFILE>_<FIELD>` environment variables, a JSON provider command (`--secrets-command` / `SPECBOOK_SECRETS_COMMAND`), then local profiles. Environment and command sources use the runner's explicit origin scope; local profiles must declare matching origins. Leases and heartbeats return unfinished work to the queue after a crash or shutdown. Work fails after its run timeout plus a 60-second grace, or three abandoned attempts. Runner environments support saved evidence and verification; live chat exploration uses server browsers.
+
+Personal access tokens can have an expiry chosen at creation. Account and token management requires a browser session. Signing out or revoking a user's sessions also revokes their personal tokens.
 
 Build the Chromium runner image with `docker build -f Dockerfile.runner -t specbook-runner:local .`. The CLI guide includes a [Kubernetes Job](docs/cli/examples/runner-job.yaml), [Deployment](docs/cli/examples/runner-deployment.yaml) and [KEDA scaler](docs/cli/examples/runner-keda.yaml). `/runner/metrics` exposes group depth as JSON or Prometheus text with runner-token or admin-token authentication. Remote CLI commands honor `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; proxy credentials stay out of output.
 

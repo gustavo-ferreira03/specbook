@@ -29,8 +29,8 @@ export async function readAgentState(session: string): Promise<AgentState> {
     return JSON.parse(await fs.readFile(path.join(session, "state.json"), "utf8")) as AgentState;
 }
 
-const filePath = z.string().max(300).regex(/^specs\/[a-z0-9][a-z0-9_-]*\/(?:feature\.yml|[a-z0-9][a-z0-9_-]*\/(?:spec\.yml|spec\.ts))$/);
-const specPath = z.string().max(300).regex(/^specs\/[a-z0-9][a-z0-9_-]*\/[a-z0-9][a-z0-9_-]*$/);
+const filePath = z.string().max(512).regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*\/(?:feature\.yml|spec\.yml|spec\.ts)$/);
+const specPath = z.string().max(500).regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/);
 const ref = z.string().min(1).max(300);
 const noArgs = z.strictObject({});
 const turnContextSchema = z.strictObject({ id: z.string().uuid(), selected: z.array(proposalSchema).optional() });

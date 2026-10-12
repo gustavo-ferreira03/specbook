@@ -265,7 +265,7 @@ export function renderConnect(result: Awaited<ReturnType<typeof connect>>) {
 }
 
 export function renderPull(result: Awaited<ReturnType<typeof pull>>) {
-    const head = result.conflicts.length ? `${pc.yellow("▲")} Pulled ${result.pulled.length} Specs; ${result.conflicts.length} local conflict${result.conflicts.length === 1 ? "" : "s"}` : success(`Pulled ${result.pulled.length} Spec${result.pulled.length === 1 ? "" : "s"}`);
+    const head = result.conflicts.length ? `${pc.yellow("▲")} Pulled ${result.pulled.length} Spec${result.pulled.length === 1 ? "" : "s"}; ${result.conflicts.length} local conflict${result.conflicts.length === 1 ? "" : "s"}` : success(`Pulled ${result.pulled.length} Spec${result.pulled.length === 1 ? "" : "s"}`);
     return [head, "", ...result.pulled.map((spec) => `  ${pc.green("✔")} ${spec.path}`), ...result.conflicts.map((item) => `  ${pc.yellow("▲")} ${item.path} ${pc.dim("· unpublished edits preserved")}`), result.conflicts.length ? `\n${pc.dim("Save or resolve local edits, then run specbook pull again.")}` : next("specbook run")].join("\n");
 }
 

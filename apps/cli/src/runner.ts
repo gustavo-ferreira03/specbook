@@ -54,6 +54,18 @@ async function artifacts(directory: string, scrubText: (text: string) => string)
     return result;
 }
 
+function withoutVideo(completion: RunnerCompletion): RunnerCompletion {
+    return { ...completion, results: completion.results.map((result) => ({ ...result, artifacts: result.artifacts
+        .filter((artifact) => artifact.path !== "evidence/execution.webm")
+        .map((artifact) => {
+            if (artifact.path !== "evidence.json") return artifact;
+            try {
+                const evidence = JSON.parse(Buffer.from(artifact.content, "base64").toString("utf8"));
+                return { ...artifact, content: Buffer.from(JSON.stringify({ ...evidence, video: null })).toString("base64") };
+            } catch { return artifact; }
+        }) })) };
+}
+
 async function execute(lease: Lease, signal: AbortSignal, allowedOrigins: string[], secretsCommand?: string): Promise<RunnerCompletion> {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "specbook-runner-"));
     const started = Date.now();
@@ -178,7 +190,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
         return result.data;
     };
     const retry = async (error: unknown, currentSignal: AbortSignal) => {
-        if (error instanceof RemoteError && error.status >= 400 && error.status < 500) throw error;
+        if (error instanceof RemoteError && [401, 403].includes(error.status)) throw error;
         if (Date.now() - retryNotice >= 5000) {
             retryNotice = Date.now();
             await emit({ event: "retrying", reason: error instanceof Error ? error.message : "Runner request failed", retryInMs: 2000 });
@@ -202,6 +214,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
         let expires = Date.parse(lease.leaseExpiresAt);
         let heartbeatError: unknown;
         let completed = false;
+        let releaseReason: string | undefined;
         const heartbeat = (async () => {
             let wait = lease.heartbeatMs;
             while (!heartbeatSignal.aborted) {
@@ -226,7 +239,8 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
         })();
         try {
             await emit({ event: "claimed", jobId: lease.jobId, batchId: lease.work.batchId, specs: lease.work.specs.length });
-            const completion = await execute(lease, jobSignal, allowedOrigins, options.secretsCommand);
+            let completion = await execute(lease, jobSignal, allowedOrigins, options.secretsCommand);
+            let retriedWithoutVideo = false;
             while (!jobSignal.aborted) {
                 try {
                     const response = await send(`/runner/jobs/${lease.jobId}/complete`, completion, jobSignal);
@@ -237,7 +251,23 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
                     await emit({ event: "completed", jobId: lease.jobId, batchId: lease.work.batchId,
                         results: completion.results.map(({ runId, status, failReason }) => ({ runId, status, failReason })) });
                     break;
-                } catch (error) { if (jobSignal.aborted) break; await retry(error, jobSignal); }
+                } catch (error) {
+                    if (jobSignal.aborted) break;
+                    if (error instanceof RemoteError && error.status === 413 && !retriedWithoutVideo) {
+                        completion = withoutVideo(completion);
+                        retriedWithoutVideo = true;
+                        await emit({ event: "retrying", reason: "Runner evidence exceeds the server upload limit; retrying once without video", retryInMs: 0 });
+                        continue;
+                    }
+                    if (error instanceof RemoteError && error.status >= 400 && error.status < 500 && ![401, 403].includes(error.status)) {
+                        releaseReason = `Runner could not upload this job's results: ${error.message}`;
+                        completedJobs++;
+                        failedJobs++;
+                        await emit({ event: "rejected", jobId: lease.jobId, batchId: lease.work.batchId, reason: releaseReason });
+                        break;
+                    }
+                    await retry(error, jobSignal);
+                }
             }
         } catch (error) {
             if (!jobSignal.aborted) throw error;
@@ -245,7 +275,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             heartbeatStop.abort();
             await heartbeat;
             if (!completed) {
-                const response = await send(`/runner/jobs/${lease.jobId}/release`, { leaseId: lease.leaseId }, AbortSignal.timeout(5000)).catch(() => null);
+                const response = await send(`/runner/jobs/${lease.jobId}/release`, { leaseId: lease.leaseId, ...(releaseReason ? { reason: releaseReason } : {}) }, AbortSignal.timeout(5000)).catch(() => null);
                 await response?.body?.cancel();
             }
         }

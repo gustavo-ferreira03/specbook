@@ -36,15 +36,19 @@ async function uiEntry(directory: string): Promise<string | null> {
 }
 
 async function response(url: string, signal?: AbortSignal): Promise<Response> {
+    let fetched: Response;
     try {
         const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000);
-        const fetched = await fetch(url, { signal: requestSignal });
-        if (!fetched.ok) throw new Error("UI release is unavailable");
-        return fetched;
+        fetched = await fetch(url, { signal: requestSignal });
     } catch (error) {
         if (signal?.aborted) throw signal.reason;
         throw new Error("The UI release could not be downloaded");
     }
+    if (!fetched.ok) {
+        await fetched.body?.cancel();
+        throw new Error(fetched.status === 404 ? "The UI release is unavailable (HTTP 404)" : `The UI release could not be downloaded (HTTP ${fetched.status})`);
+    }
+    return fetched;
 }
 
 async function downloadUi(currentVersion: string, target: string, url: string, signal?: AbortSignal): Promise<void> {
@@ -117,7 +121,7 @@ export async function resolveUi(options: Pick<ServeOptions, "ui" | "signal">, em
 
 function portNumber(value: string | undefined, fallback: number, label: string): number {
     const number = value === undefined ? fallback : Number(value);
-    if (!Number.isInteger(number) || number < 1 || number > 65535) throw new Error(`Use a ${label} port between 1 and 65535`);
+    if (!Number.isInteger(number) || number < 1 || number > 65535) throw new Error(`Use ${label === "API" ? "an" : "a"} ${label} port between 1 and 65535`);
     return number;
 }
 

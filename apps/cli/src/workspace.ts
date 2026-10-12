@@ -43,7 +43,11 @@ export async function safeWorkspacePath(workspace: string, relative: string, for
 
 export async function workspaceDirectory(cwd = process.cwd()): Promise<string> {
     const directory = path.join(path.resolve(cwd), ".specbook");
-    await safeWorkspacePath(directory, "config.yml");
+    try { await safeWorkspacePath(directory, "config.yml"); }
+    catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("There is no .specbook workspace here. Run specbook init --base-url <app-url> in your project directory first.");
+        throw error;
+    }
     return directory;
 }
 
@@ -59,9 +63,10 @@ export function detectAgents(): ("claude" | "codex")[] {
 }
 
 export async function initWorkspace(cwd: string, baseUrl: string, agent?: "claude" | "codex"): Promise<unknown> {
-    const config = configSchema.parse({ version: 1, baseUrl, agent });
-    const url = new URL(baseUrl);
+    let url: URL;
+    try { url = new URL(baseUrl); } catch { throw new Error("Use a full HTTP(S) base URL, such as https://app.example.com"); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Use an HTTP(S) base URL without credentials");
+    const config = configSchema.parse({ version: 1, baseUrl, agent });
     const workspace = path.join(path.resolve(cwd), ".specbook");
     await fs.mkdir(workspace, { recursive: true });
     const configFile = await safeWorkspacePath(workspace, "config.yml", true);

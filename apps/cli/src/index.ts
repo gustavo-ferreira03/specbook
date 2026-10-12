@@ -18,6 +18,7 @@ import { scrubCi } from "./ci-comment";
 import * as ui from "./ui";
 
 const json = process.argv.includes("--json");
+const isChatCommand = process.argv.slice(2).find((argument) => !argument.startsWith("-")) === "chat";
 stdout.on("error", (error: NodeJS.ErrnoException) => { if (error.code === "EPIPE") process.exit(0); throw error; });
 const interactive = !json && !!stdin.isTTY && !!stderr.isTTY;
 const agentOption = () => new Option("--agent <agent>", "local coding agent that drives Specbook").choices(["claude", "codex"]);
@@ -508,17 +509,24 @@ main().catch(async (error) => {
     if (error instanceof CommanderError) {
         if (["commander.helpDisplayed", "commander.version", "commander.help"].includes(error.code)) return;
         process.exitCode = error.exitCode || 1;
-        if (json) await print({ ok: false, error: error.message.replace(/^error: /, "") }, () => "");
+        if (json) {
+            const message = error.message.replace(/^error: /, "");
+            const id = process.argv.slice(2).find((item) => /^c-[a-f0-9]{8}$/.test(item)) ?? "";
+            await print(isChatCommand ? chatReplySchema.parse({ id, status: "failed", message, error: message }) : { ok: false, error: message }, () => "");
+        }
         return;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    let message = error instanceof Error ? error.message : String(error);
+    if (!json && error instanceof RemoteError && error.detail?.code === "revision_conflict") {
+        message += `\nConflicting paths:\n${error.detail.conflicts.map((conflict) => `  ${conflict.path}`).join("\n")}\nRun ${error.detail.command}, resolve the conflicts, then publish again.`;
+    }
     let safe: string;
     try { safe = scrubCi(await scrubTokens(await scrub(message))); } catch { safe = "Could not read saved credentials securely; check SPECBOOK_HOME and file permissions"; }
     if (json) {
         const raw = process.argv.slice(2);
         const id = raw.find((item) => /^c-[a-f0-9]{8}$/.test(item)) ?? "";
         const detail = error instanceof RemoteError ? error.detail : undefined;
-        stdout.write(scrubCi(redactTokens(JSON.stringify(raw.includes("chat") ? chatReplySchema.parse({ id, status: "failed", message: safe, error: safe }) : { ok: false, error: safe, ...detail }))) + "\n");
+        stdout.write(scrubCi(redactTokens(JSON.stringify(isChatCommand ? chatReplySchema.parse({ id, status: "failed", message: safe, error: safe }) : { ok: false, error: safe, ...detail }))) + "\n");
     } else stderr.write(ui.failure(safe) + "\n");
     process.exitCode = 1;
 });

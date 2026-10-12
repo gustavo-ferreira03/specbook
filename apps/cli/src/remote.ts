@@ -239,9 +239,12 @@ export async function pull(workspace: string) {
 }
 
 async function verifiedRuns(workspace: string, paths: string[]) {
-    const runs = await safeWorkspacePath(workspace, "runs");
-    const entries = (await fs.readdir(runs, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().reverse();
     const latest = new Map<string, { runId: string; result: LocalRun["results"][number] }>();
+    let entries: string[];
+    try {
+        const runs = await safeWorkspacePath(workspace, "runs");
+        entries = (await fs.readdir(runs, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().reverse();
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return latest; throw error; }
     for (const id of entries) {
         let run: LocalRun;
         try { run = JSON.parse(await fs.readFile(await safeWorkspacePath(workspace, `runs/${id}/run.json`), "utf8")); }
