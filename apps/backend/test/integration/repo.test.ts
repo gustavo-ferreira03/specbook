@@ -68,6 +68,71 @@ before(async () => {
 });
 
 describe("project, feature and spec through the writer", () => {
+    test("deleting a waiting environment clears its state and ignores its late run completion", async () => {
+        const { environmentsRepository } = await import("../../src/infra/repositories/environments");
+        const { specEnvironmentsRepository } = await import("../../src/infra/repositories/spec-environments");
+        const { resolveRunEnvironment } = await import("../../src/core/environments");
+        const { projectOverview } = await import("../../src/core/jobs/overview");
+        const { runsDir } = await import("../../src/core/paths");
+        const projectId = await createProject("Removed publish environment");
+        const environment = await environmentsRepository.create(projectId, { name: "Preview", baseUrl: "https://app.example.com", allowedOrigins: [], credentialOverrides: {} });
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const { spec } = await createSpec(projectId, feature.id, "Open application");
+        const snapshot = await writer.readProjectSpecFiles(projectId);
+        const input = { ...snapshot.specs[0]!, baseRevision: snapshot.specs[0]!.revision, feature: snapshot.features[0]! };
+        await writer.publishSpecsInRepo(projectId, environment.id, [input]);
+        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId), awaitingDeploy: true, environment: await resolveRunEnvironment(projectId, environment.name) });
+        await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
+        await fs.writeFile(path.join(runsDir, run.id, "spec.yml"), input.files["spec.yml"]);
+        await runsRepository.finishRun(run.id, "failed", 1, "Deployment is unavailable");
+        assert.equal((await projectOverview(projectId)).specHealth[spec.id]?.status, "awaiting_deploy");
+        await environmentsRepository.delete(environment.id);
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "unverified");
+        assert.equal((await projectOverview(projectId)).specHealth[spec.id]?.status, "not_checked");
+        await specEnvironmentsRepository.set(spec, environment.id, "passed");
+        assert.deepEqual(await specEnvironmentsRepository.list(spec), []);
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "unverified");
+        const head = await repoGit.getHeadSha(projectId);
+        await assert.rejects(() => writer.publishSpecsInRepo(projectId, environment.id, [input]), /environment was removed/);
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+    });
+
+    test("publishing retries when a moved Spec was absent from its acquired locks", async () => {
+        const { ResourceBusyError } = await import("../../src/core/specs/lifecycle");
+        const { environmentsRepository } = await import("../../src/infra/repositories/environments");
+        const { reindexProjectUnlocked } = await import("../../src/core/repo/indexer");
+        const projectId = await createProject("Concurrent Spec move");
+        const feature = await writer.createFeatureInRepo(projectId, null, "Store", "");
+        const { spec } = await createSpec(projectId, feature.id, "Open application");
+        const snapshot = await writer.readProjectSpecFiles(projectId);
+        const pathAfterMove = "specs/store/moved-application";
+        const input = { path: pathAfterMove, baseRevision: snapshot.specs[0]!.revision, files: snapshot.specs[0]!.files, feature: snapshot.features[0]! };
+        const list = specsRepository.listSpecs;
+        let moved = false;
+        specsRepository.listSpecs = async function (id) {
+            const rows = await list.call(this, id);
+            if (id === projectId && !moved) {
+                moved = true;
+                await repoGit.withRepoLock(projectId, async () => {
+                    await fs.rename(path.join(repoGit.getRepoDir(projectId), spec.path), path.join(repoGit.getRepoDir(projectId), pathAfterMove));
+                    await repoGit.commitAll(projectId, "spec: move");
+                    await reindexProjectUnlocked(projectId);
+                });
+            }
+            return rows;
+        };
+        const environment = (await environmentsRepository.list(projectId))[0]!;
+        try {
+            await assert.rejects(() => writer.publishSpecsInRepo(projectId, environment.id, [input]), ResourceBusyError);
+            assert.equal((await specsRepository.getSpec(spec.id))?.status, "unverified");
+        } finally {
+            specsRepository.listSpecs = list;
+        }
+        const result = await writer.publishSpecsInRepo(projectId, environment.id, [input]);
+        assert.equal(result.specs[0]?.id, spec.id);
+        assert.equal(result.specs[0]?.status, "awaiting_deploy");
+    });
+
     test("CLI publishing records the environment and rejects stale batches before writing", async () => {
         const { environmentsRepository } = await import("../../src/infra/repositories/environments");
         const { specEnvironmentsRepository } = await import("../../src/infra/repositories/spec-environments");

@@ -2,6 +2,9 @@ import crypto from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { db, runBatch } from "../db/client";
 import { environments, projects } from "../db/schema";
+import { repoGit } from "../../core/repo/git";
+import { specsRepository } from "./specs";
+import { specEnvironmentsRepository } from "./spec-environments";
 
 export type Environment = typeof environments.$inferSelect;
 export type EnvironmentInput = Pick<Environment, "name" | "baseUrl" | "allowedOrigins" | "credentialOverrides">;
@@ -27,7 +30,14 @@ class EnvironmentsRepository {
     }
 
     async delete(id: string): Promise<void> {
-        await db.delete(environments).where(eq(environments.id, id));
+        const row = (await db.select().from(environments).where(eq(environments.id, id)))[0];
+        if (!row) return;
+        await repoGit.withRepoLock(row.projectId, async () => {
+            await db.delete(environments).where(eq(environments.id, id));
+            for (const spec of await specsRepository.listSpecs(row.projectId)) {
+                if (spec.status === "awaiting_deploy") await specEnvironmentsRepository.refresh(spec);
+            }
+        });
     }
 }
 

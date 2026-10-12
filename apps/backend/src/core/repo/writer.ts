@@ -7,6 +7,7 @@ import { featuresRepository, type Feature } from "../../infra/repositories/featu
 import { projectContextsRepository, type ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
 import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
+import { environmentsRepository } from "../../infra/repositories/environments";
 import { validateSpecSource, type SpecSourceValidation } from "@specbook/runtime/validate";
 import { acquireSpecLocks, areSpecsLocked, ResourceBusyError, withSpecLock, withSpecLocks } from "../specs/lifecycle";
 import { repoGit } from "./git";
@@ -72,8 +73,10 @@ export async function publishSpecsInRepo(projectId: string, environmentId: strin
     const paths = new Set(inputs.map((input) => input.path));
     if (paths.size !== inputs.length) throw new Error("Publish each Spec only once per request");
     const existing = (await specsRepository.listSpecs(projectId)).filter((spec) => paths.has(spec.path));
+    const lockedIds = new Set(existing.map((spec) => spec.id));
     return withSpecLocks(existing.map((spec) => spec.id), () => repoGit.withRepoLock(projectId, async () => {
         await repoGit.assertRepoWritableUnlocked(projectId);
+        if (!(await environmentsRepository.list(projectId)).some((environment) => environment.id === environmentId)) throw new Error("The target environment was removed. Connect to an existing environment before publishing.");
         const conflicts: SpecRevisionConflict["conflicts"] = [];
         const changed = new Set<string>();
         const existingFeatures = new Set((await featuresRepository.listFeatures(projectId)).map((feature) => feature.path));
@@ -91,6 +94,10 @@ export async function publishSpecsInRepo(projectId: string, environmentId: strin
             }
         }
         if (conflicts.length) throw new SpecRevisionConflict(conflicts);
+        if (inputs.some((input) => {
+            const current = currentSpecs.get(input.path);
+            return current && !lockedIds.has(current.id);
+        })) throw new ResourceBusyError("The project changed while publish was being prepared. Retry publishing.");
         const { commitSha } = await mutateRepoUnlocked(projectId, `spec: publish ${inputs.length} from CLI`, async () => {
             for (const input of inputs) {
                 const parents: string[] = [];

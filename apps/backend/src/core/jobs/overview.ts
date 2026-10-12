@@ -1,6 +1,7 @@
 import type { RunEnvironment } from "../../infra/db/schema";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { schedulesRepository } from "../../infra/repositories/schedules";
+import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
 import { listRunBatches, type RunBatchTrigger } from "../runner/batch";
 import { runTriggerForIntent } from "../steward/signals";
 import { loadProjectState, projectPresentation, type ActivityStory, type PresentedItem } from "./presentation";
@@ -61,10 +62,11 @@ export async function projectOverview(projectId: string) {
     const repairing = new Set(jobs.filter((job) => job.kind === "regenerate" && job.specId && ["queued", "running"].includes(job.status)).map((job) => job.specId));
     for (const spec of specs) {
         const current = currentRuns.get(spec.id);
+        const waiting = current?.awaitingDeploy && current.status !== "passed" && await specEnvironmentsRepository.awaiting(spec, current.environment?.id);
         const status: SpecHealthStatus = spec.status === "invalid" ? repairing.has(spec.id) ? "repairing" : "invalid"
             : current?.status === "running" ? "running"
-            : current?.awaitingDeploy && current.status !== "passed" || spec.status === "awaiting_deploy" && (!current || current.status === "passed") ? "awaiting_deploy"
-            : !current ? "not_checked"
+            : waiting || spec.status === "awaiting_deploy" && (!current || current.status === "passed") ? "awaiting_deploy"
+            : !current || current.awaitingDeploy && current.status !== "passed" ? "not_checked"
             : current.flaky ? "flaky" : current.status === "passed" ? "passing" : "failing";
         const label = status === "invalid" ? "Needs repair" : status === "repairing" ? "Repairing"
             : status === "running" ? "Running" : status === "awaiting_deploy" ? "Waiting for deploy"
