@@ -340,6 +340,23 @@ Conversation cancellation, deletion and queued follow-ups aren't implemented. A 
 
 Remote vault synchronization, encrypted credential storage and additional browsers remain outside this task. Agent availability, authentication, subscription limits and supported CLI flags depend on the installed coding-agent versions; unsupported restricted-mode configurations fail without granting broader tools. Windows and macOS conversation behavior remains untested.
 
+Server package verification
+---------------------------
+
+The 2026-10-12 follow-up verified the public CLI download with a separate backend on `127.0.0.1:4100`, frontend on `127.0.0.2:4101` and storage under `/tmp/specbook-cli-delivery-storage`. Without the tarball, both backend `/cli/specbook.tgz` and frontend `/api/cli/specbook.tgz` returned 404 with the exact build command. After `pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz`, both anonymous downloads returned 200 and matched the local archive's SHA-256 hash.
+
+`docker build -t specbook-connect-cli:verification .` passed. The runtime image contained the same tarball bytes, and its bundled backend served them with 200 and `application/gzip` before creating any admin account. The build context includes the CLI documentation needed by `prepack` while excluding the other documentation files.
+
+This exact command ran from a disposable workspace with a new npm cache at `/tmp/specbook-cli-url-cache-KqKLge` and `SPECBOOK_URL=http://127.0.0.2:4101/api`:
+
+```sh
+npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci --environment Production --spec-ids "$SPECBOOK_SPEC_IDS" --json
+```
+
+It exited 0, reported a passing remote browser run and wrote the self-contained HTML report, JUnit and Markdown summary. The npm lockfile recorded `http://127.0.0.2:4101/api/cli/specbook.tgz` as the package source. The project token stayed in the environment; the download needed no token. Logs and the command transcript are under `/tmp/specbook-cli-delivery-verification/`.
+
+`pnpm -r build` and backend, frontend and CLI `npx tsc --noEmit` passed. The existing backend tests finished with 333 of 334 passing; only the allowed OpenAI sign-in test failed because callback port 1455 was occupied. Download tests cover public access, binary content, missing-package guidance and rejection of uploads. All five pipeline snippets select the server package, and a repository scan found no instructions that select the CLI by its registry name.
+
 Remote phase verification
 -------------------------
 
