@@ -7,6 +7,7 @@ import { runsRepository } from "../../infra/repositories/runs";
 import type { Spec } from "../../infra/repositories/specs";
 import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
 import { environmentsRepository } from "../../infra/repositories/environments";
+import { visibleRuns } from "../private-runner/visibility";
 
 export async function specDetail(spec: Spec, runLimit?: number) {
     const feature = await featuresRepository.getFeature(spec.featureId);
@@ -36,6 +37,6 @@ export async function specDetail(spec: Spec, runLimit?: number) {
         ...state,
         name: environments.find((environment) => environment.id === state.environmentId)?.name,
     }));
-    return { spec, feature, content, runs, environmentStates };
+    return { spec, feature, content, runs: await visibleRuns(runs), environmentStates };
 }
 

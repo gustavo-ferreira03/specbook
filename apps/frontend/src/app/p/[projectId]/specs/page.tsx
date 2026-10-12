@@ -320,6 +320,7 @@ export default function SpecsDashboard({ params }: { params: Promise<{ projectId
                 error={runBatch.error}
                 warning={runBatch.warning}
                 environment={runBatch.environment}
+                queue={runBatch.queue}
             />
         </div>
     );

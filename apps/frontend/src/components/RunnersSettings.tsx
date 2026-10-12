@@ -1,15 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Check, CircleCheck, CircleMinus, Clipboard, HardDrive, RefreshCw, Trash2 } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { RelativeTime } from "@/components/RelativeTime";
+import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
 import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiPath, errorMessage, isAbortError } from "@/lib/api";
 import { copyText, selectElementText } from "@/lib/clipboard";
+import { countLabel } from "@/lib/format";
+import type { RunnerQueueEntry } from "@/lib/types";
 
 interface Runner {
     id: string;
@@ -22,6 +26,8 @@ interface Runner {
 
 export function RunnersSettings() {
     const [runners, setRunners] = useState<Runner[] | null>(null);
+    const [queues, setQueues] = useState<RunnerQueueEntry[] | null>(null);
+    const [queueError, setQueueError] = useState("");
     const [name, setName] = useState("");
     const [group, setGroup] = useState("");
     const [secret, setSecret] = useState<{ id: string; value: string } | null>(null);
@@ -39,9 +45,17 @@ export function RunnersSettings() {
         const controller = new AbortController();
         let timer: ReturnType<typeof setTimeout>;
         async function load() {
-            try { setRunners((await api<{ runners: Runner[] }>("/runners", { signal: controller.signal })).runners); }
-            catch (reason) { if (!isAbortError(reason)) setFeedback({ type: "error", text: errorMessage(reason) }); }
-            finally { if (!controller.signal.aborted) timer = setTimeout(load, 15_000); }
+            const results = await Promise.allSettled([
+                api<{ runners: Runner[] }>("/runners", { signal: controller.signal }),
+                api<{ queues: RunnerQueueEntry[] }>("/runners/queue", { signal: controller.signal }),
+            ]);
+            if (controller.signal.aborted) return;
+            const [runnerResult, queueResult] = results;
+            if (runnerResult.status === "fulfilled") setRunners(runnerResult.value.runners);
+            else if (!isAbortError(runnerResult.reason)) setFeedback({ type: "error", text: errorMessage(runnerResult.reason) });
+            if (queueResult.status === "fulfilled") { setQueues(queueResult.value.queues); setQueueError(""); }
+            else if (!isAbortError(queueResult.reason)) setQueueError(errorMessage(queueResult.reason));
+            if (!controller.signal.aborted) timer = setTimeout(load, 5000);
         }
         void load();
         return () => { controller.abort(); clearTimeout(timer); };
@@ -77,6 +91,18 @@ export function RunnersSettings() {
     }
 
     return <>
+        <SettingsSection id="runner-queue-heading" title="Run queue" description="Waiting runs by environment and runner group." className="mb-10">
+            {queueError ? <SettingsBlock><p role="alert" className="text-control text-danger">Queue details are unavailable: {queueError}</p><Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => setRetry((value) => value + 1)}>Refresh queue</Button></SettingsBlock>
+                : !queues ? <SettingsBlock><Skeleton className="h-16 w-full" role="status" aria-label="Loading run queue" aria-busy="true" /></SettingsBlock>
+                    : !queues.length ? <SettingsBlock><p className="text-body text-ink-muted">No environments use a runner yet. Choose Runner in your project's environment settings.</p></SettingsBlock>
+                        : <ul aria-label="Runner queues">{queues.map((queue) => <li key={queue.environmentId} className="border-b border-line px-4 py-4 last:border-b-0 sm:px-5">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div className="min-w-0"><p className="break-words text-body font-medium text-ink"><Link href={`/p/${queue.projectId}/settings`} className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{queue.projectName}</Link> · {queue.environmentName}</p><p className="mt-1 text-meta text-ink-muted">{queue.group ? `Group: ${queue.group}` : "No group"}</p></div>
+                                <p className="text-meta text-ink-muted"><span className="tabular">{queue.onlineRunners}</span> online · <span className="tabular">{queue.busyRunners}</span> busy</p>
+                            </div>
+                            {queue.queued > 0 ? <RunnerQueueNotice queue={queue} className="mt-3" /> : <p className="mt-3 flex items-center gap-1.5 text-control text-ink-muted"><CircleCheck size={14} aria-hidden="true" />{countLabel(0, "run")} waiting</p>}
+                        </li>)}</ul>}
+        </SettingsSection>
         <SettingsSection id="runners-heading" title="Runners" description="Run Specs inside your private network. Runners connect outbound to Specbook; credentials stay on their machine.">
             <form onSubmit={create}>
                 <SettingsRow label="Runner name" htmlFor="runner-name" description="Identify the machine or service that will use this token."><Input id="runner-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Office runner" maxLength={80} required disabled={busy || Boolean(secret)} /></SettingsRow>

@@ -55,6 +55,35 @@ async function fixture() {
 }
 
 describe("CI access and quality gates", () => {
+    test("queue visibility counts waiting Specs per environment and explains runner availability", async () => {
+        const { resolveRunEnvironment } = await import("../../src/core/environments");
+        const { runnerQueueSnapshot, visibleRuns } = await import("../../src/core/private-runner/visibility");
+        const { project, spec } = await fixture();
+        const configured = (await environmentsRepository.list(project.id))[0]!;
+        await environmentsRepository.update(configured, { ...configured, executor: "runner", runnerGroup: "visibility" });
+        const environment = await resolveRunEnvironment(project.id);
+        const run = await runsRepository.createRun({ specId: spec.id, commitSha: "sha", sourceHash: "source", environment });
+        const batchId = crypto.randomUUID();
+        await enqueueRunnerBatch(batchId, project.id, "visibility", { batchId, projectId: project.id, baseUrl: environment.baseUrl,
+            networkPolicy: { origins: [environment.baseUrl], allowPrivate: true }, timeoutMs: 60_000,
+            specs: [{ runId: run.id, specId: spec.id, title: spec.title, files: { "spec.ts": VALID_SPEC, "spec.yml": JSON.stringify(HUMAN_SPEC) } }] });
+        const first = (await runnerQueueSnapshot()).batchQueues.get(batchId)!;
+        assert.equal(first.queued, 1);
+        assert.equal(first.environmentId, environment.id);
+        assert.equal(first.reason, "No runner online in group visibility.");
+        assert.ok(first.oldestWaitMs >= 0);
+        assert.equal((await visibleRuns([run]))[0].queue?.queued, 1);
+        const issued = await issueRunnerToken("Visibility", "visibility");
+        const runner = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+        const lease = (await runnersRepository.claim(runner, 60_000))!;
+        assert.equal((await visibleRuns([run]))[0].queue, null);
+        await releaseRunnerWork(lease.id, runner.id, lease.leaseId!);
+        assert.equal((await runnerQueueSnapshot()).batchQueues.get(batchId)!.reason, "Waiting for a runner to claim work.");
+        await revokeRunnerToken(runner.id);
+        await runnersRepository.cancelBatch(batchId);
+        await runsRepository.finishRun(run.id, "error", 0, "Verification finished");
+    });
+
     test("runner tokens are shown once, admin-session managed and separate from CI and personal access", async () => {
         const { createRunnersRouter } = await import("../../src/infra/web/routes/runners");
         const { accessGate } = await import("../../src/infra/web/access");

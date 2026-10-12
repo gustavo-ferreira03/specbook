@@ -7,6 +7,7 @@ import { authenticateRunnerToken, issueRunnerToken, publicRunner, runnerTokenSch
 import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunnerWork, revokeRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
 import { runnersRepository, type RunnerToken } from "../../repositories/runners";
 import { access } from "../access";
+import { runnerQueueSnapshot } from "../../../core/private-runner/visibility";
 
 declare module "hono" {
     interface ContextVariableMap { runner: RunnerToken }
@@ -25,6 +26,10 @@ function requireSession(c: Context): void {
 
 export function createRunnersRouter(): Hono {
     const router = new Hono();
+    router.get("/runners/queue", access("admin"), async (c) => {
+        c.header("Cache-Control", "no-store");
+        return c.json({ queues: (await runnerQueueSnapshot()).queues });
+    });
     router.get("/runners", access("admin"), async (c) => c.json({ runners: (await runnersRepository.list()).map(publicRunner) }));
     router.post("/runners", access("admin"), zValidator("json", runnerTokenSchema), async (c) => {
         requireSession(c);

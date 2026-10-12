@@ -661,6 +661,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
             />
             <SpecRunDialog
                 environment={runBatch.environment ?? undefined}
+                queue={runBatch.queue}
                 open={runBatch.open}
                 onOpenChange={runBatch.setOpen}
                 title={runBatch.title}

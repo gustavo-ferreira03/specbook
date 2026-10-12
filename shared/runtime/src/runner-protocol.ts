@@ -27,6 +27,22 @@ export const runnerPayloadSchema = z.object({
 }).strict();
 export type RunnerPayload = z.infer<typeof runnerPayloadSchema>;
 
+export const runnerQueueEntrySchema = z.object({
+    projectId: id,
+    projectName: z.string(),
+    environmentId: id,
+    environmentName: z.string(),
+    group: z.string().nullable(),
+    executor: z.enum(["runner", "tunnel"]),
+    queued: z.number().int().nonnegative(),
+    oldestQueuedAt: z.string().datetime().nullable(),
+    oldestWaitMs: z.number().nonnegative(),
+    onlineRunners: z.number().int().nonnegative(),
+    busyRunners: z.number().int().nonnegative(),
+    reason: z.string().nullable(),
+}).strict();
+export type RunnerQueueEntry = z.infer<typeof runnerQueueEntrySchema>;
+
 export const runnerClaimRequestSchema = z.object({ version: z.string().min(1).max(100) }).strict();
 export const runnerClaimResponseSchema = z.object({
     runner: z.object({ id, name: z.string(), group: z.string().nullable() }).strict(),
@@ -64,6 +80,7 @@ export const runnerCompleteRequestSchema = z.object({
 export type RunnerCompletion = z.infer<typeof runnerCompleteRequestSchema>;
 
 export const runnerJsonSchemas = {
+    queue: z.toJSONSchema(runnerQueueEntrySchema),
     claim: z.toJSONSchema(runnerClaimRequestSchema),
     claimed: z.toJSONSchema(runnerClaimResponseSchema),
     heartbeat: z.toJSONSchema(runnerHeartbeatSchema),

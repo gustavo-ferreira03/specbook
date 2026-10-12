@@ -13,6 +13,7 @@ import { specsRepository } from "../../repositories/specs";
 import { isInside } from "@specbook/runtime/safe-fs";
 import { batchReport, runReport } from "../../../core/ci/report";
 import { resolveRunEnvironment } from "../../../core/environments";
+import { runnerQueueSnapshot, visibleRuns } from "../../../core/private-runner/visibility";
 
 const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
 
@@ -88,7 +89,8 @@ export function createRunsRouter(): Hono {
             const environment = await resolveRunEnvironment(spec.projectId, c.req.query("environment"));
             if (environment.executor === "runner") {
                 const batch = await startSpecBatch(spec.projectId, [spec.id], spec.title, { environment });
-                return c.json({ run: await runsRepository.getRun(batch.specs[0].runId), batchId: batch.id }, 202);
+                const run = await runsRepository.getRun(batch.specs[0].runId);
+                return c.json({ run: run ? (await visibleRuns([run]))[0] : null, batchId: batch.id }, 202);
             }
             const run = await executeSpec(c.req.param("id"), { automate: true, environment: c.req.query("environment") });
             return c.json({ run });
@@ -101,7 +103,8 @@ export function createRunsRouter(): Hono {
         try {
             const { specIds, label, environment } = c.req.valid("json");
             const batch = await startSpecBatch(c.req.param("id"), specIds, label, { environment });
-            return c.json({ batch }, 202);
+            const { batchQueues } = await runnerQueueSnapshot();
+            return c.json({ batch: { ...batch, queue: batchQueues.get(batch.id) ?? null } }, 202);
         } catch (error) {
             throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
         }
@@ -110,7 +113,9 @@ export function createRunsRouter(): Hono {
     router.get("/run-batches/:id", access("viewer"), async (c) => {
         const batch = await getRunBatch(c.req.param("id"));
         if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
-        return c.json({ batch, reportUrl: `/run-batches/${encodeURIComponent(batch.id)}/report` });
+        const { batchQueues } = await runnerQueueSnapshot();
+        const queue = batchQueues.get(batch.id) ?? null;
+        return c.json({ batch: { ...batch, queue, specs: batch.specs.map((item) => ({ ...item, queue: item.status === "running" ? queue : null })) }, reportUrl: `/run-batches/${encodeURIComponent(batch.id)}/report` });
     });
 
     router.get("/run-batches/:id/report", access("viewer"), async (c) => {
@@ -130,13 +135,13 @@ export function createRunsRouter(): Hono {
         const spec = await specsRepository.getSpec(c.req.param("id"));
         if (!spec) throw new HTTPException(404, { message: "Spec not found" });
         const { limit, before } = c.req.valid("query");
-        return c.json({ runs: await runsRepository.listRuns(spec.id, { limit, before }) });
+        return c.json({ runs: await visibleRuns(await runsRepository.listRuns(spec.id, { limit, before })) });
     });
 
     router.get("/runs/:id", access("viewer"), async (c) => {
         const run = await runsRepository.getRun(c.req.param("id"));
         if (!run) throw new HTTPException(404, { message: "Run not found" });
-        return c.json({ run });
+        return c.json({ run: (await visibleRuns([run]))[0] });
     });
 
     router.get("/runs/:id/artifacts", access("viewer"), async (c) => {

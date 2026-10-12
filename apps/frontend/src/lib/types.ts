@@ -19,6 +19,21 @@ export interface ProjectEnvironment {
     runnerGroup: string | null;
 }
 
+export interface RunnerQueueEntry {
+    projectId: string;
+    projectName: string;
+    environmentId: string;
+    environmentName: string;
+    group: string | null;
+    executor: "runner" | "tunnel";
+    queued: number;
+    oldestQueuedAt: string | null;
+    oldestWaitMs: number;
+    onlineRunners: number;
+    busyRunners: number;
+    reason: string | null;
+}
+
 export interface SpecCandidate {
     id: string;
     title: string;
@@ -82,6 +97,7 @@ export interface HumanSpec {
 }
 
 export interface Run {
+    queue?: RunnerQueueEntry | null;
     baseUrl?: string | null;
     environment?: ProjectEnvironment | null;
     id: string;
@@ -230,6 +246,7 @@ export interface RunEvidence {
 }
 
 export interface RunBatchItem {
+    queue?: RunnerQueueEntry | null;
     awaitingDeploy?: boolean;
     runId: string;
     specId: string;
@@ -243,6 +260,7 @@ export interface RunBatchItem {
 }
 
 export interface RunBatch {
+    queue?: RunnerQueueEntry | null;
     environment?: ProjectEnvironment;
     baseUrl?: string;
     id: string;

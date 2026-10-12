@@ -26,6 +26,7 @@ export interface RunBatchController {
     error: string;
     warning: string;
     environment: RunBatch["environment"] | null;
+    queue: RunBatch["queue"] | null;
     start: (title: string, targets: RunBatchTarget[], environment?: string) => Promise<void>;
 }
 
@@ -34,7 +35,7 @@ function itemsFromBatch(batch: RunBatch): SpecBatchItem[] {
         runId: item.runId,
         specId: item.specId,
         title: item.title,
-        status: item.status,
+        status: item.status === "running" && item.queue ? "queued" : item.status,
         durationMs: item.durationMs,
         failReason: item.failReason,
     }));
@@ -67,6 +68,7 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
     const [error, setError] = useState("");
     const [warning, setWarning] = useState("");
     const [environment, setEnvironment] = useState<RunBatch["environment"] | null>(null);
+    const [queue, setQueue] = useState<RunBatch["queue"] | null>(null);
     const controllerRef = useRef<AbortController | null>(null);
     const onProgressRef = useRef(options.onProgress);
     useEffect(() => {
@@ -96,6 +98,7 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
         setError("");
         setWarning("");
         setEnvironment(null);
+        setQueue(null);
         setRunning(true);
         setOpen(true);
 
@@ -103,6 +106,7 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
             if (signal.aborted) return;
             setItems(itemsFromBatch(batch));
             setEnvironment(batch.environment ?? null);
+            setQueue(batch.queue ?? null);
             onProgressRef.current?.(batch);
         };
         const markUnknown = () => setItems((current) => current.map((item) =>
@@ -163,5 +167,5 @@ export function useRunBatch(projectId: string, options: { onProgress?: (batch: R
         }
     }, [projectId]);
 
-    return { open, setOpen, title, items, running, reportUrl, error, warning, environment, start };
+    return { open, setOpen, title, items, running, reportUrl, error, warning, environment, queue, start };
 }

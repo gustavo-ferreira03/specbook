@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, ChevronDown, CircleHelp, Clock3, Download, ExternalLink, HardDrive, Minus, RefreshCw } from "lucide-react";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
+import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -113,6 +114,7 @@ export function SpecRunDialog({
     error = "",
     warning = "",
     environment,
+    queue,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -123,6 +125,7 @@ export function SpecRunDialog({
     error?: string;
     warning?: string;
     environment?: RunBatch["environment"] | null;
+    queue?: RunBatch["queue"] | null;
 }) {
     const settled = items.filter((item) => item.status !== "queued" && item.status !== "running").length;
     const passed = items.filter((item) => item.status === "passed").length;
@@ -138,11 +141,12 @@ export function SpecRunDialog({
                     <DialogTitle>{title}</DialogTitle>
                     <DialogDescription>
                         {running
-                            ? `Running ${countLabel(items.length, "Spec")} together. You can keep this open to follow along.`
+                            ? `${queue?.queued ? "Waiting to run" : "Running"} ${countLabel(items.length, "Spec")} together. You can keep this open to follow along.`
                             : `${summary} across ${countLabel(items.length, "Spec")}.`}
                     </DialogDescription>
                     {environment && <p className="mt-1 break-words text-meta text-ink-muted"><span className="font-medium text-ink">{environment.name}</span> · {environment.baseUrl}</p>}
                     {environment?.executor === "runner" && <p className="mt-1 flex items-center gap-1.5 text-meta text-ink-muted"><HardDrive size={12} aria-hidden="true" />Runs on a private-network runner{environment.runnerGroup ? ` · ${environment.runnerGroup}` : ""}</p>}
+                    <RunnerQueueNotice queue={queue} className="mt-3" />
                 </DialogHeader>
 
                 <div className="shrink-0 border-y border-line bg-surface-soft px-5 py-3" aria-live="polite">

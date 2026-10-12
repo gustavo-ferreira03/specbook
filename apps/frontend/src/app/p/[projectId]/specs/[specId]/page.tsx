@@ -5,13 +5,14 @@ import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, FileCode2, FileX2, HardDrive, Images, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, ExternalLink, FileCode2, FileX2, HardDrive, Images, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { RawFileEditor } from "@/components/RawFileEditor";
 import { RelativeTime } from "@/components/RelativeTime";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
+import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SpecFolio } from "@/components/SpecFolio";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
@@ -148,7 +149,13 @@ function VerificationBanner({
     let detail: React.ReactNode = null;
     let body: React.ReactNode = null;
 
-    if (running) {
+    const queued = latestRun?.status === "running" && Boolean(latestRun.queue);
+    if (queued) {
+        status = "queued";
+        headline = "Waiting to run";
+        detail = `${latestRun.environment?.name ?? environment}${latestRun.environment?.runnerGroup ? ` · Group: ${latestRun.environment.runnerGroup}` : ""}`;
+        body = <RunnerQueueNotice queue={latestRun.queue} className="mt-2" />;
+    } else if (running || latestRun?.status === "running") {
         status = "running";
         headline = "Verifying now";
         detail = `Running this Spec against ${environment}. Results appear here when it finishes.`;
@@ -205,7 +212,7 @@ function VerificationBanner({
     }
 
     const meta = statusMeta(status);
-    const Icon = meta.icon;
+    const Icon = queued ? Clock3 : meta.icon;
     return (
         <section aria-label="Run status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className={cn("slab flex flex-wrap gap-4 rounded-xl bg-surface p-4 sm:flex-nowrap", body ? "items-start" : "items-center", sealColor[status])}>
             <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-md text-surface", sealFill[status] ?? "bg-ink-subtle")}>
@@ -362,7 +369,8 @@ function RunEntry({
 }) {
     const [open, setOpen] = useState(latest);
     const waiting = run.awaitingDeploy && run.status !== "passed" && run.status !== "running";
-    const meta = statusMeta(waiting ? "awaiting_deploy" : run.status);
+    const queued = run.status === "running" && Boolean(run.queue);
+    const meta = statusMeta(waiting || queued ? "awaiting_deploy" : run.status);
     useEffect(() => {
         if (open && !loaded && run.status !== "running") onExpand(run.id);
     }, [loaded, onExpand, open, run.id, run.status]);
@@ -379,7 +387,7 @@ function RunEntry({
                 }}
             >
                 <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
-                    <StatusPill status={waiting ? "awaiting_deploy" : run.status} kind="run" size="sm" />
+                    {queued ? <span className="inline-flex items-center gap-1.5 text-meta text-ink-subtle"><Clock3 size={13} aria-hidden="true" />Queued</span> : <StatusPill status={waiting ? "awaiting_deploy" : run.status} kind="run" size="sm" />}
                     {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
@@ -412,6 +420,7 @@ function RunEntry({
                         <a href={`#run-${run.retryOf}`} className="rounded-sm font-medium underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">View first attempt</a>
                     </p>
                 )}
+                {queued && <RunnerQueueNotice queue={run.queue} className="mt-2" />}
                 {run.status !== "passed" && loaded?.data?.failedStep && (
                     <p className="mt-2 text-control text-ink-muted"><span className="font-medium text-ink">Failed at step:</span> {loaded.data.failedStep}</p>
                 )}
