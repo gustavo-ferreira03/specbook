@@ -110,6 +110,10 @@ class RunnersRepository {
         return (await db.select().from(runnerJobs).where(eq(runnerJobs.id, id)))[0] ?? null;
     }
 
+    async jobByBatch(batchId: string): Promise<RunnerJob | null> {
+        return (await db.select().from(runnerJobs).where(eq(runnerJobs.batchId, batchId)))[0] ?? null;
+    }
+
     async reclaim(now = new Date().toISOString(), activeCompletionIds: string[] = [], recoverAllCompleting = false): Promise<void> {
         const staleCompletion = recoverAllCompleting ? undefined : lte(sql`coalesce(${runnerJobs.completionStartedAt}, ${runnerJobs.updatedAt})`, new Date(Date.parse(now) - RUNNER_COMPLETION_TIMEOUT_MS).toISOString());
         await db.update(runnerJobs).set({ status: "queued", runnerId: null, runnerInstanceId: null, leaseId: null, leaseExpiresAt: null,

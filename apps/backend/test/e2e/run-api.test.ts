@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { Hono } from "hono";
+import type { RunBatch } from "../../src/core/runner/batch";
 import { HUMAN_SPEC, useTempStorage, VALID_SPEC } from "../helpers/storage";
 
 useTempStorage();
@@ -263,9 +264,20 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     await environmentsRepository.update(environment, { ...environment, executor: "runner", runnerGroup: "broken" });
     const feature = await writer.createFeatureInRepo(project.id, null, "Private", "");
     const makeSpec = async (title: string) => (await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title, description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC.replace("Open the application", title) })).spec;
-    for (const corruption of ["missing batch", "invalid batch", "missing Spec", "finish error"]) {
+    for (const corruption of ["missing batch", "invalid batch", "missing Spec", "finish error", "batch directory"]) {
         const spec = await makeSpec(corruption);
-        const batch = await startSpecBatch(project.id, [spec.id], corruption);
+        const abort = new AbortController();
+        const waiting = corruption === "batch directory" ? executeSpec(spec.id, { signal: abort.signal }) : null;
+        let batch: RunBatch;
+        if (waiting) {
+            let pending;
+            for (let attempt = 0; attempt < 100 && !pending; attempt++) {
+                pending = (await runnersRepository.pending()).find((row) => row.payload.specs.some((entry) => entry.specId === spec.id));
+                if (!pending) await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            assert.ok(pending);
+            batch = (await getRunBatch(pending.batchId))!;
+        } else batch = await startSpecBatch(project.id, [spec.id], corruption);
         const job = (await runnersRepository.pending()).find((row) => row.batchId === batch.id)!;
         if (corruption === "missing Spec") {
             assert.equal((await runsRepository.getRun(batch.specs[0].runId))!.awaitingDeploy, false);
@@ -276,6 +288,7 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
         const batchFile = path.join(getRunBatchDirectory(batch.id), "batch.json");
         if (corruption === "missing batch") await fs.rm(batchFile);
         if (corruption === "invalid batch") await fs.writeFile(batchFile, "{invalid");
+        if (corruption === "batch directory") { await fs.rm(batchFile); await fs.mkdir(batchFile); }
         if (corruption === "missing Spec") await fs.rm(path.join(runsDir, batch.specs[0].runId, "spec.ts"));
         const original = runsRepository.finishRun;
         if (corruption === "finish error") runsRepository.finishRun = async () => { throw new Error("Simulated finish failure"); };
@@ -284,7 +297,15 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
         const retired = (await runnersRepository.job(job.id))!;
         assert.equal(retired.status, "completed", corruption);
         assert.match(retired.lastFailure!, /could not be finalized/, corruption);
-        assert.equal((await getRunBatch(batch.id))!.status, "error", corruption);
+        if (waiting) {
+            const timeout = setTimeout(() => abort.abort(new Error("Terminal runner waiter did not finish")), 3000);
+            try {
+                const result = await waiting;
+                assert.equal(result.status, "error", "waiter must finish even when batch metadata cannot be repaired");
+                assert.match(result.failReason!, /could not be finalized/);
+            } finally { clearTimeout(timeout); }
+            await fs.rm(batchFile, { recursive: true, force: true });
+        } else assert.equal((await getRunBatch(batch.id))!.status, "error", corruption);
         if (corruption === "missing Spec") {
             const recovered = (await runsRepository.getRun(batch.specs[0].runId))!;
             assert.equal(recovered.awaitingDeploy, true, "fallback must retain deployment waiting created after this run started");

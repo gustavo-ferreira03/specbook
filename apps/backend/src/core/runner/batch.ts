@@ -26,7 +26,7 @@ import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import type { SpecAnalysis } from "@specbook/runtime/validate";
 import type { RunnerCompletion } from "@specbook/runtime/runner-protocol";
 import { cancelRunnerBatch, enqueueRunnerBatch, maintainRunnerQueue, pendingRunnerBatchIds } from "../private-runner/queue";
-import type { RunnerJob } from "../../infra/repositories/runners";
+import { runnersRepository, type RunnerJob } from "../../infra/repositories/runners";
 import { logger } from "../../infra/logger";
 import { createEnvironmentTunnelProxy, TunnelWaitInterrupted, waitForTunnel } from "../tunnel/registry";
 
@@ -554,6 +554,16 @@ async function waitRunnerBatch(batch: RunBatch, signal?: AbortSignal): Promise<R
             await maintainRunnerQueue();
             const completed = await getRunBatch(batch.id).catch(() => null);
             if (completed && completed.status !== "running") return completed;
+            const job = await runnersRepository.jobByBatch(batch.id);
+            if (job?.status === "completed") {
+                const failReason = job.lastFailure ?? "Runner work could not be finalized. Check the server logs for details.";
+                const specs = await Promise.all(batch.specs.map(async (item): Promise<RunBatchItem> => {
+                    const run = await runsRepository.getRun(item.runId);
+                    return { ...item, status: run && run.status !== "running" ? run.status : "error", durationMs: run?.durationMs ?? null,
+                        failReason: run?.failReason ?? failReason, awaitingDeploy: run?.awaitingDeploy ?? item.awaitingDeploy };
+                }));
+                return { ...batch, status: "error", durationMs: Math.max(0, Date.now() - Date.parse(batch.startedAt)), failReason, specs };
+            }
             await new Promise<void>((resolve) => setTimeout(resolve, 500));
         }
     } catch (error) {
