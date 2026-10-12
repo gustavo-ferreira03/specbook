@@ -163,7 +163,9 @@ export async function resolveRunnerSecrets(refs: SecretRef[], baseUrl: string, o
 
 function textScrubber(store: Store): (text: string) => string {
     rememberEnvironmentSecrets();
-    const values = [...new Set([...Object.values(store).flatMap((profile) => Object.values(profile.fields)), ...runnerSecretValues])];
+    // Profile and field names are chosen by the user and shown everywhere; a value equal to one is not hidden.
+    const names = new Set([...Object.keys(store), ...Object.values(store).flatMap((profile) => Object.keys(profile.fields))]);
+    const values = [...new Set([...Object.values(store).flatMap((profile) => Object.values(profile.fields)), ...runnerSecretValues])].filter((value) => !names.has(value));
     const variants = [...new Set(values.flatMap((value) => {
         const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         return [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1), escaped, escaped.replace(/"/g, "&quot;").replace(/'/g, "&#39;"), escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;")];

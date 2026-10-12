@@ -165,7 +165,7 @@ export async function createLocalMcpServer(workspace: string, session: string, s
         }
         const command = `specbook credentials add ${profile}`;
         const requestedFields = [...new Set(fields)];
-        return finish({ status: "needs_credentials", message: `${message}\nProfile: ${profile}. Fields: ${requestedFields.join(", ")}.\nRun: ${command}\nKeep credential values out of this conversation, then reply \"done\".`, pendingAction: { type: "credentials", profile, fields: requestedFields, command } });
+        return finish({ status: "needs_credentials", message, pendingAction: { type: "credentials", profile, fields: requestedFields, command } });
     });
     tool("report_done", "End the turn: the request is complete. Summarize the outcome; Specbook attaches the Specs and evidence from actual runs.", outcomeToolSchemas.report_done, async ({ message }) => finish({ status: "done", message }));
     tool("report_failed", "End the turn: the request cannot complete. Give the cause and how to fix it and retry.", outcomeToolSchemas.report_failed, async ({ message, error }) => finish({ status: "failed", message, error }));
