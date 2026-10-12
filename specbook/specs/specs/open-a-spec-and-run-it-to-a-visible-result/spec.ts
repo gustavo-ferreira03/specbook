@@ -16,7 +16,7 @@ test("Open a Spec and run it to a visible result", async ({ page, step, secret }
     });
     await step("Run the Spec again", async () => {
         await page.getByRole("button", { name: "Run again" }).click();
-        await expect(page.getByRole("region", { name: "Run status" }).getByText("Last run passed")).toBeVisible({ timeout: 30000 });
+        await expect(page.getByRole("region", { name: "Run status" }).getByRole("paragraph").getByText("Last run passed")).toBeVisible({ timeout: 30000 });
     });
     await step("The newest run in the history passed just now", async () => {
         const newest = page.getByRole("list", { name: "Runs, newest first" }).getByRole("listitem").first();
