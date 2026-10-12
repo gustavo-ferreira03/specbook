@@ -71,6 +71,12 @@ describe("CI access and quality gates", () => {
         assert.equal(first.queued, 1);
         assert.equal(first.environmentId, environment.id);
         assert.equal(first.reason, "No runner online in group visibility.");
+        const { queueMetrics, prometheusQueueMetrics, runnerMetricsSchema } = await import("../../src/core/private-runner/metrics");
+        const metrics = queueMetrics([first]);
+        assert.ok(runnerMetricsSchema.safeParse(metrics).success);
+        assert.equal(metrics.groups[0].queued, 1);
+        assert.match(prometheusQueueMetrics(metrics), /specbook_runner_queue_depth\{runner_group="visibility"\} 1\n/);
+        assert.match(prometheusQueueMetrics({ groups: [{ group: 'office"\\\n', queued: 0, oldestWaitSeconds: 0 }] }), /runner_group="office\\"\\\\\\n"/);
         assert.ok(first.oldestWaitMs >= 0);
         assert.equal((await visibleRuns([run]))[0].queue?.queued, 1);
         const issued = await issueRunnerToken("Visibility", "visibility");

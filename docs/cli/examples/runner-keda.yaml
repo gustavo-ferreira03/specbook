@@ -1,0 +1,31 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: specbook-runner-metrics
+spec:
+  secretTargetRef:
+    - parameter: token
+      name: specbook-runner
+      key: token
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: specbook-runner
+spec:
+  scaleTargetRef:
+    name: specbook-runner
+  pollingInterval: 15
+  cooldownPeriod: 300
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: https://specbook.example.com/api/runner/metrics?group=lab
+        valueLocation: groups.0.queued
+        targetValue: "1"
+        activationTargetValue: "0"
+        authMode: bearer
+      authenticationRef:
+        name: specbook-runner-metrics

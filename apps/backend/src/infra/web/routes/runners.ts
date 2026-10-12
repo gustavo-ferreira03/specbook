@@ -8,6 +8,8 @@ import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunner
 import { runnersRepository, type RunnerToken } from "../../repositories/runners";
 import { access } from "../access";
 import { runnerQueueSnapshot } from "../../../core/private-runner/visibility";
+import { accessTokenFromHeaders } from "../../../core/accounts/sessions";
+import { prometheusQueueMetrics, queueMetrics, runnerMetricsQuerySchema } from "../../../core/private-runner/metrics";
 
 declare module "hono" {
     interface ContextVariableMap { runner: RunnerToken }
@@ -20,12 +22,32 @@ async function verifyRunner(c: Context): Promise<true> {
     return true;
 }
 
+async function verifyMetrics(c: Context): Promise<true> {
+    const runner = await authenticateRunnerToken(c.req.header("authorization"), false);
+    if (runner) { c.set("runner", runner); return true; }
+    const user = await accessTokenFromHeaders(c.req.raw.headers);
+    if (!user || user.role !== "admin") throw new HTTPException(401, { message: "Provide a runner token or an admin access token for runner metrics." });
+    c.set("user", user);
+    c.set("authentication", "token");
+    return true;
+}
+
 function requireSession(c: Context): void {
     if (c.get("authentication") !== "session") throw new HTTPException(403, { message: "Sign in to the web app to manage runner tokens." });
 }
 
 export function createRunnersRouter(): Hono {
     const router = new Hono();
+    router.get("/runner/metrics", access("runner-token", verifyMetrics), zValidator("query", runnerMetricsQuerySchema), async (c) => {
+        const { group, format } = c.req.valid("query");
+        const runner = c.get("runner");
+        const queues = (await runnerQueueSnapshot()).queues.filter((entry) =>
+            (!runner || !entry.group || entry.group === runner.group) && (group === undefined || (entry.group ?? "") === group));
+        const metrics = queueMetrics(queues);
+        c.header("Cache-Control", "no-store");
+        if (format === "prometheus") return c.body(prometheusQueueMetrics(metrics), 200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" });
+        return c.json(metrics);
+    });
     router.get("/runners/queue", access("admin"), async (c) => {
         c.header("Cache-Control", "no-store");
         return c.json({ queues: (await runnerQueueSnapshot()).queues });

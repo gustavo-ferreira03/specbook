@@ -18,11 +18,11 @@ export async function issueRunnerToken(name: string, group: string | null) {
     return { token: issued.token, runner: publicRunner(runner) };
 }
 
-export async function authenticateRunnerToken(authorization?: string): Promise<RunnerToken | null> {
+export async function authenticateRunnerToken(authorization?: string, touch = true): Promise<RunnerToken | null> {
     const candidate = authorization?.match(/^Bearer (sb_runner_[A-Za-z0-9_-]{43})$/)?.[1];
     if (!candidate) return null;
     const runner = await runnersRepository.token(tokenHash(candidate));
     if (!runner) return null;
-    await runnersRepository.touch(runner.id);
+    if (touch) await runnersRepository.touch(runner.id);
     return runner;
 }
