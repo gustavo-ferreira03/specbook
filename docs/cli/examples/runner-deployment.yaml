@@ -18,6 +18,8 @@ spec:
           env:
             - name: SPECBOOK_URL
               value: https://specbook.example.com/api
+            - name: SPECBOOK_RUNNER_ALLOWED_ORIGINS
+              value: https://private-app.example.com
             - name: SPECBOOK_RUNNER_TOKEN
               valueFrom:
                 secretKeyRef:

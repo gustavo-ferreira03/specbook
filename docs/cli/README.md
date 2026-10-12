@@ -159,17 +159,19 @@ Private-network runners
 
 An admin creates a token under **Settings → Runners**. Choose a group to restrict it to that group's work and, when needed, select the projects it can access; the default is all projects. Copy the secret once. **Rotate token** displays a replacement once, revokes the previous secret immediately and returns its leased work to the queue. Revoking a token also closes its tunnels. Token management requires an admin web session.
 
-Choose **Runner** in **Project settings → Environments**, then enter the matching group. Ungrouped environments can use any authorized runner; a token without a group cannot claim grouped work. Manual runs, Run all, CI, schedules and deployment signals share this queue. The runner needs outbound HTTPS access to Specbook and browser access to the application's allowed origins.
+An admin chooses **Runner** in **Project settings → Environments**, then enters the matching group. Grouped environments use runners in that group; ungrouped environments use only ungrouped runners. Manual runs, Run all, CI, schedules and deployment signals share this queue. The runner needs outbound HTTPS access to Specbook and browser access to the application's allowed origins.
 
 ```sh
 export SPECBOOK_HOME=/var/lib/specbook-runner
 export SPECBOOK_URL=https://specbook.example.com/api
 # Supply SPECBOOK_RUNNER_TOKEN through your secret store.
 specbook credentials add shop --origin https://private-app.example.com
-specbook runner --concurrency 1
+specbook runner --concurrency 1 --allow-origin https://private-app.example.com
 ```
 
 `--url` or `--server` overrides `SPECBOOK_URL`; a missing token prompts without echoing it on a terminal. `--json` never prompts. Set concurrency with `--concurrency` or `SPECBOOK_RUNNER_CONCURRENCY` (1–32, default 1). Each process has its own capacity even when several replicas share a token. Settings shows their CLI and protocol versions and flags older clients. Claims and heartbeats report both versions; an incompatible protocol gets an upgrade message pointing to the server's CLI tarball.
+
+Configure the runner's own origin allowlist before starting it. Repeat `--allow-origin https://app.example.com` for each permitted HTTP(S) origin, or set `SPECBOOK_RUNNER_ALLOWED_ORIGINS` to a comma- or whitespace-separated list. The CLI refuses to start without it. Production runners must use an explicit allowlist controlled by the runner operator; never derive it from a server response. Before resolving secrets or opening Chromium, the runner refuses and releases a job whose base URL or environment allowed origins fall outside this list.
 
 **Settings → Runners → Run queue** shows waiting Spec counts, oldest wait, available runners and the reason for each environment/group. Waiting Spec pages and Run all results show the same information. The admin API is `GET /runners/queue`, returning `{ queues: [{ projectId, projectName, environmentId, environmentName, group, executor, queued, oldestQueuedAt, oldestWaitMs, onlineRunners, busyRunners, reason }] }`. Counts cover waiting Specs, including every Spec in a queued batch; leased Specs leave the queue. Reasons distinguish an offline group from runners with occupied capacity.
 
@@ -190,7 +192,7 @@ Build the runner image from this checkout without publishing it:
 ```sh
 docker build -f Dockerfile.runner -t specbook-runner:local .
 docker run --rm --shm-size=512m \
-  -e SPECBOOK_URL -e SPECBOOK_RUNNER_TOKEN \
+  -e SPECBOOK_URL -e SPECBOOK_RUNNER_TOKEN -e SPECBOOK_RUNNER_ALLOWED_ORIGINS \
   specbook-runner:local --once
 ```
 
@@ -241,7 +243,7 @@ specbook runner --secrets-command /opt/specbook/read-profile
 
 The runner invokes the provider command with the profile as its final argument, once per needed profile per batch. A wrapper receives `shop` as `$1` and prints one JSON object whose field values are nonempty strings. It can obtain them with a Vault or 1Password CLI, then select the required fields. If environment variables supply every needed field, the runner doesn't call the provider. Missing provider fields fall back to local profiles; provider failures stop that batch with a credentials error. Keep credentials out of the command string because process arguments are visible to local users.
 
-Provider execution has a 30-second limit and a 1 MiB stdout limit. The runner discards stderr and describes failures without its content. Environment/provider secrets are limited to the run's base origin; local values retain their saved origin restrictions. Values never enter JSON events or uploads. The runtime scrubs text evidence, masks secrets in screenshots and disables video for secret runs. Runner environments never fetch server-vault credentials or use server credential overrides.
+Provider execution has a 30-second limit and a 1 MiB stdout limit. The runner discards stderr and describes failures without its content. Environment/provider secrets use the runner operator's explicit origin allowlist, intersected with the job's origins. Local profiles must declare matching origins with `credentials add <profile> --origin <origin>`; runner mode refuses profiles without origins. Their saved origins also intersect the runner and job allowlists. Values never enter JSON events or uploads. The runtime scrubs text evidence, masks secrets in screenshots and disables video for secret runs. Runner environments never fetch server-vault credentials or use server credential overrides.
 
 Runner JSON output uses newline-delimited events:
 
@@ -302,7 +304,7 @@ The web UI ships separately as a Next.js standalone artifact matching the CLI ve
 2. A UI next to the installed CLI, in `dist/ui` or `ui`. Docker bundles it at `/app/ui` and passes that directory explicitly.
 3. `$SPECBOOK_HOME/ui/<version>`, populated by a checksum-verified release download.
 
-The default artifact URL is `https://github.com/gustavo-ferreira03/specbook/releases/download/v<version>/specbook-ui-<version>.tar.gz`; its checksum is at the same URL plus `.sha256`. Serve verifies SHA-256 before extracting and rejects escaping paths and unsafe archive entries. A missing release produces instructions to download, verify and extract the matching UI, then use `specbook serve --ui <directory>`. `SPECBOOK_UI_RELEASE_URL` overrides the complete artifact URL, with `{version}` substitution, for a release mirror. The CLI doesn't download UI files for local commands.
+The default artifact URL is `https://github.com/gustavo-ferreira03/specbook/releases/download/v<version>/specbook-ui-<version>.tar.gz`. The release workflow packages the UI first and embeds its SHA-256 in the CLI package; serve verifies downloads against that trusted checksum before extracting and rejects escaping paths and unsafe archive entries. Source builds without an embedded checksum require an extracted UI through `--ui`. A missing release produces instructions to download, verify and extract the matching UI, then use `specbook serve --ui <directory>`. `SPECBOOK_UI_RELEASE_URL` overrides the complete HTTPS artifact URL, with `{version}` substitution, for a release mirror. A mirror cannot change the expected checksum. The CLI doesn't download UI files for local commands.
 
 Build an explicit UI from this checkout:
 

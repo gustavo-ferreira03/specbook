@@ -19,11 +19,12 @@ import { normalizeServerUrl, redactTokens, rememberToken, RemoteError } from "./
 import { remoteFetch } from "./network";
 
 type Lease = NonNullable<RunnerClaim["lease"]>;
-export interface RunnerOptions { url: string; token: string; concurrency?: number; once?: boolean; drainAfter?: number; secretsCommand?: string; signal?: AbortSignal }
+export interface RunnerOptions { url: string; token: string; concurrency?: number; once?: boolean; drainAfter?: number; allowedOrigins?: string[]; secretsCommand?: string; signal?: AbortSignal }
 export type RunnerEvent =
     | { event: "connected"; url: string; runner: RunnerClaim["runner"]; concurrency: number }
     | { event: "claimed"; jobId: string; batchId: string; specs: number }
     | { event: "completed"; jobId: string; batchId: string; results: { runId: string; status: string; failReason: string | null }[] }
+    | { event: "rejected"; jobId: string; batchId: string; reason: string }
     | { event: "retrying"; reason: string; retryInMs: number }
     | { event: "stopped"; url: string; completedJobs: number; failedJobs: number };
 
@@ -53,7 +54,7 @@ async function artifacts(directory: string, scrubText: (text: string) => string)
     return result;
 }
 
-async function execute(lease: Lease, signal: AbortSignal, secretsCommand?: string): Promise<RunnerCompletion> {
+async function execute(lease: Lease, signal: AbortSignal, allowedOrigins: string[], secretsCommand?: string): Promise<RunnerCompletion> {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "specbook-runner-"));
     const started = Date.now();
     const results: RunnerCompletion["results"] = [];
@@ -75,7 +76,7 @@ async function execute(lease: Lease, signal: AbortSignal, secretsCommand?: strin
             selected.push({ key: spec.runId, source: spec.files["spec.ts"], analysis: analyzed.analysis, outputDir });
         }
         const refs = selected.flatMap((spec) => spec.analysis.secretRefs);
-        const resolved = await resolveRunnerSecrets(refs, lease.work.baseUrl, { command: secretsCommand, signal });
+        const resolved = await resolveRunnerSecrets(refs, lease.work.baseUrl, { command: secretsCommand, signal, allowedOrigins, jobOrigins: lease.work.networkPolicy.origins });
         safeText = (text) => scrubText(resolved.scrub(text));
         for (const spec of lease.work.specs) {
             const outputDir = path.join(directory, spec.runId);
@@ -125,6 +126,11 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     if (options.once && options.drainAfter !== undefined) throw new Error("Use --once or --drain-after, not both");
     const limit = options.once ? 1 : options.drainAfter;
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Use a positive integer for --drain-after");
+    const allowedOrigins = [...new Set(options.allowedOrigins ?? [])];
+    if (!allowedOrigins.length) throw new Error("Configure --allow-origin or SPECBOOK_RUNNER_ALLOWED_ORIGINS with the application origins this runner may access");
+    for (const origin of allowedOrigins) {
+        if (httpTarget(origin).origin !== origin) throw new Error("Runner allowed origins must be HTTP(S) origins without credentials, paths, query or fragment");
+    }
     let api = normalizeServerUrl(options.url);
     const stop = new AbortController();
     const signal = options.signal ? AbortSignal.any([options.signal, stop.signal]) : stop.signal;
@@ -180,6 +186,15 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
         await delay(2000, currentSignal);
     };
     const work = async (lease: Lease) => {
+        const jobOrigins = [httpTarget(lease.work.baseUrl).origin, ...lease.work.networkPolicy.origins];
+        if (jobOrigins.some((origin) => !allowedOrigins.includes(origin))) {
+            const reason = "Runner refused this job: its base URL or allowed origins are outside the runner's locally configured origin allowlist";
+            const response = await send(`/runner/jobs/${lease.jobId}/release`, { leaseId: lease.leaseId, reason }, AbortSignal.timeout(5000));
+            await response.body?.cancel();
+            failedJobs++;
+            await emit({ event: "rejected", jobId: lease.jobId, batchId: lease.work.batchId, reason });
+            return;
+        }
         const cancelled = new AbortController();
         const heartbeatStop = new AbortController();
         const jobSignal = AbortSignal.any([signal, cancelled.signal]);
@@ -211,7 +226,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
         })();
         try {
             await emit({ event: "claimed", jobId: lease.jobId, batchId: lease.work.batchId, specs: lease.work.specs.length });
-            const completion = await execute(lease, jobSignal, options.secretsCommand);
+            const completion = await execute(lease, jobSignal, allowedOrigins, options.secretsCommand);
             while (!jobSignal.aborted) {
                 try {
                     const response = await send(`/runner/jobs/${lease.jobId}/complete`, completion, jobSignal);

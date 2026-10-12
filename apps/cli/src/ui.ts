@@ -85,6 +85,7 @@ export function renderRunnerEvent(event: RunnerEvent): string {
         case "connected": return `${success(`Runner ${pc.bold(event.runner.name)} connected`)}\n${pc.dim(`${event.url} · concurrency ${event.concurrency}${event.runner.group ? ` · group ${event.runner.group}` : ""}`)}`;
         case "claimed": return `${pc.cyan("●")} Running ${event.specs} Spec${event.specs === 1 ? "" : "s"} ${pc.dim(`· ${event.batchId}`)}`;
         case "completed": return event.results.map((result) => `${result.status === "passed" ? success(result.runId) : failure(result.runId)}${result.failReason ? `\n  ${pc.dim(result.failReason)}` : ""}`).join("\n");
+        case "rejected": return `${failure(`Job ${event.jobId} rejected`)}\n  ${pc.dim(event.reason)}`;
         case "retrying": return `${pc.yellow("▲")} ${event.reason}${event.retryInMs ? pc.dim(` · retrying in ${event.retryInMs / 1000}s`) : ""}`;
         case "stopped": return `${pc.dim("Runner stopped")} · ${event.completedJobs} job${event.completedJobs === 1 ? "" : "s"} completed${event.failedJobs ? ` · ${event.failedJobs} with failures` : ""}`;
     }
