@@ -21,7 +21,7 @@ Describe a flow in chat, and Specbook explores your app in a real browser, write
 
 ## Features
 
-- **Specs people can read**: every check is a `spec.yml` with steps and an expected result, paired with an executable `spec.ts`.
+- **Specs people can read**: every check is a `spec.yml` with preconditions, steps and one expected result, paired with an executable `spec.ts` that keeps a screenshot of that result on every run.
 - **An agent that does the legwork**: it maps your app, proposes Specs, signs in with stored credentials and asks only when it is blocked.
 - **Evidence for every run**: screenshots per step, video on failure, diagnostics and run history live next to the Spec.
 - **QA for your coding agent**: the `specbook` CLI lets Claude Code or Codex talk to Specbook in a conversation and create and verify Specs against your local app, with no server and no model to configure.

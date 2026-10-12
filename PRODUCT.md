@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Developers and small teams who build web applications and want their behaviour documented and verified. They talk to Specbook's agent, or let their own coding agent request tests over MCP, then come back to review Specs, runs and failures. Sessions are short and focused: check what broke, read the evidence, approve a change, move on.
+Developers and small teams who build web applications and want their behaviour documented and verified. They talk to Specbook's agent in the hosted app, or let their own coding agent converse with Specbook through the `specbook` CLI against their local app, then review Specs, runs and failures. Sessions are short and focused: check what broke, read the evidence, approve a change, move on.
 
 ## Product Purpose
 
