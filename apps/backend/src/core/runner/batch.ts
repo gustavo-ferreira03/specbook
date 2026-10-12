@@ -8,6 +8,7 @@ import { resolveRunEnvironment } from "../environments";
 import type { RunEnvironment, RunStatus } from "../../infra/db/schema";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
+import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runBatchesDir, runsDir } from "../paths";
 import { repoGit } from "../repo/git";
@@ -35,6 +36,7 @@ export interface RunBatchItem {
     status: RunStatus;
     durationMs: number | null;
     failReason: string | null;
+    awaitingDeploy?: boolean;
 }
 
 export interface CiBatchMetadata {
@@ -193,12 +195,12 @@ async function finishPreparedSpec(
         }
     }
     if ((options?.persistFailures !== false || result.status === "passed") && (result.status === "passed" || result.status === "failed")) {
-        await specsRepository.updateSpecStatusForContent(
-            prepared.item.specId,
-            prepared.item.sourceHash,
-            prepared.item.markdownHash,
-            result.status,
-        );
+        const current = await specsRepository.getSpec(prepared.item.specId);
+        if (current && current.sourceHash === prepared.item.sourceHash && current.markdownHash === prepared.item.markdownHash
+            && (!prepared.run.awaitingDeploy || result.status === "passed")) {
+            if (prepared.run.environment) await specEnvironmentsRepository.set(current, prepared.run.environment.id, result.status);
+            else await specsRepository.updateSpecStatusForContent(current.id, current.sourceHash, current.markdownHash, result.status);
+        }
     }
     prepared.item.status = result.status;
     prepared.item.durationMs = result.durationMs;
@@ -361,11 +363,13 @@ async function prepareSpecBatch(
     };
     try {
         for (const definition of definitions) {
+            const awaitingDeploy = await specEnvironmentsRepository.awaiting(definition.spec, environment?.id);
             const run = await runsRepository.createRun({
                 specId: definition.spec.id,
                 commitSha,
                 sourceHash: definition.sourceHash,
-                automate: options ? options.automate : true,
+                automate: awaitingDeploy ? false : options ? options.automate : true,
+                awaitingDeploy,
                 retryOf: options?.retryOf,
                 healOnFailure,
                 baseUrl,
@@ -401,6 +405,7 @@ async function prepareSpecBatch(
             status: "running",
             durationMs: null,
             failReason: null,
+            awaitingDeploy: createdRuns[index].awaitingDeploy,
         })),
     };
     try {

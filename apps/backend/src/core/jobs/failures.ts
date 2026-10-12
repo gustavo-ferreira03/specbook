@@ -31,7 +31,7 @@ export async function processRunFailures(): Promise<void> {
                     if (!original?.automationPending) await runsRepository.acknowledgeAutomation(run.id);
                     continue;
                 }
-                if (run.status === "passed") {
+                if (run.status === "passed" || run.awaitingDeploy) {
                     retryDelays.delete(run.id);
                     await runsRepository.acknowledgeAutomation(run.id);
                     continue;

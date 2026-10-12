@@ -5,6 +5,8 @@ import type { HumanSpec } from "../../infra/db/schema";
 import { featuresRepository } from "../../infra/repositories/features";
 import { runsRepository } from "../../infra/repositories/runs";
 import type { Spec } from "../../infra/repositories/specs";
+import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
+import { environmentsRepository } from "../../infra/repositories/environments";
 
 export async function specDetail(spec: Spec, runLimit?: number) {
     const feature = await featuresRepository.getFeature(spec.featureId);
@@ -29,6 +31,11 @@ export async function specDetail(spec: Spec, runLimit?: number) {
                   yamlSource: raw.yaml ?? "",
               }
             : null;
-    return { spec, feature, content, runs };
+    const environments = await environmentsRepository.list(spec.projectId);
+    const environmentStates = (await specEnvironmentsRepository.list(spec)).map((state) => ({
+        ...state,
+        name: environments.find((environment) => environment.id === state.environmentId)?.name,
+    }));
+    return { spec, feature, content, runs, environmentStates };
 }
 

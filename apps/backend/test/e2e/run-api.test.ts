@@ -90,6 +90,59 @@ test("chat events disable compression and buffering in the frontend proxy", asyn
 });
 
 describe("executeSpec (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
+    test("published Specs wait for deploy only in their target environment until a passing run", { timeout: 120_000 }, async () => {
+        const { createProject } = await import("../../src/core/projects");
+        const { specsRepository } = await import("../../src/infra/repositories/specs");
+        const { runsRepository } = await import("../../src/infra/repositories/runs");
+        const { specEnvironmentsRepository } = await import("../../src/infra/repositories/spec-environments");
+        const { processRunFailures } = await import("../../src/core/jobs/failures");
+        const { currentFailure } = await import("../../src/core/jobs/triage");
+        const { projectOverview } = await import("../../src/core/jobs/overview");
+        const { serializeSpecYaml } = await import("@specbook/runtime/yaml");
+        const project = await createProject("Await deployment", baseUrl);
+        const environment = (await environmentsRepository.list(project.id))[0]!;
+        const staging = await environmentsRepository.create(project.id, { name: "Staging", baseUrl, allowedOrigins: [], credentialOverrides: {} });
+        const source = 'import { test, expect } from "specbook"; test("Deployment", async ({ page, step }) => { await step("Open store", async () => { await page.goto("/"); }); await step("The store is available", async () => { await expect(page.getByRole("heading")).toHaveText("Store", { timeout: 100 }); }); });';
+        const input = { path: "specs/store/deployment", baseRevision: null, files: { "spec.yml": serializeSpecYaml({ title: "Deployment", description: "", humanSpec: { preconditions: [], steps: ["Open store"], expectedResult: "The store is available", postconditions: [] } }), "spec.ts": source }, feature: { path: "specs/store", source: "title: Store\n" } };
+        const { specs: published } = await writer.publishSpecsInRepo(project.id, environment.id, [input]);
+        const spec = (await specsRepository.getSpec(published[0]!.id))!;
+        const failed = await executeSpec(spec.id, { baseUrl: `${baseUrl}flaky/await-deploy`, automate: true });
+        assert.equal(failed.status, "failed");
+        assert.equal(failed.awaitingDeploy, true);
+        assert.equal(failed.automationPending, false);
+        await processRunFailures();
+        assert.equal(await runsRepository.retryFor(failed.id), null);
+        assert.equal(await currentFailure(project.id, failed.id), null);
+        assert.deepEqual(await jobsRepository.inbox(project.id), []);
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "awaiting_deploy");
+        const overview = await projectOverview(project.id);
+        assert.equal(overview.summary.specHealth.failing, 0);
+        assert.equal(overview.summary.specHealth.awaiting_deploy, 1);
+        assert.equal(overview.specHealth[spec.id]?.status, "awaiting_deploy");
+        assert.equal(overview.recentRuns[0]?.counts.awaiting_deploy, 1);
+        const otherFailure = await executeSpec(spec.id, { environment: staging.name, baseUrl: `${baseUrl}flaky/staging` });
+        assert.equal(otherFailure.status, "failed");
+        assert.equal(otherFailure.awaitingDeploy, false);
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "failed", "a failure outside the waiting environment remains a normal failure");
+        assert.ok(await currentFailure(project.id, otherFailure.id));
+        const otherEnvironment = await executeSpec(spec.id, { environment: staging.name });
+        assert.equal(otherEnvironment.status, "passed");
+        assert.equal(otherEnvironment.awaitingDeploy, false);
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "awaiting_deploy", "another environment cannot promote the awaiting target");
+        const passing = await executeSpec(spec.id);
+        assert.equal(passing.status, "passed");
+        assert.equal(passing.awaitingDeploy, true);
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "passed");
+        assert.equal(await specEnvironmentsRepository.awaiting(spec, environment.id), false);
+        const regularFailure = await executeSpec(spec.id, { baseUrl: `${baseUrl}flaky/regular`, automate: true });
+        assert.equal(regularFailure.status, "failed");
+        assert.equal(regularFailure.awaitingDeploy, false);
+        assert.equal(regularFailure.automationPending, true);
+        const changed = { ...input, baseRevision: published[0]!.revision, files: { ...input.files, "spec.yml": input.files["spec.yml"].replace("description: \"\"", "description: Published again") } };
+        await writer.publishSpecsInRepo(project.id, environment.id, [changed]);
+        assert.equal((await specsRepository.getSpec(spec.id))?.status, "awaiting_deploy");
+    });
+
     test("single-Spec batches preserve retry options and discard temporary failures", { timeout: 120_000 }, async () => {
         const { runsRepository } = await import("../../src/infra/repositories/runs");
         const { specsRepository } = await import("../../src/infra/repositories/specs");

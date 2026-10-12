@@ -6,14 +6,16 @@ import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { featuresRepository, type Feature } from "../../infra/repositories/features";
 import { projectContextsRepository, type ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { specsRepository, type Spec } from "../../infra/repositories/specs";
+import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
 import { validateSpecSource, type SpecSourceValidation } from "@specbook/runtime/validate";
-import { acquireSpecLocks, areSpecsLocked, ResourceBusyError, withSpecLock } from "../specs/lifecycle";
+import { acquireSpecLocks, areSpecsLocked, ResourceBusyError, withSpecLock, withSpecLocks } from "../specs/lifecycle";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";
 import { assertRepoPathSafe, readOptionalRepoFile, readRepoFile, writeRepoFile } from "@specbook/runtime/safe-fs";
 import { uniqueSlug } from "./slug";
 import {
     parseSpecYaml,
+    parseFeatureYaml,
     serializeContextYaml,
     serializeFeatureYaml,
     serializeSpecYaml,
@@ -23,6 +25,107 @@ export type SpecValidation = SpecSourceValidation;
 
 export function sourceHashOf(source: string): string {
     return crypto.createHash("sha256").update(source).digest("hex");
+}
+
+export function specRevision(yaml: string, testSource: string): string {
+    return sourceHashOf(JSON.stringify([yaml, testSource]));
+}
+
+export class SpecRevisionConflict extends Error {
+    constructor(readonly conflicts: { path: string; revision: string | null }[]) {
+        super("The remote Spec changed. Run specbook pull before publishing again.");
+    }
+}
+
+export interface PublishedSpecInput {
+    path: string;
+    baseRevision: string | null;
+    files: { "spec.yml": string; "spec.ts": string };
+    feature: { path: string; source: string };
+}
+
+export async function readProjectSpecFiles(projectId: string) {
+    return repoGit.withRepoLock(projectId, async () => {
+        const features = await Promise.all((await featuresRepository.listFeatures(projectId)).map(async (feature) => ({
+            path: feature.path,
+            source: await readFile(projectId, featureYamlFile(feature.path)),
+        })));
+        const specs = await Promise.all((await specsRepository.listSpecs(projectId)).map(async (spec) => {
+            const yaml = await readFile(projectId, specYamlFile(spec.path));
+            const source = await readFile(projectId, specTestFile(spec.path));
+            return { path: spec.path, revision: specRevision(yaml, source), files: { "spec.yml": yaml, "spec.ts": source } };
+        }));
+        return { features, specs };
+    });
+}
+
+export async function publishSpecsInRepo(projectId: string, environmentId: string, inputs: PublishedSpecInput[]) {
+    for (const input of inputs) {
+        if (!/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/.test(input.path)) throw new Error("Use a Spec path inside specs/<feature>/<slug>");
+        const document = parseSpecYaml(input.files["spec.yml"]);
+        if (!document.title) throw new Error("Every Spec needs a title in spec.yml");
+        const validation = validateSpec(input.files["spec.ts"], document.humanSpec);
+        if (!validation.ok) throw new Error(`${input.path}: ${validation.error}`);
+        if (!parseFeatureYaml(input.feature.source).title) throw new Error("Every Feature needs a title in feature.yml");
+        if (path.posix.dirname(input.path) !== input.feature.path) throw new Error("The Feature path must be the Spec's parent directory");
+    }
+    const paths = new Set(inputs.map((input) => input.path));
+    if (paths.size !== inputs.length) throw new Error("Publish each Spec only once per request");
+    const existing = (await specsRepository.listSpecs(projectId)).filter((spec) => paths.has(spec.path));
+    return withSpecLocks(existing.map((spec) => spec.id), () => repoGit.withRepoLock(projectId, async () => {
+        await repoGit.assertRepoWritableUnlocked(projectId);
+        const conflicts: SpecRevisionConflict["conflicts"] = [];
+        const changed = new Set<string>();
+        const existingFeatures = new Set((await featuresRepository.listFeatures(projectId)).map((feature) => feature.path));
+        const currentSpecs = new Map((await specsRepository.listSpecs(projectId)).map((spec) => [spec.path, spec]));
+        for (const input of inputs) {
+            const current = currentSpecs.get(input.path);
+            const yaml = await readOptionalFile(projectId, specYamlFile(input.path));
+            const source = await readOptionalFile(projectId, specTestFile(input.path));
+            const revision = yaml !== null && source !== null ? specRevision(yaml, source) : null;
+            if (input.baseRevision !== revision || (!current && (yaml !== null || source !== null))) conflicts.push({ path: input.path, revision });
+            if (revision !== specRevision(input.files["spec.yml"], input.files["spec.ts"])) changed.add(input.path);
+            if (existingFeatures.has(input.path)) throw new Error("A Feature already uses this Spec path");
+            for (let parent = input.feature.path; parent !== "specs"; parent = path.posix.dirname(parent)) {
+                if (currentSpecs.has(parent) || paths.has(parent)) throw new Error("A Spec cannot contain Features or other Specs");
+            }
+        }
+        if (conflicts.length) throw new SpecRevisionConflict(conflicts);
+        const { commitSha } = await mutateRepoUnlocked(projectId, `spec: publish ${inputs.length} from CLI`, async () => {
+            for (const input of inputs) {
+                const parents: string[] = [];
+                for (let parent = input.feature.path; parent !== "specs"; parent = path.posix.dirname(parent)) parents.unshift(parent);
+                for (const parent of parents) {
+                    if (existingFeatures.has(parent)) continue;
+                    const yaml = parent === input.feature.path ? input.feature.source : serializeFeatureYaml({ title: path.posix.basename(parent), description: "" });
+                    await fs.mkdir(await safePath(projectId, parent), { recursive: true });
+                    await writeFile(projectId, featureYamlFile(parent), yaml);
+                    existingFeatures.add(parent);
+                }
+                await fs.mkdir(await safePath(projectId, input.path), { recursive: true });
+                await writeFile(projectId, specYamlFile(input.path), input.files["spec.yml"]);
+                await writeFile(projectId, specTestFile(input.path), input.files["spec.ts"]);
+            }
+        });
+        await reindexProjectUnlocked(projectId);
+        const result = await Promise.all(inputs.map(async (input) => {
+            const spec = await specsRepository.getSpecByPath(projectId, input.path);
+            if (!spec) throw new Error("Published Spec was not indexed");
+            return { input, spec };
+        }));
+        const specs = [];
+        for (const { input, spec } of result) {
+            const state = (await specEnvironmentsRepository.list(spec)).find((row) => row.environmentId === environmentId);
+            if (changed.has(input.path) || !state) await specEnvironmentsRepository.set(spec, environmentId, "awaiting_deploy");
+            const updated = await specsRepository.getSpec(spec.id);
+            specs.push({ id: spec.id, path: spec.path, revision: specRevision(input.files["spec.yml"], input.files["spec.ts"]), status: updated!.status });
+        }
+        const features = await Promise.all([...new Set(inputs.map((input) => input.feature.path))].map(async (featurePath) => ({
+            path: featurePath,
+            source: await readFile(projectId, featureYamlFile(featurePath)),
+        })));
+        return { commitSha, specs, features };
+    }));
 }
 
 export function specYamlFile(specPath: string): string {

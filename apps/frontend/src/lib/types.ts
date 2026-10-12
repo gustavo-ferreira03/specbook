@@ -1,4 +1,4 @@
-export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
+export type SpecStatus = "unverified" | "awaiting_deploy" | "passed" | "failed" | "invalid";
 export type RunStatus = "running" | "passed" | "failed" | "error";
 
 export interface Project {
@@ -86,6 +86,7 @@ export interface Run {
     retryOf: string | null;
     flaky: boolean;
     automationPending: boolean;
+    awaitingDeploy: boolean;
     specId: string;
     commitSha: string;
     sourceHash: string;
@@ -96,6 +97,7 @@ export interface Run {
 }
 
 export interface SpecDetail {
+    environmentStates: { environmentId: string; name?: string; status: SpecStatus }[];
     spec: {
         id: string;
         projectId: string;
@@ -226,6 +228,7 @@ export interface RunEvidence {
 }
 
 export interface RunBatchItem {
+    awaitingDeploy?: boolean;
     runId: string;
     specId: string;
     commitSha: string;
@@ -372,7 +375,7 @@ export interface ActivityStory {
 }
 
 export interface SpecHealth {
-    status: "passing" | "failing" | "flaky" | "not_checked" | "running" | "repairing" | "invalid";
+    status: "passing" | "failing" | "flaky" | "awaiting_deploy" | "not_checked" | "running" | "repairing" | "invalid";
     label: string;
     runId?: string;
     lastCheckedAt: string | null;
@@ -392,7 +395,7 @@ export interface RecentRun extends ActivityStory {
     environment?: ProjectEnvironment;
     trigger: "deploy" | "ci" | "schedule" | "manual" | "spec_change";
     occurrences: number;
-    counts: { total: number; passed: number; failed: number; flaky: number; running: number };
+    counts: { total: number; passed: number; failed: number; flaky: number; running: number; awaiting_deploy: number };
 }
 
 export interface OverviewResponse {
@@ -400,7 +403,7 @@ export interface OverviewResponse {
         verdict: string;
         nextCheck: string;
         nextCheckAt: string | null;
-        specHealth: { total: number; passing: number; failing: number; flaky: number; not_checked: number; running: number; repairing: number; invalid: number };
+        specHealth: { total: number; passing: number; failing: number; flaky: number; awaiting_deploy: number; not_checked: number; running: number; repairing: number; invalid: number };
     };
     specHealth: Record<string, SpecHealth>;
     needsYou: PresentedInboxItem[];

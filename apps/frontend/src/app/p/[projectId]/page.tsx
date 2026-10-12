@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronRight, Compass, ExternalLink, CircleHelp, Eye, LoaderCircle, ScanSearch, Search, MessageSquareText, Pause, Play, RefreshCw, type LucideIcon } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Clock3, Compass, ExternalLink, CircleHelp, Eye, LoaderCircle, ScanSearch, Search, MessageSquareText, Pause, Play, RefreshCw, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { DecisionDetails } from "@/components/DecisionDetails";
 import { EmptyState } from "@/components/EmptyState";
@@ -12,6 +12,7 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { SectionHeader } from "@/components/SectionHeader";
 import { InlineFeedback, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { StatusDot } from "@/components/StatusDot";
+import { StatusPill } from "@/components/StatusPill";
 import { StoryDetails } from "@/components/StoryDetails";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -62,13 +63,14 @@ function RunOutcome({ run }: { run: RecentRun }) {
     if (run.counts.running > 0) return <LoaderCircle size={15} className="animate-spin text-running motion-reduce:animate-none" />;
     if (run.outcome === "failed" || run.counts.failed > 0) return <AlertCircle size={15} className="text-danger" />;
     if (run.outcome === "flaky" || run.counts.flaky > 0) return <RefreshCw size={15} className="text-warning" />;
+    if (run.counts.awaiting_deploy > 0) return <Clock3 size={15} className="text-ink-subtle" />;
     if (run.outcome === "passed") return <Check size={15} className="text-success" />;
     return <Check size={15} className="text-ink-subtle" />;
 }
 
 function runCounts(run: RecentRun) {
-    if (run.counts.passed + run.counts.failed + run.counts.flaky + run.counts.running <= 1) return "";
-    return `${run.counts.passed} passed · ${run.counts.failed} failed${run.counts.flaky ? ` · ${run.counts.flaky} flaky` : ""}${run.counts.running ? ` · ${run.counts.running} running` : ""}`;
+    if (run.counts.total <= 1) return run.counts.awaiting_deploy ? "Waiting for deploy" : "";
+    return `${run.counts.passed} passed · ${run.counts.failed} failed${run.counts.flaky ? ` · ${run.counts.flaky} flaky` : ""}${run.counts.running ? ` · ${run.counts.running} running` : ""}${run.counts.awaiting_deploy ? ` · ${run.counts.awaiting_deploy} waiting for deploy` : ""}`;
 }
 
 function healthStatus(health: OverviewResponse["summary"]["specHealth"]) {
@@ -100,6 +102,7 @@ function HomeHero({ projectName, baseUrl, summary, actions }: { projectName?: st
                     {summary.lastCheckedAt && <RelativeTime value={summary.lastCheckedAt} prefix="last checked" />}
                     {summary.nextCheckAt && <><span aria-hidden="true">·</span><span>next run <time dateTime={summary.nextCheckAt}>{formatDateTime(summary.nextCheckAt)}</time></span></>}
                 </p>}
+                {summary.specHealth.awaiting_deploy > 0 && <div className="mt-2 flex items-center gap-2 text-control"><StatusPill status="awaiting_deploy" /><span className="text-ink-muted">{summary.specHealth.awaiting_deploy} {summary.specHealth.awaiting_deploy === 1 ? "Spec" : "Specs"}</span></div>}
                 <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
                     <p className="flex min-w-0 items-center gap-2 text-control text-ink">
                         <span aria-hidden="true" className={paused ? "size-2 shrink-0 rounded-full bg-ink-subtle" : "size-2 shrink-0 rounded-full bg-success status-pulse"} />

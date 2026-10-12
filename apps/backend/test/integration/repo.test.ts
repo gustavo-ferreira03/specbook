@@ -68,6 +68,47 @@ before(async () => {
 });
 
 describe("project, feature and spec through the writer", () => {
+    test("CLI publishing records the environment and rejects stale batches before writing", async () => {
+        const { environmentsRepository } = await import("../../src/infra/repositories/environments");
+        const { specEnvironmentsRepository } = await import("../../src/infra/repositories/spec-environments");
+        const { withActor } = await import("../../src/core/accounts/audit");
+        const { serializeSpecYaml } = await import("@specbook/runtime/yaml");
+        const projectId = await createProject("CLI publishing");
+        const environment = (await environmentsRepository.list(projectId))[0]!;
+        const source = serializeSpecYaml({ title: "Open application", description: "", humanSpec: HUMAN_SPEC });
+        const input = { path: "specs/store/open-application", baseRevision: null, files: { "spec.yml": source, "spec.ts": VALID_SPEC }, feature: { path: "specs/store", source: "title: Store\ndescription: Browsing\n" } };
+        const published = await withActor({ id: null, name: "CLI Developer", email: "cli@example.com", kind: "user" }, () => writer.publishSpecsInRepo(projectId, environment.id, [input]));
+        assert.equal(published.specs[0]?.status, "awaiting_deploy");
+        assert.equal(await repoGit.getProjectGit(projectId).raw(["log", "-1", "--format=%an <%ae>"]), "CLI Developer <cli@example.com>\n");
+        assert.equal(await repoGit.getProjectGit(projectId).raw(["log", "-1", "--format=%s"]), "spec: publish 1 from CLI\n");
+        const snapshot = await writer.readProjectSpecFiles(projectId);
+        assert.deepEqual(snapshot.features, [input.feature]);
+        assert.deepEqual(snapshot.specs, [{ path: input.path, revision: published.specs[0]!.revision, files: input.files }]);
+        const spec = (await specsRepository.getSpec(published.specs[0]!.id))!;
+        assert.equal((await specEnvironmentsRepository.list(spec))[0]?.environmentId, environment.id);
+        const unchanged = await writer.publishSpecsInRepo(projectId, environment.id, [{ ...input, baseRevision: published.specs[0]!.revision }]);
+        assert.equal(unchanged.commitSha, published.commitSha, "unchanged publishing creates no commit");
+        await writer.updateSpecWithLock(spec.id, { description: "Changed on the server" });
+        const head = await repoGit.getHeadSha(projectId);
+        const fresh = { ...input, path: "specs/store/another-spec" };
+        await assert.rejects(() => writer.publishSpecsInRepo(projectId, environment.id, [{ ...input, baseRevision: published.specs[0]!.revision }, fresh]), writer.SpecRevisionConflict);
+        assert.equal(await repoGit.getHeadSha(projectId), head);
+        assert.equal(await specsRepository.getSpecByPath(projectId, fresh.path), null);
+        assert.ok((await repoGit.getProjectGit(projectId).status()).isClean());
+        const current = (await writer.readProjectSpecFiles(projectId)).specs[0]!;
+        const replacement = await writer.publishSpecsInRepo(projectId, environment.id, [{ ...input, baseRevision: current.revision }]);
+        assert.equal(replacement.specs[0]?.status, "awaiting_deploy");
+        assert.equal(replacement.specs[0]?.revision, published.specs[0]?.revision);
+        const invalid = { ...fresh, files: { ...fresh.files, "spec.ts": "console.log('invalid source');" } };
+        await assert.rejects(() => writer.publishSpecsInRepo(projectId, environment.id, [invalid]), /must import|import|test/i);
+        assert.equal(await specsRepository.getSpecByPath(projectId, fresh.path), null);
+        const apiConflict = await api("POST", `/projects/${projectId}/specs/publish`, { environment: environment.name, specs: [input] });
+        assert.equal(apiConflict.status, 409);
+        const body = await apiConflict.json();
+        assert.equal(body.code, "revision_conflict");
+        assert.equal(body.command, "specbook pull");
+    });
+
     test("creating a project initialises the checkout and the canonical bare repository", async () => {
         const projectId = await createProject();
         assert.ok(existsSync(path.join(repoGit.getRepoDir(projectId), ".git")));
@@ -1424,7 +1465,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(view.failing.some((item) => item.specId === invalid!.id), false, "an invalid implementation is not a failing application check");
         assert.equal(view.needsYou.some((item) => item.id === invalidFinding.id), true, "a finding without a current failing check remains a reviewable decision");
         assert.equal(view.summary.paused, true);
-        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 1, flaky: 1, not_checked: 3, running: 0, repairing: 0, invalid: 1 });
+        assert.deepEqual(view.summary.specHealth, { total: 7, passing: 1, failing: 1, flaky: 1, awaiting_deploy: 0, not_checked: 3, running: 0, repairing: 0, invalid: 1 });
         assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
         assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
         assert.equal(view.specHealth[invalid!.id]?.status, "invalid");
@@ -1563,12 +1604,12 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(pending.recentRuns[0]?.counts.running, 1);
         assert.equal(pending.recentRuns[0]?.trigger, "deploy", "resumed deployments retain their original trigger");
         await runsRepository.finishRun(original.id, "passed", 10, null);
-        assert.deepEqual((await projectOverview(projectId)).recentRuns[0]?.counts, { total: 1, passed: 0, failed: 0, flaky: 0, running: 1 }, "pending automation is counted once even after a passing result");
+        assert.deepEqual((await projectOverview(projectId)).recentRuns[0]?.counts, { total: 1, passed: 0, failed: 0, flaky: 0, running: 1, awaiting_deploy: 0 }, "pending automation is counted once even after a passing result");
         await runsRepository.finishRun(original.id, "failed", 10, "Login button was not visible");
         const retry = await createOverviewRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha, retryOf: original.id });
         await runsRepository.finishRun(retry.id, "passed", 20, null);
         await runsRepository.markFlaky(original.id, retry.id);
-        assert.deepEqual((await projectOverview(projectId)).recentRuns[0]?.counts, { total: 1, passed: 0, failed: 0, flaky: 0, running: 1 }, "marking flaky before acknowledgment never duplicates the result count");
+        assert.deepEqual((await projectOverview(projectId)).recentRuns[0]?.counts, { total: 1, passed: 0, failed: 0, flaky: 0, running: 1, awaiting_deploy: 0 }, "marking flaky before acknowledgment never duplicates the result count");
         await runsRepository.acknowledgeAutomation(original.id);
         await specsRepository.updateSpecStatus(spec.id, "passed");
         const router = new Hono().route("/", createJobsRouter());
@@ -1875,8 +1916,8 @@ describe("accounts, roles and session security", () => {
         const git = await call("GET", `/git/${project.id}.git/info/refs?service=git-upload-pack`, undefined, "", { authorization: `Basic ${Buffer.from(`git:${gitToken}`).toString("base64")}` });
         assert.equal(git.status, 200, await git.clone().text());
         const ciToken = (await (await call("POST", `/projects/${project.id}/ci/token`)).json()).token;
-        assert.equal((await call("GET", `/ci/projects/${project.id}/client.mjs`, undefined, "", { authorization: `Bearer ${ciToken}` })).status, 200);
-        assert.equal((await call("GET", `/ci/projects/${project.id}/client.mjs`, undefined, "")).status, 401);
+        assert.equal((await call("POST", `/ci/projects/${project.id}/deploy`, {}, "", { authorization: `Bearer ${ciToken}` })).status, 202);
+        assert.equal((await call("POST", `/ci/projects/${project.id}/deploy`, {}, "")).status, 401);
         const audit = await (await call("GET", "/settings/audit?limit=100")).json();
         assert.ok(audit.events.some((event: { actorId: string; action: string }) => event.actorId === editor.user.id && event.action === "repository.commit"));
         assert.doesNotMatch(JSON.stringify(audit), new RegExp(password));

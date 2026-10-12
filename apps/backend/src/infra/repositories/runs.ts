@@ -10,7 +10,7 @@ export const DEFAULT_RUN_LIST_LIMIT = 50;
 export const MAX_RUN_LIST_LIMIT = 200;
 
 class RunsRepository {
-    async createRun(input: { specId: string; commitSha: string; sourceHash: string; automate?: boolean; healOnFailure?: boolean; retryOf?: string; baseUrl?: string; environment?: RunEnvironment }): Promise<Run> {
+    async createRun(input: { specId: string; commitSha: string; sourceHash: string; automate?: boolean; awaitingDeploy?: boolean; healOnFailure?: boolean; retryOf?: string; baseUrl?: string; environment?: RunEnvironment }): Promise<Run> {
         const row: Run = {
             id: crypto.randomUUID(),
             specId: input.specId,
@@ -22,6 +22,7 @@ class RunsRepository {
             failReason: null,
             errorCode: null,
             automationPending: input.automate ?? false,
+            awaitingDeploy: input.awaitingDeploy ?? false,
             healOnFailure: input.healOnFailure ?? true,
             retryOf: input.retryOf ?? null,
             flaky: false,

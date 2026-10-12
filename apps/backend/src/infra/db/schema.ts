@@ -2,7 +2,7 @@ import { type HumanSpec, type RunStatus, type ProjectContext } from "@specbook/r
 export { EMPTY_PROJECT_CONTEXT, type HumanSpec, type RunStatus, type ProjectContext } from "@specbook/runtime/types";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-export type SpecStatus = "unverified" | "passed" | "failed" | "invalid";
+export type SpecStatus = "unverified" | "awaiting_deploy" | "passed" | "failed" | "invalid";
 export interface RunEnvironment {
     configuredBaseUrl: string;
     id: string;
@@ -87,6 +87,15 @@ export const specs = sqliteTable(
     (table) => [uniqueIndex("specs_project_path_unique").on(table.projectId, table.path)],
 );
 
+export const specEnvironmentStates = sqliteTable("spec_environment_states", {
+    specId: text("spec_id").notNull().references(() => specs.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id").notNull().references(() => environments.id, { onDelete: "cascade" }),
+    sourceHash: text("source_hash").notNull(),
+    markdownHash: text("markdown_hash").notNull(),
+    status: text("status").$type<SpecStatus>().notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [uniqueIndex("spec_environment_states_spec_environment_idx").on(table.specId, table.environmentId)]);
+
 export const chats = sqliteTable("chats", {
     id: text("id").primaryKey(),
     projectId: text("project_id")
@@ -125,6 +134,7 @@ export const runs = sqliteTable(
         failReason: text("fail_reason"),
         errorCode: text("error_code").$type<import("@specbook/runtime/errors").ErrorCode>(),
         automationPending: integer("automation_pending", { mode: "boolean" }).notNull().default(false),
+        awaitingDeploy: integer("awaiting_deploy", { mode: "boolean" }).notNull().default(false),
         healOnFailure: integer("heal_on_failure", { mode: "boolean" }).notNull().default(true),
         retryOf: text("retry_of"),
         flaky: integer("flaky", { mode: "boolean" }).notNull().default(false),

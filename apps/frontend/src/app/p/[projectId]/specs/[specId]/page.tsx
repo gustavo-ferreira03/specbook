@@ -75,9 +75,9 @@ function Dot() {
     return <span aria-hidden="true" className="text-ink-disabled">·</span>;
 }
 
-function FailureReason({ reason, tone = "danger" }: { reason: string; tone?: "danger" | "invalid" }) {
+function FailureReason({ reason, tone = "danger" }: { reason: string; tone?: "danger" | "invalid" | "neutral" }) {
     return (
-        <pre className={cn("mt-3 max-h-48 overflow-auto rounded-lg px-3 py-2.5 font-mono text-meta whitespace-pre-wrap break-words", tone === "invalid" ? "bg-invalid-soft text-invalid" : "bg-danger-soft text-danger")}>
+        <pre className={cn("mt-3 max-h-48 overflow-auto rounded-lg px-3 py-2.5 font-mono text-meta whitespace-pre-wrap break-words", tone === "invalid" ? "bg-invalid-soft text-invalid" : tone === "neutral" ? "bg-neutral-soft text-ink-muted" : "bg-danger-soft text-danger")}>
             {reason}
         </pre>
     );
@@ -170,6 +170,12 @@ function VerificationBanner({
                 </div>}
             </>
         );
+    } else if (spec.status === "awaiting_deploy") {
+        status = "awaiting_deploy";
+        headline = "Waiting for deploy";
+        const targets = specDetail.environmentStates.filter((state) => state.status === "awaiting_deploy" && state.name).map((state) => state.name).join(", ");
+        detail = `This Spec passed locally${targets ? ` and was published to ${targets}` : ""}. Server runs keep their evidence while it waits for the deployment. Its first passing run enables normal acceptance checks.`;
+        if (latestRun?.awaitingDeploy && latestRun.status !== "passed" && latestRun.failReason) body = <FailureReason reason={latestRun.failReason} tone="neutral" />;
     } else if (!latestRun) {
         status = "unverified";
         headline = "Not verified yet";
@@ -354,7 +360,8 @@ function RunEntry({
     onSelect: (selection: EvidenceSelection) => void;
 }) {
     const [open, setOpen] = useState(latest);
-    const meta = statusMeta(run.status);
+    const waiting = run.awaitingDeploy && run.status !== "passed" && run.status !== "running";
+    const meta = statusMeta(waiting ? "awaiting_deploy" : run.status);
     useEffect(() => {
         if (open && !loaded && run.status !== "running") onExpand(run.id);
     }, [loaded, onExpand, open, run.id, run.status]);
@@ -371,7 +378,7 @@ function RunEntry({
                 }}
             >
                 <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
-                    <StatusPill status={run.status} kind="run" size="sm" />
+                    <StatusPill status={waiting ? "awaiting_deploy" : run.status} kind="run" size="sm" />
                     {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
@@ -406,7 +413,7 @@ function RunEntry({
                 {run.status !== "passed" && loaded?.data?.failedStep && (
                     <p className="mt-2 text-control text-ink-muted"><span className="font-medium text-ink">Failed at step:</span> {loaded.data.failedStep}</p>
                 )}
-                {run.status !== "passed" && run.failReason && <FailureReason reason={run.failReason} />}
+                {run.status !== "passed" && run.failReason && <FailureReason reason={run.failReason} tone={waiting ? "neutral" : "danger"} />}
                 <CollapsibleContent className="pt-3">
                     <RunEvidencePanel run={run} loaded={loaded} onSelect={onSelect} />
                 </CollapsibleContent>

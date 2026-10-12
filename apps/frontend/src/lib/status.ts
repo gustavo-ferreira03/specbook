@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CircleDashed, LoaderCircle, RotateCcw, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, Clock3, LoaderCircle, RotateCcw, X, type LucideIcon } from "lucide-react";
 import type { RunStatus, SpecHealth, SpecStatus } from "./types";
 
 export type AnyStatus = SpecStatus | RunStatus | SpecHealth["status"];
@@ -31,6 +31,7 @@ const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "iconColor" | "soft" |
     error: { label: "Error", runLabel: "Error", description: "The run could not complete.", tone: "danger", icon: X },
     invalid: { label: "Invalid", runLabel: "Invalid", description: "The Spec files could not be read.", tone: "invalid", icon: AlertTriangle },
     unverified: { label: "Not run", runLabel: "Not run", description: "Not run since it was created or changed.", tone: "neutral", icon: CircleDashed },
+    awaiting_deploy: { label: "Waiting for deploy", runLabel: "Waiting for deploy", description: "Published from a passing local run. Failures wait for deployment until the first passing server run.", tone: "neutral", icon: Clock3 },
     running: { label: "Running", runLabel: "Running", description: "A run is in progress.", tone: "running", icon: LoaderCircle },
     passing: { label: "Passing", runLabel: "Passed", description: "The last run passed.", tone: "success", icon: Check },
     failing: { label: "Failing", runLabel: "Failed", description: "The last run failed.", tone: "danger", icon: X },
@@ -46,7 +47,7 @@ export function statusMeta(status: string): StatusMeta {
     return { ...base, ...TONES[base.tone] };
 }
 
-export const SPEC_STATUS_ORDER: SpecStatus[] = ["failed", "invalid", "unverified", "passed"];
+export const SPEC_STATUS_ORDER: SpecStatus[] = ["failed", "invalid", "awaiting_deploy", "unverified", "passed"];
 
 export type StatusCounts = Partial<Record<SpecStatus, number>>;
 

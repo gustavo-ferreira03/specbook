@@ -9,7 +9,9 @@ import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
 import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
 import { YamlParseError } from "@specbook/runtime/yaml";
 import { editSpecFiles } from "../../../core/repo/manual";
-import { updateSpecWithLock } from "../../../core/repo/writer";
+import { publishSpecsInRepo, readProjectSpecFiles, SpecRevisionConflict, updateSpecWithLock } from "../../../core/repo/writer";
+import { resolveRunEnvironment } from "../../../core/environments";
+import { projectsRepository } from "../../repositories/projects";
 import { specsRepository } from "../../repositories/specs";
 
 const editFilesSchema = z
@@ -20,6 +22,17 @@ const editFilesSchema = z
     .refine((body) => body.yaml !== undefined || body.testSource !== undefined, {
         message: "Provide yaml and/or testSource content",
     });
+
+const repoPathSchema = z.string().max(500).regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/);
+const publishSchema = z.object({
+    environment: z.string().trim().min(1).max(80).optional(),
+    specs: z.array(z.object({
+        path: repoPathSchema,
+        baseRevision: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+        files: z.object({ "spec.yml": z.string().max(100_000), "spec.ts": z.string().max(100_000) }).strict(),
+        feature: z.object({ path: repoPathSchema, source: z.string().max(100_000) }).strict(),
+    }).strict()).min(1).max(100),
+}).strict();
 
 
 const updateSpecSchema = z
@@ -52,6 +65,27 @@ function mapManualError(error: unknown): never {
 
 export function createSpecsRouter(): Hono {
     const router = new Hono();
+
+    router.get("/projects/:id/specs/files", access("viewer"), async (c) => {
+        const projectId = c.req.param("id");
+        if (!await projectsRepository.getProject(projectId)) throw new HTTPException(404, { message: "Project not found" });
+        return c.json(await readProjectSpecFiles(projectId));
+    });
+
+    router.post("/projects/:id/specs/publish", access("editor"), zValidator("json", publishSchema), async (c) => {
+        const projectId = c.req.param("id");
+        if (!await projectsRepository.getProject(projectId)) throw new HTTPException(404, { message: "Project not found" });
+        const body = c.req.valid("json");
+        try {
+            const environment = await resolveRunEnvironment(projectId, body.environment);
+            return c.json(await publishSpecsInRepo(projectId, environment.id, body.specs));
+        } catch (error) {
+            if (error instanceof SpecRevisionConflict) return c.json({ error: error.message, code: "revision_conflict", conflicts: error.conflicts, command: "specbook pull" }, 409);
+            if (error instanceof ResourceBusyError || error instanceof UnsafeRepoPathError) throw new HTTPException(409, { message: error.message });
+            if (error instanceof Error) throw new HTTPException(400, { message: error.message });
+            throw error;
+        }
+    });
 
     router.get("/specs/:id", access("viewer"), async (c) => {
         const spec = await specsRepository.getSpec(c.req.param("id"));
