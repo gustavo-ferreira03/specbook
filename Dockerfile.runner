@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+FROM node:26-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0 AS build
+
+WORKDIR /build
+RUN npm install --global corepack@0.36.0 && corepack enable pnpm
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/backend/package.json ./apps/backend/
+COPY apps/frontend/package.json ./apps/frontend/
+COPY shared/runtime/package.json ./shared/runtime/
+COPY apps/cli/package.json ./apps/cli/
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm --filter @specbook/runtime build \
+    && pnpm --dir apps/cli pack --out /tmp/specbook.tgz
+
+FROM node:26-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    SPECBOOK_HOME=/home/node/.config/specbook \
+    NODE_ENV=production
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /tmp/specbook.tgz /tmp/specbook.tgz
+RUN npm install --global /tmp/specbook.tgz \
+    && node /usr/local/lib/node_modules/specbook/node_modules/@playwright/test/cli.js install --with-deps chromium \
+    && rm -rf /tmp/specbook.tgz /root/.npm /var/lib/apt/lists/* \
+    && mkdir -p /home/node/.config/specbook \
+    && chown -R node:node /home/node/.config /ms-playwright
+USER node
+WORKDIR /home/node
+ENTRYPOINT ["/usr/bin/tini", "--", "specbook", "runner"]

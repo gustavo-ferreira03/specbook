@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: specbook-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: specbook-runner }
+  template:
+    metadata:
+      labels: { app: specbook-runner }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: runner
+          image: specbook-runner:YOUR_VERSION
+          args: ["--json"]
+          env:
+            - name: SPECBOOK_URL
+              value: https://specbook.example.com/api
+            - name: SPECBOOK_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: specbook-runner
+                  key: token
+            - name: SPECBOOK_RUNNER_CONCURRENCY
+              value: "1"
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "2", memory: "2Gi" }
+          volumeMounts:
+            - name: browser-shm
+              mountPath: /dev/shm
+      volumes:
+        - name: browser-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi

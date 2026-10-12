@@ -16,7 +16,7 @@ import { ensureChromium } from "./browsers";
 import { normalizeServerUrl, redactTokens, rememberToken, RemoteError } from "./remote";
 
 type Lease = NonNullable<RunnerClaim["lease"]>;
-export interface RunnerOptions { url: string; token: string; concurrency?: number; signal?: AbortSignal }
+export interface RunnerOptions { url: string; token: string; concurrency?: number; once?: boolean; drainAfter?: number; signal?: AbortSignal }
 export type RunnerEvent =
     | { event: "connected"; url: string; runner: RunnerClaim["runner"]; concurrency: number }
     | { event: "claimed"; jobId: string; batchId: string; specs: number }
@@ -129,6 +129,9 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     if (!options.token || /\s/.test(options.token) || options.token.length > 4096) throw new Error("Provide one runner token through SPECBOOK_RUNNER_TOKEN or the hidden prompt");
     const concurrency = options.concurrency ?? 1;
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) throw new Error("Use --concurrency between 1 and 32");
+    if (options.once && options.drainAfter !== undefined) throw new Error("Use --once or --drain-after, not both");
+    const limit = options.once ? 1 : options.drainAfter;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Use a positive integer for --drain-after");
     let api = normalizeServerUrl(options.url);
     const stop = new AbortController();
     const signal = options.signal ? AbortSignal.any([options.signal, stop.signal]) : stop.signal;
@@ -136,6 +139,8 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     let completedJobs = 0;
     let failedJobs = 0;
     let retryNotice = 0;
+    let startedJobs = 0;
+    let claimingJobs = 0;
     const send = async (route: string, body: unknown, requestSignal: AbortSignal, fallback = false): Promise<Response> => {
         const fetchAt = async (url: string) => {
             try {
@@ -233,8 +238,19 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     };
     const worker = async () => {
         while (!signal.aborted) {
+            if (limit !== undefined && startedJobs >= limit) break;
+            // Reserve a slot before polling so concurrent workers cannot exceed the drain limit.
+            if (limit !== undefined && startedJobs + claimingJobs >= limit) { await delay(100, signal); continue; }
+            claimingJobs++;
+            let claimed: RunnerClaim;
             try {
-                const claimed = await jsonResponse(await send("/runner/claim", { version: "0.1.0" }, signal, !connected), runnerClaimResponseSchema);
+                claimed = await jsonResponse(await send("/runner/claim", { version: "0.1.0" }, signal, !connected), runnerClaimResponseSchema);
+            } catch (error) {
+                if (signal.aborted) break;
+                await retry(error, signal);
+                continue;
+            } finally { claimingJobs--; }
+            try {
                 if (!connected) {
                     connected = true;
                     await emit({ event: "connected", url: api, runner: claimed.runner, concurrency });
@@ -243,7 +259,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
                     if (claimed.lease) await send(`/runner/jobs/${claimed.lease.jobId}/release`, { leaseId: claimed.lease.leaseId }, AbortSignal.timeout(5000)).then((response) => response.body?.cancel()).catch(() => undefined);
                     break;
                 }
-                if (claimed.lease) await work(claimed.lease);
+                if (claimed.lease) { startedJobs++; await work(claimed.lease); }
                 else await delay(100, signal);
             } catch (error) { if (signal.aborted) break; await retry(error, signal); }
         }
