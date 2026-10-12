@@ -7,15 +7,17 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiPath, errorMessage, isAbortError } from "@/lib/api";
 import { copyText, selectElementText } from "@/lib/clipboard";
 
-interface AccessToken { id: string; name: string; createdAt: string; lastUsedAt: string | null }
+interface AccessToken { id: string; name: string; createdAt: string; lastUsedAt: string | null; expiresAt: string | null }
 
 export function AccessTokensSettings() {
     const [tokens, setTokens] = useState<AccessToken[] | null>(null);
     const [name, setName] = useState("");
+    const [expiryDays, setExpiryDays] = useState("never");
     const [secret, setSecret] = useState<{ id: string; value: string } | null>(null);
     const [busy, setBusy] = useState(false);
     const [retry, setRetry] = useState(0);
@@ -42,7 +44,8 @@ export function AccessTokensSettings() {
     async function create(event: React.FormEvent) {
         event.preventDefault(); setBusy(true); setFeedback(null); setCopied(false); setCopyError(false);
         try {
-            const result = await api<{ token: string; accessToken: AccessToken }>("/auth/access-tokens", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+            const expiresAt = expiryDays === "never" ? null : new Date(Date.now() + Number(expiryDays) * 86_400_000).toISOString();
+            const result = await api<{ token: string; accessToken: AccessToken }>("/auth/access-tokens", { method: "POST", body: JSON.stringify({ name: name.trim(), expiresAt }) });
             setSecret({ id: result.accessToken.id, value: result.token });
             setTokens((current) => [result.accessToken, ...(current ?? [])]);
             setName("");
@@ -69,9 +72,10 @@ export function AccessTokensSettings() {
     }
 
     return <>
-        <SettingsSection id="access-tokens-heading" title="Access tokens" description="Connect the CLI to Specbook as your account. Tokens use your current permissions.">
+        <SettingsSection id="access-tokens-heading" title="Access tokens" description="Connect the CLI to Specbook as your account. Administrative actions require a browser session. Signing out revokes your tokens.">
             <form onSubmit={create}>
                 <SettingsRow label="Token name" htmlFor="access-token-name" description="Use a name that identifies the device or workflow."><Input id="access-token-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Work laptop" maxLength={80} required disabled={busy || Boolean(secret)} /></SettingsRow>
+                <SettingsRow label="Expires after" htmlFor="access-token-expiry" description="Choose when the token stops working automatically."><Select value={expiryDays} onValueChange={setExpiryDays} disabled={busy || Boolean(secret)}><SelectTrigger id="access-token-expiry"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="30">30 days</SelectItem><SelectItem value="90">90 days</SelectItem><SelectItem value="365">1 year</SelectItem><SelectItem value="never">No expiry</SelectItem></SelectContent></Select></SettingsRow>
                 <SettingsFooter feedback={<InlineFeedback feedback={feedback} />}><Button type="submit" disabled={busy || !name.trim() || Boolean(secret)}>{busy && !revoke ? <RefreshCw size={14} className="animate-spin motion-reduce:animate-none" /> : <KeyRound size={14} />}Create token</Button></SettingsFooter>
             </form>
             {secret && <SettingsBlock className="bg-warning-soft/60">
@@ -83,7 +87,7 @@ export function AccessTokensSettings() {
             </SettingsBlock>}
             {!tokens ? <SettingsBlock>{feedback?.type === "error" ? <Button type="button" variant="outline" onClick={() => { setFeedback(null); setRetry((value) => value + 1); }}>Try again</Button> : <div role="status" aria-label="Loading access tokens" aria-busy="true"><Skeleton className="h-16 w-full" /></div>}</SettingsBlock>
                 : !tokens.length ? <SettingsBlock><p className="text-body text-ink-muted">No access tokens yet. Create one to log in from the CLI.</p></SettingsBlock>
-                    : <ul aria-label="Your access tokens">{tokens.map((token) => <li key={token.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 last:border-b-0 sm:px-5"><div className="min-w-0"><p className="flex items-center gap-2 break-words text-body font-medium text-ink"><KeyRound size={14} className="shrink-0 text-ink-subtle" aria-hidden="true" />{token.name}</p><p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-muted"><RelativeTime value={token.createdAt} prefix="Created" />{token.lastUsedAt ? <RelativeTime value={token.lastUsedAt} prefix="Last used" /> : <span>Never used</span>}</p></div><Button type="button" variant="destructive-soft" size="sm" disabled={busy} aria-label={`Revoke ${token.name}`} onClick={(event) => { triggerRef.current = event.currentTarget; setRevokeError(""); setRevoke(token); }}><Trash2 size={14} />Revoke token</Button></li>)}</ul>}
+                    : <ul aria-label="Your access tokens">{tokens.map((token) => <li key={token.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 last:border-b-0 sm:px-5"><div className="min-w-0"><p className="flex items-center gap-2 break-words text-body font-medium text-ink"><KeyRound size={14} className="shrink-0 text-ink-subtle" aria-hidden="true" />{token.name}</p><p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-muted"><RelativeTime value={token.createdAt} prefix="Created" />{token.lastUsedAt ? <RelativeTime value={token.lastUsedAt} prefix="Last used" /> : <span>Never used</span>}{token.expiresAt ? <time dateTime={token.expiresAt}>Expires {new Date(token.expiresAt).toLocaleDateString()}</time> : <span>No expiry</span>}</p></div><Button type="button" variant="destructive-soft" size="sm" disabled={busy} aria-label={`Revoke token ${token.name}`} onClick={(event) => { triggerRef.current = event.currentTarget; setRevokeError(""); setRevoke(token); }}><Trash2 size={14} />Revoke token</Button></li>)}</ul>}
         </SettingsSection>
         <ConfirmDeleteDialog open={Boolean(revoke)} title="Revoke access token?" description={<>The token named <strong>{revoke?.name}</strong> will stop working immediately. Create a new token to reconnect its CLI.</>} confirmLabel="Revoke token" busyLabel="Revoking…" busy={busy} error={revokeError} returnFocusRef={triggerRef} onCancel={() => { setRevoke(null); setRevokeError(""); }} onConfirm={() => void revokeToken()} />
     </>;

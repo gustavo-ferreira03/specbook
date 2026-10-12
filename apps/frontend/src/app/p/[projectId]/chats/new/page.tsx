@@ -23,8 +23,8 @@ import { cn } from "@/lib/utils";
 import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 
 const suggestions = [
-    { title: "Describe a flow", body: "State what should happen and how success is recognized.", seed: "A user should be able to ", icon: MessageSquareText },
-    { title: "Explore a feature", body: "Let the agent inspect an area and propose useful coverage.", seed: "Explore the ", icon: Sparkles },
+    { title: "Describe a flow", body: "State what should happen and how success is recognized.", seed: "A user should be able to ", icon: MessageSquareText, requiresExploration: false },
+    { title: "Explore a feature", body: "Let the agent inspect an area and propose useful coverage.", seed: "Explore the ", icon: Sparkles, requiresExploration: true },
 ];
 
 function initialText(specId: string | null, intent: string | null): string {
@@ -103,11 +103,11 @@ function NewChatContent({ projectId }: { projectId: string }) {
                         {runnerEnvironment && <RunnerExplorationNotice className="mt-4" />}
                         <TunnelConnectionNotice projectId={projectId} className="mt-4" />
                         <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                            {suggestions.map((suggestion) => (
+                            {suggestions.filter((suggestion) => !runnerEnvironment || !suggestion.requiresExploration).map((suggestion) => (
                                 <button
                                     key={suggestion.title}
                                     type="button"
-                                    disabled={modelMissing || sending || runnerEnvironment && suggestion.icon === Sparkles}
+                                    disabled={modelMissing || sending}
                                     onClick={() => {
                                         setText(suggestion.seed);
                                         textareaRef.current?.focus();

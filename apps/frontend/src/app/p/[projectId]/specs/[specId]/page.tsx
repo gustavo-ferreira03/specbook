@@ -293,7 +293,7 @@ function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
     );
 }
 
-function EvidenceGallery({ runId, evidence, onSelect }: { runId: string; evidence: RunEvidence; onSelect: (step: RunEvidence["steps"][number]) => void }) {
+function EvidenceGallery({ runId, passed, evidence, onSelect }: { runId: string; passed: boolean; evidence: RunEvidence; onSelect: (step: RunEvidence["steps"][number]) => void }) {
     if (evidence.steps.length === 0) return null;
     return (
         <section aria-labelledby={`evidence-${runId}`}>
@@ -308,7 +308,7 @@ function EvidenceGallery({ runId, evidence, onSelect }: { runId: string; evidenc
                             className="group/shot flex w-48 flex-col overflow-hidden rounded-lg border border-line bg-surface text-left outline-none transition-colors hover:border-line-hover focus-visible:ring-2 focus-visible:ring-ring sm:w-52"
                         >
                             <img src={artifactUrl(runId, step.file)} alt="" loading="lazy" className="h-28 w-full border-b border-line bg-surface-soft object-cover object-top" />
-                            <span className={cn("px-2.5 pt-2 text-meta font-medium tabular", step.kind === "expected" ? "text-success" : "text-ink-subtle")}>{evidenceStepLabel(step)}</span>
+                            <span className={cn("px-2.5 pt-2 text-meta font-medium tabular", step.kind === "expected" && passed ? "text-success" : "text-ink-subtle")}>{evidenceStepLabel(step)}</span>
                             <span className="line-clamp-2 min-h-10 px-2.5 pt-0.5 pb-2 text-meta leading-5 break-words text-ink">{step.label}</span>
                         </button>
                     ))}
@@ -345,7 +345,7 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
                     <video controls preload="metadata" className="mt-2 aspect-video w-full rounded-lg border border-line bg-browser" src={artifactUrl(run.id, evidence.video)} />
                 </section>
             )}
-            <EvidenceGallery runId={run.id} evidence={evidence} onSelect={(step) => onSelect({ runId: run.id, step })} />
+            <EvidenceGallery runId={run.id} passed={run.status === "passed"} evidence={evidence} onSelect={(step) => onSelect({ runId: run.id, step })} />
             <ApiRunEvidence evidence={evidence} />
             <RunDiagnostics evidence={evidence} />
             {empty && <p className="text-control text-ink-subtle">No evidence was recorded for this run.</p>}
@@ -676,8 +676,13 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const latestRun = runs[0];
     const crumbs: Crumb[] = [specsCrumb, ...(feature ? [{ label: feature.title, href: `/p/${projectId}/specs#feature-${feature.id}` }] : [])];
     const sourceEdited = Boolean(content && testSourceDraft !== content.testSource);
-    const stepsChanged = Boolean(editing && content?.humanSpec && JSON.stringify([...splitLines(preconditionsDraft), ...splitLines(stepsDraft), expectedResultDraft.trim(), ...splitLines(postconditionsDraft)].filter(Boolean))
-        !== JSON.stringify([...content.humanSpec.preconditions, ...content.humanSpec.steps, content.humanSpec.expectedResult, ...content.humanSpec.postconditions].map((title) => title.trim()).filter(Boolean)));
+    const changedFields = {
+        preconditions: Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(preconditionsDraft)) !== JSON.stringify(content.humanSpec.preconditions.map((title) => title.trim()))),
+        steps: Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(stepsDraft)) !== JSON.stringify(content.humanSpec.steps.map((title) => title.trim()))),
+        expectedResult: Boolean(editing && content?.humanSpec && expectedResultDraft.trim() !== content.humanSpec.expectedResult.trim()),
+        postconditions: Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(postconditionsDraft)) !== JSON.stringify(content.humanSpec.postconditions.map((title) => title.trim()))),
+    };
+    const behaviorChanged = Object.values(changedFields).some(Boolean);
 
     return (
         <div className="min-h-full bg-surface">
@@ -741,27 +746,27 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                         <Textarea id="spec-description" value={descriptionDraft} onChange={(event) => setDescriptionDraft(event.target.value)} disabled={saving} rows={2} />
                                     </Field>
                                     <Field id="spec-preconditions" label="Preconditions" hint="One per line. Who is signed in and what state the app is in before the steps. The automation sets up and checks each one.">
-                                        <Textarea id="spec-preconditions" aria-describedby="spec-preconditions-hint" value={preconditionsDraft} onChange={(event) => setPreconditionsDraft(event.target.value)} disabled={saving} rows={3} placeholder="Signed in as the shopper" />
+                                        <Textarea id="spec-preconditions" aria-describedby={changedFields.preconditions ? "spec-preconditions-hint spec-behavior-note" : "spec-preconditions-hint"} value={preconditionsDraft} onChange={(event) => setPreconditionsDraft(event.target.value)} disabled={saving} rows={3} placeholder="Signed in as the shopper" />
                                     </Field>
                                     <Field id="spec-steps" label="Steps" hint="One per line, in order. Each line becomes a numbered step.">
-                                        <Textarea id="spec-steps" aria-describedby={stepsChanged ? "spec-steps-hint spec-steps-note" : "spec-steps-hint"} value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)} disabled={saving} rows={6} placeholder="Open the store home page" />
-                                        {stepsChanged && (
-                                            <p id="spec-steps-note" role="status" className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-meta text-ink">
-                                                <TriangleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-icon" />
-                                                <span>
-                                                    {sourceEdited
-                                                        ? "Check that the step() titles in the automation source match the preconditions, steps, expected result and postconditions, in that order, or the Spec becomes invalid."
-                                                        : <>The automation must be updated to match these preconditions, steps, expected result and postconditions, or the Spec becomes invalid when you save. Use <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`} className="font-medium underline underline-offset-2">Edit with AI</Link>, or change the step() titles in the automation source below.</>}
-                                                </span>
-                                            </p>
-                                        )}
+                                        <Textarea id="spec-steps" aria-describedby={changedFields.steps ? "spec-steps-hint spec-behavior-note" : "spec-steps-hint"} value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)} disabled={saving} rows={6} placeholder="Open the store home page" />
                                     </Field>
                                     <Field id="spec-expected-result" label="Expected result" hint="One sentence the user can see on screen. The automation proves it right after the steps and keeps that screenshot as evidence.">
-                                        <Textarea id="spec-expected-result" aria-describedby="spec-expected-result-hint" value={expectedResultDraft} onChange={(event) => setExpectedResultDraft(event.target.value)} disabled={saving} rows={3} />
+                                        <Textarea id="spec-expected-result" aria-describedby={changedFields.expectedResult ? "spec-expected-result-hint spec-behavior-note" : "spec-expected-result-hint"} value={expectedResultDraft} onChange={(event) => setExpectedResultDraft(event.target.value)} disabled={saving} rows={3} />
                                     </Field>
                                     <Field id="spec-postconditions" label="Postconditions" hint="One per line. Side effects checked after the expected result. Optional; most Specs have none.">
-                                        <Textarea id="spec-postconditions" aria-describedby="spec-postconditions-hint" value={postconditionsDraft} onChange={(event) => setPostconditionsDraft(event.target.value)} disabled={saving} rows={2} />
+                                        <Textarea id="spec-postconditions" aria-describedby={changedFields.postconditions ? "spec-postconditions-hint spec-behavior-note" : "spec-postconditions-hint"} value={postconditionsDraft} onChange={(event) => setPostconditionsDraft(event.target.value)} disabled={saving} rows={2} />
                                     </Field>
+                                    {behaviorChanged && (
+                                        <p id="spec-behavior-note" role="status" className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-meta text-ink">
+                                            <TriangleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-icon" />
+                                            <span>
+                                                {sourceEdited
+                                                    ? "Check that the step() titles in the automation source match the preconditions, steps, expected result and postconditions, in that order, or the Spec becomes invalid."
+                                                    : <>The automation must be updated to match these preconditions, steps, expected result and postconditions, or the Spec becomes invalid when you save. Use <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`} className="font-medium underline underline-offset-2">Edit with AI</Link>, or change the step() titles in the automation source below.</>}
+                                            </span>
+                                        </p>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-3">

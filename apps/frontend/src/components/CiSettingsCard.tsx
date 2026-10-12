@@ -75,6 +75,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
     const [publicApiUrl, setPublicApiUrl] = useState(API_URL);
     useEffect(() => { setPublicApiUrl(`${window.location.origin}${API_URL}`); }, []);
     const snippet = ciSnippet(provider, publicApiUrl, projectId, failOnFlaky, failOnKnownBugs, environment);
+    const insecureServer = publicApiUrl.startsWith("http://");
     const selectedProvider = CI_PROVIDERS.find(([value]) => value === provider)!;
 
     useEffect(() => {
@@ -203,6 +204,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                     </div>
                 </SettingsRow>
                 <SettingsBlock>
+                    {insecureServer && <Alert variant="warning" role="alert" className="mb-4"><AlertTitle>Use HTTPS before running this pipeline</AlertTitle><AlertDescription>This snippet downloads and executes the CLI over HTTP and sends your CI token without transport encryption. Use an HTTPS server URL to protect the download and token.</AlertDescription></Alert>}
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <code className="break-all font-mono text-meta text-ink-muted">{selectedProvider[2]}</code>
                         <Button type="button" variant="outline" size="sm" onClick={() => void copy(snippet, "snippet")} aria-live="polite">{copied === "snippet" ? <Check size={14} /> : <Clipboard size={14} />}{copied === "snippet" ? "Copied" : "Copy snippet"}</Button>
