@@ -1,6 +1,6 @@
 {
   "name": "specbook",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Specbook behavior contracts, private-network runners and hosted server",
   "type": "module",
   "bin": {

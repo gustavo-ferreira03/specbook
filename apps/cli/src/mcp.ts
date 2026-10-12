@@ -1,3 +1,4 @@
+import { CLI_VERSION } from "./version.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { constants } from "node:fs";
@@ -56,7 +57,7 @@ export async function createLocalMcpServer(workspace: string, session: string, s
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    const server = new Server({ name: "specbook", version: "0.1.0" }, {
+    const server = new Server({ name: "specbook", version: CLI_VERSION }, {
         capabilities: { tools: {} },
         instructions: "Explore with browse tools, read existing Specs before writing, check and run selected Specs. Only Specbook files can be written. At most three runs per Spec in this turn. End each turn with exactly one outcome tool: ask_question, propose_specs, request_credentials, report_done or report_failed. No tools may be called after ending a turn. Credentials are references; never ask for their values.",
     });

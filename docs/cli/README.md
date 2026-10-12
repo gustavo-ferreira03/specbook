@@ -3,12 +3,14 @@ Specbook CLI: local verification and team publishing
 
 Specbook keeps readable behavior contracts beside restricted Playwright tests. Start a `chat` with the behavior you want covered; Specbook uses your installed, authenticated Claude Code or Codex as its brain, asks for missing details, and creates or runs Specs. The local CLI needs no Specbook server and no model configured in Specbook.
 
-Install the CLI from your team's Specbook server with Node.js 22 or newer:
+Install the latest release with Node.js 22 or newer:
 
 ```sh
-npm install -g https://specbook.example.com/api/cli/specbook.tgz
+npm install -g https://github.com/gustavo-ferreira03/specbook/releases/latest/download/specbook.tgz
 specbook init --base-url http://localhost:3000 --agent codex
 ```
+
+A team that runs a Specbook server can install the CLI that matches it from `https://specbook.example.com/api/cli/specbook.tgz` instead. Releases attach `specbook.tgz` with a `.sha256` checksum.
 
 The server serves its own CLI tarball without authentication at `/api/cli/specbook.tgz` through the frontend, or `/cli/specbook.tgz` on the backend. The package bundles the shared runtime, its test fixtures, report fonts, writing rules, this document at `dist/README.md` and the Kubernetes examples at `dist/examples`; it doesn't need the monorepo after installation.
 
@@ -328,7 +330,7 @@ Build an explicit UI from this checkout:
 pnpm -r build
 node apps/frontend/scripts/package-ui.mjs /tmp/specbook-ui
 mkdir -p /tmp/specbook-ui/extracted
-tar -xzf /tmp/specbook-ui/specbook-ui-0.1.0.tar.gz -C /tmp/specbook-ui/extracted
+tar -xzf /tmp/specbook-ui/specbook-ui-<version>.tar.gz -C /tmp/specbook-ui/extracted
 specbook serve --ui /tmp/specbook-ui/extracted --port 4201 --data /tmp/specbook-data
 ```
 

@@ -103,10 +103,10 @@ Specbook validates every test against a restricted Playwright subset before it r
 
 ## Use the CLI with your coding agent
 
-The `specbook` CLI works on your machine, including against `localhost`, with no Specbook server. Its brain is the coding agent you already use (Claude Code or Codex), so there is no model to configure. Install it from your team's server:
+The `specbook` CLI works on your machine, including against `localhost`, with no Specbook server. Its brain is the coding agent you already use (Claude Code or Codex), so there is no model to configure. Install the latest release (or `<your server>/api/cli/specbook.tgz` to match your team's server):
 
 ```sh
-npm install -g https://specbook.example.com/api/cli/specbook.tgz
+npm install -g https://github.com/gustavo-ferreira03/specbook/releases/latest/download/specbook.tgz
 specbook init --base-url http://localhost:3000
 specbook chat "a shopper can remove an item from the cart"
 ```
