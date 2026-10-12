@@ -5,6 +5,10 @@ Run behavior contracts locally, explore a browser, and ask your installed Claude
 
 Connect to a hosted Specbook to pull team coverage and publish locally passing Specs. Pipelines use `specbook ci` with a project CI token to run remote acceptance checks and save HTML evidence and JUnit results.
 
+Use `specbook runner` inside a private network to claim hosted checks over outbound HTTP, execute them with local credential profiles, and upload results and browser evidence. Create its token in **Settings → Runners**, then choose the Runner executor in the project's environment settings.
+
+`specbook serve --port 4201 --data /var/lib/specbook` starts the API, job worker, steward, schedules and web UI. Use an extracted standalone UI with `--ui`, the Docker image's bundled UI, or the matching checksum-verified release download. Local commands don't load server modules or require the UI.
+
 Install the CLI tarball from your Specbook server:
 
 ```sh

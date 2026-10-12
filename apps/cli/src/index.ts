@@ -321,6 +321,31 @@ program.command("runner")
         }
     });
 
+program.command("serve")
+    .helpGroup("Host Specbook:")
+    .description("start the API, worker, steward, schedules and web UI")
+    .option("--port <number>", "web UI port; defaults to FRONTEND_PORT or 4001")
+    .option("--host <address>", "listen address; defaults to HOST or 127.0.0.1")
+    .option("--data <directory>", "storage directory; defaults to SPECBOOK_STORAGE_DIR or SPECBOOK_HOME/server")
+    .option("--ui <directory>", "extracted standalone UI; otherwise use the bundled or cached UI")
+    .action(async (options: { port?: string; host?: string; data?: string; ui?: string }) => {
+        const abort = new AbortController();
+        const cancel = () => abort.abort(new Error("Specbook stopped"));
+        process.once("SIGINT", cancel);
+        process.once("SIGTERM", cancel);
+        try {
+            const { runServe } = await import("./serve");
+            await runServe({ ...options, signal: abort.signal }, (event) => print(event, () => {
+                if (event.event === "downloading_ui") return `${pc.cyan("●")} Downloading the web UI for Specbook ${event.version}`;
+                if (event.event === "stopped") return pc.dim("Specbook stopped");
+                return `${ui.success("Specbook is ready")}\n${pc.cyan(event.url)}\n${pc.dim(`Storage: ${event.data}`)}`;
+            }), (line) => stderr.write(line + "\n"));
+        } finally {
+            process.removeListener("SIGINT", cancel);
+            process.removeListener("SIGTERM", cancel);
+        }
+    });
+
 const spec = program.command("spec").description("scaffold and validate Specs").helpGroup("Write Specs by hand:");
 spec.command("new")
     .description("scaffold spec.yml and spec.ts")

@@ -6,6 +6,7 @@ const configuredPushLimit = Number.parseInt(process.env.SPECBOOK_GIT_MAX_PUSH_BY
 const maxPushBytes = Number.isFinite(configuredPushLimit) && configuredPushLimit > 0 ? configuredPushLimit : 200 * 1024 * 1024;
 
 const nextConfig: NextConfig = {
+    output: "standalone",
     devIndicators: false,
     allowedDevOrigins: ["localhost", "127.0.0.1", ...Object.values(networkInterfaces()).flatMap((entries) => entries?.map((entry) => entry.address) ?? [])],
     experimental: { proxyTimeout: 300_000, proxyClientMaxBodySize: maxPushBytes + 2 * 1024 * 1024 },

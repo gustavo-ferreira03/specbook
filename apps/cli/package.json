@@ -1,7 +1,7 @@
 {
   "name": "specbook",
   "version": "0.1.0",
-  "description": "Local Specbook behavior contracts and browser evidence",
+  "description": "Specbook behavior contracts, private-network runners and hosted server",
   "type": "module",
   "bin": {
     "specbook": "dist/index.js"
@@ -22,11 +22,26 @@
   "dependencies": {
     "@babel/parser": "7.29.9",
     "@clack/prompts": "^1.8.1",
+    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@hono/node-server": "^1.19.14",
+    "@hono/zod-validator": "^0.9.0",
+    "@libsql/client": "^0.17.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@playwright/mcp": "0.0.78",
     "@playwright/test": "1.62.0",
+    "axe-core": "^4.14.0",
     "commander": "^14.0.3",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "gray-matter": "^4.0.3",
+    "hono": "^4.13.1",
+    "openid-client": "^6.8.8",
     "picocolors": "^1.1.1",
     "playwright-core": "1.62.0",
+    "simple-git": "^4.0.2",
+    "tar": "^7.5.22",
+    "ws": "^8.21.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },

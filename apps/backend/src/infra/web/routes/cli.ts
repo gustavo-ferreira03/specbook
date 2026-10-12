@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { backendRoot } from "../../../core/paths";
 import { access } from "../access";
 
-export function createCliRouter(packageFile = path.join(backendRoot, "dist", "specbook.tgz")): Hono {
+export function createCliRouter(packageFile = process.env.SPECBOOK_CLI_PACKAGE_FILE ?? path.join(backendRoot, "dist", "specbook.tgz")): Hono {
     const router = new Hono();
     router.get("/cli/specbook.tgz", access("public"), async (c) => {
         c.header("Cache-Control", "no-cache");

@@ -50,6 +50,7 @@ Each command
 | `publish [spec\|feature] [--run] [--environment <name>]` | Publish selected Specs after a passing local run of their exact current files. Check their base revisions and start changed Specs as awaiting deployment in one environment. |
 | `ci [--environment <name>] [--base-url <url>]` | Trigger remote acceptance checks with a project CI token, wait for results and write HTML, JUnit and Markdown artifacts. |
 | `runner [--url <server>] [--concurrency <count>]` | Claim queued Specs over outbound HTTP, execute them with local credentials, and upload scrubbed results and evidence. |
+| `serve [--port <number>] [--host <address>] [--data <dir>] [--ui <dir>]` | Start the API, job worker, steward, schedules and standalone web UI. |
 | `spec new "<title>" --feature <name>` | Scaffold a readable contract and a valid one-step Playwright test, creating `feature.yml` when needed. Existing Specs aren't overwritten. |
 | `spec check [path]` | Validate source and YAML step titles with the same runtime as the server. With an open exploration session, count every locator on the current page and report missing or ambiguous matches. |
 | `run [spec\|feature]` | Run selected Specs in fresh browser contexts, then save results, per-step evidence and an HTML report. With no selector, run every Spec. |
@@ -186,6 +187,52 @@ Runner JSON output is newline-delimited because the command stays running. Every
 ```
 
 Configured tokens and credential values never appear in these events. Fatal errors use the existing `{ ok: false, error }` shape and exit 1.
+
+Hosting with the CLI
+--------------------
+
+`specbook serve` starts the full hosted product. The CLI package includes the API runtime and server dependencies; local commands load neither the server nor the web UI. Install the CLI tarball as described above, then start it with a persistent data directory:
+
+```sh
+specbook serve --host 127.0.0.1 --port 4201 --data /var/lib/specbook
+```
+
+`--port` selects the web UI port. An explicit port chooses the preceding port for the API unless `PORT` overrides it, so this example uses API port 4200. Without `--port`, `FRONTEND_PORT` defaults to 4001 and `PORT` defaults to 4000. `--host` overrides `HOST`, defaulting to `127.0.0.1`. `--data` maps to `SPECBOOK_STORAGE_DIR`; without either, data lives in `$SPECBOOK_HOME/server`. The backend keeps its storage lock, migrations and recovery checks. If either child process exits, serve stops the other; SIGINT and SIGTERM shut down both.
+
+For a native Linux installation, install Git and `flock` (`util-linux`), Chromium's platform libraries, and Xvfb/x11vnc if you use live chat browsers. Docker includes these tools. Chromium itself downloads on the first browser run if absent.
+
+The web UI ships separately as a Next.js standalone artifact matching the CLI version. Resolution follows this order:
+
+1. An extracted directory passed with `--ui`, containing `server.js`.
+2. A UI next to the installed CLI, in `dist/ui` or `ui`. Docker bundles it at `/app/ui` and passes that directory explicitly.
+3. `$SPECBOOK_HOME/ui/<version>`, populated by a checksum-verified release download.
+
+The default artifact URL is `https://github.com/gustavo-ferreira03/specbook/releases/download/v<version>/specbook-ui-<version>.tar.gz`; its checksum is at the same URL plus `.sha256`. Serve verifies SHA-256 before extracting and rejects escaping paths and unsafe archive entries. A missing release produces instructions to download, verify and extract the matching UI, then use `specbook serve --ui <directory>`. `SPECBOOK_UI_RELEASE_URL` overrides the complete artifact URL, with `{version}` substitution, for a release mirror. The CLI doesn't download UI files for local commands.
+
+Build an explicit UI from this checkout:
+
+```sh
+pnpm -r build
+node apps/frontend/scripts/package-ui.mjs /tmp/specbook-ui
+mkdir -p /tmp/specbook-ui/extracted
+tar -xzf /tmp/specbook-ui/specbook-ui-0.1.0.tar.gz -C /tmp/specbook-ui/extracted
+specbook serve --ui /tmp/specbook-ui/extracted --port 4201 --data /tmp/specbook-data
+```
+
+Version tags trigger `.github/workflows/release.yml`, which checks the CLI version, builds and attaches the CLI tarball, standalone UI archive and checksums to the matching GitHub release. Writing the workflow doesn't publish anything from a local checkout.
+
+The Docker image runs `specbook serve` with its bundled UI. Existing `/data` volumes, port 4001, `FRONTEND_ORIGIN`, `SPECBOOK_ALLOWED_HOSTS`, backend `PORT`, `FRONTEND_PORT` and OAuth callback variables keep their existing meanings. Set `FRONTEND_ORIGIN` to the public origin behind a reverse proxy; direct browser traffic uses the web UI's `/api` proxy. Both Docker and packed installs expose `/api/cli/specbook.tgz`. A packed install builds an installable archive from its own packaged files under the data directory; `SPECBOOK_CLI_PACKAGE_FILE` can select a prebuilt archive.
+
+Serve uses the normal human summary and puts child-process logs on stderr. With `--json`, stdout contains newline-delimited events:
+
+```text
+{ event: "downloading_ui", version }
+{ event: "ready", url, apiUrl, port, host, data, ui,
+  uiSource: "explicit" | "bundled" | "cache" | "download" }
+{ event: "stopped", url }
+```
+
+`pnpm dev` still starts the development API and Next.js dev server independently.
 
 Conversations
 -------------
@@ -390,7 +437,29 @@ missing-local.password → credentials error naming profile and field
 server credential profiles → 0; storage/output secret scan → 261 files, 0 findings
 ```
 
-The independent CLI runner check exercised concurrency 2, 38 heartbeats, graceful SIGTERM, a passing private login, missing local credentials, and nonsecret failure video. The existing backend suites passed 336 of 337 tests before the final cancellation/recovery regressions; only the allowed OpenAI subscription callback-port test failed. Additional cases in the existing suites cover token scopes and revocation, group matching, stale upload rejection, restart recovery, cancellation, and isolated proposed repairs. Live model-based evidence review wasn't exercised because these instances had no model configured.
+The independent CLI runner check exercised concurrency 2, 38 heartbeats, graceful SIGTERM, a passing private login, missing local credentials, and nonsecret failure video. A deliberate failure through the hosted runner also retained two step screenshots, a 20,851-byte failure video, the failed step, diagnostics and error context. The existing backend suites passed 339 of 340 tests; only the allowed OpenAI subscription callback-port test failed. Cases in those suites cover token scopes and revocation, group matching, stale upload rejection, restart recovery, cancellation, isolated proposed repairs, and an offline runner retry that leaves other projects' failure processing active. Live model-based evidence review wasn't exercised because these instances had no model configured.
+
+Playwright screenshots under `/tmp/specbook-runner-shots/` cover runner tokens, environment executor selection, the exploration notice and runner evidence on the Spec page. Token creation showed the value once, reload hid it, and revocation returned 401. Desktop and 390px checks found no page overflow. A scan of the server database, repository, run artifacts and captured outputs found none of the configured runner/CI/personal tokens or local credential values.
+
+Serve verification
+-------------------
+
+The CLI tarball installed under `/tmp/specbook-serve-installed` started the full product with `--ui` on ports 4280/4281. A simulated versioned release on port 4284 supplied the standalone archive and checksum to another instance on 4282/4283. The next launch reused the cache without another download; an incorrect checksum failed before server startup. Each successful instance served `/api/health` and `/api/cli/specbook.tgz` with HTTP 200 and shut down cleanly. The generated CLI download also installed independently and returned version 0.1.0.
+
+```text
+packed CLI + --ui → ready, uiSource=explicit, health 200
+simulated release + checksum → ready, uiSource=download, health 200
+same SPECBOOK_HOME → ready, uiSource=cache, one total download
+wrong checksum → exit 1, checksum verification failed
+browser /setup → administrator created
+hosted private-page Spec → passed, 2 step screenshots
+Docker process → specbook serve --ui /app/ui --port 4001 --host 0.0.0.0 --data /data
+Docker /api/health → 200; container health → healthy
+```
+
+The browser signup and hosted Spec check used ports 4230/4231 and a private static page on 4232, with data under `/tmp/specbook-serve-product`. The Docker image built locally as `specbook-runner-serve:verification`, kept its existing internal ports, and exposed only host port 4241; its temporary volume stayed under `/tmp`. An early dereferenced standalone archive lost pnpm dependency resolution; packaging now copies the traced dependencies into normal Node lookup paths, and the corrected archive passed plain Node startup, CSS/font/logo delivery, packed serve and Docker checks. No release, package, branch or container image was published.
+
+`pnpm -r build` and `npx tsc --noEmit` in backend, frontend, CLI and runtime passed. Transcripts live under `/tmp/specbook-runner-verification`, `/tmp/specbook-serve-packed-check-E05PFS` and `/tmp/specbook-serve-product`; UI screenshots include `serve-packed-spec.png`. Linux is verified here; native Windows/macOS hosting and actual GitHub release publication remain unverified.
 
 Server package verification
 ---------------------------

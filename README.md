@@ -40,7 +40,7 @@ docker run -d --name specbook --restart unless-stopped \
 
 Open [localhost:4001](http://localhost:4001). The setup wizard creates the admin account, connects a model provider and adds your first project; the bundled Sauce Demo project is a quick way to try it.
 
-The container holds everything: the web app, the agent, both browsers and the test runner. Data lives in the `specbook` volume, so updating is a `docker pull` and a new `docker run` with the same volume.
+The container runs `specbook serve` with its bundled web UI, API, job worker, steward and schedules. It includes both browsers and the test runner. Data lives in the `specbook` volume, so updating is a `docker pull` and a new `docker run` with the same volume.
 
 > [!TIP]
 > To serve Specbook on a domain, point your reverse proxy at port 4001 and add `-e FRONTEND_ORIGIN=https://specbook.example.com`. Extra hostnames go in `-e SPECBOOK_ALLOWED_HOSTS=host1,host2`.
@@ -126,7 +126,7 @@ specbook pull
 specbook publish login/sign-in --run
 ```
 
-Login asks for the token without echoing it and stores it outside the repository with 0600 permissions. Publish requires a passing local run of the current files and checks the remote revision before committing as your user. Changed Specs start as **Waiting for deploy** in the target environment: failures retain evidence without triage, Inbox items or failing health, until the first passing server run promotes them. Pull preserves unpublished local edits and reports conflicts.
+Login asks for the token without echoing it and stores it outside the repository with 0600 permissions. Publish requires a passing local run of the current files and checks the remote revision before committing as your user. Changed Specs start as **Waiting for deploy** in the target environment: failures retain evidence without triage, Inbox items or failing health, until the first passing run promotes them. Pull preserves unpublished local edits and reports conflicts.
 
 ## Run checks from CI
 
@@ -154,6 +154,18 @@ specbook runner --concurrency 1
 ```
 
 The runner connects outbound over HTTP, renews a lease while running, and uploads the same browser evidence and results as server runs. Crashed runners return their work to the queue. Manual checks, CI, schedules and deploy signals all use the environment's executor; credentials stay in the runner's local profiles. Live chat exploration isn't available for runner environments, though saved evidence, triage and runner verification remain available. See the [runner command guide](docs/cli/README.md#private-network-runners) for service configuration and JSON events.
+
+### Serve the full product
+
+The same CLI can host Specbook:
+
+```sh
+specbook serve --host 127.0.0.1 --port 4201 --data /var/lib/specbook
+# Or use an extracted standalone UI artifact:
+specbook serve --ui /opt/specbook-ui --port 4201 --data /var/lib/specbook
+```
+
+This starts the web UI on 4201 and the API on 4200, including the workers, steward and schedules. `PORT` can override the API port. Serve uses an explicit `--ui` directory, a bundled UI, or a matching release download cached in `SPECBOOK_HOME` after checksum verification. Local commands don't need the UI and don't start server modules. Docker ships the UI and keeps the existing volume, port and environment-variable setup. See the [serve guide](docs/cli/README.md#hosting-with-the-cli) for artifact builds, release mirrors and JSON events.
 
 Preview URLs supplied with `--base-url` must belong to the chosen environment's allowed origins. Quality gates can fail the build on flaky results or known bugs; awaiting-deploy failures appear separately and don't fail the pipeline. CI needs no local workspace. Use `--json` for a stable machine-readable result; tokens never appear in it.
 

@@ -34,7 +34,10 @@ COPY . .
 RUN pnpm --filter @specbook/runtime build \
     && pnpm --filter backend build \
     && pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz \
-    && pnpm --filter frontend build
+    && pnpm --filter frontend build \
+    && node apps/frontend/scripts/package-ui.mjs dist/release \
+    && mkdir -p dist/ui \
+    && tar -xzf dist/release/specbook-ui-*.tar.gz -C dist/ui
 
 FROM base AS runtime
 
@@ -50,12 +53,12 @@ RUN pnpm --filter backend browser:install:docker \
 COPY --from=build /app/shared/runtime/dist ./shared/runtime/dist
 COPY --from=build /app/apps/backend/dist ./apps/backend/dist
 COPY --from=build /app/apps/backend/drizzle ./apps/backend/drizzle
-COPY --from=build /app/apps/frontend/.next ./apps/frontend/.next
-COPY --from=build /app/apps/frontend/public ./apps/frontend/public
-COPY --from=build /app/apps/frontend/next.config.ts ./apps/frontend/next.config.ts
+COPY --from=build /app/apps/cli/dist ./apps/cli/dist
+COPY --from=build /app/apps/backend/dist/specbook.tgz ./apps/cli/dist/specbook.tgz
+COPY --from=build /app/dist/ui ./ui
 COPY LICENSE /app/LICENSE
 COPY --chmod=755 entrypoint.sh /app/entrypoint.sh
-RUN rm -rf /app/apps/frontend/.next/cache \
+RUN ln -s /app/apps/cli/dist/index.js /usr/local/bin/specbook \
     && mkdir -p /data \
     && chown node:node /data
 
@@ -68,6 +71,6 @@ VOLUME /data
 EXPOSE 4001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl --fail --silent "http://127.0.0.1:${PORT:-4000}/health" || exit 1
+    CMD curl --fail --silent "http://127.0.0.1:${FRONTEND_PORT:-4001}/api/health" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/app/entrypoint.sh"]
