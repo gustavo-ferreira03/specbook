@@ -73,7 +73,10 @@ async function saveConversation(workspace: string, state: Conversation): Promise
 }
 
 async function readConversation(workspace: string, id: string): Promise<Conversation> {
-    const file = await safeWorkspacePath(workspace, chatPath(id, "conversation.json"));
+    const file = await safeWorkspacePath(workspace, chatPath(id, "conversation.json")).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") throw Object.assign(new Error(`No conversation ${id} in this workspace. Run specbook chats to list them.`), { code: "ENOENT" });
+        throw error;
+    });
     return conversationSchema.parse(JSON.parse(await fs.readFile(file, "utf8")));
 }
 
@@ -279,7 +282,6 @@ export async function sendMessage(workspace: string, args: string[], options: Ch
         await finish(workspace, state, { id: state.id, status: "failed", message: `Could not start the conversation turn: ${message}`, error: message });
         return (await readConversation(workspace, state.id)).reply;
     }
-    process.stderr.write(`Specbook: ${state.agent} conversation ${state.id}\n`);
     return options.noWait ? state.reply : waitForReply(workspace, state.id, options);
 }
 
@@ -328,7 +330,6 @@ async function completedReply(workspace: string, state: Conversation, before: Ag
         reply.evidencePaths = [...new Set(specs.flatMap((spec) => [spec.evidencePath, spec.report].filter((file): file is string => !!file)))];
     }
     if (outcome.status === "done" && state.turn?.selected?.some((proposal) => !specs.some((spec) => spec.path === after.proposalRuns?.[String(proposal.number)] && spec.status !== "not_run"))) throw new Error("The brain reported done before running every selected Spec. Reply to request the remaining coverage.");
-    if (outcome.status === "done" && specs.length) reply.message += "\n\n" + specs.map((spec) => `${spec.title}: ${spec.status} (${spec.path})${spec.evidencePath ? `\nEvidence: ${spec.evidencePath}\nReport: ${spec.report}` : ""}`).join("\n");
     return reply;
 }
 
@@ -416,9 +417,4 @@ export async function redactReply(reply: ChatReply): Promise<ChatReply> {
         if (spec.failReason) spec.failReason = await scrub(spec.failReason);
     }
     return chatReplySchema.parse(safe);
-}
-
-export function printReply(reply: ChatReply): string {
-    const proposals = reply.proposals?.map((proposal) => `${proposal.number}. ${proposal.title}\n   Why: ${proposal.why}\n   Feature: ${proposal.feature}`).join("\n");
-    return [reply.message, proposals, `Conversation: ${reply.id}`, `Status: ${reply.status}`].filter(Boolean).join("\n\n");
 }
