@@ -1,7 +1,8 @@
 ## Spec content
 - Cover only flows that exist and are reachable in the running app. If the requested behavior is missing, say so; never invent steps.
 - Each precondition, step, expected result and postcondition is one short, observable user action or fact ("Add Chair to the cart", not "Test checkout"), without "and"; split several into several items.
-- Preconditions: the starting state in user terms, such as who is signed in and what data exists ("Signed in as the standard user", "The cart is empty"). Never mention credential profiles, browsers, sessions, Specbook or the runner.
+- Steps are user actions ("Open the cart", "Sort by Price (low to high)"). Never write an observation as a step ("See ...", "View ...", "Check ..."); assert it in the step that causes it.
+- Preconditions: the starting state in user terms, such as who is signed in and what data exists ("Signed in as the standard user", "The cart is empty"). Never mention credential profiles, browsers, sessions, Specbook or the runner. Unless the Spec tests signing in, being signed in is a precondition, not a step.
 - Expected result: the single final fact visible on screen (a message, a count, a page). The steps that produce intermediate outcomes assert them.
 - Postconditions: side effects the Spec checks after the expected result, in user terms ("The order appears in Order history"). Most Specs have none; leave the list empty then.
 - One user story per Spec, about 10 steps at most; split mixed or longer flows into separate Specs.
