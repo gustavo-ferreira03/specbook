@@ -5,7 +5,7 @@ import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, FileCode2, FileX2, Images, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, FileCode2, FileX2, HardDrive, Images, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
@@ -195,6 +195,7 @@ function VerificationBanner({
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                 <RelativeTime value={latestRun.startedAt} />
                 {environmentLabel(latestRun.environment?.name) && <><Dot /><span title={latestRun.baseUrl ?? undefined}>{latestRun.environment!.name}</span></>}
+                {latestRun.environment?.executor === "runner" && <><Dot /><span className="inline-flex items-center gap-1" title={latestRun.environment.runnerGroup ? `Runner group: ${latestRun.environment.runnerGroup}` : undefined}><HardDrive size={12} aria-hidden="true" />Runner</span></>}
                 {latestRun.durationMs !== null && <><Dot /><span className="tabular">took {formatDuration(latestRun.durationMs)}</span></>}
                 {failedStep && <><Dot /><span>stopped at “{failedStep}”</span></>}
                 {lastStep && <><Dot /><span>last captured step {lastStep.number}: {lastStep.label}</span></>}
@@ -383,6 +384,7 @@ function RunEntry({
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
                         {environmentLabel(run.environment?.name) && <><Dot /><span title={run.baseUrl ?? undefined}>{run.environment!.name}</span></>}
+                        {run.environment?.executor === "runner" && <><Dot /><span className="inline-flex items-center gap-1" title={run.environment.runnerGroup ? `Runner group: ${run.environment.runnerGroup}` : undefined}><HardDrive size={12} aria-hidden="true" />Runner</span></>}
                         {run.durationMs !== null && <><Dot /><span className="tabular">{formatDuration(run.durationMs)}</span></>}
                         {run.commitSha && <><Dot /><span className="font-mono" title="Commit">{run.commitSha.slice(0, 7)}</span></>}
                     </span>

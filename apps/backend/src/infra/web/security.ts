@@ -25,7 +25,7 @@ function isGitHttpPath(pathname: string): boolean {
 export function hostGuard(allowlist: HostAllowlist): MiddlewareHandler {
     return async (c, next) => {
         const pathname = c.req.path;
-        if (pathname === "/health" || isGitHttpPath(pathname) || pathname.startsWith("/ci/")) return next();
+        if (pathname === "/health" || isGitHttpPath(pathname) || pathname.startsWith("/ci/") || pathname.startsWith("/runner/")) return next();
         const host = c.req.header("host");
         if (!isAllowedHost(allowlist, host)) {
             logger.warn("rejected request with unexpected Host header", { host, path: pathname });
@@ -50,7 +50,9 @@ export function jsonBodyLimit(maxSize = DEFAULT_BODY_LIMIT_BYTES): MiddlewareHan
         maxSize,
         onError: (c) => c.json({ error: "Request body too large" }, 413),
     });
-    return async (c, next) => (isGitHttpPath(c.req.path) ? next() : limiter(c, next));
+    const runnerLimiter = bodyLimit({ maxSize: 90 * 1024 * 1024, onError: (c) => c.json({ error: "Runner artifacts exceed the upload limit" }, 413) });
+    return async (c, next) => isGitHttpPath(c.req.path) ? next()
+        : /^\/runner\/jobs\/[^/]+\/complete$/.test(c.req.path) ? runnerLimiter(c, next) : limiter(c, next);
 }
 
 export function requestLogger(): MiddlewareHandler {

@@ -63,6 +63,7 @@ import { createDomainTools } from "./tools";
 import { ChatTurnTimeoutError, withTurnTimeout } from "./deadline";
 import { browserFailureMessage, providerFailure, providerFailureMessage } from "../jobs/presentation-errors";
 import type { ChatToolStepRecord } from "./types";
+import { resolveRunEnvironment } from "../environments";
 
 const agentDir = path.join(storageRoot, "pi-agent");
 
@@ -188,6 +189,8 @@ async function runReservedChatTurn(
         }
         previousUserCount = userMessageCount(sessionManager);
         const storedProject = await projectsRepository.getProject(row.projectId);
+        const environment = storedProject ? turnPolicy?.environment ?? await resolveRunEnvironment(row.projectId) : undefined;
+        const runnerEnvironment = environment?.executor === "runner";
         const project = storedProject && turnPolicy?.baseUrl ? { ...storedProject, baseUrl: turnPolicy.baseUrl } : storedProject;
         if (!project) {
             metrics.fail("error", "project_missing");
@@ -235,7 +238,7 @@ async function runReservedChatTurn(
         let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
         let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null = null;
         const scrub = createProjectScrubber(row.projectId);
-        try {
+        if (!runnerEnvironment) try {
             const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
             const profiles = await credentialsRepository.listProfiles(row.projectId);
             const origins = [...new Set([new URL(startUrl).origin, ...(turnPolicy?.environment?.allowedOrigins ?? []), ...profiles.flatMap((profile) => profile.allowedOrigins)])];
@@ -279,10 +282,10 @@ async function runReservedChatTurn(
             );
         }
 
-        const credentialTools = createCredentialTools({
+        const credentialTools = runnerEnvironment ? [] : createCredentialTools({
             projectId: row.projectId,
             baseUrl: storedProject!.baseUrl,
-            environment: turnPolicy?.environment,
+            environment,
             chatId: id,
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
@@ -290,15 +293,15 @@ async function runReservedChatTurn(
             notify: () => publishChatUpdate(id),
             canPrompt: !turnPolicy,
         });
-        const sessionTools = createSessionTools({
+        const sessionTools = runnerEnvironment ? [] : createSessionTools({
             projectId: row.projectId,
             baseUrl: project.baseUrl,
             productionBaseUrl: storedProject!.baseUrl,
-            environment: turnPolicy?.environment,
+            environment,
             mcp: chatBrowser?.mcp ?? null,
             workDir: chatBrowser?.workDir ?? null,
         });
-        const explorationTools = createExplorationTools({
+        const explorationTools = runnerEnvironment ? [] : createExplorationTools({
             baseUrl: project.baseUrl,
             mcp: chatBrowser?.mcp ?? null,
             scrub,
@@ -312,17 +315,17 @@ async function runReservedChatTurn(
             ? [
                   ...browserTools,
                   ...createContextTools(discoveryRevision.id, row.projectId, id),
-                  createApiDocumentationTool(row.projectId, turnPolicy?.environment),
+                  ...(!runnerEnvironment ? [createApiDocumentationTool(row.projectId, environment)] : []),
                   ...credentialTools,
                   ...sessionTools,
                   ...explorationTools,
               ]
             : [
                   ...browserTools,
-                  ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl, environment: turnPolicy?.environment }),
+                  ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl, environment }),
                   createSpecBatchTool(row.projectId, id),
                   createChatResultsTool(row.projectId, id),
-                  createApiDocumentationTool(row.projectId, turnPolicy?.environment),
+                  ...(!runnerEnvironment ? [createApiDocumentationTool(row.projectId, environment)] : []),
                   ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`, id)] : []),
                   ...credentialTools,
                   ...sessionTools,
@@ -332,7 +335,9 @@ async function runReservedChatTurn(
             ? null
             : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
         const resourceLoader = await createResourceLoader(
-            buildSystemPrompt(project, discoveryRevision, confirmedContext) + (turnPolicy?.prompt ?? ""),
+            buildSystemPrompt(project, discoveryRevision, confirmedContext) + (turnPolicy?.prompt ?? "") + (runnerEnvironment
+                ? "\nThis environment executes on a private-network runner. Live browser exploration is unavailable. Use saved Specs, results and evidence. Run Specs through the runner; never claim to have reproduced behavior in a live browser. Credentials are configured locally on the runner with specbook credentials, never in the server vault."
+                : ""),
         );
         if (consumeAbortRequest(id)) {
             metrics.fail("aborted", "aborted_before_start");

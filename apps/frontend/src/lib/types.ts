@@ -15,6 +15,8 @@ export interface ProjectEnvironment {
     baseUrl: string;
     allowedOrigins: string[];
     credentialOverrides: Record<string, string>;
+    executor: "server" | "runner";
+    runnerGroup: string | null;
 }
 
 export interface SpecCandidate {

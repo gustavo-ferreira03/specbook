@@ -11,6 +11,18 @@ import { recordFailureSignal } from "../steward/engine";
 let processing = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 const retryDelays = new Map<string, { attempts: number; retryAt: number }>();
+const runnerRetries = new Map<string, Promise<void>>();
+
+async function retryFailure(run: Run, error: unknown): Promise<void> {
+    if (error instanceof StaleRunError) {
+        retryDelays.delete(run.id);
+        await runsRepository.acknowledgeAutomation(run.id);
+        return;
+    }
+    logger.warn("failure retry could not start", { runId: run.id, error });
+    const attempts = (retryDelays.get(run.id)?.attempts ?? 0) + 1;
+    retryDelays.set(run.id, { attempts, retryAt: Date.now() + Math.min(15_000 * 2 ** (attempts - 1), 300_000) });
+}
 
 async function failureContent(run: Run): Promise<{ sourceHash: string; markdownHash: string } | null> {
     const spec = await specsRepository.getSpec(run.specId);
@@ -44,20 +56,22 @@ export async function processRunFailures(): Promise<void> {
                 }
                 let retry = await runsRepository.retryFor(run.id);
                 if (!retry) {
+                    if (runnerRetries.has(run.id)) continue;
                     if ((retryDelays.get(run.id)?.retryAt ?? 0) > Date.now()) continue;
+                    const options = {
+                        automate: true, healOnFailure: false, retryOf: run.id, expected, baseUrl: run.baseUrl ?? undefined, environment: run.environment ?? undefined,
+                    };
+                    if (run.environment?.executor === "runner") {
+                        // An offline runner must not hold the failure monitor for every project.
+                        const task = executeSpec(run.specId, options).then(() => undefined).catch((error: unknown) => retryFailure(run, error));
+                        runnerRetries.set(run.id, task);
+                        void task.finally(() => runnerRetries.delete(run.id)).catch((error: unknown) => logger.error("runner failure retry failed", { runId: run.id, error }));
+                        continue;
+                    }
                     try {
-                        retry = await executeSpec(run.specId, {
-                            automate: true, healOnFailure: false, retryOf: run.id, expected, baseUrl: run.baseUrl ?? undefined, environment: run.environment ?? undefined,
-                        });
+                        retry = await executeSpec(run.specId, options);
                     } catch (error) {
-                        if (error instanceof StaleRunError) {
-                            retryDelays.delete(run.id);
-                            await runsRepository.acknowledgeAutomation(run.id);
-                            continue;
-                        }
-                        logger.warn("failure retry could not start", { runId: run.id, error });
-                        const attempts = (retryDelays.get(run.id)?.attempts ?? 0) + 1;
-                        retryDelays.set(run.id, { attempts, retryAt: Date.now() + Math.min(15_000 * 2 ** (attempts - 1), 300_000) });
+                        await retryFailure(run, error);
                         continue;
                     }
                 }

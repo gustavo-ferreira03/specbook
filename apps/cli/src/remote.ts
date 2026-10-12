@@ -28,7 +28,7 @@ export type RemoteProject = z.infer<typeof projectSchema>;
 export type RemoteEnvironment = z.infer<typeof environmentSchema>;
 
 const tokens = new Set<string>();
-for (const value of [process.env.SPECBOOK_TOKEN, process.env.GITHUB_TOKEN, process.env.SPECBOOK_GITLAB_TOKEN, process.env.CI_JOB_TOKEN]) if (value) tokens.add(value);
+for (const value of [process.env.SPECBOOK_TOKEN, process.env.SPECBOOK_RUNNER_TOKEN, process.env.GITHUB_TOKEN, process.env.SPECBOOK_GITLAB_TOKEN, process.env.CI_JOB_TOKEN]) if (value) tokens.add(value);
 for (const [index, arg] of process.argv.entries()) {
     if (arg === "--token" && process.argv[index + 1]) tokens.add(process.argv[index + 1]);
     if (arg.startsWith("--token=")) tokens.add(arg.slice(8));

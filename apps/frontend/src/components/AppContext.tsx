@@ -26,6 +26,7 @@ import { DraftReview } from "@/components/DraftReview";
 import { EmptyState } from "@/components/EmptyState";
 import { PageContainer, PageHeader } from "@/components/PageHeader";
 import { RelativeTime } from "@/components/RelativeTime";
+import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
 import { SectionHeader } from "@/components/SectionHeader";
 import { StatusDot } from "@/components/StatusDot";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -51,6 +52,7 @@ import { countLabel } from "@/lib/format";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import { useProjectOverview } from "@/lib/projectOverview";
 import { useVisiblePolling } from "@/lib/usePolling";
+import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 import type { CoverageArea, CoverageResponse, Project, ProjectContext, ProjectContextRevision, ProjectContextState } from "@/lib/types";
 
 function parseSafetyNotes(raw: string): string[] {
@@ -211,6 +213,7 @@ function ContextPanel({
     onDraftSaved: (draft: ProjectContextRevision) => void;
 }) {
     const { canEdit, isAdmin } = useAuth();
+    const runnerEnvironment = useRunnerEnvironment(projectId);
     const [discardingDiscovery, setDiscardingDiscovery] = useState(false);
     const [discardDiscoveryOpen, setDiscardDiscoveryOpen] = useState(false);
     const [discardDiscoveryError, setDiscardDiscoveryError] = useState("");
@@ -265,6 +268,7 @@ function ContextPanel({
     if (!canEdit && !draft && !confirmed) return <section><SectionHeader title="What this app does" /><p className="mt-3 text-body text-ink-muted">No context has been confirmed yet. An editor can start discovery and review the findings here.</p></section>;
 
     if (!draft && !confirmed) {
+        if (runnerEnvironment) return <RunnerExplorationNotice />;
         return (
             <section aria-labelledby="overview-context-heading" className="sheet rounded-xl bg-surface-soft">
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:p-6">
@@ -304,6 +308,7 @@ function ContextPanel({
 
     return (
         <div className="space-y-6">
+            {runnerEnvironment && <RunnerExplorationNotice />}
 
             {draft && !draftHasProposal && (
                 <section aria-labelledby="overview-context-heading">
@@ -384,10 +389,10 @@ function ContextPanel({
                             ? "Stays active until the draft above replaces it."
                             : <>{confirmed.confirmedAt ? <RelativeTime value={confirmed.confirmedAt} prefix="Confirmed" /> : "Confirmed"} · supplied to every new chat</>}
                         actions={canEdit && !draft && <>
-                            <Button type="button" variant="ghost" size="sm" disabled={findState === "requesting"} onClick={() => void findUncoveredAreas()}>
+                            <Button type="button" variant="ghost" size="sm" disabled={findState === "requesting" || runnerEnvironment} onClick={() => void findUncoveredAreas()}>
                                 <Search size={14} /> {findState === "requesting" ? "Requesting…" : "Find uncovered areas"}
                             </Button>
-                            <Button type="button" variant="outline" size="sm" onClick={() => setUpdateMode((value) => !value)} aria-expanded={updateMode}>
+                            <Button type="button" variant="outline" size="sm" disabled={runnerEnvironment} onClick={() => setUpdateMode((value) => !value)} aria-expanded={updateMode}>
                                 {updateMode ? <><X size={14} /> Cancel update</> : <><PencilLine size={14} /> Update context</>}
                             </Button>
                         </>}
@@ -396,7 +401,7 @@ function ContextPanel({
                     {findState === "requested" && <p className="mb-3 text-body text-ink-muted">Requested. Review suggested Specs in <Link href={`/p/${projectId}`} className="underline underline-offset-2">Overview</Link>.</p>}
                     {findError && <Alert variant="danger" role="alert" className="mb-3"><AlertDescription>{findError}</AlertDescription></Alert>}
                     <div className="overflow-hidden sheet rounded-xl">
-                        {updateMode && !draft && (
+                        {updateMode && !draft && !runnerEnvironment && (
                             <div className="border-b border-line bg-surface-soft p-4 sm:p-5">
                                 <p className="mb-3 max-w-[64ch] text-control text-ink-muted">
                                     A new discovery explores the app again, starting from the current context, and replaces it when it finishes.

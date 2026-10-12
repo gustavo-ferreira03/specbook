@@ -9,6 +9,8 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatResultGroup } from "@/components/ChatResultGroup";
 import { ChatSettingsDialog } from "@/components/ChatSettingsDialog";
+import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
+import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 import { ChatSpecPreview } from "@/components/ChatSpecPreview";
 import { CredentialRequestCard } from "@/components/CredentialRequestCard";
 import { EmptyState } from "@/components/EmptyState";
@@ -434,6 +436,7 @@ const MessageList = memo(function MessageList({
 
 function ChatContent({ projectId, chatId }: { projectId: string; chatId: string }) {
     const { canEdit, isAdmin } = useAuth();
+    const runnerEnvironment = useRunnerEnvironment(projectId);
     const chatResults = useChatResults(chatId, projectId);
     const [state, setState] = useState<ChatState | null>(null);
     const [text, setText] = useState("");
@@ -929,6 +932,8 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
                 className="pt-3 pb-3 md:pt-5 md:pb-4"
                
             />
+
+            {runnerEnvironment && <div className="shrink-0 px-4 pb-3 md:px-8"><div className="mx-auto w-full max-w-chat"><RunnerExplorationNotice /></div></div>}
 
             {discovery && revisionInfo && (
                 <div className="shrink-0 border-b border-line bg-surface-soft px-4 py-2 md:px-8" role="note" aria-label="Project discovery status">

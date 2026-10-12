@@ -11,6 +11,7 @@ import { createAreaFeatures, writeContextToRepo } from "../../../core/repo/write
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
+import { resolveRunEnvironment } from "../../../core/environments";
 
 const discoveryBriefSchema = z.object({
     goal: z.string().trim().min(1).max(500).optional(),
@@ -73,6 +74,9 @@ export function createProjectContextsRouter(): Hono {
         async (c) => {
             const project = await projectsRepository.getProject(c.req.param("id"));
             if (!project) throw new HTTPException(404, { message: "Project not found" });
+            if ((await resolveRunEnvironment(project.id)).executor === "runner") {
+                throw new HTTPException(409, { message: "Application exploration is unavailable in runner environments. Write the project context manually and run Specs through the runner." });
+            }
             if (!(await configuredModel()).ready) {
                 throw new HTTPException(409, { message: "Connect a model in global Settings before exploring this application." });
             }

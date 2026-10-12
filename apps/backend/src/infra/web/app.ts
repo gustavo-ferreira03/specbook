@@ -25,6 +25,7 @@ import { createSetupRouter } from "./routes/setup";
 import { createRepositoryRecoveryRoutes } from "./routes/repository-recovery";
 import { createSafetySettingsRouter } from "./routes/safety-settings";
 import { createOperationsRouter } from "./routes/operations";
+import { createRunnersRouter } from "./routes/runners";
 
 export function buildAllowedOrigins(frontendOrigin = process.env.FRONTEND_ORIGIN ?? "http://localhost:4001"): Set<string> {
     const allowed = new Set([frontendOrigin]);
@@ -55,6 +56,7 @@ export function createApp(): Hono {
     app.route("/", createRepositoryRecoveryRoutes());
     app.route("/", createProjectsRouter());
     app.route("/", createEnvironmentsRouter());
+    app.route("/", createRunnersRouter());
     app.route("/", createCoverageRouter());
     app.route("/", createJobsRouter());
     app.route("/", createStewardRouter());

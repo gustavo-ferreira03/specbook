@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { SpecGrid } from "@/components/SpecGrid";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
+import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -18,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { errorMessage, getLlmRuntimeStatus, startProjectChat } from "@/lib/api";
 import { onInvalidate } from "@/lib/invalidation";
 import { cn } from "@/lib/utils";
+import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 
 const suggestions = [
     { title: "Describe a flow", body: "State what should happen and how success is recognized.", seed: "A user should be able to ", icon: MessageSquareText },
@@ -33,6 +35,7 @@ function initialText(specId: string | null, intent: string | null): string {
 
 function NewChatContent({ projectId }: { projectId: string }) {
     const { canEdit, isAdmin } = useAuth();
+    const runnerEnvironment = useRunnerEnvironment(projectId);
     const router = useRouter();
     const searchParams = useSearchParams();
     const specId = searchParams.get("specId");
@@ -94,14 +97,15 @@ function NewChatContent({ projectId }: { projectId: string }) {
                         </span>
                         <h2 id="chat-intro" className="mt-5 text-display font-[650] text-ink text-balance">What should this application do?</h2>
                         <p className="mt-2 max-w-[60ch] text-body text-ink-muted">
-                            Describe a flow or point the agent to an area of the application. It will browse, clarify the behavior, and save the verified result as a Spec.
+                            {runnerEnvironment ? "Discuss saved Specs, review run evidence, or describe changes to a behavior contract." : "Describe a flow or point the agent to an area of the application. It will browse, clarify the behavior, and save the verified result as a Spec."}
                         </p>
+                        {runnerEnvironment && <RunnerExplorationNotice className="mt-4" />}
                         <div className="mt-6 grid gap-2 sm:grid-cols-2">
                             {suggestions.map((suggestion) => (
                                 <button
                                     key={suggestion.title}
                                     type="button"
-                                    disabled={modelMissing || sending}
+                                    disabled={modelMissing || sending || runnerEnvironment && suggestion.icon === Sparkles}
                                     onClick={() => {
                                         setText(suggestion.seed);
                                         textareaRef.current?.focus();
@@ -163,7 +167,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
                                 rows={1}
                                 autoFocus
                                 disabled={modelMissing || sending}
-                                placeholder={modelMissing ? "Describe a behavior to verify…" : "Describe what to explore or verify…"}
+                                placeholder={runnerEnvironment ? "Discuss a Spec or its run evidence…" : modelMissing ? "Describe a behavior to verify…" : "Describe what to explore or verify…"}
                                 className="block max-h-[200px] min-h-12 resize-none rounded-none border-0 bg-transparent px-4 pt-3.5 pb-1 text-body shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-100"
                             />
                         </Label>

@@ -13,7 +13,16 @@ export const environmentSchema = z.object({
         return url.pathname === "/" && !url.search && !url.hostname.includes("*");
     }, "Enter an origin without a path or query").transform((value) => new URL(value).origin)).max(50).default([]),
     credentialOverrides: z.record(z.string(), z.string().uuid()).default({}),
-}).strict();
+    executor: z.enum(["server", "runner"]).default("server"),
+    runnerGroup: z.string().trim().max(80).nullable().default(null).transform((value) => value || null),
+}).strict().superRefine((input, context) => {
+    if (input.executor === "runner" && Object.keys(input.credentialOverrides).length) {
+        context.addIssue({ code: "custom", path: ["credentialOverrides"], message: "Runner environments use credentials saved on the runner. Remove server credential overrides." });
+    }
+    if (input.executor === "server" && input.runnerGroup) {
+        context.addIssue({ code: "custom", path: ["runnerGroup"], message: "Choose a runner executor before selecting a runner group." });
+    }
+});
 
 export async function validateEnvironmentCredentials(projectId: string, overrides: Record<string, string>): Promise<void> {
     const profiles = await credentialsRepository.listProfiles(projectId);
@@ -29,5 +38,5 @@ export async function resolveRunEnvironment(projectId: string, name = "Productio
     if (!row) throw new NetworkTargetError(`Environment "${name}" was not found in this project`);
     const origins = [new URL(row.baseUrl).origin, ...row.allowedOrigins];
     if (baseUrl && !origins.includes(new URL(baseUrl).origin)) throw new NetworkTargetError(`Add this origin to ${row.name} in Settings → Environments before using it for a preview run`);
-    return { configuredBaseUrl: row.baseUrl, id: row.id, name: row.name, baseUrl: baseUrl ?? row.baseUrl, allowedOrigins: [...new Set(origins)], credentialOverrides: row.credentialOverrides };
+    return { configuredBaseUrl: row.baseUrl, id: row.id, name: row.name, baseUrl: baseUrl ?? row.baseUrl, allowedOrigins: [...new Set(origins)], credentialOverrides: row.executor === "runner" ? {} : row.credentialOverrides, executor: row.executor, runnerGroup: row.runnerGroup };
 }

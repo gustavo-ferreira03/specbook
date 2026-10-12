@@ -10,6 +10,8 @@ export interface RunEnvironment {
     baseUrl: string;
     allowedOrigins: string[];
     credentialOverrides: Record<string, string>;
+    executor?: "server" | "runner";
+    runnerGroup?: string | null;
 }
 
 export interface LlmSettings {
@@ -46,7 +48,33 @@ export const environments = sqliteTable("environments", {
     baseUrl: text("base_url").notNull(),
     allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull().default([]),
     credentialOverrides: text("credential_overrides", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+    executor: text("executor").$type<"server" | "runner">().notNull().default("server"),
+    runnerGroup: text("runner_group"),
 }, (table) => [uniqueIndex("environments_project_name_idx").on(table.projectId, table.name)]);
+
+export const runnerTokens = sqliteTable("runner_tokens", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    group: text("group"),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: text("created_at").notNull(),
+    lastSeenAt: text("last_seen_at"),
+});
+
+export const runnerJobs = sqliteTable("runner_jobs", {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id").notNull().unique(),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    group: text("group"),
+    payload: text("payload", { mode: "json" }).$type<import("@specbook/runtime/runner-protocol").RunnerPayload>().notNull(),
+    status: text("status").$type<"queued" | "leased" | "completed">().notNull().default("queued"),
+    runnerId: text("runner_id").references(() => runnerTokens.id, { onDelete: "set null" }),
+    leaseId: text("lease_id"),
+    leaseExpiresAt: text("lease_expires_at"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (table) => [index("runner_jobs_status_group").on(table.status, table.group), index("runner_jobs_lease_expiry").on(table.leaseExpiresAt)]);
 
 export const features = sqliteTable(
     "features",

@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { Hono } from "hono";
-import { useTempStorage } from "../helpers/storage";
+import { HUMAN_SPEC, useTempStorage, VALID_SPEC } from "../helpers/storage";
 
 useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
@@ -87,6 +87,160 @@ test("chat events disable compression and buffering in the frontend proxy", asyn
         const chunk = await reader.read();
         assert.match(new TextDecoder().decode(chunk.value), /event: connected/);
     } finally { await reader.cancel(); }
+});
+
+test("runner dispatch keeps credential lookup local and survives backend recovery", async () => {
+    const { runsRepository } = await import("../../src/infra/repositories/runs");
+    const { runnersRepository } = await import("../../src/infra/repositories/runners");
+    const { completeRunnerWork } = await import("../../src/core/private-runner/queue");
+    const { issueRunnerToken, authenticateRunnerToken } = await import("../../src/core/private-runner/tokens");
+    const { getRunBatch, markInterruptedBatches } = await import("../../src/core/runner/batch");
+    const project = await projectsRepository.createProject("Runner recovery", "http://private-app.invalid:4300");
+    await repoGit.ensureProjectRepo(project.id, { create: true });
+    const production = (await environmentsRepository.list(project.id))[0]!;
+    await environmentsRepository.update(production, { ...production, executor: "runner", runnerGroup: "recovery" });
+    const feature = await writer.createFeatureInRepo(project.id, null, "Private", "");
+    const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Local credentials", description: "",
+        humanSpec: { preconditions: [], steps: ["Enter password"], expectedResult: "", postconditions: [] },
+        testSource: 'import { test } from "specbook"; test("Local credentials", async ({ page, step, secret }) => { await step("Enter password", async () => { await page.goto("/"); await page.getByLabel("Password").fill(secret("private", "password")); }); });' });
+    const response = await app.request(`/specs/${spec.id}/run`, { method: "POST" });
+    assert.equal(response.status, 202, await response.clone().text());
+    const body = await response.json();
+    const queued = (await runnersRepository.pending()).find((job) => job.batchId === body.batchId)!;
+    assert.ok(queued, "missing server credentials do not block runner dispatch");
+    assert.equal(queued.payload.baseUrl, project.baseUrl);
+    assert.equal(queued.payload.networkPolicy.allowPrivate, true);
+    assert.equal("secretEnv" in queued.payload, false);
+    assert.equal("credentialOverrides" in queued.payload, false);
+    await runsRepository.markInterruptedRuns();
+    await markInterruptedBatches();
+    assert.equal((await runsRepository.getRun(body.run.id))!.status, "running");
+    assert.equal((await getRunBatch(body.batchId))!.status, "running");
+    const issued = await issueRunnerToken("Recovery", "recovery");
+    const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    const lease = (await runnersRepository.claim(token, 60_000))!;
+    await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
+        results: [{ runId: body.run.id, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] });
+    assert.equal((await runsRepository.getRun(body.run.id))!.status, "passed");
+});
+
+test("runner cancellation removes pending execution and isolated candidate verification preserves Spec health", async () => {
+    const { runsRepository } = await import("../../src/infra/repositories/runs");
+    const { specsRepository } = await import("../../src/infra/repositories/specs");
+    const { runnersRepository } = await import("../../src/infra/repositories/runners");
+    const { completeRunnerWork } = await import("../../src/core/private-runner/queue");
+    const { issueRunnerToken, authenticateRunnerToken } = await import("../../src/core/private-runner/tokens");
+    const { verifyRunnerCandidate } = await import("../../src/core/runner/batch");
+    const { resolveRunEnvironment } = await import("../../src/core/environments");
+    const { runsDir } = await import("../../src/core/paths");
+    const { serializeSpecYaml } = await import("@specbook/runtime/yaml");
+    const project = await projectsRepository.createProject("Runner cancellation", "http://private-app.invalid:4300");
+    await repoGit.ensureProjectRepo(project.id, { create: true });
+    const production = (await environmentsRepository.list(project.id))[0]!;
+    await environmentsRepository.update(production, { ...production, executor: "runner", runnerGroup: "candidate" });
+    const environment = await resolveRunEnvironment(project.id);
+    const feature = await writer.createFeatureInRepo(project.id, null, "Private", "");
+    const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Open the application", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+    const markdown = serializeSpecYaml({ title: "Open the application", description: "", humanSpec: HUMAN_SPEC });
+    const directory = path.join(runsDir, "proposals", project.id, "candidate");
+    await assert.rejects(() => verifyRunnerCandidate({ specId: spec.id, testSource: "invalid source", markdown, environment, directory }), /invalid/);
+    assert.deepEqual(await runsRepository.listRuns(spec.id), []);
+    const pending = async () => {
+        for (let attempt = 0; attempt < 100; attempt++) {
+            const job = (await runnersRepository.pending()).find((row) => row.projectId === project.id);
+            if (job) return job;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error("Runner work was not queued");
+    };
+    const controller = new AbortController();
+    const cancelled = executeSpec(spec.id, { environment, signal: controller.signal });
+    const cancelledAssertion = assert.rejects(cancelled, /Stopped/);
+    await pending();
+    controller.abort(new Error("Stopped by the user"));
+    await cancelledAssertion;
+    assert.equal((await runnersRepository.pending()).some((row) => row.projectId === project.id), false);
+    assert.equal((await runsRepository.listRuns(spec.id))[0].errorCode, "cancelled");
+    const candidateAbort = new AbortController();
+    const cancelledCandidate = verifyRunnerCandidate({ specId: spec.id, testSource: VALID_SPEC, markdown, environment, directory, signal: candidateAbort.signal });
+    const candidateAssertion = assert.rejects(cancelledCandidate, /Candidate stopped/);
+    await pending();
+    candidateAbort.abort(new Error("Candidate stopped"));
+    await candidateAssertion;
+    assert.equal((await runnersRepository.pending()).some((row) => row.projectId === project.id), false);
+    assert.equal((await runsRepository.listRuns(spec.id)).length, 1, "isolated candidates leave no public runs");
+    const verifying = verifyRunnerCandidate({ specId: spec.id, testSource: VALID_SPEC, markdown, environment, directory });
+    const job = await pending();
+    const issued = await issueRunnerToken("Candidate", "candidate");
+    const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    const lease = (await runnersRepository.claim(token, 60_000))!;
+    assert.equal(lease.id, job.id);
+    await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
+        results: [{ runId: lease.payload.specs[0].runId, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] });
+    const verified = await verifying;
+    assert.equal(verified.status, "passed");
+    assert.equal((await specsRepository.getSpec(spec.id))!.status, "unverified");
+    assert.equal((await runsRepository.listRuns(spec.id)).length, 1);
+    assert.equal(await fs.readFile(path.join(directory, "spec.ts"), "utf8"), VALID_SPEC);
+    const { startContextDiscovery } = await import("../../src/core/chat/discovery");
+    await assert.rejects(() => startContextDiscovery(project.id, { goal: "Explore", startUrl: environment.baseUrl, safetyNotes: [] }), /exploration is unavailable/);
+    const { createProjectContextsRouter } = await import("../../src/infra/web/routes/project-contexts");
+    const contextApp = new Hono().route("/", createProjectContextsRouter());
+    const discoveryResponse = await contextApp.request(`/projects/${project.id}/context-discoveries`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    assert.equal(discoveryResponse.status, 409);
+});
+
+test("an offline runner retry leaves other projects' failure processing available", async () => {
+    const { runsRepository } = await import("../../src/infra/repositories/runs");
+    const { runnersRepository } = await import("../../src/infra/repositories/runners");
+    const { completeRunnerWork } = await import("../../src/core/private-runner/queue");
+    const { issueRunnerToken, authenticateRunnerToken } = await import("../../src/core/private-runner/tokens");
+    const { resolveRunEnvironment } = await import("../../src/core/environments");
+    const { processRunFailures } = await import("../../src/core/jobs/failures");
+    const { runsDir } = await import("../../src/core/paths");
+    const createFailure = async (name: string, remote: boolean) => {
+        const project = await projectsRepository.createProject(name, baseUrl);
+        await repoGit.ensureProjectRepo(project.id, { create: true });
+        const production = (await environmentsRepository.list(project.id))[0]!;
+        if (remote) await environmentsRepository.update(production, { ...production, executor: "runner", runnerGroup: "monitor" });
+        const environment = await resolveRunEnvironment(project.id);
+        const feature = await writer.createFeatureInRepo(project.id, null, "Store", "");
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Open the application", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(project.id), automate: true, environment });
+        await runsRepository.finishRun(run.id, "failed", 100, "Original failure", "assertion");
+        const directory = path.join(runsDir, run.id);
+        await fs.mkdir(directory, { recursive: true });
+        await fs.copyFile(path.join(repoGit.getRepoDir(project.id), writer.specYamlFile(spec.path)), path.join(directory, "spec.yml"));
+        return { project, spec, run, environment };
+    };
+    const offline = await createFailure("Offline runner monitor", true);
+    const local = await createFailure("Local monitor", false);
+    const retry = await runsRepository.createRun({ specId: local.spec.id, sourceHash: local.spec.sourceHash, commitSha: local.run.commitSha, automate: true, retryOf: local.run.id, environment: local.environment });
+    await runsRepository.finishRun(retry.id, "passed", 100, null);
+    let timeout: NodeJS.Timeout | undefined;
+    const completed = await Promise.race([processRunFailures().then(() => true), new Promise<boolean>((resolve) => { timeout = setTimeout(() => resolve(false), 1000); })]);
+    clearTimeout(timeout);
+    assert.equal(completed, true, "runner retries do not hold the shared failure monitor");
+    assert.equal((await runsRepository.getRun(local.run.id))!.automationPending, false);
+    assert.equal((await runsRepository.getRun(local.run.id))!.flaky, true);
+    let job;
+    for (let attempt = 0; attempt < 150; attempt++) {
+        job = (await runnersRepository.pending()).find((row) => row.projectId === offline.project.id);
+        if (job) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(job);
+    await processRunFailures();
+    assert.equal((await runnersRepository.pending()).filter((row) => row.projectId === offline.project.id).length, 1);
+    assert.equal((await runsRepository.listRuns(offline.spec.id)).length, 2);
+    const issued = await issueRunnerToken("Monitor", "monitor");
+    const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    const lease = (await runnersRepository.claim(token, 60_000))!;
+    await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
+        results: [{ runId: lease.payload.specs[0].runId, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] });
+    await processRunFailures();
+    assert.equal((await runsRepository.getRun(offline.run.id))!.automationPending, false);
+    assert.equal((await runsRepository.getRun(offline.run.id))!.flaky, true);
 });
 
 describe("executeSpec (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {

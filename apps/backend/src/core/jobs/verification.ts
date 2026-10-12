@@ -23,6 +23,7 @@ import { resolveSecretOriginPolicy } from "../runner/secrets";
 import { fixProposalSchema } from "./schemas";
 import { isAgentPaused } from "./pause";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
+import { verifyRunnerCandidate } from "../runner/batch";
 
 export interface ProposalVerification {
     id: string;
@@ -63,24 +64,33 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         throw new Error("Proposal is stale; inspect the current Spec and propose again");
     }
     const refs = analysis.analysis.secretRefs.map((ref) => ref.envName);
-    const { env: secretEnv, missing } = await resolveSecretEnv(job.projectId, refs, environment.credentialOverrides);
+    const remote = environment.executor === "runner";
+    const { env: secretEnv, missing } = remote ? { env: {}, missing: [] } : await resolveSecretEnv(job.projectId, refs, environment.credentialOverrides);
     if (missing.length) throw new CodedError("credentials", `Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`);
-    const secretOrigins = await resolveSecretOriginPolicy(job.projectId, refs, environment);
-    const scrub = await projectSecretScrubber(job.projectId);
+    const secretOrigins = remote ? { defaultOrigins: [], byRef: {} } : await resolveSecretOriginPolicy(job.projectId, refs, environment);
+    const scrub = remote ? (text: string) => text : await projectSecretScrubber(job.projectId);
     const id = crypto.randomUUID();
     const directory = proposalDirectory(item, id);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(path.join(directory, "spec.ts"), patch.testSource);
     await fs.writeFile(path.join(directory, "spec.yml"), before.yaml);
-    const outcome = await withRunSlot(async () => {
+    const check = async () => {
         signal?.throwIfAborted();
         const current = await jobsRepository.get(job.id);
         if (!current || current.status !== "running" || await isAgentPaused(job.projectId)) throw new Error("Job is no longer running");
         const remaining = current.limits.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
-        if (remaining <= 0) throw new Error("The investigation has not reached a confirmed result");
+        if (remaining < 1000) throw new Error("The investigation has not reached a confirmed result");
+        return Math.min(120_000, remaining);
+    };
+    const timeoutMs = await check();
+    const outcome = remote ? await verifyRunnerCandidate({ specId: spec.id, testSource: patch.testSource, markdown: before.yaml, environment, directory, signal, timeoutMs }).then((run) => ({
+        processFailure: run.status === "error" ? run.failReason : null,
+        results: new Map([[id, run]]),
+    })) : await withRunSlot(async () => {
+        const timeoutMs = await check();
         return runPlaywrightSuite({ networkPolicy: await runNetworkPolicy(job.projectId, baseUrl, environment), directory, baseUrl,
             specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, outputDir: directory }],
-            timeoutMs: Math.min(120_000, remaining), secretEnv, secretOrigins, scrub, signal });
+            timeoutMs, secretEnv, secretOrigins, scrub, signal });
     }, signal);
     const result = outcome.results.get(id);
     const manifest = await readEvidenceManifest(directory);

@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { errorMessage, getCoverage, getProjectContext, requestTask } from "@/lib/api";
 import type { CoverageResponse, ProjectContext } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 
 const coverageLabel: Record<string, string> = { covered: "Covered", partial: "Partly covered", uncovered: "Not covered" };
 const coverageDot: Record<string, string> = { covered: "bg-success", partial: "bg-warning-icon", uncovered: "bg-ink-subtle" };
 
 export function SpecsFrontMatter({ projectId }: { projectId: string }) {
     const { canEdit } = useAuth();
+    const runnerEnvironment = useRunnerEnvironment(projectId);
     const [context, setContext] = useState<ProjectContext | null>(null);
     const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
     const [finding, setFinding] = useState<"idle" | "requesting" | "requested">("idle");
@@ -52,7 +54,7 @@ export function SpecsFrontMatter({ projectId }: { projectId: string }) {
             )}
             {canEdit && (
                 <div className="mt-5 flex flex-wrap items-center gap-1">
-                    <Button type="button" variant="ghost" size="sm" disabled={finding !== "idle"} onClick={() => void findUncovered()} className="-ml-2.5">
+                    <Button type="button" variant="ghost" size="sm" disabled={finding !== "idle" || runnerEnvironment} onClick={() => void findUncovered()} className="-ml-2.5">
                         {finding === "requesting" ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <ScanSearch size={14} />}
                         {finding === "requested" ? "Looking for uncovered areas…" : "Find uncovered areas"}
                     </Button>

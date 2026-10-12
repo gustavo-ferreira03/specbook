@@ -21,7 +21,10 @@ import { runPlaywrightSuite } from "@specbook/runtime/playwright";
 import { withRunSlot } from "@specbook/runtime/process";
 import { analyzeForRun, MAX_FAIL_REASON_CHARS, MAX_FAILED_STEP_CHARS, RUN_TIMEOUT_MS, StaleRunError, type ExecutedRun, type RunOptions } from "./execution";
 import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import type { SpecAnalysis } from "@specbook/runtime/validate";
+import type { RunnerCompletion } from "@specbook/runtime/runner-protocol";
+import { cancelRunnerBatch, enqueueRunnerBatch, pendingRunnerBatchIds } from "../private-runner/queue";
 
 type FinalRunStatus = Exclude<RunStatus, "running">;
 export type RunBatchTrigger = "deploy" | "ci" | "schedule" | "manual" | "spec_change";
@@ -60,6 +63,7 @@ export interface RunBatch {
     durationMs: number | null;
     failReason: string | null;
     specs: RunBatchItem[];
+    runnerOptions?: Pick<RunOptions, "persistFailures" | "updateSpecStatus">;
 }
 
 interface PreparedSpec {
@@ -194,7 +198,7 @@ async function finishPreparedSpec(
             await repoGit.withRepoLock(prepared.projectId, () => repoGit.deleteRunCommitRefsUnlocked(prepared.projectId, [stored.id]));
         }
     }
-    if ((options?.persistFailures !== false || result.status === "passed") && (result.status === "passed" || result.status === "failed")) {
+    if (options?.updateSpecStatus !== false && (options?.persistFailures !== false || result.status === "passed") && (result.status === "passed" || result.status === "failed")) {
         const current = await specsRepository.getSpec(prepared.item.specId);
         if (current && current.sourceHash === prepared.item.sourceHash && current.markdownHash === prepared.item.markdownHash
             && (!prepared.run.awaitingDeploy || result.status === "passed")) {
@@ -341,7 +345,8 @@ async function prepareSpecBatch(
     }
     const refsOf = (analysis: SpecAnalysis) => analysis.secretRefs.map((ref) => ref.envName);
     const refs = [...new Set(definitions.flatMap((definition) => refsOf(definition.analysis)))];
-    const { env: secretEnv, missing } = await resolveSecretEnv(projectId, refs, environment?.credentialOverrides);
+    const remote = environment?.executor === "runner";
+    const { env: secretEnv, missing } = remote ? { env: {}, missing: [] } : await resolveSecretEnv(projectId, refs, environment?.credentialOverrides);
     if (missing.length > 0) {
         const titles = definitions
             .filter((definition) => refsOf(definition.analysis).some((ref) => missing.includes(ref)))
@@ -352,8 +357,8 @@ async function prepareSpecBatch(
     }
     const secrets: BatchSecrets = {
         env: secretEnv,
-        origins: await resolveSecretOriginPolicy(projectId, refs, environment),
-        scrub: await projectSecretScrubber(projectId),
+        origins: remote ? { defaultOrigins: [], byRef: {} } : await resolveSecretOriginPolicy(projectId, refs, environment),
+        scrub: remote ? (text) => text : await projectSecretScrubber(projectId),
     };
 
     const createdRuns: Run[] = [];
@@ -407,9 +412,10 @@ async function prepareSpecBatch(
             failReason: null,
             awaitingDeploy: createdRuns[index].awaitingDeploy,
         })),
+        ...(remote && options ? { runnerOptions: { persistFailures: options.persistFailures, updateSpecStatus: options.updateSpecStatus } } : {}),
     };
     try {
-        if (!options) await writeBatch(batch);
+        if (!options || remote) await writeBatch(batch);
     } catch (error) {
         await rollback();
         throw error;
@@ -425,6 +431,108 @@ async function prepareSpecBatch(
     return { batch, prepared, secrets };
 }
 
+async function dispatchRunnerBatch(batch: RunBatch, prepared: PreparedSpec[], timeoutMs?: number): Promise<void> {
+    try {
+        for (const entry of prepared) {
+            const directory = path.join(runsDir, entry.run.id);
+            await fs.mkdir(directory, { recursive: true });
+            await Promise.all([
+                fs.writeFile(path.join(directory, "spec.ts"), entry.testSource, "utf8"),
+                fs.writeFile(path.join(directory, "spec.yml"), entry.markdown, "utf8"),
+                fs.writeFile(path.join(directory, "batch.json"), JSON.stringify({ batchId: batch.id }), "utf8"),
+            ]);
+        }
+        await enqueueRunnerBatch(batch.id, batch.projectId, batch.environment?.runnerGroup ?? null, {
+            batchId: batch.id,
+            projectId: batch.projectId,
+            baseUrl: batch.baseUrl!,
+            networkPolicy: await runNetworkPolicy(batch.projectId, batch.baseUrl!, batch.environment),
+            timeoutMs: timeoutMs ?? Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(RUN_TIMEOUT_MS, prepared.length * RUN_TIMEOUT_MS)),
+            specs: prepared.map((entry) => ({ runId: entry.run.id, specId: entry.run.specId, title: entry.item.title, files: { "spec.ts": entry.testSource, "spec.yml": entry.markdown } })),
+        });
+    } catch (error) {
+        for (const entry of prepared) {
+            await finishPreparedSpec(batch.id, entry, { status: "error", durationMs: 0, failReason: "Runner work could not be queued" }, (text) => text);
+            await runsRepository.acknowledgeAutomation(entry.run.id);
+        }
+        batch.status = "error";
+        batch.failReason = "Runner work could not be queued";
+        batch.durationMs = 0;
+        await writeBatch(batch);
+        throw error;
+    }
+}
+
+export async function finishRunnerBatch(batchId: string, completion: RunnerCompletion): Promise<void> {
+    const batch = await getRunBatch(batchId);
+    if (!batch || batch.environment?.executor !== "runner") throw new Error("Runner batch not found");
+    if (batch.status !== "running") return;
+    for (const item of batch.specs) {
+        const run = await runsRepository.getRun(item.runId);
+        const result = completion.results.find((entry) => entry.runId === item.runId);
+        if (!run || !result) throw new Error("Runner result is missing a Spec");
+        const directory = path.join(runsDir, run.id);
+        const [markdown, testSource] = await Promise.all([
+            fs.readFile(path.join(directory, "spec.yml"), "utf8"),
+            fs.readFile(path.join(directory, "spec.ts"), "utf8"),
+        ]);
+        const prepared: PreparedSpec = { run, projectId: batch.projectId, markdown, testSource, analysis: analyzeForRun(item.title, testSource, markdown), item };
+        await finishPreparedSpec(batch.id, prepared, result, (text) => text, batch.runnerOptions, result.failedStep);
+    }
+    batch.status = completion.processFailure ? "error" : batch.specs.some((entry) => entry.status === "failed" || entry.status === "error") ? "failed" : "passed";
+    batch.durationMs = completion.durationMs;
+    batch.failReason = completion.processFailure;
+    await writeBatch(batch);
+}
+
+async function waitRunnerBatch(batch: RunBatch, signal?: AbortSignal): Promise<RunBatch> {
+    try {
+        while (true) {
+            signal?.throwIfAborted();
+            const completed = await getRunBatch(batch.id);
+            if (completed && completed.status !== "running") return completed;
+            await new Promise<void>((resolve) => setTimeout(resolve, 500));
+        }
+    } catch (error) {
+        if (signal?.aborted && await cancelRunnerBatch(batch.id)) {
+            await finishRunnerBatch(batch.id, { leaseId: crypto.randomUUID(), durationMs: 0, processFailure: "Runner work was cancelled", results: batch.specs.map((item) => ({ runId: item.runId, status: "error", durationMs: 0, failReason: "Runner work was cancelled", failedStep: null, errorCode: "cancelled", artifacts: [] })) });
+            for (const item of batch.specs) await runsRepository.acknowledgeAutomation(item.runId);
+        }
+        throw error;
+    }
+}
+
+export async function verifyRunnerCandidate(input: { specId: string; testSource: string; markdown: string; environment: RunEnvironment; directory: string; timeoutMs?: number; signal?: AbortSignal }): Promise<ExecutedRun & { status: FinalRunStatus }> {
+    const spec = await specsRepository.getSpec(input.specId);
+    if (!spec) throw new Error("Spec no longer exists");
+    input.signal?.throwIfAborted();
+    const analysis = analyzeForRun(spec.title, input.testSource, input.markdown);
+    const commitSha = await repoGit.getHeadSha(spec.projectId);
+    const run = await runsRepository.createRun({ specId: spec.id, commitSha, sourceHash: sourceHashOf(input.testSource), environment: input.environment, baseUrl: input.environment.baseUrl, automate: false });
+    const item: RunBatchItem = { runId: run.id, specId: spec.id, commitSha, sourceHash: run.sourceHash, markdownHash: markdownHashOf(input.markdown), title: spec.title, status: "running", durationMs: null, failReason: null };
+    const batch: RunBatch = { id: crypto.randomUUID(), projectId: spec.projectId, label: "Verify proposed repair", environment: input.environment, baseUrl: input.environment.baseUrl, status: "running", startedAt: run.startedAt, durationMs: null, failReason: null, specs: [item], runnerOptions: { updateSpecStatus: false } };
+    const prepared: PreparedSpec = { run, projectId: spec.projectId, markdown: input.markdown, testSource: input.testSource, analysis, item };
+    const directory = path.join(runsDir, run.id);
+    try {
+        await repoGit.withRepoLock(spec.projectId, () => repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha));
+        await writeBatch(batch);
+        await dispatchRunnerBatch(batch, [prepared], input.timeoutMs);
+        await waitRunnerBatch(batch, input.signal);
+        const result = await runsRepository.getRun(run.id);
+        if (!result) throw new Error("Runner verification result disappeared");
+        if (result.status === "running") throw new Error("Runner verification is incomplete");
+        const manifest = await readEvidenceManifest(directory);
+        await fs.cp(directory, input.directory, { recursive: true });
+        return { ...result, status: result.status, failedStep: manifest.failedStep };
+    } finally {
+        await cancelRunnerBatch(batch.id);
+        await runsRepository.deleteRun(run.id);
+        await repoGit.withRepoLock(spec.projectId, () => repoGit.deleteRunCommitRefsUnlocked(spec.projectId, [run.id]));
+        await fs.rm(directory, { recursive: true, force: true });
+        await fs.rm(batchDirectory(batch.id), { recursive: true, force: true });
+    }
+}
+
 export async function executeSingleSpecBatch(specId: string, options: RunOptions): Promise<ExecutedRun> {
     options.signal?.throwIfAborted();
     const spec = await specsRepository.getSpec(specId);
@@ -432,6 +540,15 @@ export async function executeSingleSpecBatch(specId: string, options: RunOptions
     const project = await projectsRepository.getProject(spec.projectId);
     if (!project) throw new Error("Project not found");
     const { batch, prepared, secrets } = await prepareSpecBatch(project.id, [specId], spec.title, "", options.healOnFailure !== false, undefined, "manual", undefined, options);
+    if (batch.environment?.executor === "runner") {
+        await dispatchRunnerBatch(batch, prepared);
+        const completed = await waitRunnerBatch(batch, options.signal);
+        const stored = await runsRepository.getRun(prepared[0].run.id);
+        const item = completed.specs[0];
+        const run = stored ?? { ...prepared[0].run, status: item.status, durationMs: item.durationMs, failReason: item.failReason };
+        const manifest = await readEvidenceManifest(path.join(runsDir, run.id));
+        return { ...run, failedStep: manifest.failedStep };
+    }
     await executeBatch(batch, prepared, batch.baseUrl!, secrets, options);
     return prepared[0].finished!;
 }
@@ -442,12 +559,13 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     const environment = typeof options.environment === "object" ? options.environment : await resolveRunEnvironment(projectId, options.environment, options.baseUrl);
     const ids = [...new Set(specIds)];
     if (ids.length === 0) throw new Error("Select at least one Spec");
-    if (options.rejectIfBusy && await runsRepository.hasRunningRuns(ids)) throw new ResourceBusyError("Selected Specs are already running; retry after they finish");
+    if ((options.rejectIfBusy || environment.executor === "runner") && await runsRepository.hasRunningRuns(ids)) throw new ResourceBusyError("Selected Specs are already running; retry after they finish");
     const releaseSpecLocks = await acquireSpecLocks(ids, { wait: !options.rejectIfBusy });
     let batch: RunBatch;
     let prepared: PreparedSpec[];
     let secrets: BatchSecrets;
     try {
+        if (environment.executor === "runner" && await runsRepository.hasRunningRuns(ids)) throw new ResourceBusyError("Selected Specs are already running; retry after they finish");
         ({ batch, prepared, secrets } = await prepareSpecBatch(projectId, ids, label, environment.baseUrl, options.healFailures !== false, options.ci, options.trigger ?? (options.ci ? "ci" : "manual"), environment));
         try {
             await options.onPrepared?.(batch);
@@ -466,6 +584,11 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
         await releaseSpecLocks();
         throw error;
     }
+    if (environment.executor === "runner") {
+        try { await dispatchRunnerBatch(batch, prepared); }
+        finally { await releaseSpecLocks(); }
+        return batch;
+    }
     const task = executeBatch(batch, prepared, environment.baseUrl, secrets).finally(releaseSpecLocks);
     activeBatches.set(batch.id, task);
     void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
@@ -473,6 +596,7 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
 }
 
 export async function markInterruptedBatches(): Promise<void> {
+    const pendingRunners = new Set(await pendingRunnerBatchIds());
     let entries: Dirent[];
     try {
         entries = await fs.readdir(runBatchesDir, { withFileTypes: true, encoding: "utf8" });
@@ -484,6 +608,7 @@ export async function markInterruptedBatches(): Promise<void> {
         if (!entry.isDirectory()) continue;
         const batch = await getRunBatch(entry.name);
         if (!batch || batch.status !== "running") continue;
+        if (pendingRunners.has(batch.id)) continue;
         batch.status = "error";
         batch.failReason = "Backend stopped before the batch completed";
         batch.specs = batch.specs.map((spec) => spec.status === "running" ? { ...spec, status: "error", failReason: batch.failReason } : spec);

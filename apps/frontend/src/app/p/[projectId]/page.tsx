@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { PageContainer } from "@/components/PageHeader";
 import { SpecGrid } from "@/components/SpecGrid";
 import { RelativeTime } from "@/components/RelativeTime";
+import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
 import { SectionHeader } from "@/components/SectionHeader";
 import { InlineFeedback, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { StatusDot } from "@/components/StatusDot";
@@ -21,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getProject, getProjectContext, requestTask as requestProjectTask, setStewardPaused } from "@/lib/api";
 import { environmentLabel, formatDateTime } from "@/lib/format";
 import { useProjectOverview } from "@/lib/projectOverview";
+import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 import type { OverviewResponse, Project, RecentRun } from "@/lib/types";
 
 type Selection = { type: "item" | "story" | "failure"; id: string };
@@ -154,6 +156,7 @@ function RecentRuns({ runs, onOpen }: { runs: RecentRun[]; onOpen: (selection: S
 export default function HomePage({ params }: { params: Promise<{ projectId: string }> }) {
     const { canEdit, isAdmin } = useAuth();
     const { projectId } = use(params);
+    const runnerEnvironment = useRunnerEnvironment(projectId);
     const { data, failed, reload } = useProjectOverview();
     const [project, setProject] = useState<Project | null>(null);
     const [needsContext, setNeedsContext] = useState(false);
@@ -242,7 +245,7 @@ export default function HomePage({ params }: { params: Promise<{ projectId: stri
     const tryAgain = () => void reload();
 
     const agentActions = data && canEdit && <>
-        <BusyButton busy={requestingTask === "explore"} icon={ScanSearch} variant="ghost" disabled={requestingTask !== null} onClick={() => void requestTask("explore")}>Explore app</BusyButton>
+        <BusyButton busy={requestingTask === "explore"} icon={ScanSearch} variant="ghost" disabled={requestingTask !== null || runnerEnvironment} onClick={() => void requestTask("explore")}>Explore app</BusyButton>
         {data.summary.globallyPaused
             ? isAdmin && <Button asChild variant="ghost" size="sm"><Link href="/settings?tab=agent#agent-pause-heading"><Play size={14} /> Resume in settings</Link></Button>
             : <BusyButton busy={savingPause} icon={data.summary.paused ? Play : Pause} variant="ghost" disabled={savingPause} onClick={() => void togglePause()}>{savingPause ? "Saving…" : data.summary.paused ? "Resume" : "Pause"}</BusyButton>}
@@ -251,8 +254,9 @@ export default function HomePage({ params }: { params: Promise<{ projectId: stri
     return <div className="flex min-h-full flex-col bg-surface">
         <HomeHero projectName={project?.name} baseUrl={project?.baseUrl} summary={data && !emptyProject ? data.summary : undefined} actions={agentActions} />
         <PageContainer width="data" innerClassName="space-y-9">
+            {runnerEnvironment && <RunnerExplorationNotice />}
             {failed && data && <Alert variant="danger" role="alert" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{LOAD_ERROR}</AlertDescription><Button variant="outline" size="sm" onClick={tryAgain}><RefreshCw size={13} /> Try again</Button></Alert>}
-            {needsContext && canEdit && <section aria-label="Map your app" className="sheet flex flex-wrap items-center gap-4 rounded-xl bg-surface p-5">
+            {needsContext && canEdit && !runnerEnvironment && <section aria-label="Map your app" className="sheet flex flex-wrap items-center gap-4 rounded-xl bg-surface p-5">
                 <div className="min-w-0 flex-1">
                     <p className="text-section text-ink">Map your app first</p>
                     <p className="mt-1 text-body text-ink-muted">Specbook explores {project?.baseUrl ?? "your app"} and drafts what it does: areas, roles and rules. Every Spec and chat starts from that map.</p>

@@ -5,6 +5,7 @@ import type { LocalRun } from "./run";
 import type { LocatorCheck } from "./locators";
 import type { login, logout, connect, pull, publish } from "./remote";
 import type { CiResult } from "./ci";
+import type { RunnerEvent } from "./runner";
 
 type Status = "passed" | "failed" | "error" | "changed_after_run" | "not_run";
 
@@ -77,6 +78,16 @@ const briefReason = (reason: string | null | undefined) => {
 };
 export const success = (text: string) => `${pc.green("✔")} ${text}`;
 export const failure = (text: string) => `${pc.red("✖")} ${text}`;
+
+export function renderRunnerEvent(event: RunnerEvent): string {
+    switch (event.event) {
+        case "connected": return `${success(`Runner ${pc.bold(event.runner.name)} connected`)}\n${pc.dim(`${event.url} · concurrency ${event.concurrency}${event.runner.group ? ` · group ${event.runner.group}` : ""}`)}`;
+        case "claimed": return `${pc.cyan("●")} Running ${event.specs} Spec${event.specs === 1 ? "" : "s"} ${pc.dim(`· ${event.batchId}`)}`;
+        case "completed": return event.results.map((result) => `${result.status === "passed" ? success(result.runId) : failure(result.runId)}${result.failReason ? `\n  ${pc.dim(result.failReason)}` : ""}`).join("\n");
+        case "retrying": return `${pc.yellow("▲")} ${event.reason}${event.retryInMs ? pc.dim(` · retrying in ${event.retryInMs / 1000}s`) : ""}`;
+        case "stopped": return `${pc.dim("Runner stopped")} · ${event.completedJobs} job${event.completedJobs === 1 ? "" : "s"} completed${event.failedJobs ? ` · ${event.failedJobs} with failures` : ""}`;
+    }
+}
 
 export function renderInit(result: { workspace: string; config: { baseUrl: string; agent?: string }; agents: string[] }) {
     const agent = result.config.agent

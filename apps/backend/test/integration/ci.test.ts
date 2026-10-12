@@ -7,7 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 import { Hono } from "hono";
-import { useTempStorage } from "../helpers/storage";
+import { HUMAN_SPEC, useTempStorage, VALID_SPEC } from "../helpers/storage";
 
 const storage = useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
@@ -27,6 +27,9 @@ const { getRunBatchDirectory, getRunBatch, listRunBatches, listCiBatches } = awa
 const { createCiRouter, createCiSettingsRouter } = await import("../../src/infra/web/routes/ci");
 const { createEnvironmentsRouter } = await import("../../src/infra/web/routes/environments");
 const { buildHostAllowlist, csrfGuard, hostGuard, jsonBodyLimit } = await import("../../src/infra/web/security");
+const { runnersRepository } = await import("../../src/infra/repositories/runners");
+const { issueRunnerToken, authenticateRunnerToken, publicRunner } = await import("../../src/core/private-runner/tokens");
+const { enqueueRunnerBatch, completeRunnerWork, heartbeatRunnerWork, pendingRunnerBatchIds, releaseRunnerWork, revokeRunnerToken } = await import("../../src/core/private-runner/queue");
 
 before(runMigrations);
 const app = new Hono();
@@ -52,6 +55,135 @@ async function fixture() {
 }
 
 describe("CI access and quality gates", () => {
+    test("runner tokens are shown once, admin-session managed and separate from CI and personal access", async () => {
+        const { createRunnersRouter } = await import("../../src/infra/web/routes/runners");
+        const { accessGate } = await import("../../src/infra/web/access");
+        const { handleRequestError } = await import("../../src/infra/web/errors");
+        const { accountsRepository } = await import("../../src/infra/repositories/accounts");
+        const { tokenHash } = await import("../../src/core/accounts/tokens");
+        const admin = await accountsRepository.bootstrap({ name: "Runner admin", email: "runners@example.test", passwordHash: "unused" });
+        assert.ok(admin);
+        const session = crypto.randomBytes(32).toString("hex");
+        await accountsRepository.createSession(tokenHash(session), admin.id, new Date(Date.now() + 60_000).toISOString());
+        const runnerApp = new Hono();
+        runnerApp.use("*", accessGate(), csrfGuard(), jsonBodyLimit());
+        runnerApp.onError(handleRequestError);
+        runnerApp.route("/", createRunnersRouter());
+        const headers = { ...browserHeaders, Cookie: `specbook_session=${session}`, "content-type": "application/json" };
+        const response = await runnerApp.request("/runners", { method: "POST", headers, body: JSON.stringify({ name: "Office runner", group: "office" }) });
+        assert.equal(response.status, 201);
+        assert.equal(response.headers.get("cache-control"), "no-store");
+        const issued = await response.json();
+        const stored = (await runnersRepository.get(issued.runner.id))!;
+        assert.equal(stored.tokenHash.length, 64);
+        assert.ok(!JSON.stringify(stored).includes(issued.token));
+        assert.equal(issued.runner.online, false);
+        assert.ok(await authenticateRunnerToken(`Bearer ${issued.token}`));
+        assert.equal(publicRunner((await runnersRepository.get(stored.id))!).online, true);
+        const listing = await runnerApp.request("/runners", { headers });
+        assert.equal(listing.status, 200);
+        assert.ok(!(await listing.text()).includes(issued.token));
+        const project = await projectsRepository.createProject("Token scope", "https://example.com");
+        assert.equal(await authenticateCiToken(project.id, `Bearer ${issued.token}`), false);
+        assert.equal(await authenticateRunnerToken(`Bearer ${(await issueCiToken(project.id)).token}`), null);
+        const personal = `sb_pat_${crypto.randomBytes(32).toString("hex")}`;
+        await accountsRepository.createAccessToken(admin.id, "Automation", tokenHash(personal));
+        assert.equal(await authenticateRunnerToken(`Bearer ${personal}`), null);
+        assert.equal((await runnerApp.request("/runners", { method: "POST", headers: { Authorization: `Bearer ${personal}`, "content-type": "application/json" }, body: JSON.stringify({ name: "Forbidden" }) })).status, 403);
+        assert.equal((await runnerApp.request("/runner/claim", { method: "POST", headers: { Authorization: `Bearer ${personal}`, "content-type": "application/json" }, body: JSON.stringify({ version: "test" }) })).status, 401);
+        assert.equal((await runnerApp.request(`/runners/${stored.id}`, { method: "DELETE", headers })).status, 200);
+        assert.equal(await authenticateRunnerToken(`Bearer ${issued.token}`), null);
+    });
+
+    test("runner queues survive lease expiry, enforce token groups and reject stale completion", async () => {
+        const { db } = await import("../../src/infra/db/client");
+        const { runnerJobs } = await import("../../src/infra/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const project = await projectsRepository.createProject("Private queue", "http://app.private:4300");
+        const payload = { batchId: crypto.randomUUID(), projectId: project.id, baseUrl: project.baseUrl,
+            networkPolicy: { origins: [project.baseUrl], allowPrivate: true }, timeoutMs: 120_000,
+            specs: [{ runId: crypto.randomUUID(), specId: crypto.randomUUID(), title: "Private Spec", files: { "spec.ts": VALID_SPEC, "spec.yml": "steps: []" } }] };
+        await enqueueRunnerBatch(payload.batchId, project.id, "office", payload);
+        const office = await issueRunnerToken("Office", "office");
+        const outside = await issueRunnerToken("Outside", "other");
+        const officeRow = (await authenticateRunnerToken(`Bearer ${office.token}`))!;
+        const outsideRow = (await authenticateRunnerToken(`Bearer ${outside.token}`))!;
+        assert.equal(await runnersRepository.claim(outsideRow, 60_000), null);
+        const lease = (await runnersRepository.claim(officeRow, 60_000))!;
+        assert.equal(lease.attempts, 1);
+        assert.ok((await pendingRunnerBatchIds()).includes(payload.batchId));
+        assert.equal(await runnersRepository.claim(officeRow, 60_000), null);
+        const expiry = await heartbeatRunnerWork(lease.id, officeRow.id, lease.leaseId!);
+        assert.ok(Date.parse(expiry) > Date.now());
+        await db.update(runnerJobs).set({ leaseExpiresAt: new Date(0).toISOString() }).where(eq(runnerJobs.id, lease.id));
+        await runnersRepository.reclaim();
+        const replacement = (await runnersRepository.claim(officeRow, 60_000))!;
+        assert.equal(replacement.id, lease.id);
+        assert.equal(replacement.attempts, 2);
+        assert.notEqual(replacement.leaseId, lease.leaseId);
+        await assert.rejects(() => heartbeatRunnerWork(lease.id, officeRow.id, lease.leaseId!), /expired/);
+        const completion = { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
+            results: [{ runId: payload.specs[0].runId, status: "passed" as const, durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] };
+        await assert.rejects(() => completeRunnerWork(lease.id, officeRow.id, completion), /expired/);
+        await assert.rejects(() => completeRunnerWork(lease.id, officeRow.id, { ...completion, leaseId: replacement.leaseId!, results: [] }), /each Spec/);
+        await releaseRunnerWork(replacement.id, officeRow.id, replacement.leaseId!);
+        const finalLease = (await runnersRepository.claim(officeRow, 60_000))!;
+        await revokeRunnerToken(officeRow.id);
+        assert.equal((await runnersRepository.job(finalLease.id))!.status, "queued");
+        await assert.rejects(() => heartbeatRunnerWork(finalLease.id, officeRow.id, finalLease.leaseId!), /revoked/);
+        await db.delete(runnerJobs).where(eq(runnerJobs.id, finalLease.id));
+        await revokeRunnerToken(outsideRow.id);
+    });
+
+    test("runner completion stores evidence, promotes awaiting deployment and accepts response retries", async () => {
+        const { resolveRunEnvironment } = await import("../../src/core/environments");
+        const { sourceHashOf, markdownHashOf } = await import("../../src/core/repo/writer");
+        const { specEnvironmentsRepository } = await import("../../src/infra/repositories/spec-environments");
+        const { readRunEvidence } = await import("../../src/core/runner/artifacts");
+        const { stringify } = await import("yaml");
+        const project = await projectsRepository.createProject("Runner promotion", "http://app.private:4300");
+        const configured = (await environmentsRepository.list(project.id))[0]!;
+        await environmentsRepository.update(configured, { ...configured, executor: "runner", runnerGroup: "promotion" });
+        const environment = await resolveRunEnvironment(project.id);
+        const markdown = stringify({ title: "Open the application", ...HUMAN_SPEC });
+        const feature = await featuresRepository.createFeature(project.id, null, "Private", "", "features/private");
+        const spec = await specsRepository.createSpecRecord({ projectId: project.id, featureId: feature.id, title: "Open the application", description: "", path: "specs/private", sourceHash: sourceHashOf(VALID_SPEC), markdownHash: markdownHashOf(markdown) });
+        await specEnvironmentsRepository.set(spec, environment.id, "awaiting_deploy");
+        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: "sha", awaitingDeploy: true, environment });
+        const batch = { id: crypto.randomUUID(), projectId: project.id, label: "Private checks", environment, baseUrl: environment.baseUrl,
+            status: "running" as const, startedAt: new Date().toISOString(), durationMs: null, failReason: null,
+            specs: [{ runId: run.id, specId: spec.id, commitSha: "sha", sourceHash: spec.sourceHash, markdownHash: spec.markdownHash, title: spec.title,
+                status: "running" as const, durationMs: null, failReason: null, awaitingDeploy: true }] };
+        const directory = getRunBatchDirectory(batch.id);
+        const runDirectory = path.join(storage, "runs", run.id);
+        await fs.mkdir(directory, { recursive: true });
+        await fs.mkdir(runDirectory, { recursive: true });
+        await Promise.all([fs.writeFile(path.join(directory, "batch.json"), JSON.stringify(batch)), fs.writeFile(path.join(runDirectory, "spec.ts"), VALID_SPEC), fs.writeFile(path.join(runDirectory, "spec.yml"), markdown)]);
+        await enqueueRunnerBatch(batch.id, project.id, "promotion", { batchId: batch.id, projectId: project.id, baseUrl: environment.baseUrl,
+            networkPolicy: { origins: [environment.baseUrl], allowPrivate: true }, timeoutMs: 120_000,
+            specs: [{ runId: run.id, specId: spec.id, title: spec.title, files: { "spec.ts": VALID_SPEC, "spec.yml": markdown } }] });
+        const issued = await issueRunnerToken("Promotion runner", "promotion");
+        const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+        const lease = (await runnersRepository.claim(token, 60_000))!;
+        const completion = { leaseId: lease.leaseId!, durationMs: 200, processFailure: null,
+            results: [{ runId: run.id, status: "passed" as const, durationMs: 200, failReason: null, failedStep: null, artifacts: [
+                { path: "evidence.json", content: Buffer.from(JSON.stringify({ steps: [{ number: 1, label: "Open the page", file: "evidence/step-01.png" }], video: null, failedStep: null, diagnostics: [{ kind: "console", message: "Private page loaded" }] })).toString("base64") },
+                { path: "evidence/step-01.png", content: Buffer.from("screenshot").toString("base64") },
+            ] }] };
+        await completeRunnerWork(lease.id, token.id, completion);
+        await completeRunnerWork(lease.id, token.id, completion);
+        assert.equal((await runsRepository.getRun(run.id))!.status, "passed");
+        assert.equal((await getRunBatch(batch.id))!.status, "passed");
+        assert.equal(await specEnvironmentsRepository.awaiting(spec, environment.id), false);
+        assert.equal((await specsRepository.getSpec(spec.id))!.status, "passed");
+        const evidence = await readRunEvidence(run.id);
+        assert.equal(evidence.steps[0].file, "evidence/step-01.png");
+        assert.equal(evidence.diagnostics[0].message, "Private page loaded");
+        assert.ok(!(await pendingRunnerBatchIds()).includes(batch.id));
+        assert.equal((await runnersRepository.job(lease.id))!.status, "completed");
+        await revokeRunnerToken(token.id);
+    });
+
     test("waiting failures keep evidence and skip every quality gate after promotion", async () => {
         const { project, spec, batch } = await fixture();
         const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: "sha", awaitingDeploy: true });
@@ -262,6 +394,9 @@ describe("CI access and quality gates", () => {
         assert.equal(ciRunSchema.safeParse({ featureId: crypto.randomUUID(), specIds: [crypto.randomUUID()] }).success, false);
         for (const baseUrl of ["file:///etc/passwd", "https://user:pass@example.com", "not-a-url"]) assert.equal(ciRunSchema.safeParse({ baseUrl }).success, false);
         for (const origin of ["https://*.example.com", "https://example.com/path", "https://example.com?query"]) assert.equal(environmentSchema.safeParse({ name: "Production", baseUrl: "https://example.com", allowedOrigins: [origin] }).success, false);
+        assert.equal(environmentSchema.safeParse({ name: "Private", baseUrl: "http://app.private:4300", executor: "runner", runnerGroup: "office" }).success, true);
+        assert.equal(environmentSchema.safeParse({ name: "Private", baseUrl: "http://app.private:4300", executor: "runner", credentialOverrides: { shop: crypto.randomUUID() } }).success, false);
+        assert.equal(environmentSchema.safeParse({ name: "Public", baseUrl: "https://example.com", executor: "server", runnerGroup: "office" }).success, false);
     });
 
     test("reports completed attempts while agent work is paused or still awaiting acknowledgement", async () => {

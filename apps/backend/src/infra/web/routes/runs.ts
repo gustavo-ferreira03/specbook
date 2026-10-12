@@ -12,6 +12,7 @@ import { MAX_RUN_LIST_LIMIT, runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
 import { isInside } from "@specbook/runtime/safe-fs";
 import { batchReport, runReport } from "../../../core/ci/report";
+import { resolveRunEnvironment } from "../../../core/environments";
 
 const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
 
@@ -82,6 +83,13 @@ export function createRunsRouter(): Hono {
 
     router.post("/specs/:id/run", access("editor"), async (c) => {
         try {
+            const spec = await specsRepository.getSpec(c.req.param("id"));
+            if (!spec) throw new Error("Spec not found");
+            const environment = await resolveRunEnvironment(spec.projectId, c.req.query("environment"));
+            if (environment.executor === "runner") {
+                const batch = await startSpecBatch(spec.projectId, [spec.id], spec.title, { environment });
+                return c.json({ run: await runsRepository.getRun(batch.specs[0].runId), batchId: batch.id }, 202);
+            }
             const run = await executeSpec(c.req.param("id"), { automate: true, environment: c.req.query("environment") });
             return c.json({ run });
         } catch (error) {

@@ -8,6 +8,7 @@ import { startSteward, stopSteward } from "./core/steward/engine";
 import { startFailureMonitor, stopFailureMonitor } from "./core/jobs/failures";
 import { startScheduleMonitor, stopScheduleMonitor } from "./core/jobs/schedules";
 import { startJobWorker, stopJobWorker } from "./core/jobs/worker";
+import { startRunnerLeaseMonitor, stopRunnerLeaseMonitor } from "./core/private-runner/queue";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import { closeAllChatBrowsers } from "./core/browser/sessions";
@@ -51,6 +52,7 @@ await startJobWorker();
 discoverPendingProjectContexts();
 startFailureMonitor();
 startScheduleMonitor();
+startRunnerLeaseMonitor();
 startSteward();
 startRetentionMonitor();
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
@@ -115,6 +117,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     wss.close();
     stopFailureMonitor();
     stopScheduleMonitor();
+    stopRunnerLeaseMonitor();
     stopSteward();
     await stopRetentionMonitor();
     await stopJobWorker();

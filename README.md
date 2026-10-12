@@ -141,6 +141,20 @@ npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci --environment S
 
 The server serves its own CLI package at `/api/cli/specbook.tgz`, without authentication. Docker builds include the tarball; development servers return 404 until you [build and pack it](docs/cli/README.md).
 
+### Private-network runners
+
+Run Specs against an app inside your network while keeping Specbook hosted elsewhere. An admin creates a named token in **Settings → Runners**, then chooses **Runner** in the project's environment settings. An optional group directs work to the matching runners. The settings list shows online/offline state and last-seen time, and lets admins revoke access.
+
+```sh
+export SPECBOOK_HOME=/var/lib/specbook-runner
+specbook credentials add shop --origin https://private-app.example.com
+export SPECBOOK_URL=https://specbook.example.com/api
+# Set SPECBOOK_RUNNER_TOKEN through your service's secret store.
+specbook runner --concurrency 1
+```
+
+The runner connects outbound over HTTP, renews a lease while running, and uploads the same browser evidence and results as server runs. Crashed runners return their work to the queue. Manual checks, CI, schedules and deploy signals all use the environment's executor; credentials stay in the runner's local profiles. Live chat exploration isn't available for runner environments, though saved evidence, triage and runner verification remain available. See the [runner command guide](docs/cli/README.md#private-network-runners) for service configuration and JSON events.
+
 Preview URLs supplied with `--base-url` must belong to the chosen environment's allowed origins. Quality gates can fail the build on flaky results or known bugs; awaiting-deploy failures appear separately and don't fail the pipeline. CI needs no local workspace. Use `--json` for a stable machine-readable result; tokens never appear in it.
 
 ## Configuration and data

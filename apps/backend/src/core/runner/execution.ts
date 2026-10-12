@@ -21,6 +21,7 @@ export function analyzeForRun(title: string, testSource: string, markdown: strin
 export class StaleRunError extends Error {}
 
 export interface RunOptions {
+    updateSpecStatus?: boolean;
     persistFailures?: boolean;
     automate?: boolean;
     healOnFailure?: boolean;

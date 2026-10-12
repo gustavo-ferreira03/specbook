@@ -49,6 +49,7 @@ Each command
 | `pull` | Download remote features and Specs with their revisions. Preserve unpublished local edits and report conflicts with exit status 1. |
 | `publish [spec\|feature] [--run] [--environment <name>]` | Publish selected Specs after a passing local run of their exact current files. Check their base revisions and start changed Specs as awaiting deployment in one environment. |
 | `ci [--environment <name>] [--base-url <url>]` | Trigger remote acceptance checks with a project CI token, wait for results and write HTML, JUnit and Markdown artifacts. |
+| `runner [--url <server>] [--concurrency <count>]` | Claim queued Specs over outbound HTTP, execute them with local credentials, and upload scrubbed results and evidence. |
 | `spec new "<title>" --feature <name>` | Scaffold a readable contract and a valid one-step Playwright test, creating `feature.yml` when needed. Existing Specs aren't overwritten. |
 | `spec check [path]` | Validate source and YAML step titles with the same runtime as the server. With an open exploration session, count every locator on the current page and report missing or ambiguous matches. |
 | `run [spec\|feature]` | Run selected Specs in fresh browser contexts, then save results, per-step evidence and an HTML report. With no selector, run every Spec. |
@@ -150,6 +151,41 @@ ci:      { batchId, status, environment: string|null, durationMs: number|null,
 ```
 
 The CI result preserves raw execution status (`failed` or `error`) alongside `awaitingDeploy`; use `failsGate` for a pipeline decision. `qualityGate.awaitingDeploy` counts waiting failures. Local `run` results now include `hashes: { specTs, specYaml }` on each Spec result. Most errors return `{ ok: false, error }` and exit 1; a stale publish adds `{ code: "revision_conflict", conflicts: [{ path, revision: string|null }], command: "specbook pull" }`. Pull conflicts return the normal pull result with exit 1.
+
+Private-network runners
+-----------------------
+
+In **Settings → Runners**, an admin creates a named runner token and, optionally, a group. Copy the token when shown; the server stores its SHA-256 hash. The list shows last-seen time and online/offline state. Revoke a token there to stop its access and return its leased work to the queue. A group limits matching work to runners with that group; environments without a group can use any runner.
+
+In **Project settings → Environments**, choose **Runner** as the executor and enter the same group if needed. Server execution remains the default. Manual runs, Run all, CI, schedules and deployment signals use the same queue. The runner needs outbound access to Specbook and browser access to the configured application origins; it doesn't need an inbound port. Private DNS resolution happens on the runner.
+
+```sh
+export SPECBOOK_HOME=/var/lib/specbook-runner
+specbook credentials add shop --origin https://private-app.example.com
+export SPECBOOK_URL=https://specbook.example.com/api
+# Supply SPECBOOK_RUNNER_TOKEN through your service's secret store.
+specbook runner --concurrency 1
+```
+
+`--url` (or `--server`) overrides `SPECBOOK_URL`. Without `SPECBOOK_RUNNER_TOKEN`, the command asks through a hidden terminal prompt; `--json` never prompts. There is no token argument. Use your service manager to restart the runner after a host restart. The concurrency default is 1, with a supported range of 1–32; each slot claims one batch at a time.
+
+The server sends immutable `spec.ts` and `spec.yml` files, the base URL and the network policy. It never resolves or sends vault values for runner environments, and those environments don't use server credential overrides. `secret("shop", "password")` reads the runner's local `shop` profile, including its origin restrictions. A missing profile or field produces a credentials error that names the required profile and fields and gives the `specbook credentials add` command. Keep profiles in `SPECBOOK_HOME`, outside the repository.
+
+Claims carry a lease with heartbeat renewal. If the process crashes or loses its lease, the server returns the batch to the queue; a late upload from the old lease can't replace the next runner's result. SIGINT and SIGTERM abort active browser work and release unfinished claims. The default lease is 60 seconds; `SPECBOOK_RUNNER_LEASE_SECONDS` on the server accepts 5–300 seconds.
+
+Results use the same server storage, reports, Spec pages, evidence review, failure retries, triage and Inbox paths as server execution. Passing runs also promote awaiting-deploy Specs in their target environment. Evidence includes step screenshots, diagnostics, error context and failure video where the shared runtime permits recording. As with local secret runs, the runtime disables video when credentials are in use and masks credential text in screenshots. Agent investigation can read saved evidence and verify proposed repairs through the runner. Live chat browser exploration is unavailable for runner environments; the app states this limitation.
+
+Runner JSON output is newline-delimited because the command stays running. Every line is one event:
+
+```text
+{ event: "connected", url, runner: { id, name, group }, concurrency }
+{ event: "claimed", jobId, batchId, specs }
+{ event: "completed", jobId, batchId, results: [{ runId, status, failReason }] }
+{ event: "retrying", reason, retryInMs }
+{ event: "stopped", url, completedJobs, failedJobs }
+```
+
+Configured tokens and credential values never appear in these events. Fatal errors use the existing `{ ok: false, error }` shape and exit 1.
 
 Conversations
 -------------
@@ -334,11 +370,27 @@ Node SEA also requires bundling or extracting runtime modules and assets. The cu
 Gaps and scope
 --------------
 
-The CLI supports local verification, remote publishing and CI. Conversations still use the installed local coding agent in connected workspaces. Server-hosted conversations, a private-network runner and `serve` remain outside this phase.
+The CLI supports local verification, remote publishing, CI and private-network runners. Conversations still use the installed local coding agent in connected workspaces. Live agent exploration inside runner environments remains outside this phase.
 
 Conversation cancellation, deletion and queued follow-ups aren't implemented. A working turn rejects new input with `working`; send it again after the turn finishes. Conversation histories stay on disk under the ignored `chats/` directory, and credential metadata stays in history after a request. Authentication copies disappear after each turn, while agent session files remain for resumption. The CLI rejects known stored secrets in messages and redacts reply prose, while preserving structural ids and statuses. It can't identify a secret that was never saved in the credential store; never paste one into chat.
 
 Remote vault synchronization, encrypted credential storage and additional browsers remain outside this task. Agent availability, authentication, subscription limits and supported CLI flags depend on the installed coding-agent versions; unsupported restricted-mode configurations fail without granting broader tools. Windows and macOS conversation behavior remains untested.
+
+Private-network runner verification
+-----------------------------------
+
+The 2026-10-12 checks used the worktree API on port 4200, temporary UI instances on ports above 4200, and a private static application on port 4210. Storage and local credential profiles stayed under `/tmp/specbook-runner-verification`. Ports 4000/4001 and the main checkout's storage stayed untouched.
+
+```text
+manual SauceDemo run → passed; 3 step screenshots; waiting Spec promoted
+specbook ci --environment Production → exit 0; quality gate passed
+deploy signal --environment Production → runner run passed
+kill runner during private-page run → lease expired → restarted runner passed same batch
+missing-local.password → credentials error naming profile and field
+server credential profiles → 0; storage/output secret scan → 261 files, 0 findings
+```
+
+The independent CLI runner check exercised concurrency 2, 38 heartbeats, graceful SIGTERM, a passing private login, missing local credentials, and nonsecret failure video. The existing backend suites passed 336 of 337 tests before the final cancellation/recovery regressions; only the allowed OpenAI subscription callback-port test failed. Additional cases in the existing suites cover token scopes and revocation, group matching, stale upload rejection, restart recovery, cancellation, and isolated proposed repairs. Live model-based evidence review wasn't exercised because these instances had no model configured.
 
 Server package verification
 ---------------------------

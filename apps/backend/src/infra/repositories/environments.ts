@@ -7,7 +7,7 @@ import { specsRepository } from "./specs";
 import { specEnvironmentsRepository } from "./spec-environments";
 
 export type Environment = typeof environments.$inferSelect;
-export type EnvironmentInput = Pick<Environment, "name" | "baseUrl" | "allowedOrigins" | "credentialOverrides">;
+export type EnvironmentInput = Pick<Environment, "name" | "baseUrl" | "allowedOrigins" | "credentialOverrides"> & Partial<Pick<Environment, "executor" | "runnerGroup">>;
 
 class EnvironmentsRepository {
     async list(projectId: string): Promise<Environment[]> {
@@ -16,7 +16,7 @@ class EnvironmentsRepository {
     }
 
     async create(projectId: string, input: EnvironmentInput): Promise<Environment> {
-        const row = { id: crypto.randomUUID(), projectId, ...input };
+        const row = { id: crypto.randomUUID(), projectId, executor: "server" as const, runnerGroup: null, ...input };
         await db.insert(environments).values(row);
         return row;
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, ChevronDown, CircleHelp, Clock3, Download, ExternalLink, Minus, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, CircleHelp, Clock3, Download, ExternalLink, HardDrive, Minus, RefreshCw } from "lucide-react";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -142,6 +142,7 @@ export function SpecRunDialog({
                             : `${summary} across ${countLabel(items.length, "Spec")}.`}
                     </DialogDescription>
                     {environment && <p className="mt-1 break-words text-meta text-ink-muted"><span className="font-medium text-ink">{environment.name}</span> · {environment.baseUrl}</p>}
+                    {environment?.executor === "runner" && <p className="mt-1 flex items-center gap-1.5 text-meta text-ink-muted"><HardDrive size={12} aria-hidden="true" />Runs on a private-network runner{environment.runnerGroup ? ` · ${environment.runnerGroup}` : ""}</p>}
                 </DialogHeader>
 
                 <div className="shrink-0 border-y border-line bg-surface-soft px-5 py-3" aria-live="polite">

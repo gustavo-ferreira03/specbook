@@ -291,6 +291,36 @@ program.command("ci")
         await print(result, () => ui.renderCi(result));
     });
 
+program.command("runner")
+    .helpGroup("Host Specbook:")
+    .description("claim private-network runs over outbound HTTP and upload evidence")
+    .option("--url <url>", "Specbook server URL; defaults to SPECBOOK_URL")
+    .option("--server <url>", "Specbook server URL")
+    .option("--concurrency <number>", "jobs executed at the same time", "1")
+    .addHelpText("after", `\n${pc.dim("Set SPECBOOK_RUNNER_TOKEN from your secret store. Credentials resolve from local profiles.")}`)
+    .action(async (options: { url?: string; server?: string; concurrency: string }) => {
+        const url = options.url ?? options.server ?? process.env.SPECBOOK_URL;
+        if (!url) throw new Error("SPECBOOK_URL or --url is required");
+        let token = process.env.SPECBOOK_RUNNER_TOKEN;
+        if (!token) {
+            if (!interactive) throw new Error("Set SPECBOOK_RUNNER_TOKEN when running non-interactively");
+            token = answer(await clack.password({ message: "Runner token", output: stderr }));
+        }
+        rememberToken(token);
+        const abort = new AbortController();
+        const cancel = () => abort.abort(new Error("Runner stopped"));
+        process.once("SIGINT", cancel);
+        process.once("SIGTERM", cancel);
+        try {
+            const { runRunner } = await import("./runner");
+            await runRunner({ url, token, concurrency: Number(options.concurrency), signal: abort.signal },
+                (event) => print(event, () => ui.renderRunnerEvent(event)));
+        } finally {
+            process.removeListener("SIGINT", cancel);
+            process.removeListener("SIGTERM", cancel);
+        }
+    });
+
 const spec = program.command("spec").description("scaffold and validate Specs").helpGroup("Write Specs by hand:");
 spec.command("new")
     .description("scaffold spec.yml and spec.ts")

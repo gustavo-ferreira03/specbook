@@ -119,10 +119,19 @@ class RunsRepository {
     }
 
     async markInterruptedRuns(): Promise<void> {
+        const { pendingRunnerBatchIds } = await import("../../core/private-runner/queue");
+        const { getRunBatch } = await import("../../core/runner/batch");
+        const pending = new Set<string>();
+        for (const id of await pendingRunnerBatchIds()) {
+            const batch = await getRunBatch(id);
+            for (const item of batch?.specs ?? []) pending.add(item.runId);
+        }
+        const interrupted = (await db.select({ id: runs.id }).from(runs).where(eq(runs.status, "running"))).filter((row) => !pending.has(row.id));
+        if (!interrupted.length) return;
         await db
             .update(runs)
             .set({ status: "error", failReason: "Backend stopped before the run completed", errorCode: "infrastructure" })
-            .where(eq(runs.status, "running"));
+            .where(inArray(runs.id, interrupted.map((row) => row.id)));
     }
 }
 

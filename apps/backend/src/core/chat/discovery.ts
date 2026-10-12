@@ -8,6 +8,7 @@ import { createAreaFeatures, writeContextToRepo } from "../repo/writer";
 import { isChatBusy } from "./chat-registry";
 import { createChat } from "./session-store";
 import { startChatTurn } from "./turn-runner";
+import { resolveRunEnvironment } from "../environments";
 
 export const DEFAULT_DISCOVERY_GOAL =
     "Autonomously explore the application and map its areas, terminology, roles, business rules, and UI patterns. Log in when the application requires it (request credentials if none exist), and record as unknowns only what stays unclear or unreachable after that.";
@@ -32,10 +33,13 @@ async function startDiscoveryLocked(
     return { revision: (await projectContextsRepository.getProjectContextRevision(revision.id)) ?? revision, chat };
 }
 
-export function startContextDiscovery(
+export async function startContextDiscovery(
     projectId: string,
     brief: DiscoveryBrief,
 ): Promise<{ revision: ProjectContextRevisionRow; chat: { id: string } } | { activeDraft: ProjectContextRevisionRow }> {
+    if ((await resolveRunEnvironment(projectId)).executor === "runner") {
+        throw new Error("Application exploration is unavailable in runner environments. Write the project context manually and run Specs through the runner.");
+    }
     return projectContextsRepository.withProjectContextDraftLock(projectId, async () => {
         const activeDraft = await projectContextsRepository.getActiveProjectContextDraft(projectId);
         return activeDraft ? { activeDraft } : startDiscoveryLocked(projectId, brief);
@@ -48,6 +52,7 @@ export async function discoverProjectContext(projectId: string): Promise<string 
         return await projectContextsRepository.withProjectContextDraftLock(projectId, async () => {
             const project = await projectsRepository.getProject(projectId);
             if (!project || (await projectContextsRepository.hasRevisions(projectId))) return null;
+            if ((await resolveRunEnvironment(project.id)).executor === "runner") return null;
             const brief = { goal: DEFAULT_DISCOVERY_GOAL, startUrl: project.baseUrl, safetyNotes: [] };
             return (await startDiscoveryLocked(project.id, brief)).chat.id;
         });

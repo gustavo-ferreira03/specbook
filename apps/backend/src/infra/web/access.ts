@@ -7,7 +7,7 @@ import type { UserRole } from "../../core/accounts/schemas";
 import type { User } from "../repositories/accounts";
 import { logger } from "../logger";
 
-export type BearerRule = "git-token" | "ci-token";
+export type BearerRule = "git-token" | "ci-token" | "runner-token";
 export type AccessRule = UserRole | "public" | BearerRule;
 export type BearerVerifier = (c: Context) => Promise<true | Response>;
 const policies = new WeakMap<Function, AccessRule>();
@@ -41,7 +41,7 @@ export function accessGate(): MiddlewareHandler {
         const handlers = matchedRoutes(c).map(({ handler }) => handler);
         const declared = handlers.map((handler) => routePolicy(handler)).filter((rule): rule is AccessRule => Boolean(rule));
         const required = declared.filter((rule): rule is UserRole => rule in rank).sort((a, b) => rank[b] - rank[a]).at(0);
-        const bearer = !required && declared.find((rule) => rule === "git-token" || rule === "ci-token");
+        const bearer = !required && declared.find((rule) => rule === "git-token" || rule === "ci-token" || rule === "runner-token");
         const probe = c.req.path === "/health" || c.req.path === "/ready";
         const tokenRequest = !bearer && !probe && c.req.raw.headers.has("authorization");
         const session = bearer || probe || tokenRequest ? null : await sessionFromHeaders(c.req.raw.headers);
@@ -58,7 +58,7 @@ export function accessGate(): MiddlewareHandler {
         }
         const actor: Actor = user
             ? { id: user.id, name: user.name, email: user.email, kind: "user" }
-            : { id: null, name: bearer === "git-token" ? "Git client" : bearer === "ci-token" ? "CI" : "Specbook", kind: bearer === "git-token" ? "git" : bearer === "ci-token" ? "ci" : "system" };
+            : { id: null, name: bearer === "git-token" ? "Git client" : bearer === "ci-token" ? "CI" : bearer === "runner-token" ? "Runner" : "Specbook", kind: bearer === "git-token" ? "git" : bearer === "ci-token" ? "ci" : "system" };
         await withActor(actor, async () => {
             await next();
             if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method) && c.res.status < 400 && !c.req.path.startsWith("/auth/") && c.req.path !== "/setup/admin") {
