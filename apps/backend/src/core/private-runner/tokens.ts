@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { issuePrefixedToken, tokenHash } from "../accounts/tokens";
 import { runnersRepository, type RunnerToken } from "../../infra/repositories/runners";
-import { RUNNER_CLI_VERSION, RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
+import { RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
+import { CLI_VERSION as RUNNER_CLI_VERSION } from "../../infra/cli-version";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { HTTPException } from "hono/http-exception";
 

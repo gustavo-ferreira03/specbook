@@ -49,8 +49,8 @@ Each command
 | `pull` | Download remote features and Specs with their revisions. Preserve unpublished local edits and report conflicts with exit status 1. |
 | `publish [spec\|feature] [--run] [--environment <name>]` | Publish selected Specs after a passing local run of their exact current files. Check their base revisions and start changed Specs as awaiting deployment in one environment. |
 | `ci [--environment <name>] [--base-url <url>]` | Trigger remote acceptance checks with a project CI token, wait for results and write HTML, JUnit and Markdown artifacts. |
-| `runner [--url <server>] [--concurrency <count>] [--once | --drain-after <count>] [--secrets-command <command>]` | Claim queued Specs over outbound HTTPS, execute them with runner-side secrets, and upload scrubbed results and evidence. |
-| `tunnel [--url <server>] --project <id> [--environment <name-or-id>]` | Connect server browsers to an environment’s allowed private origins through an outbound WebSocket tunnel. |
+| `runner --allow-origin <origin> [--url <server>] [--concurrency <count>] [--once | --drain-after <count>] [--secrets-command <command>]` | Claim queued Specs over outbound HTTPS, execute them with runner-side secrets, and upload scrubbed results and evidence. Repeat `--allow-origin`, or set `SPECBOOK_RUNNER_ALLOWED_ORIGINS`. |
+| `tunnel --allow-origin <origin> [--url <server>] --project <id> [--environment <name-or-id>]` | Connect server browsers to an environment’s allowed private origins through an outbound WebSocket tunnel. Repeat `--allow-origin`, or set `SPECBOOK_TUNNEL_ALLOWED_ORIGINS`. |
 | `serve [--port <number>] [--host <address>] [--data <dir>] [--ui <dir>]` | Start the API, job worker, steward, schedules and standalone web UI. |
 | `spec new "<title>" --feature <name>` | Scaffold a readable contract and a valid one-step Playwright test, creating `feature.yml` when needed. Existing Specs aren't overwritten. |
 | `spec check [path]` | Validate source and YAML step titles with the same runtime as the server. With an open exploration session, count every locator on the current page and report missing or ambiguous matches. |
@@ -159,7 +159,7 @@ The CI result preserves raw execution status (`failed` or `error`) alongside `aw
 Private-network runners
 -----------------------
 
-An admin creates a token under **Settings → Runners**. Choose a group to restrict it to that group's work and, when needed, select the projects it can access; the default is all projects. Copy the secret once. **Rotate token** displays a replacement once, revokes the previous secret immediately and returns its leased work to the queue. Revoking a token also closes its tunnels. Token management requires an admin web session.
+An admin creates a token under **Settings → Runners**. Choose **Runner** as its purpose, a group to restrict it to that group's work and, when needed, the projects it can access; the default is all projects. Tunnel connections require a separate token with **Tunnel** purpose and a group. Copy the secret once. **Rotate token** displays a replacement once, revokes the previous secret immediately and returns its unfinished work to the queue. Revoking a tunnel token also closes its tunnels. Token management requires an admin web session.
 
 An admin chooses **Runner** in **Project settings → Environments**, then enters the matching group. Grouped environments use runners in that group; ungrouped environments use only ungrouped runners. Manual runs, Run all, CI, schedules and deployment signals share this queue. The runner needs outbound HTTPS access to Specbook and browser access to the application's allowed origins.
 
@@ -189,7 +189,9 @@ specbook runner --drain-after 10 --concurrency 2
 
 `--once` completes one claimed batch, then exits. `--drain-after <n>` completes at most n claimed batches, including all their Specs, then exits after the active slots finish. These flags are mutually exclusive. A batch's failed Spec still counts as completed work; no matching work means the runner keeps polling. Container defaults can use `SPECBOOK_RUNNER_ONCE=true` or `SPECBOOK_RUNNER_DRAIN_AFTER=10`.
 
-Queued and leased work must finish within the run timeout plus a 60-second grace. After three claims interrupted by expired leases or disconnects, the batch fails with a process failure instead of requeuing indefinitely. The waiting run retains the reason. A runner's origin refusal terminates that work immediately with its refusal reason.
+Work can wait in the queue for up to 30 minutes. Its execution deadline starts when a runner claims it and allows the full run timeout plus a 60-second grace. After three expired leases or hard failures, the batch fails with a process failure instead of requeuing indefinitely. Graceful SIGINT/SIGTERM releases and scale-down do not consume attempts. The waiting run retains the failure reason. A runner's origin refusal terminates that work immediately with its refusal reason.
+
+Set `SPECBOOK_RUNNER_QUEUE_TIMEOUT_SECONDS` on the server to change the queue timeout. Tunnel waiting has the same default and its own `SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS` setting.
 
 Build the runner image from this checkout without publishing it:
 
@@ -234,20 +236,28 @@ Runner secret sources
 
 For `secret("shop", "password")`, the runner checks these sources in order:
 
-1. `SPECBOOK_SECRET_SHOP_PASSWORD` in the process environment. `secretEnvName` uppercases profile and field and converts punctuation to underscores.
+1. A nonempty `SPECBOOK_SECRET_SHOP_PASSWORD` in the process environment. `secretEnvName` uppercases profile and field and converts punctuation to underscores. An empty value falls through to the next source.
 2. The JSON object returned by `--secrets-command` or `SPECBOOK_SECRETS_COMMAND` for the `shop` profile.
 3. The local `shop` profile under `SPECBOOK_HOME`.
 
 ```sh
 # Inject SPECBOOK_SECRET_SHOP_PASSWORD from your orchestration secret store.
+export SPECBOOK_SECRET_SHOP_ORIGINS=https://private-app.example.com
+export SPECBOOK_RUNNER_ALLOWED_ORIGINS=https://private-app.example.com
 specbook runner --once
 # Or call a wrapper around Vault, 1Password or another secret manager:
 specbook runner --secrets-command /opt/specbook/read-profile
 ```
 
-The runner invokes the provider command with the profile as its final argument, once per needed profile per batch. A wrapper receives `shop` as `$1` and prints one JSON object whose field values are nonempty strings. It can obtain them with a Vault or 1Password CLI, then select the required fields. If environment variables supply every needed field, the runner doesn't call the provider. Missing provider fields fall back to local profiles; provider failures stop that batch with a credentials error. Keep credentials out of the command string because process arguments are visible to local users.
+The runner invokes the provider command with the profile as its final argument, once per needed profile per batch. A wrapper receives `shop` as `$1` and prints an object with nonempty string fields and explicit profile origins:
 
-Provider execution has a 30-second limit and a 1 MiB stdout limit. The runner discards stderr and describes failures without its content. Environment/provider secrets use the runner operator's explicit origin allowlist, intersected with the job's origins. Local profiles must declare matching origins with `credentials add <profile> --origin <origin>`; runner mode refuses profiles without origins. Their saved origins also intersect the runner and job allowlists. Values never enter JSON events or uploads. The runtime scrubs text evidence, masks secrets in screenshots and disables video for secret runs. Runner environments never fetch server-vault credentials or use server credential overrides.
+```json
+{"fields":{"password":"<value from your secret store>"},"origins":["https://private-app.example.com"]}
+```
+
+The wrapper can obtain fields with a Vault or 1Password CLI. A flat fields object is also accepted when `SPECBOOK_SECRET_SHOP_ORIGINS` supplies its origins. If environment variables supply every needed field, the runner doesn't call the provider. Missing provider fields fall back to local profiles; provider failures stop that batch with a credentials error. Keep credentials out of the command string because process arguments are visible to local users.
+
+Provider execution has a 30-second limit and a 1 MiB stdout limit. The runner discards stderr and describes failures without its content. Environment secrets require `SPECBOOK_SECRET_<PROFILE>_ORIGINS`, a comma- or whitespace-separated list. Provider secrets require their `origins` array or the same profile environment variable. Local profiles declare origins with `credentials add <profile> --origin <origin>`. Runner mode refuses any source without explicit profile origins matching the job and the runner's allowlist. Values never enter JSON events or uploads. The runtime scrubs text evidence, masks secrets in screenshots and disables video for secret runs. Runner environments never fetch server-vault credentials or use server credential overrides.
 
 Runner JSON output uses newline-delimited events:
 
@@ -264,20 +274,22 @@ Rejected jobs emit `{ event: "rejected", jobId, batchId, reason }`; the runner r
 Server browsers through a tunnel
 --------------------------------
 
-Choose **Server through a tunnel** in the environment settings and set a runner group. Create a dedicated runner token restricted to that group and, preferably, the project. Open the outbound tunnel from a machine that can resolve and reach the private application:
+Choose **Server through a tunnel** in the environment settings and set a runner group. Create a token with **Tunnel** purpose restricted to that group and, preferably, the project. Runner-purpose tokens cannot open tunnels, and tunnel-purpose tokens cannot claim runner jobs. Open the outbound tunnel from a machine that can resolve and reach the private application:
 
 ```sh
 export SPECBOOK_URL=https://specbook.example.com/api
 export SPECBOOK_PROJECT=YOUR_PROJECT_ID
 # Inject SPECBOOK_RUNNER_TOKEN; do not pass it as an argument.
-specbook tunnel --environment Staging
+specbook tunnel --environment Staging --allow-origin https://private-app.example.com
 ```
 
 `--project` overrides `SPECBOOK_PROJECT`; `--environment` accepts a name or id and defaults to `SPECBOOK_ENVIRONMENT` or Production. Only one tunnel connects to an environment at a time. Use an HTTPS server URL in production and configure your reverse proxy to forward WebSocket upgrades for `/api/runner/tunnel` (direct backend: `/runner/tunnel`). `specbook serve` forwards these upgrades too.
 
+Configure the tunnel's local allowlist with repeated `--allow-origin` values or `SPECBOOK_TUNNEL_ALLOWED_ORIGINS` (comma- or whitespace-separated). The CLI refuses to start without it and refuses server configuration outside it. Each connection must belong to both the environment's origins and this local allowlist. Tunnel mode also blocks public origins outside the environment's allowed origins: add any required CDNs and identity providers to both lists.
+
 The server authenticates the WebSocket with a bearer header, then multiplexes browser HTTP, HTTPS and WebSocket connections. Private DNS lookup happens in the tunnel process. Both ends check each target against the environment's exact base and allowed origins; an unrelated host never gets a connection. HTTPS keeps application TLS end to end, and the existing browser/API network guard still applies.
 
-Server browsers execute Specs and explore the app in chat while credentials remain in the server vault, including environment overrides. When the tunnel disconnects, new runs wait with a **No tunnel connected** reason and chat gives the command to start it. Queued tunnel runs retain their immutable Spec files and resume waiting after a server restart. Start the tunnel before retrying the chat message. SIGINT/SIGTERM closes the tunnel; reconnections retry after three seconds, while revoked tokens and configuration changes require restarting with the correct settings.
+Server browsers execute Specs and explore the app in chat while credentials remain in the server vault, including environment overrides. When the tunnel disconnects, new runs wait with a **No tunnel connected** reason and chat gives the command to start it. Queued tunnel runs retain their immutable Spec files and resume waiting after a server restart; they fail clearly if no tunnel connects within 30 minutes. Start the tunnel before retrying the chat message. SIGINT/SIGTERM closes the tunnel. Disconnections and an occupied tunnel slot retry with backoff from three to 30 seconds; ping/pong timeouts detect half-open connections. Revoked tokens, incompatible protocols and origin changes require restarting with the correct settings. Renaming an environment preserves its connection.
 
 Tunnel JSON output is newline-delimited:
 

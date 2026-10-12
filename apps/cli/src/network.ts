@@ -4,7 +4,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 
 const dispatchers = new Map<string, Dispatcher>();
 const socketAgents = new Map<string, HttpAgent>();
-const env = (name: string) => process.env[name.toLowerCase()] ?? process.env[name];
+const env = (name: string) => process.env[name.toLowerCase()] || process.env[name];
 
 function proxyFor(input: string | URL): string | undefined {
     const url = new URL(input);

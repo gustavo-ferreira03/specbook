@@ -3,7 +3,6 @@ import { errorCodeSchema } from "./errors.ts";
 import { httpTarget } from "./network/targets.ts";
 
 export const RUNNER_PROTOCOL_VERSION = 1;
-export const RUNNER_CLI_VERSION = "0.1.0";
 
 const id = z.string().uuid();
 const origin = z.string().max(2000).refine((value) => {

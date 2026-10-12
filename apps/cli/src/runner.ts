@@ -11,8 +11,9 @@ import { parseSpecYaml } from "@specbook/runtime/yaml";
 import {
     runnerArtifactPathSchema, runnerClaimResponseSchema, runnerCompleteRequestSchema,
     runnerHeartbeatResponseSchema, type RunnerClaim, type RunnerCompletion,
-    RUNNER_CLI_VERSION, RUNNER_PROTOCOL_VERSION,
+    RUNNER_PROTOCOL_VERSION,
 } from "@specbook/runtime/runner-protocol";
+import { CLI_VERSION as RUNNER_CLI_VERSION } from "./version";
 import { resolveRunnerSecrets, scrub } from "./credentials";
 import { ensureChromium } from "./browsers";
 import { normalizeServerUrl, redactTokens, rememberToken, RemoteError } from "./remote";

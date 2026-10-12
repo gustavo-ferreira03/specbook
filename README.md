@@ -145,7 +145,7 @@ The server serves its own CLI package at `/api/cli/specbook.tgz`, without authen
 
 ### Private-network runners and tunnels
 
-An admin creates a token under **Settings → Runners**, with an optional group and project restrictions. Choose **Runner** in an environment to execute its Specs inside your network. The Runners tab, waiting Specs and Run all results show queue counts, oldest wait and why work is waiting. Tokens rotate with a replacement shown once; each connected process reports its CLI/protocol version and capacity.
+An admin creates a token under **Settings → Runners**, choosing **Runner** or **Tunnel** purpose and optional project restrictions. Choose **Runner** in an environment to execute its Specs inside your network. The Runners tab, waiting Specs and Run all results show queue counts, oldest wait and why work is waiting. Tokens rotate with a replacement shown once; each connected process reports its CLI/protocol version and capacity.
 
 ```sh
 export SPECBOOK_HOME=/var/lib/specbook-runner
@@ -159,7 +159,7 @@ specbook runner --once
 
 Production runners require an origin allowlist set by their operator, using `--allow-origin` or `SPECBOOK_RUNNER_ALLOWED_ORIGINS`. Jobs outside it fail before secrets or browsers open. Grouped runners claim only their own group, and ungrouped runners claim ungrouped work. Only an admin signed in to the web app can change executors, groups or private destinations.
 
-Runner secrets resolve from `SPECBOOK_SECRET_<PROFILE>_<FIELD>` environment variables, a JSON provider command (`--secrets-command` / `SPECBOOK_SECRETS_COMMAND`), then local profiles. Environment and command sources use the runner's explicit origin scope; local profiles must declare matching origins. Leases and heartbeats return unfinished work to the queue after a crash or shutdown. Work fails after its run timeout plus a 60-second grace, or three abandoned attempts. Runner environments support saved evidence and verification; live chat exploration uses server browsers.
+Runner secrets resolve from nonempty `SPECBOOK_SECRET_<PROFILE>_<FIELD>` environment variables, a JSON provider command (`--secrets-command` / `SPECBOOK_SECRETS_COMMAND`), then local profiles. Each source requires explicit profile origins: `SPECBOOK_SECRET_<PROFILE>_ORIGINS`, a provider's `origins` array, or local profile origins. Those origins must match the job and runner allowlists. Work can queue for 30 minutes; execution allows its full run timeout plus a 60-second grace from claim. Three expired leases or hard failures end the batch; graceful shutdown and scale-down do not consume attempts. Runner environments support saved evidence and verification; live chat exploration uses server browsers.
 
 Personal access tokens can have an expiry chosen at creation. Account and token management requires a browser session. Signing out or revoking a user's sessions also revokes their personal tokens.
 
@@ -169,10 +169,10 @@ For server-side chat exploration and Spec runs against a private app, choose **S
 
 ```sh
 export SPECBOOK_PROJECT=YOUR_PROJECT_ID
-specbook tunnel --environment Staging
+specbook tunnel --environment Staging --allow-origin https://private-app.example.com
 ```
 
-Use a dedicated runner token restricted to that group. The outbound WebSocket tunnel carries HTTP(S) and WebSocket traffic only for the environment's allowed origins, while logins remain in the server vault. Runs wait when no tunnel connects, and chat explains how to start one. Read the [operations guide](docs/cli/README.md#private-network-runners) for flags, rotation, proxy configuration, secret providers and JSON output.
+Use a **Tunnel** token restricted to that group and configure `--allow-origin` or `SPECBOOK_TUNNEL_ALLOWED_ORIGINS` locally. The outbound WebSocket tunnel carries HTTP(S) and WebSocket traffic only for origins allowed by both the environment and the operator; add required public CDNs and identity providers to both lists. Logins remain in the server vault. Runs wait for up to 30 minutes when no tunnel connects, and chat explains how to start one. Read the [operations guide](docs/cli/README.md#private-network-runners) for flags, rotation, proxy configuration, secret providers and JSON output.
 
 ### Serve the full product
 

@@ -16,6 +16,7 @@ import { login, logout, connectionChoices, environmentChoices, connect, pull, pu
 import { runCi, type CiOptions } from "./ci";
 import { scrubCi } from "./ci-comment";
 import * as ui from "./ui";
+import { CLI_VERSION } from "./version";
 
 const json = process.argv.includes("--json");
 const isChatCommand = process.argv.slice(2).find((argument) => !argument.startsWith("-")) === "chat";
@@ -92,7 +93,7 @@ function exitWith(reply: ChatReply) {
 
 const program = new Command("specbook")
     .description("Behavior contracts for web apps, written and verified by your coding agent.")
-    .version("0.1.0", "-v, --version", "print the version")
+    .version(CLI_VERSION, "-v, --version", "print the version")
     .helpCommand(false)
     .usage("<command> [options]")
     .option("--json", "print machine-readable JSON (for coding agents)")
@@ -118,7 +119,7 @@ const program = new Command("specbook")
         outputError: (text, write) => write(ui.failure(text.replace(/^error: /, "")) + "\n"),
     })
     .exitOverride()
-    .addHelpText("before", `${pc.bold("specbook")} ${pc.dim("0.1.0")}\n`)
+    .addHelpText("before", `${pc.bold("specbook")} ${pc.dim(CLI_VERSION)}\n`)
     .addHelpText("after", `
 ${pc.bold("Start here")}
   ${pc.dim("$")} ${pc.cyan('specbook init --base-url http://localhost:3000')}
@@ -338,8 +339,9 @@ program.command("tunnel")
     .option("--server <url>", "Specbook server URL")
     .option("--project <id>", "project id; defaults to SPECBOOK_PROJECT")
     .option("--environment <name>", "target environment; defaults to SPECBOOK_ENVIRONMENT or Production")
-    .addHelpText("after", `\n${pc.dim("Set SPECBOOK_RUNNER_TOKEN from your secret store. The token must match the environment's runner group and project.")}`)
-    .action(async (options: { url?: string; server?: string; project?: string; environment?: string }) => {
+    .option("--allow-origin <origin>", "application origin this tunnel may access; repeat for more origins", (origin: string, previous: string[]) => [...previous, origin], [])
+    .addHelpText("after", `\n${pc.dim("Set SPECBOOK_RUNNER_TOKEN from your secret store. Choose a tunnel token matching the environment's runner group and project, and configure --allow-origin.")}`)
+    .action(async (options: { url?: string; server?: string; project?: string; environment?: string; allowOrigin: string[] }) => {
         const url = options.url ?? options.server ?? process.env.SPECBOOK_URL;
         if (!url) throw new Error("SPECBOOK_URL or --url is required");
         const project = options.project ?? process.env.SPECBOOK_PROJECT;
@@ -347,7 +349,7 @@ program.command("tunnel")
         let token = process.env.SPECBOOK_RUNNER_TOKEN;
         if (!token) {
             if (!interactive) throw new Error("Set SPECBOOK_RUNNER_TOKEN when running non-interactively");
-            token = answer(await clack.password({ message: "Runner token", output: stderr }));
+            token = answer(await clack.password({ message: "Tunnel token", output: stderr }));
         }
         rememberToken(token);
         const abort = new AbortController();
@@ -356,7 +358,8 @@ program.command("tunnel")
         process.once("SIGTERM", cancel);
         try {
             const { runTunnel } = await import("./tunnel");
-            await runTunnel({ url, token, project, environment: options.environment ?? process.env.SPECBOOK_ENVIRONMENT, signal: abort.signal },
+            await runTunnel({ url, token, project, environment: options.environment ?? process.env.SPECBOOK_ENVIRONMENT,
+                allowedOrigins: options.allowOrigin.length ? options.allowOrigin : process.env.SPECBOOK_TUNNEL_ALLOWED_ORIGINS?.split(/[\s,]+/).filter(Boolean), signal: abort.signal },
                 (event) => print(event, () => ui.renderTunnelEvent(event)));
         } finally {
             process.removeListener("SIGINT", cancel);
@@ -500,7 +503,7 @@ async function main(): Promise<void> {
         stdout.write(JSON.stringify({ help: program.helpInformation(), chatReplySchema: chatReplyJsonSchema }) + "\n");
         return;
     }
-    if (json && (raw.includes("--version") || raw.includes("-v"))) { stdout.write('{"version":"0.1.0"}\n'); return; }
+    if (json && (raw.includes("--version") || raw.includes("-v"))) { stdout.write(JSON.stringify({ version: CLI_VERSION }) + "\n"); return; }
     if (!raw.length) { program.outputHelp(); return; }
     await program.parseAsync(process.argv);
 }

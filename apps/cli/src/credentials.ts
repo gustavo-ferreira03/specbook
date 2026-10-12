@@ -6,7 +6,7 @@ import { SECRET_NAME_PATTERN, secretEnvName } from "@specbook/runtime/specbook/g
 import type { SecretRef } from "@specbook/runtime/validate";
 import { httpTarget } from "@specbook/runtime/network/targets";
 import { CodedError } from "@specbook/runtime/errors";
-import { providerFields } from "./secret-provider";
+import { providerProfile, type ProviderProfile } from "./secret-provider";
 
 const nameSchema = z.string().regex(SECRET_NAME_PATTERN);
 const profileSchema = z.object({
@@ -20,7 +20,18 @@ type Store = z.infer<typeof storeSchema>;
 const runnerSecretValues = new Set<string>();
 
 function rememberEnvironmentSecrets(): void {
-    for (const [name, value] of Object.entries(process.env)) if (name.startsWith("SPECBOOK_SECRET_") && value) runnerSecretValues.add(value);
+    for (const [name, value] of Object.entries(process.env)) if (name.startsWith("SPECBOOK_SECRET_") && !name.endsWith("_ORIGINS") && value) runnerSecretValues.add(value);
+}
+
+function environmentProfileOrigins(profile: string): string[] {
+    const value = process.env[secretEnvName(profile, "ORIGINS")];
+    if (!value) return [];
+    const origins = [...new Set(value.split(/[\s,]+/).filter(Boolean))];
+    for (const origin of origins) {
+        try { if (httpTarget(origin).origin !== origin) throw new Error(); }
+        catch { throw new CodedError("credentials", `Credential profile ${profile} origins must be HTTP(S) origins without credentials, paths or fragments`); }
+    }
+    return origins;
 }
 
 export function configHome(): string {
@@ -119,28 +130,30 @@ export async function resolveRunnerSecrets(refs: SecretRef[], baseUrl: string, o
     const jobOrigins = options.jobOrigins ?? [httpTarget(baseUrl).origin];
     const sourceOrigins = (options.allowedOrigins ?? []).filter((origin) => jobOrigins.includes(origin));
     if (refs.length && !sourceOrigins.length) throw new CodedError("credentials", "Runner secret sources require locally configured --allow-origin values matching the job");
-    const provided = new Map<string, Record<string, string>>();
+    const provided = new Map<string, ProviderProfile>();
     if (options.command) {
-        for (const profile of new Set(refs.filter((ref) => process.env[secretEnvName(ref.profile, ref.field)] === undefined).map((ref) => ref.profile))) {
-            const fields = await providerFields(options.command, profile, options.signal);
-            provided.set(profile, fields);
-            for (const value of Object.values(fields)) runnerSecretValues.add(value);
+        for (const profile of new Set(refs.filter((ref) => !process.env[secretEnvName(ref.profile, ref.field)]).map((ref) => ref.profile))) {
+            const supplied = await providerProfile(options.command, profile, options.signal);
+            provided.set(profile, supplied);
+            for (const value of Object.values(supplied.fields)) runnerSecretValues.add(value);
         }
     }
     const secretEnv: Record<string, string> = {};
     const byRef: Record<string, string[]> = {};
     for (const ref of refs) {
         const envName = secretEnvName(ref.profile, ref.field);
-        const environment = process.env[envName];
-        const fields = provided.get(ref.profile);
-        const provider = fields && Object.hasOwn(fields, ref.field) ? fields[ref.field] : undefined;
+        const environment = process.env[envName] || undefined;
+        const supplied = provided.get(ref.profile);
+        const provider = supplied && Object.hasOwn(supplied.fields, ref.field) ? supplied.fields[ref.field] : undefined;
         const profile = Object.hasOwn(store, ref.profile) ? store[ref.profile] : undefined;
         const local = profile && Object.hasOwn(profile.fields, ref.field) ? profile.fields[ref.field] : undefined;
         const value = environment ?? provider ?? local;
         if (!value) throw new CodedError("credentials", `Credential field ${ref.profile}.${ref.field} is not configured; set ${envName}, configure --secrets-command, or run specbook credentials add ${ref.profile}`);
-        const origins = environment !== undefined || provider !== undefined ? sourceOrigins
-            : (profile?.origins ?? []).filter((origin) => sourceOrigins.includes(origin));
-        if (!origins.length) throw new CodedError("credentials", `Credential profile ${ref.profile} needs explicit origins matching this job; configure specbook credentials add ${ref.profile} --origin <allowed-origin>`);
+        const declaredOrigins = environment !== undefined ? environmentProfileOrigins(ref.profile)
+            : provider !== undefined ? supplied!.origins.length ? supplied!.origins : environmentProfileOrigins(ref.profile)
+            : profile?.origins ?? [];
+        const origins = declaredOrigins.filter((origin) => sourceOrigins.includes(origin));
+        if (!origins.length) throw new CodedError("credentials", `Credential profile ${ref.profile} needs explicit origins matching this job; set ${secretEnvName(ref.profile, "ORIGINS")}, return provider origins, or configure credentials add ${ref.profile} --origin <allowed-origin>`);
         runnerSecretValues.add(value);
         secretEnv[envName] = value;
         byRef[ref.envName] = origins;

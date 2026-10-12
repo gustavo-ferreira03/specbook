@@ -3,7 +3,7 @@
     "type": "module",
     "scripts": {
         "dev": "tsx watch src/index.ts",
-        "build": "esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/index.js && esbuild src/operations-cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/operations-cli.js && mkdir -p dist/prompts && cp src/core/chat/prompts/* dist/prompts/",
+        "build": "node scripts/build.mjs",
         "browser:install": "node scripts/install-browsers.mjs",
         "browser:install:docker": "node scripts/install-browsers.mjs --with-deps",
         "db:generate": "drizzle-kit generate",
