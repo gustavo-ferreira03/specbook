@@ -198,6 +198,15 @@ export const userSessions = sqliteTable("user_sessions", {
     expiresAt: text("expires_at").notNull(),
 }, (table) => [index("user_sessions_user").on(table.userId), index("user_sessions_expiry").on(table.expiresAt)]);
 
+export const personalAccessTokens = sqliteTable("personal_access_tokens", {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: text("created_at").notNull(),
+    lastUsedAt: text("last_used_at"),
+}, (table) => [index("personal_access_tokens_user").on(table.userId)]);
+
 export const userInvites = sqliteTable("user_invites", {
     id: text("id").primaryKey(),
     tokenHash: text("token_hash").notNull().unique(),

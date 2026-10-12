@@ -6,7 +6,7 @@ import { z } from "zod";
 import { recordAudit } from "../../../core/accounts/audit";
 import { beginOidc, finishOidc, validateIssuer } from "../../../core/accounts/oidc";
 import { hashPassword, verifyPassword } from "../../../core/accounts/passwords";
-import { acceptInvitationSchema, adminSchema, invitationSchema, loginSchema, memberSchema, ssoSchema, tokenSchema } from "../../../core/accounts/schemas";
+import { acceptInvitationSchema, accessTokenSchema, adminSchema, invitationSchema, loginSchema, memberSchema, ssoSchema, tokenSchema } from "../../../core/accounts/schemas";
 import { authEvents, clearCookies, cookieToken, publicUser, randomToken, requestOrigin, revokeUserSessions, startSession, tokenHash } from "../../../core/accounts/sessions";
 import { encryptSecret } from "../../../core/credentials/crypto";
 import { accountsRepository, withAccountsLock, type User } from "../../repositories/accounts";
@@ -44,6 +44,26 @@ export function createAccountsRouter(): Hono {
         return c.json({ needsAdmin: !await accountsRepository.hasUsers(), passwordLoginEnabled: sso.passwordLoginEnabled, oidcEnabled: sso.enabled });
     });
     router.get("/auth/me", access("viewer"), (c) => c.json({ user: publicUser(requireRole(c, "viewer")) }));
+
+    router.get("/auth/access-tokens", access("viewer"), async (c) => {
+        return c.json({ tokens: await accountsRepository.accessTokens(requireRole(c, "viewer").id) });
+    });
+    router.post("/auth/access-tokens", access("viewer"), zValidator("json", accessTokenSchema), async (c) => {
+        if (c.get("authentication") !== "session") throw new HTTPException(403, { message: "Sign in to the web app to create access tokens." });
+        const user = requireRole(c, "viewer");
+        const token = `sb_pat_${randomToken()}`;
+        const accessToken = await accountsRepository.createAccessToken(user.id, c.req.valid("json").name, tokenHash(token));
+        await recordAudit("auth.access_token.created", { id: accessToken.id, name: accessToken.name });
+        c.header("Cache-Control", "no-store");
+        return c.json({ token, accessToken }, 201);
+    });
+    router.delete("/auth/access-tokens/:id", access("viewer"), async (c) => {
+        if (c.get("authentication") !== "session") throw new HTTPException(403, { message: "Sign in to the web app to revoke access tokens." });
+        const id = c.req.param("id");
+        if (!await accountsRepository.revokeAccessToken(requireRole(c, "viewer").id, id)) throw new HTTPException(404, { message: "Access token not found." });
+        await recordAudit("auth.access_token.revoked", { id });
+        return c.json({ ok: true });
+    });
 
     router.post("/setup/admin", access("public"), zValidator("json", adminSchema), async (c) => {
         limit("bootstrap", 5);

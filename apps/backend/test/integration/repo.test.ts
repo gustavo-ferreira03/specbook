@@ -1885,6 +1885,49 @@ describe("accounts, roles and session security", () => {
         assert.equal((await call("GET", "/projects", undefined, viewer.cookie)).status, 401);
     });
 
+    test("personal tokens are one-time secrets, follow current roles and can only be revoked by their owner", async () => {
+        const { accountsRepository } = await import("../../src/infra/repositories/accounts");
+        const { db } = await import("../../src/infra/db/client");
+        const { personalAccessTokens } = await import("../../src/infra/db/schema");
+        const { tokenHash } = await import("../../src/core/accounts/tokens");
+        const member = await accountsRepository.createSsoUser("token-user@example.com", "Token user", "editor", "https://tokens.example.com", "token-user");
+        const session = crypto.randomBytes(32).toString("hex");
+        await accountsRepository.createSession(tokenHash(session), member.id, new Date(Date.now() + 60_000).toISOString());
+        const cookie = `specbook_session=${session}`;
+        assert.equal((await call("POST", "/auth/access-tokens", { name: " " }, cookie)).status, 400);
+        const created = await call("POST", "/auth/access-tokens", { name: "Work laptop" }, cookie);
+        assert.equal(created.status, 201);
+        assert.equal(created.headers.get("cache-control"), "no-store");
+        const { token, accessToken } = await created.json();
+        assert.match(token, /^sb_pat_[a-f0-9]{64}$/);
+        assert.equal(accessToken.name, "Work laptop");
+        assert.equal(accessToken.lastUsedAt, null);
+        const stored = (await db.select().from(personalAccessTokens)).find((row) => row.id === accessToken.id)!;
+        assert.equal(stored.tokenHash, tokenHash(token));
+        assert.ok(!JSON.stringify(stored).includes(token));
+        const headers = { authorization: `Bearer ${token}` };
+        assert.equal((await (await call("GET", "/auth/me", undefined, "", headers)).json()).user.id, member.id);
+        const list = await (await call("GET", "/auth/access-tokens", undefined, cookie)).json();
+        assert.ok(list.tokens[0].lastUsedAt);
+        assert.ok(!JSON.stringify(list).includes(token));
+        assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status, 404);
+        assert.equal((await call("POST", "/auth/access-tokens", { name: "More tokens" }, "", headers)).status, 403);
+        const bearerWrite = await secured.request("http://localhost:4000/projects", { method: "POST", headers: { host: "localhost:4000", "content-type": "application/json", ...headers }, body: JSON.stringify({ name: "Bearer project", baseUrl: "https://example.com" }) });
+        assert.equal(bearerWrite.status, 200, await bearerWrite.clone().text());
+        assert.equal((await call("PATCH", `/settings/members/${member.id}`, { role: "viewer" })).status, 200);
+        assert.equal((await call("POST", "/projects", { name: "Forbidden", baseUrl: "https://example.com" }, "", headers)).status, 403);
+        assert.equal((await call("PATCH", `/settings/members/${member.id}`, { disabled: true })).status, 200);
+        assert.equal((await call("GET", "/auth/me", undefined, "", headers)).status, 401);
+        assert.equal((await call("PATCH", `/settings/members/${member.id}`, { disabled: false })).status, 200);
+        assert.equal((await call("GET", "/auth/me", undefined, adminCookie, { authorization: "Bearer invalid" })).status, 401);
+        await accountsRepository.createSession(tokenHash(session), member.id, new Date(Date.now() + 60_000).toISOString());
+        assert.equal((await call("DELETE", `/auth/access-tokens/${accessToken.id}`, undefined, cookie)).status, 200);
+        assert.equal((await call("GET", "/auth/me", undefined, "", headers)).status, 401);
+        const audit = await (await call("GET", "/settings/audit?limit=100")).json();
+        assert.ok(!JSON.stringify(audit).includes(token));
+        assert.ok(audit.events.some((event: { actorId: string; action: string }) => event.actorId === member.id && event.action === "auth.access_token.created"));
+    });
+
     test("last usable administrator is protected and session revocation closes active streams", async () => {
         const { accountsRepository } = await import("../../src/infra/repositories/accounts");
         const { watchSession } = await import("../../src/core/accounts/sessions");

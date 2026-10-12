@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronDown, Link2, LogOut, Settings, UserRound } from "lucide-react";
+import { ChevronDown, KeyRound, Link2, LogOut, Settings, UserRound } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -34,6 +34,7 @@ export function UserMenu() {
             <DropdownMenuContent align="end" className="max-w-[calc(100vw-32px)]">
                 <DropdownMenuLabel><p className="truncate font-medium">{user.name}</p><p className="mt-0.5 truncate text-meta font-normal text-ink-muted">{user.email}</p><p className="mt-0.5 text-meta font-normal capitalize text-ink-muted">{user.role}</p></DropdownMenuLabel>
                 {isAdmin && <><DropdownMenuSeparator /><DropdownMenuItem asChild><Link href="/settings"><Settings size={14} /> Instance settings</Link></DropdownMenuItem></>}
+                <DropdownMenuItem asChild><Link href="/settings?tab=access-tokens"><KeyRound size={14} /> Access tokens</Link></DropdownMenuItem>
                 {ssoEnabled && <DropdownMenuItem disabled={busy} onSelect={() => void connectSso()}><Link2 size={14} /> Connect single sign-on</DropdownMenuItem>}
                 <DropdownMenuSeparator /><DropdownMenuItem onSelect={(event) => { event.preventDefault(); void signOut(); }} disabled={busy}><LogOut size={14} /> {busy ? "Signing out…" : "Sign out"}</DropdownMenuItem>
             </DropdownMenuContent>

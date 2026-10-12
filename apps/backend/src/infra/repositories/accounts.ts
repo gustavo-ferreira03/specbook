@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { DEFAULT_SSO_SETTINGS, type SsoSettings, type UserRole } from "../../core/accounts/schemas";
 import { db } from "../db/client";
-import { appSettings, auditEvents, oidcIdentities, oidcStates, userInvites, users, userSessions } from "../db/schema";
+import { appSettings, auditEvents, oidcIdentities, oidcStates, personalAccessTokens, userInvites, users, userSessions } from "../db/schema";
 import { createKeyedLock } from "../../core/operations/keyed-lock";
 
 export type User = typeof users.$inferSelect;
@@ -45,6 +45,26 @@ export const accountsRepository = {
     },
     async deleteSession(tokenHash: string) { await db.delete(userSessions).where(eq(userSessions.tokenHash, tokenHash)); },
     async revokeUserSessions(userId: string) { await db.delete(userSessions).where(eq(userSessions.userId, userId)); },
+    async accessTokens(userId: string) {
+        return db.select({ id: personalAccessTokens.id, name: personalAccessTokens.name, createdAt: personalAccessTokens.createdAt, lastUsedAt: personalAccessTokens.lastUsedAt })
+            .from(personalAccessTokens).where(eq(personalAccessTokens.userId, userId)).orderBy(desc(personalAccessTokens.createdAt), asc(personalAccessTokens.id));
+    },
+    async createAccessToken(userId: string, name: string, tokenHash: string) {
+        const [token] = await db.insert(personalAccessTokens).values({ id: crypto.randomUUID(), userId, name, tokenHash, createdAt: now() })
+            .returning({ id: personalAccessTokens.id, name: personalAccessTokens.name, createdAt: personalAccessTokens.createdAt, lastUsedAt: personalAccessTokens.lastUsedAt });
+        return token!;
+    },
+    async accessTokenUser(tokenHash: string): Promise<User | null> {
+        const row = (await db.select({ user: users, tokenId: personalAccessTokens.id }).from(personalAccessTokens)
+            .innerJoin(users, eq(users.id, personalAccessTokens.userId))
+            .where(and(eq(personalAccessTokens.tokenHash, tokenHash), isNull(users.disabledAt))))[0];
+        if (!row) return null;
+        const used = await db.update(personalAccessTokens).set({ lastUsedAt: now() }).where(eq(personalAccessTokens.id, row.tokenId)).returning({ id: personalAccessTokens.id });
+        return used.length ? row.user : null;
+    },
+    async revokeAccessToken(userId: string, id: string) {
+        return (await db.delete(personalAccessTokens).where(and(eq(personalAccessTokens.id, id), eq(personalAccessTokens.userId, userId))).returning({ id: personalAccessTokens.id })).length > 0;
+    },
     async changeMember(id: string, patch: { role?: UserRole; disabled?: boolean }): Promise<User | null> {
         const removesAdmin = patch.role && patch.role !== "admin" || patch.disabled === true;
         const sso = await this.getSso();

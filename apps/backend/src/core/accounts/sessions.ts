@@ -34,6 +34,12 @@ export async function sessionFromHeaders(headers: Headers) {
     return token ? accountsRepository.session(tokenHash(token)) : null;
 }
 
+export async function accessTokenFromHeaders(headers: Headers): Promise<User | null> {
+    const value = headers.get("authorization");
+    const token = value?.match(/^Bearer (sb_pat_[a-f0-9]{64})$/i)?.[1];
+    return token ? accountsRepository.accessTokenUser(tokenHash(token)) : null;
+}
+
 export function writeCookie(c: Context, name: string, value: string, age: number, origin = requestOrigin(c)): void {
     const secure = origin.startsWith("https://");
     setCookie(c, secure ? `__Host-${name}` : name, value, { httpOnly: true, secure, sameSite: "Lax", path: "/", maxAge: age });

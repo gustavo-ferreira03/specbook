@@ -2,7 +2,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 import { recordAudit, withActor, type Actor } from "../../core/accounts/audit";
-import { sessionFromHeaders } from "../../core/accounts/sessions";
+import { accessTokenFromHeaders, sessionFromHeaders } from "../../core/accounts/sessions";
 import type { UserRole } from "../../core/accounts/schemas";
 import type { User } from "../repositories/accounts";
 import { logger } from "../logger";
@@ -15,7 +15,7 @@ const verifiers = new WeakMap<Function, BearerVerifier>();
 const rank: Record<UserRole, number> = { viewer: 1, editor: 2, admin: 3 };
 
 declare module "hono" {
-    interface ContextVariableMap { user: User | null }
+    interface ContextVariableMap { user: User | null; authentication: "session" | "token" | null }
 }
 
 export function access(rule: UserRole | "public"): MiddlewareHandler;
@@ -43,9 +43,12 @@ export function accessGate(): MiddlewareHandler {
         const required = declared.filter((rule): rule is UserRole => rule in rank).sort((a, b) => rank[b] - rank[a]).at(0);
         const bearer = !required && declared.find((rule) => rule === "git-token" || rule === "ci-token");
         const probe = c.req.path === "/health" || c.req.path === "/ready";
-        const session = bearer || probe ? null : await sessionFromHeaders(c.req.raw.headers);
-        c.set("user", session?.user ?? null);
-        if (!declared.length) throw new HTTPException(session ? 403 : 401, { message: "This endpoint is not available to your account." });
+        const tokenRequest = !bearer && !probe && c.req.raw.headers.has("authorization");
+        const session = bearer || probe || tokenRequest ? null : await sessionFromHeaders(c.req.raw.headers);
+        const user = tokenRequest ? await accessTokenFromHeaders(c.req.raw.headers) : session?.user ?? null;
+        c.set("user", user);
+        c.set("authentication", user ? tokenRequest ? "token" : "session" : null);
+        if (!declared.length) throw new HTTPException(user ? 403 : 401, { message: "This endpoint is not available to your account." });
         if (required) requireRole(c, required);
         if (bearer) {
             const verify = handlers.map((handler) => verifiers.get(handler)).find(Boolean);
@@ -53,8 +56,8 @@ export function accessGate(): MiddlewareHandler {
             const verdict = await verify(c);
             if (verdict !== true) return verdict;
         }
-        const actor: Actor = session
-            ? { id: session.user.id, name: session.user.name, email: session.user.email, kind: "user" }
+        const actor: Actor = user
+            ? { id: user.id, name: user.name, email: user.email, kind: "user" }
             : { id: null, name: bearer === "git-token" ? "Git client" : bearer === "ci-token" ? "CI" : "Specbook", kind: bearer === "git-token" ? "git" : bearer === "ci-token" ? "ci" : "system" };
         await withActor(actor, async () => {
             await next();

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { EllipsisVertical, Link2, LogOut, Monitor, Moon, Settings, Sun, SunMoon } from "lucide-react";
+import { EllipsisVertical, KeyRound, Link2, LogOut, Monitor, Moon, Settings, Sun, SunMoon } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import {
     DropdownMenu,
@@ -103,6 +103,7 @@ export function SidebarUser() {
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     {isAdmin && <DropdownMenuItem asChild><Link href="/settings"><Settings size={14} /> Instance settings</Link></DropdownMenuItem>}
+                    <DropdownMenuItem asChild><Link href="/settings?tab=access-tokens"><KeyRound size={14} /> Access tokens</Link></DropdownMenuItem>
                     <ThemeSwitch />
                     {ssoEnabled && <DropdownMenuItem disabled={busy} onSelect={() => void connectSso()}><Link2 size={14} /> Connect single sign-on</DropdownMenuItem>}
                     <DropdownMenuSeparator />
