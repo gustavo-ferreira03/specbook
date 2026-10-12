@@ -403,7 +403,7 @@ export interface ActivityStory {
 }
 
 export interface SpecHealth {
-    status: "passing" | "failing" | "flaky" | "awaiting_deploy" | "not_checked" | "running" | "repairing" | "invalid";
+    status: "passing" | "failing" | "flaky" | "awaiting_deploy" | "not_checked" | "running" | "queued" | "repairing" | "invalid";
     label: string;
     runId?: string;
     lastCheckedAt: string | null;

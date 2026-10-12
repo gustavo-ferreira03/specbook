@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_INIT_SCRIPT } from "@/lib/theme-script";
 import { AuthProvider } from "@/components/AuthProvider";
 import { SetupGate } from "@/components/SetupGate";
+import { RunStateAnnouncementProvider } from "@/components/RunStateAnnouncement";
 import "./globals.css";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
@@ -29,7 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <head>
                 <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
             </head>
-            <body><TooltipProvider><AuthProvider><SetupGate>{children}</SetupGate></AuthProvider></TooltipProvider></body>
+            <body><TooltipProvider><AuthProvider><SetupGate><RunStateAnnouncementProvider>{children}</RunStateAnnouncementProvider></SetupGate></AuthProvider></TooltipProvider></body>
         </html>
     );
 }

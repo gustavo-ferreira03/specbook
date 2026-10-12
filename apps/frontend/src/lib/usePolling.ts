@@ -2,13 +2,14 @@
 
 import { useEffect, useRef } from "react";
 
-export function useVisiblePolling(poll: () => void, intervalMs: number): void {
+export function useVisiblePolling(poll: () => void, intervalMs: number, enabled = true): void {
     const pollRef = useRef(poll);
     useEffect(() => {
         pollRef.current = poll;
     });
 
     useEffect(() => {
+        if (!enabled) return;
         let timer: number | null = null;
         const startTimer = () => {
             if (timer === null) timer = window.setInterval(() => pollRef.current(), intervalMs);
@@ -33,5 +34,5 @@ export function useVisiblePolling(poll: () => void, intervalMs: number): void {
             stopTimer();
             document.removeEventListener("visibilitychange", handleVisibility);
         };
-    }, [intervalMs]);
+    }, [intervalMs, enabled]);
 }

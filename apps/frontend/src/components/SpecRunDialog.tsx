@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, ChevronDown, CircleHelp, Clock3, Download, ExternalLink, HardDrive, Minus, Network, RefreshCw } from "lucide-react";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
+import { RunStateAnnouncement } from "@/components/RunStateAnnouncement";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -98,9 +99,9 @@ export function ApiRunEvidence({ evidence }: { evidence: RunEvidence }) {
 }
 
 function BatchStatus({ status }: { status: SpecBatchStatus }) {
-    if (status === "passed" || status === "failed" || status === "error" || status === "running") return <StatusPill status={status} kind="run" size="sm" />;
+    if (status === "passed" || status === "failed" || status === "error" || status === "running" || status === "queued") return <StatusPill status={status} kind="run" size="sm" />;
     const Icon = status === "skipped" ? Minus : status === "unknown" ? CircleHelp : Clock3;
-    const label = status === "skipped" ? "Skipped" : status === "unknown" ? "Unknown" : "Queued";
+    const label = status === "skipped" ? "Skipped" : status === "unknown" ? "Unknown" : "Waiting to run";
     return <Badge variant="neutral" size="sm" className="gap-1 pr-2.5 pl-1.5"><Icon size={12} strokeWidth={2.25} aria-hidden="true" /> {label}</Badge>;
 }
 
@@ -131,17 +132,19 @@ export function SpecRunDialog({
     const passed = items.filter((item) => item.status === "passed").length;
     const failed = items.filter((item) => item.status === "failed" || item.status === "error").length;
     const skipped = items.filter((item) => item.status === "skipped").length;
+    const waiting = running && items.some((item) => item.status === "queued") && !items.some((item) => item.status === "running");
 
     const summary = [`${passed} passed`, failed ? `${failed} failed` : "", skipped ? `${skipped} skipped` : ""].filter(Boolean).join(", ");
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="flex h-[min(34rem,calc(100dvh-24px))] max-w-xl flex-col gap-0 overflow-hidden p-0 sm:p-0" showCloseButton={!running}>
+                <RunStateAnnouncement priority={10} message={running ? waiting ? `Waiting to run. ${queue?.reason ?? ""}` : "Running Specs." : error ? "Results incomplete." : `Run completed. ${summary}.`} />
                 <DialogHeader className="shrink-0 px-5 pt-5 pb-4 pr-12">
                     <DialogTitle>{title}</DialogTitle>
                     <DialogDescription>
                         {running
-                            ? `${queue?.queued ? "Waiting to run" : "Running"} ${countLabel(items.length, "Spec")} together. You can keep this open to follow along.`
+                            ? `${waiting ? "Waiting to run" : "Running"} ${countLabel(items.length, "Spec")} together. You can keep this open to follow along.`
                             : `${summary} across ${countLabel(items.length, "Spec")}.`}
                     </DialogDescription>
                     {environment && <p className="mt-1 break-words text-meta text-ink-muted"><span className="font-medium text-ink">{environment.name}</span> · {environment.baseUrl}</p>}
@@ -150,7 +153,7 @@ export function SpecRunDialog({
                     <RunnerQueueNotice queue={queue} className="mt-3" />
                 </DialogHeader>
 
-                <div className="shrink-0 border-y border-line bg-surface-soft px-5 py-3" aria-live="polite">
+                <div className="shrink-0 border-y border-line bg-surface-soft px-5 py-3">
                     <div className="flex items-center justify-between gap-3 text-meta text-ink-muted">
                         <span className="font-medium text-ink">{running ? `${settled} of ${items.length} completed` : error ? "Results incomplete" : "Run completed"}</span>
                         <span className="tabular">{passed} passed · {failed} failed</span>
@@ -175,7 +178,7 @@ export function SpecRunDialog({
                     <ul className="divide-y divide-line px-5" aria-label="Specs in this run">
                         {items.map((item) => (
                             <li key={item.specId} className="flex min-w-0 items-start gap-3 py-3">
-                                <span className="w-20 shrink-0 pt-0.5"><BatchStatus status={item.status} /></span>
+                                <span className="w-28 shrink-0 pt-0.5"><BatchStatus status={item.status} /></span>
                                 <div className="min-w-0 flex-1">
                                     <p className="text-control font-medium break-words text-ink">{item.title}</p>
                                     {item.failReason && <p className="mt-1 line-clamp-4 font-mono text-meta whitespace-pre-wrap break-words text-danger">{item.failReason}</p>}
@@ -191,7 +194,7 @@ export function SpecRunDialog({
                     {reportUrl && <Button asChild variant="outline"><a href={`${reportUrl}?download`} download><Download size={13} aria-hidden="true" />Download report</a></Button>}
                     {reportUrl && <Button asChild variant="outline"><a href={reportUrl} target="_blank" rel="noreferrer">Open report <ExternalLink size={13} /></a></Button>}
                     <DialogClose asChild>
-                        <Button type="button" disabled={running}>{running ? "Running…" : "Close"}</Button>
+                        <Button type="button" disabled={running}>{running ? waiting ? "Waiting to run…" : "Running…" : "Close"}</Button>
                     </DialogClose>
                 </DialogFooter>
             </DialogContent>

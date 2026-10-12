@@ -33,6 +33,7 @@ const STATUS: Record<AnyStatus, Omit<StatusMeta, "text" | "iconColor" | "soft" |
     unverified: { label: "Not run", runLabel: "Not run", description: "Not run since it was created or changed.", tone: "neutral", icon: CircleDashed },
     awaiting_deploy: { label: "Waiting for deploy", runLabel: "Waiting for deploy", description: "Published from a passing local run. Failures wait for deployment until the first passing server run.", tone: "neutral", icon: Clock3 },
     running: { label: "Running", runLabel: "Running", description: "A run is in progress.", tone: "running", icon: LoaderCircle },
+    queued: { label: "Waiting to run", runLabel: "Waiting to run", description: "The run is waiting for a runner or tunnel.", tone: "neutral", icon: Clock3 },
     passing: { label: "Passing", runLabel: "Passed", description: "The last run passed.", tone: "success", icon: Check },
     failing: { label: "Failing", runLabel: "Failed", description: "The last run failed.", tone: "danger", icon: X },
     flaky: { label: "Flaky", runLabel: "Passed on retry", description: "Failed first, then passed on an automatic retry with no test changes.", tone: "warning", icon: RotateCcw },

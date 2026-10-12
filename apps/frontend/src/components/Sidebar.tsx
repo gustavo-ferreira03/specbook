@@ -7,6 +7,7 @@ import {
     AlertCircle,
     ChevronRight,
     ChevronsUpDown,
+    Clock3,
     FileCheck2,
     House,
     LoaderCircle,
@@ -130,6 +131,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
         },
     });
     const batchRunning = runBatch.running;
+    const batchWaiting = batchRunning && runBatch.items.some((item) => item.status === "queued") && !runBatch.items.some((item) => item.status === "running");
 
     useEffect(() => {
         localStorage.setItem("specbook:last-project", projectId);
@@ -543,7 +545,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
                             <span className="font-mono text-meta text-ink-subtle">Features</span>
                             {batchRunning && (
                                 <Button type="button" variant="ghost" size="sm" onClick={() => runBatch.setOpen(true)} className="h-7 gap-1 px-2 text-meta text-ink-muted">
-                                    <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" /> View run
+                                    {batchWaiting ? <Clock3 size={13} aria-hidden="true" /> : <LoaderCircle size={13} className="animate-spin text-running motion-reduce:animate-none" />} {batchWaiting ? "View waiting run" : "View run"}
                                 </Button>
                             )}
                         </div>

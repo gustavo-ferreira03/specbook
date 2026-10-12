@@ -63,6 +63,14 @@ export function formatRelative(value: DateInput, now: number = Date.now()): stri
     return formatDate(date);
 }
 
+export function formatWaitDuration(durationMs: number): string {
+    if (durationMs < 60_000) return "under a minute";
+    const minutes = Math.floor(durationMs / 60_000);
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours} hr`;
+}
+
 export function formatDuration(durationMs: number): string {
     if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
     if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;

@@ -27,6 +27,6 @@ export function useProjectTunnels(projectId: string): { tunnels: ProjectTunnel[]
     useEffect(() => onInvalidate((event) => {
         if (matchesInvalidation(event, "projects", projectId)) refresh();
     }), [projectId, refresh]);
-    useVisiblePolling(refresh, 5000);
+    useVisiblePolling(refresh, 5000, tunnels === null || tunnels.length > 0);
     return { tunnels, error };
 }

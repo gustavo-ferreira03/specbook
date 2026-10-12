@@ -7,12 +7,14 @@ import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, ExternalLink, FileCode2, FileX2, HardDrive, Images, Network, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
+import { Dot } from "@/components/Dot";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { RawFileEditor } from "@/components/RawFileEditor";
 import { RelativeTime } from "@/components/RelativeTime";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
+import { RunStateAnnouncement } from "@/components/RunStateAnnouncement";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SpecFolio } from "@/components/SpecFolio";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
@@ -70,10 +72,6 @@ async function loadRunEvidence(runId: string, signal?: AbortSignal): Promise<Loa
         if (isAbortError(error)) throw error;
         return { data: null, error: errorMessage(error) };
     }
-}
-
-function Dot() {
-    return <span aria-hidden="true" className="text-ink-disabled">·</span>;
 }
 
 function FailureReason({ reason, tone = "danger" }: { reason: string; tone?: "danger" | "invalid" | "neutral" }) {
@@ -215,7 +213,8 @@ function VerificationBanner({
     const meta = statusMeta(status);
     const Icon = queued ? Clock3 : meta.icon;
     return (
-        <section aria-label="Run status" role={status === "failed" || status === "invalid" || status === "error" ? "alert" : "status"} className={cn("slab flex flex-wrap gap-4 rounded-xl bg-surface p-4 sm:flex-nowrap", body ? "items-start" : "items-center", sealColor[status])}>
+        <section aria-label="Run status" className={cn("slab flex flex-wrap gap-4 rounded-xl bg-surface p-4 sm:flex-nowrap", body ? "items-start" : "items-center", sealColor[status])}>
+            <RunStateAnnouncement message={`${headline}${queued && latestRun?.queue?.reason ? `. ${latestRun.queue.reason}` : ""}`} />
             <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-md text-surface", sealFill[status] ?? "bg-ink-subtle")}>
                 <Icon size={19} strokeWidth={2.5} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
             </span>
@@ -388,7 +387,7 @@ function RunEntry({
                 }}
             >
                 <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
-                    {queued ? <span className="inline-flex items-center gap-1.5 text-meta text-ink-subtle"><Clock3 size={13} aria-hidden="true" />Queued</span> : <StatusPill status={waiting ? "awaiting_deploy" : run.status} kind="run" size="sm" />}
+                    {queued ? <StatusPill status="queued" kind="run" size="sm" /> : <StatusPill status={waiting ? "awaiting_deploy" : run.status} kind="run" size="sm" />}
                     {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
                     <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
                         <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>

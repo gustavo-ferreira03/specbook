@@ -68,6 +68,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
     }, [text]);
 
     const modelMissing = modelReady === false;
+    const visibleSuggestions = suggestions.filter((suggestion) => !runnerEnvironment || !suggestion.requiresExploration);
 
     async function send(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -102,8 +103,8 @@ function NewChatContent({ projectId }: { projectId: string }) {
                         </p>
                         {runnerEnvironment && <RunnerExplorationNotice className="mt-4" />}
                         <TunnelConnectionNotice projectId={projectId} className="mt-4" />
-                        <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                            {suggestions.filter((suggestion) => !runnerEnvironment || !suggestion.requiresExploration).map((suggestion) => (
+                        <div className={cn("mt-6 grid gap-2", visibleSuggestions.length > 1 && "sm:grid-cols-2")}>
+                            {visibleSuggestions.map((suggestion) => (
                                 <button
                                     key={suggestion.title}
                                     type="button"
