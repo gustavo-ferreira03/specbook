@@ -3,7 +3,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import { HTTPException } from "hono/http-exception";
 import { runnerPayloadSchema, type RunnerCompletion, type RunnerPayload } from "@specbook/runtime/runner-protocol";
-import { MAX_RUNNER_ATTEMPTS, RUNNER_QUEUE_GRACE_MS, runnerJobDeadline, runnersRepository, type RunnerJob, type RunnerToken } from "../../infra/repositories/runners";
+import { MAX_RUNNER_ATTEMPTS, RUNNER_EXECUTION_GRACE_MS, runnerJobDeadline, runnerQueueTimeoutMs, runnersRepository, type RunnerJob, type RunnerToken } from "../../infra/repositories/runners";
 import { runsDir } from "../paths";
 import { createKeyedLock } from "../operations/keyed-lock";
 import { logger } from "../../infra/logger";
@@ -34,6 +34,10 @@ export async function pendingRunnerBatchIds(): Promise<string[]> {
     return (await runnersRepository.pending()).map((job) => job.batchId);
 }
 
+export async function pendingRunnerRunIds(): Promise<string[]> {
+    return (await runnersRepository.pending()).flatMap((job) => job.payload.specs.map((spec) => spec.runId));
+}
+
 function waitForWork(signal: AbortSignal, milliseconds: number): Promise<void> {
     return new Promise((resolve) => {
         const finish = () => { clearTimeout(timer); events.off("work", finish); signal.removeEventListener("abort", finish); resolve(); };
@@ -54,7 +58,7 @@ export async function claimRunnerWork(runner: RunnerToken, signal: AbortSignal, 
             if (current.tokenHash !== runner.tokenHash) throw new HTTPException(401, { message: "Runner token was rotated. Configure the replacement token." });
             const instance = await runnersRepository.instance(instanceId);
             if (!instance || instance.disconnectedAt || instance.runnerId !== runner.id || instance.mode !== "runner") throw new HTTPException(409, { message: "Runner instance disconnected. Restart the CLI process." });
-            return runnersRepository.claim(current, runnerLeaseMs(), instanceId);
+            return runnersRepository.claim(current, runnerLeaseMs(), instanceId, [...activeCompletions]);
         });
         if (job) return job;
         const remaining = deadline - Date.now();
@@ -108,11 +112,11 @@ export async function releaseRunnerWork(jobId: string, runnerId: string, leaseId
         const job = await withQueueLock("queue", async () => {
             if (!await runnersRepository.get(runnerId)) throw new HTTPException(401, { message: "Runner token was revoked" });
             const job = requireLease(await runnersRepository.job(jobId), runnerId, leaseId);
-            if (reason) await runnersRepository.reserveCompletion(jobId);
+            if (reason) { await runnersRepository.reserveCompletion(jobId); activeCompletions.add(jobId); }
             else await runnersRepository.release(jobId, leaseId, runnerId);
             return job;
         });
-        if (reason) await failRunnerJob(job, reason);
+        if (reason) { try { await failRunnerJob(job, reason, true); } finally { activeCompletions.delete(jobId); } }
     });
     events.emit("work");
 }
@@ -205,16 +209,26 @@ export async function cancelRunnerBatch(batchId: string): Promise<boolean> {
     return jobLocks.run(job.id, () => withQueueLock("queue", () => runnersRepository.cancelBatch(batchId)));
 }
 
-async function failRunnerJob(job: RunnerJob, reason: string): Promise<void> {
-    const { finishRunnerBatch } = await import("../runner/batch");
-    await runnersRepository.recordFailure(job.id, reason);
-    await finishRunnerBatch(job.batchId, { leaseId: job.leaseId ?? crypto.randomUUID(), durationMs: Math.max(0, Date.now() - Date.parse(job.createdAt)), processFailure: reason,
-        results: job.payload.specs.map((spec) => ({ runId: spec.runId, status: "error", durationMs: null, failReason: reason, failedStep: null, errorCode: "infrastructure", artifacts: [] })) });
-    await runnersRepository.complete(job.id, true);
+async function failRunnerJob(job: RunnerJob, reason: string, failedAttempt = false): Promise<void> {
+    const { finishRunnerBatch, failBrokenRunnerBatch } = await import("../runner/batch");
+    await runnersRepository.recordFailure(job.id, reason, failedAttempt);
+    try {
+        await finishRunnerBatch(job.batchId, { leaseId: job.leaseId ?? crypto.randomUUID(), durationMs: Math.max(0, Date.now() - Date.parse(job.createdAt)), processFailure: reason,
+            results: job.payload.specs.map((spec) => ({ runId: spec.runId, status: "error", durationMs: null, failReason: reason, failedStep: null, errorCode: "infrastructure", artifacts: [] })) });
+    } catch (error) {
+        const failure = `${reason} Runner work could not be finalized because its batch or Spec snapshot is unavailable.`;
+        logger.error("could not finalize runner work", { jobId: job.id, batchId: job.batchId, error });
+        await runnersRepository.recordFailure(job.id, failure);
+        await failBrokenRunnerBatch(job, failure).catch((error: unknown) => logger.error("could not recover runner batch", { jobId: job.id, error }));
+    } finally {
+        await runnersRepository.complete(job.id, true);
+    }
 }
 
 function failureReason(job: RunnerJob): string | null {
-    if (runnerJobDeadline(job) <= Date.now()) return `Runner work expired after ${Math.round((job.payload.timeoutMs + RUNNER_QUEUE_GRACE_MS) / 1000)}s.${job.lastFailure ? ` ${job.lastFailure}` : ` No runner completed this work${job.group ? ` in group ${job.group}` : ""}.`}`;
+    if (runnerJobDeadline(job) <= Date.now()) return job.status === "queued"
+        ? `Runner work expired after waiting ${Math.round(runnerQueueTimeoutMs() / 1000)}s for a runner${job.group ? ` in group ${job.group}` : ""}.${job.lastFailure ? ` ${job.lastFailure}` : ""}`
+        : `Runner execution expired after ${Math.round((job.payload.timeoutMs + RUNNER_EXECUTION_GRACE_MS) / 1000)}s. No runner completed this work.${job.lastFailure ? ` ${job.lastFailure}` : ""}`;
     if (job.status === "queued" && job.attempts >= MAX_RUNNER_ATTEMPTS) return `Runner work stopped after ${MAX_RUNNER_ATTEMPTS} attempts.${job.lastFailure ? ` ${job.lastFailure}` : " Runners repeatedly disconnected before completion."}`;
     return null;
 }
@@ -222,7 +236,7 @@ function failureReason(job: RunnerJob): string | null {
 export function maintainRunnerQueue(): Promise<void> {
     if (maintenance) return maintenance;
     maintenance = (async () => {
-        await withQueueLock("queue", () => runnersRepository.reclaim());
+        await withQueueLock("queue", () => runnersRepository.reclaim(new Date().toISOString(), [...activeCompletions]));
         const jobs = (await runnersRepository.pending()).filter((job) => !activeCompletions.has(job.id) && !jobLocks.has(job.id) && failureReason(job));
         const results = await Promise.allSettled(jobs.map((job) => jobLocks.run(job.id, async () => {
             const current = await withQueueLock("queue", async () => {
@@ -233,10 +247,23 @@ export function maintainRunnerQueue(): Promise<void> {
             });
             if (current) await failRunnerJob(current, failureReason(current)!);
         })));
-        for (const result of results) if (result.status === "rejected") throw result.reason;
+        for (let index = 0; index < results.length; index++) {
+            const result = results[index];
+            if (result.status !== "rejected") continue;
+            const job = jobs[index];
+            logger.error("runner maintenance could not finish work", { jobId: job.id, error: result.reason });
+            await runnersRepository.recordFailure(job.id, "Runner work could not be finalized during queue maintenance.")
+                .then(() => runnersRepository.complete(job.id, true))
+                .catch((error: unknown) => logger.error("could not retire runner work", { jobId: job.id, error }));
+        }
         events.emit("work");
     })().finally(() => { maintenance = undefined; });
     return maintenance;
+}
+
+export async function recoverRunnerCompletions(): Promise<void> {
+    await withQueueLock("queue", () => runnersRepository.reclaim(new Date().toISOString(), [...activeCompletions], true));
+    await maintainRunnerQueue();
 }
 
 export function startRunnerLeaseMonitor(): void {

@@ -96,7 +96,7 @@ export async function prepareReportSection(options: {
         const state: StepState = !failed ? "passed"
             : failedIndex >= 0 ? (index < failedIndex ? "passed" : index === failedIndex ? "failed" : "skipped")
             : shot ? "passed" : "skipped";
-        const matching = planned.find((entry) => sameStepTitle(entry.title, label));
+        const matching = executed.length === planned.length ? planned[index] : planned.find((entry) => sameStepTitle(entry.title, label));
         return { number, ordinal: matching?.ordinal ?? (matching ? null : number), kind: matching?.kind ?? "step", label, state, image: directory && shot ? await image(directory, shot.file) : null };
     }));
     return { item, tone: toneOf(item), feature: options.feature || "Other Specs", path: options.path ?? null, expectedResult: human?.expectedResult ?? "", steps,

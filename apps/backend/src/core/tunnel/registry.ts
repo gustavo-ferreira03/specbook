@@ -22,10 +22,16 @@ const waiting = new Map<string, Waiting>();
 let shutdown = new AbortController();
 export class TunnelWaitInterrupted extends Error {}
 
+export function tunnelQueueTimeoutMs(): number {
+    const seconds = Number(process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS ?? 1800);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 30 * 60_000;
+}
+
 export function stopTunnelWaits(): void { shutdown.abort(new TunnelWaitInterrupted("Backend stopped while waiting for a tunnel")); }
 
-export function tunnelStartCommand(environment: Pick<RunEnvironment, "id" | "name">, projectId: string): string {
-    return `specbook tunnel --project ${projectId} --environment ${environment.id}`;
+export function tunnelStartCommand(environment: Pick<RunEnvironment, "id" | "baseUrl" | "allowedOrigins">, projectId: string): string {
+    const origins = [...new Set([new URL(environment.baseUrl).origin, ...environment.allowedOrigins])];
+    return `specbook tunnel --project ${projectId} --environment ${environment.id}${origins.map((origin) => ` --allow-origin '${origin.replaceAll("'", "'\\''")}'`).join("")}`;
 }
 
 export function hasTunnel(environmentId: string): boolean {
@@ -48,6 +54,7 @@ export function closeRunnerTunnels(runnerId: string): void {
 }
 
 export async function configuredTunnel(runner: RunnerToken, projectId: string, selector: string): Promise<TunnelConfig> {
+    if (runner.purpose !== "tunnel") throw new CodedError("environment", "Use a token created for tunneling, restricted to this environment's runner group");
     const projects = runner.projectIds;
     if (projects && !projects.includes(projectId)) throw new CodedError("environment", "This runner token is not allowed to access this project");
     const environment = (await environmentsRepository.list(projectId)).find((row) => row.id === selector || row.name.toLowerCase() === selector.toLowerCase());
@@ -64,7 +71,11 @@ async function currentConnection(connection: Connection): Promise<boolean> {
     if (!runner || runner.tokenHash !== connection.tokenHash) return false;
     try {
         const current = await configuredTunnel(runner, connection.config.environment.projectId, connection.config.environment.id);
-        return JSON.stringify(current) === JSON.stringify(connection.config);
+        const previous = connection.config;
+        const matching = current.environment.id === previous.environment.id && current.environment.projectId === previous.environment.projectId
+            && current.environment.group === previous.environment.group && JSON.stringify([...current.origins].sort()) === JSON.stringify([...previous.origins].sort());
+        if (matching) connection.config = current;
+        return matching;
     } catch { return false; }
 }
 
@@ -86,20 +97,27 @@ export async function createEnvironmentTunnelProxy(environment: RunEnvironment) 
 export async function waitForTunnel(environment: RunEnvironment, projectId: string, runIds: string[] = [], signal?: AbortSignal, queuedAt = new Date().toISOString()): Promise<void> {
     signal = signal ? AbortSignal.any([signal, shutdown.signal]) : shutdown.signal;
     signal.throwIfAborted();
+    const deadline = Date.parse(queuedAt) + tunnelQueueTimeoutMs();
+    const checkDeadline = () => {
+        if (Date.now() >= deadline) throw new CodedError("environment", `Tunnel work expired after waiting ${Math.round(tunnelQueueTimeoutMs() / 1000)}s. No tunnel connected in group ${environment.runnerGroup ?? "(unset)"}. Start specbook tunnel inside the private network and run the Spec again.`);
+    };
+    checkDeadline();
     if (hasTunnel(environment.id)) return;
     const id = crypto.randomUUID();
     waiting.set(id, { environment, projectId, runIds, queuedAt });
     try {
         while (!hasTunnel(environment.id)) {
             signal?.throwIfAborted();
+            checkDeadline();
             await new Promise<void>((resolve) => {
                 const done = () => { clearTimeout(timer); signal?.removeEventListener("abort", done); resolve(); };
-                const timer = setTimeout(done, 500);
+                const timer = setTimeout(done, Math.max(1, Math.min(500, deadline - Date.now())));
                 signal?.addEventListener("abort", done, { once: true });
                 if (signal?.aborted) done();
             });
         }
         signal?.throwIfAborted();
+        checkDeadline();
     } finally { waiting.delete(id); }
 }
 
@@ -132,12 +150,15 @@ export function attachTunnelWebSockets(server: Server, hostAllowlist: HostAllowl
             if (reservedEnvironment) connecting.delete(reservedEnvironment);
             if (pendingInstance) void runnersRepository.disconnect(pendingInstance.runnerId, pendingInstance.id).catch(() => undefined);
         });
-        const reject = (status: number, message: string) => socket.end(`HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Forbidden"}\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n${message}`);
+        const reject = (status: number, message: string) => {
+            const title = status === 401 ? "Unauthorized" : status === 409 ? "Conflict" : status === 426 ? "Upgrade Required" : "Forbidden";
+            socket.end(`HTTP/1.1 ${status} ${title}\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n${message}`);
+        };
         void (async () => {
             if (!isAllowedHost(hostAllowlist, request.headers.host) || request.headers.origin) { reject(403, "Tunnel connections must come from the CLI"); return; }
             const runner = await authenticateRunnerToken(request.headers.authorization);
             if (!runner) { reject(401, "Provide a valid runner token"); return; }
-            if (request.headers["x-specbook-protocol"] !== String(RUNNER_PROTOCOL_VERSION)) { reject(409, `Runner protocol is incompatible. Install the CLI from this server and restart specbook tunnel.`); return; }
+            if (request.headers["x-specbook-protocol"] !== String(RUNNER_PROTOCOL_VERSION)) { reject(426, `Runner protocol is incompatible. Install the CLI from this server and restart specbook tunnel.`); return; }
             const version = String(request.headers["x-specbook-version"] ?? "");
             if (!version || version.length > 100) { reject(400, "Provide the CLI version"); return; }
             const projectId = String(request.headers["x-specbook-project"] ?? "");

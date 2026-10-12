@@ -66,11 +66,15 @@ describe("CI access and quality gates", () => {
         await environmentsRepository.update(previous, input);
         const environment = await resolveRunEnvironment(project.id);
         assert.deepEqual(environment.credentialOverrides, input.credentialOverrides);
-        const allowed = await issueRunnerToken("Tunnel", "tunnel", [project.id]);
-        const wrongGroup = await issueRunnerToken("Other group", "other", [project.id]);
+        const allowed = await issueRunnerToken("Tunnel", "tunnel", [project.id], "tunnel");
+        const ordinaryRunner = await issueRunnerToken("Ordinary runner", "tunnel", [project.id]);
+        const wrongGroup = await issueRunnerToken("Other group", "other", [project.id], "tunnel");
         const anotherProject = await projectsRepository.createProject("Another project", "https://example.com");
-        const wrongProject = await issueRunnerToken("Other project", "tunnel", [anotherProject.id]);
+        const wrongProject = await issueRunnerToken("Other project", "tunnel", [anotherProject.id], "tunnel");
         const runner = (await runnersRepository.get(allowed.runner.id))!;
+        assert.equal(runner.purpose, "tunnel");
+        await assert.rejects(() => issueRunnerToken("Ungrouped tunnel", null, null, "tunnel"), /runner group/);
+        await assert.rejects(async () => configuredTunnel((await runnersRepository.get(ordinaryRunner.runner.id))!, project.id, environment.id), /created for tunneling/);
         const configured = await configuredTunnel(runner, project.id, environment.id);
         assert.deepEqual(configured.origins, ["http://internal.example.test:4598"]);
         await assert.rejects(async () => configuredTunnel((await runnersRepository.get(wrongGroup.runner.id))!, project.id, environment.id), /runner group/);
@@ -84,7 +88,58 @@ describe("CI access and quality gates", () => {
         abort.abort(new Error("Verification stopped"));
         await assert.rejects(waiting, /Verification stopped/);
         assert.ok(!(await tunnelQueueEntries()).some((entry) => entry.environmentId === environment.id));
-        for (const token of [allowed, wrongGroup, wrongProject]) await revokeRunnerToken(token.runner.id);
+        for (const token of [allowed, ordinaryRunner, wrongGroup, wrongProject]) await revokeRunnerToken(token.runner.id);
+    });
+
+    test("tunnel upgrades require a dedicated token and survive environment renames", async () => {
+        const { serve } = await import("@hono/node-server");
+        const { WebSocket } = await import("ws");
+        const { createApp } = await import("../../src/infra/web/app");
+        const { attachTunnelWebSockets, publicTunnels } = await import("../../src/core/tunnel/registry");
+        const { RUNNER_PROTOCOL_VERSION } = await import("@specbook/runtime/runner-protocol");
+        const project = await projectsRepository.createProject("Tunnel lifecycle", "https://private.example.com");
+        const input = environmentSchema.parse({ name: "Private", baseUrl: project.baseUrl, executor: "tunnel", runnerGroup: "private" });
+        const environment = await environmentsRepository.create(project.id, input);
+        const ordinary = await issueRunnerToken("Same-group runner", "private", [project.id]);
+        const dedicated = await issueRunnerToken("Dedicated tunnel", "private", [project.id], "tunnel");
+        const server = serve({ fetch: createApp().fetch, hostname: "127.0.0.1", port: 0 }) as http.Server;
+        await new Promise<void>((resolve) => server.listening ? resolve() : server.once("listening", resolve));
+        const port = (server.address() as AddressInfo).port;
+        assert.ok(port > 4500);
+        const detach = attachTunnelWebSockets(server, buildHostAllowlist(port, {}));
+        const sockets: InstanceType<typeof WebSocket>[] = [];
+        const connect = (token: string, protocol = RUNNER_PROTOCOL_VERSION) => new Promise<{ status: number; websocket: InstanceType<typeof WebSocket> }>((resolve, reject) => {
+            const websocket = new WebSocket(`ws://127.0.0.1:${port}/runner/tunnel`, { headers: {
+                authorization: `Bearer ${token}`, "x-specbook-protocol": String(protocol), "x-specbook-version": "0.1.0",
+                "x-specbook-project": project.id, "x-specbook-environment": environment.id,
+            } });
+            sockets.push(websocket);
+            websocket.on("error", () => undefined);
+            const timer = setTimeout(() => reject(new Error("Tunnel handshake timed out")), 5000);
+            websocket.once("unexpected-response", (_request, response) => { clearTimeout(timer); response.resume(); resolve({ status: response.statusCode!, websocket }); });
+            websocket.once("message", (data) => { clearTimeout(timer); assert.equal(JSON.parse(data.toString()).type, "ready"); resolve({ status: 101, websocket }); });
+        });
+        try {
+            assert.equal((await connect(dedicated.token, 999)).status, 426);
+            assert.equal((await connect(ordinary.token)).status, 403);
+            const connected = await connect(dedicated.token);
+            assert.equal(connected.status, 101);
+            assert.equal((await connect(dedicated.token)).status, 409);
+            await environmentsRepository.update(environment, { ...input, name: "Renamed private" });
+            await new Promise((resolve) => setTimeout(resolve, 5200));
+            assert.equal(connected.websocket.readyState, WebSocket.OPEN);
+            assert.equal(publicTunnels().find((entry) => entry.environmentId === environment.id)?.environmentName, "Renamed private");
+            const headers = { authorization: `Bearer ${dedicated.token}`, "content-type": "application/json" };
+            const response = await fetch(`http://127.0.0.1:${port}/runner/claim`, { method: "POST", headers, body: JSON.stringify({ instanceId: crypto.randomUUID(), version: "0.1.0", protocolVersion: 1, concurrency: 1 }) });
+            assert.equal(response.status, 403, "tunnel tokens cannot claim runner execution");
+            await response.body?.cancel();
+        } finally {
+            for (const socket of sockets) socket.terminate();
+            detach();
+            server.closeIdleConnections();
+            await new Promise<void>((resolve) => server.close(() => resolve()));
+            for (const token of [ordinary, dedicated]) await revokeRunnerToken(token.runner.id);
+        }
     });
 
     test("restart preserves tunnel runs queued before browser execution", async () => {
@@ -248,7 +303,7 @@ describe("CI access and quality gates", () => {
         await assert.rejects(() => claimRunnerWork(officeRow, new AbortController().signal, firstInstance), /disconnected/);
         await runnersRepository.cancelBatch(secondBatch);
         const lease = (await runnersRepository.claim(officeRow, 60_000))!;
-        assert.equal(lease.attempts, 2);
+        assert.equal(lease.attempts, 0, "graceful disconnects do not consume attempts");
         assert.ok((await pendingRunnerBatchIds()).includes(payload.batchId));
         assert.equal(await runnersRepository.claim(officeRow, 60_000), null);
         const expiry = await heartbeatRunnerWork(lease.id, officeRow.id, lease.leaseId!);
@@ -257,7 +312,7 @@ describe("CI access and quality gates", () => {
         await runnersRepository.reclaim();
         const replacement = (await runnersRepository.claim(officeRow, 60_000))!;
         assert.equal(replacement.id, lease.id);
-        assert.equal(replacement.attempts, 3);
+        assert.equal(replacement.attempts, 1, "only the expired lease consumes an attempt");
         assert.notEqual(replacement.leaseId, lease.leaseId);
         await assert.rejects(() => heartbeatRunnerWork(lease.id, officeRow.id, lease.leaseId!), /expired/);
         const completion = { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
@@ -265,7 +320,9 @@ describe("CI access and quality gates", () => {
         await assert.rejects(() => completeRunnerWork(lease.id, officeRow.id, completion), /expired/);
         await assert.rejects(() => completeRunnerWork(lease.id, officeRow.id, { ...completion, leaseId: replacement.leaseId!, results: [] }), /each Spec/);
         await releaseRunnerWork(replacement.id, officeRow.id, replacement.leaseId!);
-        assert.equal(await runnersRepository.claim(officeRow, 60_000), null, "the third abandoned attempt cannot be leased again");
+        const gracefullyReleased = (await runnersRepository.claim(officeRow, 60_000))!;
+        assert.equal(gracefullyReleased.attempts, 1, "graceful releases do not consume attempts");
+        await releaseRunnerWork(gracefullyReleased.id, officeRow.id, gracefullyReleased.leaseId!);
         await runnersRepository.cancelBatch(payload.batchId);
         const revokeBatch = crypto.randomUUID();
         await enqueueRunnerBatch(revokeBatch, project.id, "office", { ...payload, batchId: revokeBatch });

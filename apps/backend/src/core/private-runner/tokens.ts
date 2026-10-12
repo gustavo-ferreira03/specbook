@@ -7,9 +7,10 @@ import { HTTPException } from "hono/http-exception";
 
 export const runnerTokenSchema = z.object({
     name: z.string().trim().min(1).max(80),
+    purpose: z.enum(["runner", "tunnel"]).default("runner"),
     group: z.string().trim().max(80).nullable().optional().transform((value) => value || null),
     projectIds: z.array(z.string().uuid()).min(1).max(1000).refine((ids) => new Set(ids).size === ids.length, "Select each project once").nullable().optional().default(null),
-}).strict();
+}).strict().refine((input) => input.purpose !== "tunnel" || Boolean(input.group), { path: ["group"], message: "Tunnel tokens require a runner group" });
 
 export function runnerIsOutdated(version: string | null, protocolVersion: number | null): boolean {
     if (!version) return false;
@@ -23,19 +24,20 @@ export function runnerIsOutdated(version: string | null, protocolVersion: number
 }
 
 export function publicRunner(runner: RunnerToken) {
-    return { id: runner.id, name: runner.name, group: runner.group, createdAt: runner.createdAt, lastSeenAt: runner.lastSeenAt,
+    return { id: runner.id, name: runner.name, purpose: runner.purpose, group: runner.group, createdAt: runner.createdAt, lastSeenAt: runner.lastSeenAt,
         cliVersion: runner.cliVersion, protocolVersion: runner.protocolVersion, concurrency: runner.concurrency, projectIds: runner.projectIds,
         outdated: runnerIsOutdated(runner.cliVersion, runner.protocolVersion),
         online: runner.lastSeenAt !== null && Date.now() - Date.parse(runner.lastSeenAt) < 90_000 };
 }
 
-export async function issueRunnerToken(name: string, group: string | null, projectIds: string[] | null = null) {
+export async function issueRunnerToken(name: string, group: string | null, projectIds: string[] | null = null, purpose: RunnerToken["purpose"] = "runner") {
+    if (purpose === "tunnel" && !group) throw new HTTPException(400, { message: "Tunnel tokens require a runner group." });
     if (projectIds) {
         const available = new Set((await projectsRepository.listProjects()).map((project) => project.id));
         if (projectIds.some((id) => !available.has(id))) throw new HTTPException(400, { message: "A selected project no longer exists." });
     }
     const issued = issuePrefixedToken("sb_runner_");
-    const runner = await runnersRepository.create(name, group, issued.hash, projectIds);
+    const runner = await runnersRepository.create(name, group, issued.hash, projectIds, purpose);
     return { token: issued.token, runner: publicRunner(runner) };
 }
 

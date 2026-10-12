@@ -18,6 +18,7 @@ declare module "hono" {
 async function verifyRunner(c: Context): Promise<true> {
     const runner = await authenticateRunnerToken(c.req.header("authorization"));
     if (!runner) throw new HTTPException(401, { message: "Provide a valid runner token. Create one in Settings → Runners." });
+    if (runner.purpose !== "runner") throw new HTTPException(403, { message: "Use a token created for runner execution to claim or complete Specs." });
     c.set("runner", runner);
     return true;
 }
@@ -70,8 +71,8 @@ export function createRunnersRouter(): Hono {
     router.post("/runners", access("admin"), zValidator("json", runnerTokenSchema), async (c) => {
         requireSession(c);
         const input = c.req.valid("json");
-        const created = await issueRunnerToken(input.name, input.group, input.projectIds);
-        await recordAudit("runner.token.created", { id: created.runner.id, name: created.runner.name, group: created.runner.group });
+        const created = await issueRunnerToken(input.name, input.group, input.projectIds, input.purpose);
+        await recordAudit("runner.token.created", { id: created.runner.id, name: created.runner.name, purpose: created.runner.purpose, group: created.runner.group });
         c.header("Cache-Control", "no-store");
         return c.json(created, 201);
     });

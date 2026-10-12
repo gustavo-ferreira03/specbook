@@ -107,6 +107,10 @@ describe("run evidence", () => {
         const fallback = await prepareReportSection({ directory, item: section.item, humanSpec: { preconditions: ["An account exists"], steps: ["Open the page"], expectedResult: "The page is shown", postconditions: [] } });
         assert.equal(fallback.steps[0].kind, "step");
         assert.equal(fallback.steps[0].ordinal, 1);
+        await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [1, 2, 3, 4].map((number) => ({ number, label: "Check state", file: `evidence/step-0${number}.png` })), video: null, failedStep: null }));
+        const duplicates = await prepareReportSection({ directory, item: { ...section.item, status: "passed" },
+            humanSpec: { preconditions: ["Check state"], steps: ["Check state"], expectedResult: "Check state", postconditions: ["Check state"] } });
+        assert.deepEqual(duplicates.steps.map(({ kind, ordinal }) => [kind, ordinal]), [["precondition", null], ["step", 1], ["expected", null], ["postcondition", null]]);
     });
 
     test("validates stored manifests and supports older step entries", async () => {

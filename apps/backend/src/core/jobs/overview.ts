@@ -1,3 +1,4 @@
+import { runnerQueueSnapshot } from "../private-runner/visibility";
 import type { RunEnvironment } from "../../infra/db/schema";
 import { runsRepository, type Run } from "../../infra/repositories/runs";
 import { schedulesRepository } from "../../infra/repositories/schedules";
@@ -8,7 +9,7 @@ import { loadProjectState, projectPresentation, type ActivityStory, type Present
 import { matchesCurrentSpec } from "./current-run";
 import { finishedAt, oldestFirst } from "./shared";
 
-export type SpecHealthStatus = "passing" | "failing" | "flaky" | "awaiting_deploy" | "not_checked" | "running" | "repairing" | "invalid";
+export type SpecHealthStatus = "passing" | "failing" | "flaky" | "awaiting_deploy" | "not_checked" | "queued" | "running" | "repairing" | "invalid";
 export interface SpecHealth {
     status: SpecHealthStatus;
     label: string;
@@ -58,18 +59,20 @@ export async function projectOverview(projectId: string) {
         return [spec.id, latest && await matchesCurrentSpec(latest, spec) ? latest : undefined] as const;
     })));
     const specHealth: Record<string, SpecHealth> = {};
-    const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, passing: 0, failing: 0, flaky: 0, awaiting_deploy: 0, not_checked: 0, running: 0, repairing: 0, invalid: 0 };
+    const healthCounts: Record<SpecHealthStatus | "total", number> = { total: specs.length, passing: 0, failing: 0, flaky: 0, awaiting_deploy: 0, not_checked: 0, queued: 0, running: 0, repairing: 0, invalid: 0 };
+    const runningPrivate = [...currentRuns.values()].some((run) => run?.status === "running" && ["runner", "tunnel"].includes(run.environment?.executor ?? "server"));
+    const runQueues = runningPrivate ? (await runnerQueueSnapshot()).runQueues : new Map();
     const repairing = new Set(jobs.filter((job) => job.kind === "regenerate" && job.specId && ["queued", "running"].includes(job.status)).map((job) => job.specId));
     for (const spec of specs) {
         const current = currentRuns.get(spec.id);
         const waiting = current?.awaitingDeploy && current.status !== "passed" && await specEnvironmentsRepository.awaiting(spec, current.environment?.id);
         const status: SpecHealthStatus = spec.status === "invalid" ? repairing.has(spec.id) ? "repairing" : "invalid"
-            : current?.status === "running" ? "running"
+            : current?.status === "running" ? runQueues.has(current.id) ? "queued" : "running"
             : waiting || spec.status === "awaiting_deploy" && (!current || current.status === "passed") ? "awaiting_deploy"
             : !current || current.awaitingDeploy && current.status !== "passed" ? "not_checked"
             : current.flaky ? "flaky" : current.status === "passed" ? "passing" : "failing";
         const label = status === "invalid" ? "Needs repair" : status === "repairing" ? "Repairing"
-            : status === "running" ? "Running" : status === "awaiting_deploy" ? "Waiting for deploy"
+            : status === "queued" ? "Waiting to run" : status === "running" ? "Running" : status === "awaiting_deploy" ? "Waiting for deploy"
             : status === "not_checked" ? "Not run since the last change" : status === "flaky" ? "Passed on retry"
             : status === "passing" ? "Passing" : "Latest run failed";
         specHealth[spec.id] = { status, label, runId: current?.id, lastCheckedAt: current && current.status !== "running" ? finishedAt(current) : null };
@@ -169,7 +172,7 @@ export async function projectOverview(projectId: string) {
     const verdict = [specs.length ? `${healthCounts.passing} of ${countLabel(specs.length, "Spec")} passing` : "No Specs yet",
         healthCounts.failing ? `${healthCounts.failing} failing` : "", healthCounts.flaky ? `${healthCounts.flaky} flaky` : "",
         healthCounts.repairing ? `${healthCounts.repairing} repairing` : "", healthCounts.invalid ? `${healthCounts.invalid} need repairing` : "",
-        healthCounts.not_checked ? `${healthCounts.not_checked} not run yet` : "", healthCounts.awaiting_deploy ? `${healthCounts.awaiting_deploy} waiting for deploy` : "", healthCounts.running ? `${healthCounts.running} running` : ""].filter(Boolean).join(" · ");
+        healthCounts.not_checked ? `${healthCounts.not_checked} not run yet` : "", healthCounts.awaiting_deploy ? `${healthCounts.awaiting_deploy} waiting for deploy` : "", healthCounts.queued ? `${healthCounts.queued} waiting to run` : "", healthCounts.running ? `${healthCounts.running} running` : ""].filter(Boolean).join(" · ");
     const activeCount = recentRuns.filter((run) => run.status === "working").length + jobs.filter((job) => job.status === "running").length;
     const nextCheckAt = agentPaused ? null : schedule?.nextRunAt ?? null;
     const nextCheck = agentPaused ? "Resume Specbook to continue."

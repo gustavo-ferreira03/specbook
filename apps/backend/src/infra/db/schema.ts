@@ -54,6 +54,7 @@ export const environments = sqliteTable("environments", {
 
 export const runnerTokens = sqliteTable("runner_tokens", {
     id: text("id").primaryKey(),
+    purpose: text("purpose").$type<"runner" | "tunnel">().notNull().default("runner"),
     name: text("name").notNull(),
     group: text("group"),
     tokenHash: text("token_hash").notNull().unique(),
@@ -78,6 +79,9 @@ export const runnerJobs = sqliteTable("runner_jobs", {
     leaseExpiresAt: text("lease_expires_at"),
     attempts: integer("attempts").notNull().default(0),
     lastFailure: text("last_failure"),
+    queueExpiresAt: text("queue_expires_at"),
+    claimedAt: text("claimed_at"),
+    completionStartedAt: text("completion_started_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (table) => [index("runner_jobs_status_group").on(table.status, table.group), index("runner_jobs_lease_expiry").on(table.leaseExpiresAt)]);

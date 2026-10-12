@@ -104,7 +104,7 @@ export function createRunsRouter(): Hono {
             const { specIds, label, environment } = c.req.valid("json");
             const batch = await startSpecBatch(c.req.param("id"), specIds, label, { environment });
             const { batchQueues, runQueues } = await runnerQueueSnapshot();
-            return c.json({ batch: { ...batch, queue: batchQueues.get(batch.id) ?? runQueues.get(batch.specs[0].runId) ?? null } }, 202);
+            return c.json({ batch: { ...batch, queue: batchQueues.get(batch.id) ?? runQueues.get(batch.specs[0].runId) ?? null, specs: batch.specs.map((item) => ({ ...item, queue: item.status === "running" ? runQueues.get(item.runId) ?? null : null })) } }, 202);
         } catch (error) {
             throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
         }

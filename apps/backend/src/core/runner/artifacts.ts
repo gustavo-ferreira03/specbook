@@ -6,7 +6,7 @@ import { runsRepository } from "../../infra/repositories/runs";
 import { runsDir } from "../paths";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { readEvidenceManifest, type EvidenceManifest } from "@specbook/runtime/evidence";
-import { sameStepTitle } from "@specbook/runtime/validate";
+import { analyzeSpecSource, sameStepTitle } from "@specbook/runtime/validate";
 export { isInside } from "@specbook/runtime/safe-fs";
 
 
@@ -52,10 +52,14 @@ export async function readRunEvidence(runId: string) {
         : null;
     const manifest: EvidenceManifest = directory ? await readEvidenceManifest(directory) : { steps: [], video: null, failedStep: null };
     const plan = humanSpec ? executionPlan(humanSpec) : [];
+    const source = directory && available.has("spec.ts") ? await fs.readFile(path.join(directory, "spec.ts"), "utf8").catch(() => null) : null;
+    const analysis = source ? analyzeSpecSource(source) : null;
+    const stepCount = analysis?.ok ? analysis.analysis.steps.length : manifest.steps.length;
+    const currentOrder = stepCount === plan.length;
     const steps = manifest.steps.flatMap((item) => {
         if (!available.has(item.file)) return [];
         const number = item.number;
-        const planned = plan.find((entry) => sameStepTitle(entry.title, item.label));
+        const planned = currentOrder ? plan[item.number - 1] : plan.find((entry) => sameStepTitle(entry.title, item.label));
         return [{
             number,
             kind: planned?.kind ?? "step",

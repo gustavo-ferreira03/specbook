@@ -216,11 +216,11 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
     }
     assert.ok(job);
     assert.equal(areSpecsLocked([spec.id]), false, "waiting for an offline runner must allow publication and edits");
-    await db.update(runnerJobs).set({ createdAt: new Date(Date.now() - job.payload.timeoutMs - 61_000).toISOString() }).where(eq(runnerJobs.id, job.id));
+    await db.update(runnerJobs).set({ queueExpiresAt: new Date(0).toISOString() }).where(eq(runnerJobs.id, job.id));
     await maintainRunnerQueue();
     const expired = await waiting;
     assert.equal(expired.status, "error");
-    assert.match(expired.failReason!, /Runner work expired.*No runner completed/);
+    assert.match(expired.failReason!, /Runner work expired.*waiting.*for a runner/);
     await runsRepository.acknowledgeAutomation(expired.id);
     assert.match((await getRunBatch(job.batchId))!.failReason!, /Runner work expired/);
     const next = await startSpecBatch(project.id, [spec.id], "Abandoned leases");
@@ -243,6 +243,152 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
     assert.match((await getRunBatch(refused.id))!.failReason!, /outside the runner allowlist/);
     assert.equal(await runnersRepository.claim(token, 60_000), null, "refused work must not be claimed repeatedly");
     await runsRepository.acknowledgeAutomation(refused.specs[0].runId);
+});
+
+test("broken runner finalization cannot poison claims, queue notices or metrics", async () => {
+    const { eq } = await import("drizzle-orm");
+    const { db } = await import("../../src/infra/db/client");
+    const { runnerJobs } = await import("../../src/infra/db/schema");
+    const { runnersRepository } = await import("../../src/infra/repositories/runners");
+    const { maintainRunnerQueue, claimRunnerWork, releaseRunnerWork } = await import("../../src/core/private-runner/queue");
+    const { runnerQueueSnapshot } = await import("../../src/core/private-runner/visibility");
+    const { queueMetrics } = await import("../../src/core/private-runner/metrics");
+    const { startSpecBatch, getRunBatch, getRunBatchDirectory } = await import("../../src/core/runner/batch");
+    const { runsRepository } = await import("../../src/infra/repositories/runs");
+    const { runsDir } = await import("../../src/core/paths");
+    const { issueRunnerToken, authenticateRunnerToken } = await import("../../src/core/private-runner/tokens");
+    const project = await projectsRepository.createProject("Broken runner finish", "http://private-app.invalid:4601");
+    await repoGit.ensureProjectRepo(project.id, { create: true });
+    const environment = (await environmentsRepository.list(project.id))[0]!;
+    await environmentsRepository.update(environment, { ...environment, executor: "runner", runnerGroup: "broken" });
+    const feature = await writer.createFeatureInRepo(project.id, null, "Private", "");
+    const makeSpec = async (title: string) => (await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title, description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC.replace("Open the application", title) })).spec;
+    for (const corruption of ["missing batch", "invalid batch", "missing Spec", "finish error"]) {
+        const spec = await makeSpec(corruption);
+        const batch = await startSpecBatch(project.id, [spec.id], corruption);
+        const job = (await runnersRepository.pending()).find((row) => row.batchId === batch.id)!;
+        if (corruption === "missing Spec") {
+            assert.equal((await runsRepository.getRun(batch.specs[0].runId))!.awaitingDeploy, false);
+            const published = await writer.readProjectSpecFiles(project.id);
+            const current = published.specs.find((entry) => entry.path === spec.path)!;
+            await writer.publishSpecsInRepo(project.id, environment.id, [{ path: spec.path, baseRevision: current.revision, files: current.files, feature: published.features[0] }]);
+        }
+        const batchFile = path.join(getRunBatchDirectory(batch.id), "batch.json");
+        if (corruption === "missing batch") await fs.rm(batchFile);
+        if (corruption === "invalid batch") await fs.writeFile(batchFile, "{invalid");
+        if (corruption === "missing Spec") await fs.rm(path.join(runsDir, batch.specs[0].runId, "spec.ts"));
+        const original = runsRepository.finishRun;
+        if (corruption === "finish error") runsRepository.finishRun = async () => { throw new Error("Simulated finish failure"); };
+        await db.update(runnerJobs).set({ queueExpiresAt: new Date(0).toISOString() }).where(eq(runnerJobs.id, job.id));
+        try { await maintainRunnerQueue(); } finally { runsRepository.finishRun = original; }
+        const retired = (await runnersRepository.job(job.id))!;
+        assert.equal(retired.status, "completed", corruption);
+        assert.match(retired.lastFailure!, /could not be finalized/, corruption);
+        assert.equal((await getRunBatch(batch.id))!.status, "error", corruption);
+        if (corruption === "missing Spec") {
+            const recovered = (await runsRepository.getRun(batch.specs[0].runId))!;
+            assert.equal(recovered.awaitingDeploy, true, "fallback must retain deployment waiting created after this run started");
+            assert.equal(recovered.automationPending, false);
+            assert.equal((await getRunBatch(batch.id))!.specs[0].awaitingDeploy, true);
+            const { projectOverview } = await import("../../src/core/jobs/overview");
+            assert.equal((await projectOverview(project.id)).specHealth[spec.id].status, "awaiting_deploy");
+        }
+        await runsRepository.acknowledgeAutomation(batch.specs[0].runId);
+        if (corruption === "finish error") await runsRepository.finishRun(batch.specs[0].runId, "error", 0, "Verification finished");
+    }
+    const healthy = await makeSpec("Healthy work");
+    const batch = await startSpecBatch(project.id, [healthy.id], "Healthy work");
+    const queue = await runnerQueueSnapshot();
+    assert.equal(queue.batchQueues.get(batch.id)!.queued, 1);
+    assert.equal(queueMetrics(queue.queues).groups.find((entry) => entry.group === "broken")!.queued, 1);
+    const issued = await issueRunnerToken("Healthy runner", "broken");
+    const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    const lease = await claimRunnerWork(token, new AbortController().signal, token.id);
+    assert.equal(lease!.batchId, batch.id);
+    await releaseRunnerWork(lease!.id, token.id, lease!.leaseId!, "Verification finished");
+    await runsRepository.acknowledgeAutomation(batch.specs[0].runId);
+});
+
+test("runner execution gets its full budget after waiting and stale completion recovers capacity", async () => {
+    const { eq } = await import("drizzle-orm");
+    const { db } = await import("../../src/infra/db/client");
+    const { runnerJobs } = await import("../../src/infra/db/schema");
+    const { runnersRepository, runnerJobDeadline, RUNNER_EXECUTION_GRACE_MS } = await import("../../src/infra/repositories/runners");
+    const { recoverRunnerCompletions, releaseRunnerWork, heartbeatRunnerWork } = await import("../../src/core/private-runner/queue");
+    const { startSpecBatch } = await import("../../src/core/runner/batch");
+    const { runsRepository } = await import("../../src/infra/repositories/runs");
+    const { issueRunnerToken, authenticateRunnerToken } = await import("../../src/core/private-runner/tokens");
+    const project = await projectsRepository.createProject("Runner completion recovery", "http://private-app.invalid:4601");
+    await repoGit.ensureProjectRepo(project.id, { create: true });
+    const environment = (await environmentsRepository.list(project.id))[0]!;
+    await environmentsRepository.update(environment, { ...environment, executor: "runner", runnerGroup: "stale" });
+    const feature = await writer.createFeatureInRepo(project.id, null, "Private", "");
+    const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Open the application", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+    const batch = await startSpecBatch(project.id, [spec.id], "Recover completion");
+    const job = (await runnersRepository.pending()).find((row) => row.batchId === batch.id)!;
+    await db.update(runnerJobs).set({ createdAt: new Date(Date.now() - job.payload.timeoutMs - 61_000).toISOString(), queueExpiresAt: new Date(Date.now() + 200).toISOString() }).where(eq(runnerJobs.id, job.id));
+    const issued = await issueRunnerToken("Recovery runner", "stale");
+    const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    let lease = (await runnersRepository.claim(token, 60_000))!;
+    assert.equal(lease.id, job.id, "queued time must not consume execution time");
+    assert.ok(runnerJobDeadline(lease) >= Date.now() + lease.payload.timeoutMs + RUNNER_EXECUTION_GRACE_MS - 1000);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.ok(await heartbeatRunnerWork(lease.id, token.id, lease.leaseId!), "execution remains valid after its queue TTL elapses");
+    await db.update(runnerJobs).set({ queueExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString() }).where(eq(runnerJobs.id, lease.id));
+    for (let scaleDown = 0; scaleDown < 5; scaleDown++) {
+        await releaseRunnerWork(lease.id, token.id, lease.leaseId!);
+        lease = (await runnersRepository.claim(token, 60_000))!;
+        assert.equal(lease.attempts, 0);
+    }
+    await runnersRepository.reserveCompletion(lease.id);
+    await db.update(runnerJobs).set({ completionStartedAt: new Date(0).toISOString() }).where(eq(runnerJobs.id, lease.id));
+    await runnersRepository.reclaim();
+    lease = (await runnersRepository.claim(token, 60_000))!;
+    assert.equal(lease.attempts, 1);
+    await runnersRepository.reserveCompletion(lease.id);
+    await recoverRunnerCompletions();
+    lease = (await runnersRepository.claim(token, 60_000))!;
+    assert.equal(lease.attempts, 2, "startup recovers completing rows immediately");
+    await releaseRunnerWork(lease.id, token.id, lease.leaseId!, "Verification finished");
+    await runsRepository.acknowledgeAutomation(batch.specs[0].runId);
+});
+
+test("tunnel waits release Spec locks and expire with a clear reason", async () => {
+    const { areSpecsLocked } = await import("../../src/core/specs/lifecycle");
+    const { startSpecBatch, getRunBatch } = await import("../../src/core/runner/batch");
+    const { runsRepository } = await import("../../src/infra/repositories/runs");
+    const { tunnelQueueEntries } = await import("../../src/core/tunnel/registry");
+    const project = await projectsRepository.createProject("Tunnel wait deadline", "http://private-app.invalid:4601");
+    await repoGit.ensureProjectRepo(project.id, { create: true });
+    const environment = (await environmentsRepository.list(project.id))[0]!;
+    await environmentsRepository.update(environment, { ...environment, executor: "tunnel", runnerGroup: "offline-tunnel" });
+    const feature = await writer.createFeatureInRepo(project.id, null, "Private", "");
+    const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Open the application", description: "", humanSpec: HUMAN_SPEC, testSource: VALID_SPEC });
+    const previous = process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS;
+    process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS = "0.2";
+    try {
+        for (const single of [false, true]) {
+            const running = single ? executeSpec(spec.id) : startSpecBatch(project.id, [spec.id], "Offline tunnel");
+            for (let attempt = 0; attempt < 50 && !(await tunnelQueueEntries()).some((entry) => entry.projectId === project.id); attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+            assert.equal(areSpecsLocked([spec.id]), false);
+            assert.match((await tunnelQueueEntries()).find((entry) => entry.projectId === project.id)!.reason!, /No tunnel connected/);
+            if (single) {
+                const result = await running;
+                assert.equal(result.status, "error");
+                assert.match(result.failReason!, /Tunnel work expired.*No tunnel connected/);
+            } else {
+                const batch = await running;
+                let complete = await getRunBatch(batch.id);
+                for (let attempt = 0; attempt < 100 && complete?.status === "running"; attempt++) { await new Promise((resolve) => setTimeout(resolve, 10)); complete = await getRunBatch(batch.id); }
+                assert.equal(complete!.status, "error");
+                assert.match(complete!.failReason!, /Tunnel work expired.*No tunnel connected/);
+            }
+            const run = (await runsRepository.listRuns(spec.id))[0];
+            await runsRepository.acknowledgeAutomation(run.id);
+        }
+    } finally { if (previous === undefined) delete process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS; else process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS = previous; }
 });
 
 test("runner completion keeps heartbeats available and preserves deployment state through revocation and expiry", async () => {
@@ -286,7 +432,7 @@ test("runner completion keeps heartbeats available and preserves deployment stat
         assert.equal((await runnersRepository.job(lease.id))!.status, "completing");
         const heartbeat = await Promise.race([heartbeatRunnerWork(lease.id, token.id, lease.leaseId!), new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000))]);
         assert.ok(heartbeat, "file moves must not hold the global queue lock");
-        await db.update(runnerJobs).set({ createdAt: new Date(0).toISOString() }).where(eq(runnerJobs.id, lease.id));
+        await db.update(runnerJobs).set({ claimedAt: new Date(0).toISOString(), completionStartedAt: new Date(0).toISOString() }).where(eq(runnerJobs.id, lease.id));
         await revokeRunnerToken(token.id);
         await maintainRunnerQueue();
         assert.equal((await runnersRepository.job(lease.id))!.status, "completing", "an accepted completion must finish once even if its token is revoked or its deadline elapses during storage");
@@ -321,6 +467,12 @@ test("historical evidence maps step kinds by title and falls back for unknown la
     assert.equal(response.status, 200);
     const evidence = await response.json();
     assert.deepEqual(evidence.steps.map((step: { kind: string; ordinal: number | null }) => [step.kind, step.ordinal]), [["step", 1], ["expected", null], ["step", 3]]);
+    await fs.writeFile(path.join(directory, "spec.yml"), serializeSpecYaml({ title: "Duplicate titles", description: "", humanSpec: { preconditions: ["Check state"], steps: ["Check state"], expectedResult: "Check state", postconditions: ["Check state"] } }));
+    await fs.writeFile(path.join(directory, "spec.ts"), 'import { test } from "specbook"; test("Duplicate titles", async ({ step, page }) => { await step("Check state", async () => { await page.goto("/"); }); await step("Check state", async () => {}); await step("Check state", async () => {}); await step("Check state", async () => {}); });');
+    await fs.writeFile(path.join(directory, "evidence/step-04.png"), "png");
+    await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [1, 2, 3, 4].map((number) => ({ number, label: "Check state", file: `evidence/step-0${number}.png` })), video: null, failedStep: null }));
+    const duplicates = await (await app.request(`/runs/${run.id}/evidence`)).json();
+    assert.deepEqual(duplicates.steps.map((step: { kind: string; ordinal: number | null }) => [step.kind, step.ordinal]), [["precondition", null], ["step", 1], ["expected", null], ["postcondition", null]]);
 });
 
 test("an offline runner retry leaves other projects' failure processing available", async () => {

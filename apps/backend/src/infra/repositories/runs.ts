@@ -123,13 +123,10 @@ class RunsRepository {
     }
 
     async markInterruptedRuns(): Promise<void> {
-        const { pendingRunnerBatchIds } = await import("../../core/private-runner/queue");
-        const { getRunBatch, pendingTunnelBatchRunIds } = await import("../../core/runner/batch");
+        const { pendingRunnerRunIds } = await import("../../core/private-runner/queue");
+        const { pendingTunnelBatchRunIds } = await import("../../core/runner/batch");
         const pending = new Set<string>(await pendingTunnelBatchRunIds());
-        for (const id of await pendingRunnerBatchIds()) {
-            const batch = await getRunBatch(id);
-            for (const item of batch?.specs ?? []) pending.add(item.runId);
-        }
+        for (const id of await pendingRunnerRunIds()) pending.add(id);
         const interrupted = (await db.select({ id: runs.id }).from(runs).where(eq(runs.status, "running"))).filter((row) => !pending.has(row.id));
         if (!interrupted.length) return;
         await db
