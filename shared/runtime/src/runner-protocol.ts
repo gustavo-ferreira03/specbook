@@ -2,6 +2,9 @@ import { z } from "zod";
 import { errorCodeSchema } from "./errors.ts";
 import { httpTarget } from "./network/targets.ts";
 
+export const RUNNER_PROTOCOL_VERSION = 1;
+export const RUNNER_CLI_VERSION = "0.1.0";
+
 const id = z.string().uuid();
 const origin = z.string().max(2000).refine((value) => {
     try { return httpTarget(value).origin === value; } catch { return false; }
@@ -43,7 +46,12 @@ export const runnerQueueEntrySchema = z.object({
 }).strict();
 export type RunnerQueueEntry = z.infer<typeof runnerQueueEntrySchema>;
 
-export const runnerClaimRequestSchema = z.object({ version: z.string().min(1).max(100) }).strict();
+const runnerVersionFields = {
+    version: z.string().regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/).max(100),
+    protocolVersion: z.number().int().nonnegative(),
+    concurrency: z.number().int().min(1).max(32),
+};
+export const runnerClaimRequestSchema = z.object(runnerVersionFields).strict();
 export const runnerClaimResponseSchema = z.object({
     runner: z.object({ id, name: z.string(), group: z.string().nullable() }).strict(),
     lease: z.object({
@@ -56,9 +64,9 @@ export const runnerClaimResponseSchema = z.object({
 }).strict();
 export type RunnerClaim = z.infer<typeof runnerClaimResponseSchema>;
 
-export const runnerHeartbeatSchema = z.object({ leaseId: id }).strict();
+export const runnerHeartbeatSchema = z.object({ leaseId: id, ...runnerVersionFields }).strict();
 export const runnerHeartbeatResponseSchema = z.object({ leaseExpiresAt: z.string().datetime() }).strict();
-export const runnerReleaseSchema = runnerHeartbeatSchema;
+export const runnerReleaseSchema = z.object({ leaseId: id }).strict();
 
 export const runnerCompleteRequestSchema = z.object({
     leaseId: id,

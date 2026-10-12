@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
+import { remoteFetch } from "./network";
 
 export function scrubCi(value: string): string {
     for (const token of [process.env.SPECBOOK_TOKEN, process.env.GITHUB_TOKEN, process.env.SPECBOOK_GITLAB_TOKEN, process.env.CI_JOB_TOKEN].filter((value): value is string => !!value).sort((a, b) => b.length - a.length)) {
@@ -72,7 +73,7 @@ export async function publishCiComment(context: CiCommentContext | null, api: st
     const deadline = Date.now() + 60_000;
     async function request(route: string, method = "GET", body?: { body: string }): Promise<unknown> {
         if (Date.now() >= deadline) throw new Error("Timed out publishing the Specbook comment");
-        const response = await fetch(`${context!.api}${route}`, { method, headers: { ...context!.headers, "Content-Type": "application/json" },
+        const response = await remoteFetch(`${context!.api}${route}`, { method, headers: { ...context!.headers, "Content-Type": "application/json" },
             ...(body ? { body: JSON.stringify(body) } : {}), redirect: "error", signal: AbortSignal.timeout(Math.min(30_000, Math.max(1, deadline - Date.now()))) });
         if (!response.ok) throw new Error(`${context!.provider === "github" ? "GitHub" : "GitLab"} comment API returned HTTP ${response.status}; reports are saved locally`);
         return response.status === 204 ? null : response.json();

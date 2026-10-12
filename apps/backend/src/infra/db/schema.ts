@@ -59,6 +59,10 @@ export const runnerTokens = sqliteTable("runner_tokens", {
     tokenHash: text("token_hash").notNull().unique(),
     createdAt: text("created_at").notNull(),
     lastSeenAt: text("last_seen_at"),
+    cliVersion: text("cli_version"),
+    protocolVersion: integer("protocol_version"),
+    concurrency: integer("concurrency").notNull().default(1),
+    projectIds: text("project_ids", { mode: "json" }).$type<string[] | null>(),
 });
 
 export const runnerJobs = sqliteTable("runner_jobs", {

@@ -267,6 +267,13 @@
       "when": 1791796121221,
       "tag": "0037_private_network_runners",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1791799650151,
+      "tag": "0038_runner_lifecycle",
+      "breakpoints": true
     }
   ]
 }

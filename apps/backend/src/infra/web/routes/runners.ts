@@ -1,10 +1,10 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { runnerClaimRequestSchema, runnerCompleteRequestSchema, runnerHeartbeatSchema, runnerReleaseSchema } from "@specbook/runtime/runner-protocol";
+import { RUNNER_PROTOCOL_VERSION, runnerClaimRequestSchema, runnerCompleteRequestSchema, runnerHeartbeatSchema, runnerReleaseSchema } from "@specbook/runtime/runner-protocol";
 import { recordAudit } from "../../../core/accounts/audit";
 import { authenticateRunnerToken, issueRunnerToken, publicRunner, runnerTokenSchema } from "../../../core/private-runner/tokens";
-import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunnerWork, revokeRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
+import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunnerWork, revokeRunnerToken, rotateRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
 import { runnersRepository, type RunnerToken } from "../../repositories/runners";
 import { access } from "../access";
 import { runnerQueueSnapshot } from "../../../core/private-runner/visibility";
@@ -36,13 +36,20 @@ function requireSession(c: Context): void {
     if (c.get("authentication") !== "session") throw new HTTPException(403, { message: "Sign in to the web app to manage runner tokens." });
 }
 
+const upgradeMessage = `Runner protocol is incompatible with this server (requires ${RUNNER_PROTOCOL_VERSION}). Upgrade the CLI from this server's /cli/specbook.tgz and restart the runner.`;
+
+function requireProtocol(version: number): void {
+    if (version !== RUNNER_PROTOCOL_VERSION) throw new HTTPException(426, { message: upgradeMessage });
+}
+
 export function createRunnersRouter(): Hono {
     const router = new Hono();
     router.get("/runner/metrics", access("runner-token", verifyMetrics), zValidator("query", runnerMetricsQuerySchema), async (c) => {
         const { group, format } = c.req.valid("query");
         const runner = c.get("runner");
         const queues = (await runnerQueueSnapshot()).queues.filter((entry) =>
-            (!runner || !entry.group || entry.group === runner.group) && (group === undefined || (entry.group ?? "") === group));
+            (!runner || ((!entry.group || entry.group === runner.group) && (!runner.projectIds || runner.projectIds.includes(entry.projectId))))
+            && (group === undefined || (entry.group ?? "") === group));
         const metrics = queueMetrics(queues);
         c.header("Cache-Control", "no-store");
         if (format === "prometheus") return c.body(prometheusQueueMetrics(metrics), 200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" });
@@ -56,10 +63,17 @@ export function createRunnersRouter(): Hono {
     router.post("/runners", access("admin"), zValidator("json", runnerTokenSchema), async (c) => {
         requireSession(c);
         const input = c.req.valid("json");
-        const created = await issueRunnerToken(input.name, input.group);
+        const created = await issueRunnerToken(input.name, input.group, input.projectIds);
         await recordAudit("runner.token.created", { id: created.runner.id, name: created.runner.name, group: created.runner.group });
         c.header("Cache-Control", "no-store");
         return c.json(created, 201);
+    });
+    router.post("/runners/:id/rotate", access("admin"), async (c) => {
+        requireSession(c);
+        const created = await rotateRunnerToken(c.req.param("id"));
+        await recordAudit("runner.token.rotated", { id: created.runner.id });
+        c.header("Cache-Control", "no-store");
+        return c.json(created);
     });
     router.delete("/runners/:id", access("admin"), async (c) => {
         requireSession(c);
@@ -67,8 +81,13 @@ export function createRunnersRouter(): Hono {
         await recordAudit("runner.token.revoked", { id: c.req.param("id") });
         return c.json({ ok: true });
     });
-    router.post("/runner/claim", access("runner-token", verifyRunner), zValidator("json", runnerClaimRequestSchema), async (c) => {
+    router.post("/runner/claim", access("runner-token", verifyRunner), zValidator("json", runnerClaimRequestSchema, (result) => {
+        if (!result.success && result.error.issues.some((issue) => issue.path[0] === "protocolVersion")) throw new HTTPException(426, { message: upgradeMessage });
+    }), async (c) => {
         const runner = c.get("runner");
+        const input = c.req.valid("json");
+        requireProtocol(input.protocolVersion);
+        await runnersRepository.touch(runner.id, input);
         const job = await claimRunnerWork(runner, c.req.raw.signal);
         c.header("Cache-Control", "no-store");
         return c.json({ runner: { id: runner.id, name: runner.name, group: runner.group }, lease: job ? {
@@ -76,6 +95,9 @@ export function createRunnersRouter(): Hono {
         } : null });
     });
     router.post("/runner/jobs/:id/heartbeat", access("runner-token", verifyRunner), zValidator("json", runnerHeartbeatSchema), async (c) => {
+        const input = c.req.valid("json");
+        requireProtocol(input.protocolVersion);
+        await runnersRepository.touch(c.get("runner").id, input);
         const leaseExpiresAt = await heartbeatRunnerWork(c.req.param("id"), c.get("runner").id, c.req.valid("json").leaseId);
         return c.json({ leaseExpiresAt });
     });

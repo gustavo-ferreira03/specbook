@@ -6,6 +6,7 @@ import { z } from "zod";
 import { configHome, containsSecret } from "./credentials";
 import { loadConfig, listSpecs, safeWorkspacePath, type LocalConfig } from "./workspace";
 import { runLocal, type LocalRun } from "./run";
+import { remoteFetch, redactProxyCredentials } from "./network";
 
 const serverSchema = z.object({ url: z.string().url(), token: z.string().min(1) }).strict();
 const serversSchema = z.array(serverSchema);
@@ -36,7 +37,7 @@ for (const [index, arg] of process.argv.entries()) {
 export function rememberToken(token: string): void { tokens.add(token); }
 export function redactTokens(text: string): string {
     const values = [...tokens].flatMap((token) => [token, encodeURIComponent(token), JSON.stringify(token).slice(1, -1)]).sort((a, b) => b.length - a.length);
-    return values.reduce((safe, value) => value ? safe.split(value).join("[REDACTED]") : safe, text);
+    return redactProxyCredentials(values.reduce((safe, value) => value ? safe.split(value).join("[REDACTED]") : safe, text));
 }
 export async function scrubTokens(text: string): Promise<string> {
     for (const server of await readServers()) rememberToken(server.token);
@@ -89,7 +90,7 @@ export async function request(server: Server, route: string, options: { method?:
     const url = normalizeServerUrl(server.url);
     const send = async (base: string) => {
         try {
-            return await fetch(`${base}${route}`, {
+            return await remoteFetch(`${base}${route}`, {
                 method: options.method ?? "GET", headers: { Authorization: `Bearer ${server.token}`, "Content-Type": "application/json" },
                 ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
                 redirect: "error", signal: AbortSignal.timeout(options.timeoutMs ?? 35_000),

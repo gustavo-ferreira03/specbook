@@ -47,9 +47,10 @@ export async function runnerQueueSnapshot() {
         for (const spec of job.payload.specs) runQueues.set(spec.runId, entry);
     }
     for (const entry of entries.values()) {
-        const online = runners.filter((runner) => publicRunner(runner).online && (!entry.group || runner.group === entry.group));
+        const online = runners.filter((runner) => publicRunner(runner).online && (!entry.group || runner.group === entry.group)
+            && (!runner.projectIds || runner.projectIds.includes(entry.projectId)));
         entry.onlineRunners = online.length;
-        entry.busyRunners = online.filter((runner) => jobs.some((job) => job.status === "leased" && job.runnerId === runner.id)).length;
+        entry.busyRunners = online.filter((runner) => jobs.filter((job) => job.status === "leased" && job.runnerId === runner.id).length >= runner.concurrency).length;
         entry.oldestWaitMs = entry.oldestQueuedAt ? Math.max(0, Date.now() - Date.parse(entry.oldestQueuedAt)) : 0;
         if (entry.queued) {
             entry.reason = !online.length ? `No runner online${entry.group ? ` in group ${entry.group}` : ""}.`

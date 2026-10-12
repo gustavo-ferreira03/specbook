@@ -10,10 +10,12 @@ import { parseSpecYaml } from "@specbook/runtime/yaml";
 import {
     runnerArtifactPathSchema, runnerClaimResponseSchema, runnerCompleteRequestSchema,
     runnerHeartbeatResponseSchema, type RunnerClaim, type RunnerCompletion,
+    RUNNER_CLI_VERSION, RUNNER_PROTOCOL_VERSION,
 } from "@specbook/runtime/runner-protocol";
 import { listProfiles, resolveRunSecrets, scrub } from "./credentials";
 import { ensureChromium } from "./browsers";
 import { normalizeServerUrl, redactTokens, rememberToken, RemoteError } from "./remote";
+import { remoteFetch } from "./network";
 
 type Lease = NonNullable<RunnerClaim["lease"]>;
 export interface RunnerOptions { url: string; token: string; concurrency?: number; once?: boolean; drainAfter?: number; signal?: AbortSignal }
@@ -144,7 +146,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     const send = async (route: string, body: unknown, requestSignal: AbortSignal, fallback = false): Promise<Response> => {
         const fetchAt = async (url: string) => {
             try {
-                return await fetch(`${url}${route}`, { method: "POST", redirect: "error", headers: {
+                return await remoteFetch(`${url}${route}`, { method: "POST", redirect: "error", headers: {
                     Authorization: `Bearer ${options.token}`, "Content-Type": "application/json",
                 }, body: JSON.stringify(body), signal: AbortSignal.any([requestSignal, AbortSignal.timeout(35_000)]) });
             } catch {
@@ -159,8 +161,12 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             if (response.ok) api = `${api}/api`;
         }
         if (!response.ok) {
-            await response.body?.cancel();
-            const reason = response.status === 401 || response.status === 403 ? "Runner token is invalid or revoked" : response.status === 409 ? "Runner lease is no longer active" : `Specbook returned HTTP ${response.status}`;
+            let error: unknown;
+            try { error = await response.json(); } catch { /* Proxy errors may not be JSON. */ }
+            const parsed = z.object({ error: z.string().max(2000) }).safeParse(error);
+            const reason = response.status === 426 && parsed.success ? redactTokens(parsed.data.error)
+                : response.status === 401 || response.status === 403 ? "Runner token is invalid or revoked or cannot access this project"
+                : response.status === 409 ? "Runner lease is no longer active" : `Specbook returned HTTP ${response.status}`;
             throw new RemoteError(reason, response.status);
         }
         return response;
@@ -194,7 +200,9 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
                 await delay(Math.min(wait, Math.max(1, expires - Date.now())), heartbeatSignal);
                 if (heartbeatSignal.aborted) return;
                 try {
-                    const response = await jsonResponse(await send(`/runner/jobs/${lease.jobId}/heartbeat`, { leaseId: lease.leaseId }, heartbeatSignal), runnerHeartbeatResponseSchema);
+                    const response = await jsonResponse(await send(`/runner/jobs/${lease.jobId}/heartbeat`, {
+                        leaseId: lease.leaseId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
+                    }, heartbeatSignal), runnerHeartbeatResponseSchema);
                     expires = Date.parse(response.leaseExpiresAt);
                     wait = lease.heartbeatMs;
                 } catch (error) {
@@ -244,7 +252,10 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             claimingJobs++;
             let claimed: RunnerClaim;
             try {
-                claimed = await jsonResponse(await send("/runner/claim", { version: "0.1.0" }, signal, !connected), runnerClaimResponseSchema);
+                claimed = await jsonResponse(await send("/runner/claim", {
+                    version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
+                }, signal, !connected), runnerClaimResponseSchema);
+                if (claimed.lease) startedJobs++;
             } catch (error) {
                 if (signal.aborted) break;
                 await retry(error, signal);
@@ -259,7 +270,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
                     if (claimed.lease) await send(`/runner/jobs/${claimed.lease.jobId}/release`, { leaseId: claimed.lease.leaseId }, AbortSignal.timeout(5000)).then((response) => response.body?.cancel()).catch(() => undefined);
                     break;
                 }
-                if (claimed.lease) { startedJobs++; await work(claimed.lease); }
+                if (claimed.lease) await work(claimed.lease);
                 else await delay(100, signal);
             } catch (error) { if (signal.aborted) break; await retry(error, signal); }
         }

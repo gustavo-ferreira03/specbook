@@ -7,6 +7,8 @@ import { runnersRepository, type RunnerJob, type RunnerToken } from "../../infra
 import { runsDir } from "../paths";
 import { createKeyedLock } from "../operations/keyed-lock";
 import { logger } from "../../infra/logger";
+import { issuePrefixedToken } from "../accounts/tokens";
+import { publicRunner } from "./tokens";
 
 const withQueueLock = createKeyedLock().run;
 const events = new EventEmitter();
@@ -45,6 +47,7 @@ export async function claimRunnerWork(runner: RunnerToken, signal: AbortSignal):
         const job = await withQueueLock("queue", async () => {
             const current = await runnersRepository.get(runner.id);
             if (!current) throw new HTTPException(401, { message: "Runner token was revoked" });
+            if (current.tokenHash !== runner.tokenHash) throw new HTTPException(401, { message: "Runner token was rotated. Configure the replacement token." });
             return runnersRepository.claim(current, runnerLeaseMs());
         });
         if (job) return job;
@@ -142,6 +145,14 @@ export async function revokeRunnerToken(id: string): Promise<boolean> {
     const revoked = await withQueueLock("queue", () => runnersRepository.revoke(id));
     events.emit("work");
     return revoked;
+}
+
+export async function rotateRunnerToken(id: string) {
+    const issued = issuePrefixedToken("sb_runner_");
+    const runner = await withQueueLock("queue", () => runnersRepository.rotate(id, issued.hash));
+    if (!runner) throw new HTTPException(404, { message: "Runner not found" });
+    events.emit("work");
+    return { token: issued.token, runner: publicRunner(runner) };
 }
 
 export async function cancelRunnerBatch(batchId: string): Promise<boolean> {

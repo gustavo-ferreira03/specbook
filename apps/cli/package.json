@@ -36,11 +36,13 @@
     "drizzle-orm": "^0.45.2",
     "gray-matter": "^4.0.3",
     "hono": "^4.13.1",
+    "https-proxy-agent": "^7.0.6",
     "openid-client": "^6.8.8",
     "picocolors": "^1.1.1",
     "playwright-core": "1.62.0",
     "simple-git": "^4.0.2",
     "tar": "^7.5.22",
+    "undici-proxy": "npm:undici@^6.29.0",
     "ws": "^8.21.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
@@ -49,6 +51,7 @@
     "@babel/types": "7.29.8",
     "@specbook/runtime": "workspace:*",
     "@types/node": "^26.6.4",
+    "@types/ws": "^8.18.1",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "7.0.2"

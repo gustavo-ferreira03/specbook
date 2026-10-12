@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { RunnerPayload } from "@specbook/runtime/runner-protocol";
 import { db } from "../db/client";
 import { runnerJobs, runnerTokens } from "../db/schema";
@@ -20,14 +20,27 @@ class RunnersRepository {
         return (await db.select().from(runnerTokens).where(eq(runnerTokens.id, id)))[0] ?? null;
     }
 
-    async create(name: string, group: string | null, hash: string): Promise<RunnerToken> {
-        const row = { id: crypto.randomUUID(), name, group, tokenHash: hash, createdAt: new Date().toISOString(), lastSeenAt: null };
+    async create(name: string, group: string | null, hash: string, projectIds: string[] | null = null): Promise<RunnerToken> {
+        const row: RunnerToken = { id: crypto.randomUUID(), name, group, tokenHash: hash, createdAt: new Date().toISOString(), lastSeenAt: null,
+            cliVersion: null, protocolVersion: null, concurrency: 1, projectIds };
         await db.insert(runnerTokens).values(row);
         return row;
     }
 
-    async touch(id: string): Promise<void> {
-        await db.update(runnerTokens).set({ lastSeenAt: new Date().toISOString() }).where(eq(runnerTokens.id, id));
+    async touch(id: string, versions?: { version: string; protocolVersion: number; concurrency: number }): Promise<void> {
+        await db.update(runnerTokens).set({ lastSeenAt: new Date().toISOString(), ...(versions ? {
+            cliVersion: versions.version, protocolVersion: versions.protocolVersion, concurrency: versions.concurrency,
+        } : {}) }).where(eq(runnerTokens.id, id));
+    }
+
+    async rotate(id: string, hash: string): Promise<RunnerToken | null> {
+        const [tokens] = await db.batch([
+            db.update(runnerTokens).set({ tokenHash: hash, lastSeenAt: null, cliVersion: null, protocolVersion: null })
+                .where(eq(runnerTokens.id, id)).returning(),
+            db.update(runnerJobs).set({ status: "queued", runnerId: null, leaseId: null, leaseExpiresAt: null, updatedAt: new Date().toISOString() })
+                .where(and(eq(runnerJobs.runnerId, id), eq(runnerJobs.status, "leased"))),
+        ]);
+        return tokens[0] ?? null;
     }
 
     async revoke(id: string): Promise<boolean> {
@@ -60,8 +73,11 @@ class RunnersRepository {
 
     async claim(runner: RunnerToken, leaseMs: number): Promise<RunnerJob | null> {
         await this.reclaim();
+        const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerId, runner.id), eq(runnerJobs.status, "leased")));
+        if (active >= runner.concurrency) return null;
         const matchingGroup = runner.group ? or(isNull(runnerJobs.group), eq(runnerJobs.group, runner.group)) : isNull(runnerJobs.group);
-        const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), matchingGroup)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];
+        const matchingProjects = runner.projectIds === null ? undefined : sql`${runnerJobs.projectId} in (select value from json_each(${JSON.stringify(runner.projectIds)}))`;
+        const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), matchingGroup, matchingProjects)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];
         if (!candidate) return null;
         const updated = await db.update(runnerJobs).set({ status: "leased", runnerId: runner.id, leaseId: crypto.randomUUID(),
             leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(), attempts: sql`${runnerJobs.attempts} + 1`, updatedAt: new Date().toISOString() })

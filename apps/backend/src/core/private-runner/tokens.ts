@@ -1,20 +1,30 @@
 import { z } from "zod";
 import { issuePrefixedToken, tokenHash } from "../accounts/tokens";
 import { runnersRepository, type RunnerToken } from "../../infra/repositories/runners";
+import { RUNNER_CLI_VERSION, RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
+import { projectsRepository } from "../../infra/repositories/projects";
+import { HTTPException } from "hono/http-exception";
 
 export const runnerTokenSchema = z.object({
     name: z.string().trim().min(1).max(80),
     group: z.string().trim().max(80).nullable().optional().transform((value) => value || null),
+    projectIds: z.array(z.string().uuid()).min(1).max(1000).refine((ids) => new Set(ids).size === ids.length, "Select each project once").nullable().optional().default(null),
 }).strict();
 
 export function publicRunner(runner: RunnerToken) {
     return { id: runner.id, name: runner.name, group: runner.group, createdAt: runner.createdAt, lastSeenAt: runner.lastSeenAt,
+        cliVersion: runner.cliVersion, protocolVersion: runner.protocolVersion, concurrency: runner.concurrency, projectIds: runner.projectIds,
+        outdated: runner.cliVersion !== null && (runner.cliVersion !== RUNNER_CLI_VERSION || runner.protocolVersion !== RUNNER_PROTOCOL_VERSION),
         online: runner.lastSeenAt !== null && Date.now() - Date.parse(runner.lastSeenAt) < 90_000 };
 }
 
-export async function issueRunnerToken(name: string, group: string | null) {
+export async function issueRunnerToken(name: string, group: string | null, projectIds: string[] | null = null) {
+    if (projectIds) {
+        const available = new Set((await projectsRepository.listProjects()).map((project) => project.id));
+        if (projectIds.some((id) => !available.has(id))) throw new HTTPException(400, { message: "A selected project no longer exists." });
+    }
     const issued = issuePrefixedToken("sb_runner_");
-    const runner = await runnersRepository.create(name, group, issued.hash);
+    const runner = await runnersRepository.create(name, group, issued.hash, projectIds);
     return { token: issued.token, runner: publicRunner(runner) };
 }
 
