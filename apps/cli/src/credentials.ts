@@ -130,9 +130,11 @@ export async function resolveRunnerSecrets(refs: SecretRef[], baseUrl: string, o
     for (const ref of refs) {
         const envName = secretEnvName(ref.profile, ref.field);
         const environment = process.env[envName];
-        const provider = provided.get(ref.profile)?.[ref.field];
-        const profile = store[ref.profile];
-        const value = environment ?? provider ?? profile?.fields[ref.field];
+        const fields = provided.get(ref.profile);
+        const provider = fields && Object.hasOwn(fields, ref.field) ? fields[ref.field] : undefined;
+        const profile = Object.hasOwn(store, ref.profile) ? store[ref.profile] : undefined;
+        const local = profile && Object.hasOwn(profile.fields, ref.field) ? profile.fields[ref.field] : undefined;
+        const value = environment ?? provider ?? local;
         if (!value) throw new CodedError("credentials", `Credential field ${ref.profile}.${ref.field} is not configured; set ${envName}, configure --secrets-command, or run specbook credentials add ${ref.profile}`);
         runnerSecretValues.add(value);
         secretEnv[envName] = value;

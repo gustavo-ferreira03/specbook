@@ -131,6 +131,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     let connected = false;
     let completedJobs = 0;
     let failedJobs = 0;
+    const capacity = () => limit === undefined ? concurrency : Math.max(1, Math.min(concurrency, limit - completedJobs));
     let retryNotice = 0;
     const instanceId = randomUUID();
     let startedJobs = 0;
@@ -193,7 +194,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
                 if (heartbeatSignal.aborted) return;
                 try {
                     const response = await jsonResponse(await send(`/runner/jobs/${lease.jobId}/heartbeat`, {
-                        leaseId: lease.leaseId, instanceId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
+                        leaseId: lease.leaseId, instanceId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: capacity(),
                     }, heartbeatSignal), runnerHeartbeatResponseSchema);
                     expires = Date.parse(response.leaseExpiresAt);
                     wait = lease.heartbeatMs;
@@ -245,7 +246,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             let claimed: RunnerClaim;
             try {
                 claimed = await jsonResponse(await send("/runner/claim", {
-                    instanceId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
+                    instanceId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: capacity(),
                 }, signal, !connected), runnerClaimResponseSchema);
                 if (claimed.lease) startedJobs++;
             } catch (error) {
@@ -256,7 +257,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             try {
                 if (!connected) {
                     connected = true;
-                    await emit({ event: "connected", url: api, runner: claimed.runner, concurrency });
+                    await emit({ event: "connected", url: api, runner: claimed.runner, concurrency: capacity() });
                 }
                 if (signal.aborted) {
                     if (claimed.lease) await send(`/runner/jobs/${claimed.lease.jobId}/release`, { leaseId: claimed.lease.leaseId }, AbortSignal.timeout(5000)).then((response) => response.body?.cancel()).catch(() => undefined);
@@ -267,7 +268,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             } catch (error) { if (signal.aborted) break; await retry(error, signal); }
         }
     };
-    const workers = Array.from({ length: concurrency }, () => worker().catch((error) => { stop.abort(error); throw error; }));
+    const workers = Array.from({ length: Math.min(concurrency, limit ?? concurrency) }, () => worker().catch((error) => { stop.abort(error); throw error; }));
     const settled = await Promise.allSettled(workers);
     const disconnected = await send("/runner/disconnect", { instanceId }, AbortSignal.timeout(5000)).catch(() => null);
     await disconnected?.body?.cancel();

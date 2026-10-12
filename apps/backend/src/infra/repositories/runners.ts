@@ -93,7 +93,8 @@ class RunnersRepository {
     async claim(runner: RunnerToken, leaseMs: number, instanceId = runner.id): Promise<RunnerJob | null> {
         await this.reclaim();
         const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerInstanceId, instanceId), eq(runnerJobs.status, "leased")));
-        if (active >= runner.concurrency) return null;
+        const instance = (await db.select().from(runnerInstances).where(eq(runnerInstances.id, instanceId)))[0];
+        if (active >= (instance?.concurrency ?? runner.concurrency)) return null;
         const matchingGroup = runner.group ? or(isNull(runnerJobs.group), eq(runnerJobs.group, runner.group)) : isNull(runnerJobs.group);
         const matchingProjects = runner.projectIds === null ? undefined : sql`${runnerJobs.projectId} in (select value from json_each(${JSON.stringify(runner.projectIds)}))`;
         const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), matchingGroup, matchingProjects)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];

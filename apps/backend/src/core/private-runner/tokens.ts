@@ -11,10 +11,21 @@ export const runnerTokenSchema = z.object({
     projectIds: z.array(z.string().uuid()).min(1).max(1000).refine((ids) => new Set(ids).size === ids.length, "Select each project once").nullable().optional().default(null),
 }).strict();
 
+export function runnerIsOutdated(version: string | null, protocolVersion: number | null): boolean {
+    if (!version) return false;
+    if (protocolVersion !== RUNNER_PROTOCOL_VERSION) return true;
+    const actual = version.split(/[.-]/).slice(0, 3).map(Number);
+    const current = RUNNER_CLI_VERSION.split(".").map(Number);
+    for (let index = 0; index < 3; index++) {
+        if (actual[index] !== current[index]) return actual[index] < current[index];
+    }
+    return version.includes("-");
+}
+
 export function publicRunner(runner: RunnerToken) {
     return { id: runner.id, name: runner.name, group: runner.group, createdAt: runner.createdAt, lastSeenAt: runner.lastSeenAt,
         cliVersion: runner.cliVersion, protocolVersion: runner.protocolVersion, concurrency: runner.concurrency, projectIds: runner.projectIds,
-        outdated: runner.cliVersion !== null && (runner.cliVersion !== RUNNER_CLI_VERSION || runner.protocolVersion !== RUNNER_PROTOCOL_VERSION),
+        outdated: runnerIsOutdated(runner.cliVersion, runner.protocolVersion),
         online: runner.lastSeenAt !== null && Date.now() - Date.parse(runner.lastSeenAt) < 90_000 };
 }
 

@@ -1,10 +1,10 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { RUNNER_CLI_VERSION, RUNNER_PROTOCOL_VERSION, runnerClaimRequestSchema, runnerCompleteRequestSchema, runnerDisconnectSchema, runnerHeartbeatSchema, runnerReleaseSchema } from "@specbook/runtime/runner-protocol";
+import { RUNNER_PROTOCOL_VERSION, runnerClaimRequestSchema, runnerCompleteRequestSchema, runnerDisconnectSchema, runnerHeartbeatSchema, runnerReleaseSchema } from "@specbook/runtime/runner-protocol";
 import { recordAudit } from "../../../core/accounts/audit";
-import { authenticateRunnerToken, issueRunnerToken, publicRunner, runnerTokenSchema } from "../../../core/private-runner/tokens";
-import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunnerWork, revokeRunnerToken, rotateRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
+import { authenticateRunnerToken, issueRunnerToken, publicRunner, runnerIsOutdated, runnerTokenSchema } from "../../../core/private-runner/tokens";
+import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunnerWork, reportRunnerInstance, revokeRunnerToken, rotateRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
 import { runnersRepository, type RunnerToken } from "../../repositories/runners";
 import { access } from "../access";
 import { runnerQueueSnapshot } from "../../../core/private-runner/visibility";
@@ -64,7 +64,7 @@ export function createRunnersRouter(): Hono {
         return c.json({ runners: tokens.map((token) => {
             const current = instances.filter((instance) => instance.runnerId === token.id && Date.now() - Date.parse(instance.lastSeenAt) < 90_000);
             return { ...publicRunner(token), online: current.length > 0, instances: current.map((instance) => ({ ...instance,
-                outdated: instance.cliVersion !== RUNNER_CLI_VERSION || instance.protocolVersion !== RUNNER_PROTOCOL_VERSION })) };
+                outdated: runnerIsOutdated(instance.cliVersion, instance.protocolVersion) })) };
         }) });
     });
     router.post("/runners", access("admin"), zValidator("json", runnerTokenSchema), async (c) => {
@@ -94,19 +94,19 @@ export function createRunnersRouter(): Hono {
         const runner = c.get("runner");
         const input = c.req.valid("json");
         requireProtocol(input.protocolVersion);
-        await runnersRepository.touch(runner.id, input);
-        await runnersRepository.reportInstance(runner.id, input.instanceId, input);
+        await reportRunnerInstance(runner, input);
         const job = await claimRunnerWork(runner, c.req.raw.signal, input.instanceId);
         c.header("Cache-Control", "no-store");
         return c.json({ runner: { id: runner.id, name: runner.name, group: runner.group }, lease: job ? {
             jobId: job.id, leaseId: job.leaseId!, leaseExpiresAt: job.leaseExpiresAt!, heartbeatMs: Math.min(60_000, Math.max(1000, Math.floor(runnerLeaseMs() / 4))), work: job.payload,
         } : null });
     });
-    router.post("/runner/jobs/:id/heartbeat", access("runner-token", verifyRunner), zValidator("json", runnerHeartbeatSchema), async (c) => {
+    router.post("/runner/jobs/:id/heartbeat", access("runner-token", verifyRunner), zValidator("json", runnerHeartbeatSchema, (result) => {
+        if (!result.success && result.error.issues.some((issue) => issue.path[0] === "protocolVersion")) throw new HTTPException(426, { message: upgradeMessage });
+    }), async (c) => {
         const input = c.req.valid("json");
         requireProtocol(input.protocolVersion);
-        await runnersRepository.touch(c.get("runner").id, input);
-        await runnersRepository.reportInstance(c.get("runner").id, input.instanceId, input);
+        await reportRunnerInstance(c.get("runner"), input);
         const leaseExpiresAt = await heartbeatRunnerWork(c.req.param("id"), c.get("runner").id, c.req.valid("json").leaseId);
         return c.json({ leaseExpiresAt });
     });
