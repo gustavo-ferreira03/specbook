@@ -87,7 +87,7 @@ export function createRunsRouter(): Hono {
             const spec = await specsRepository.getSpec(c.req.param("id"));
             if (!spec) throw new Error("Spec not found");
             const environment = await resolveRunEnvironment(spec.projectId, c.req.query("environment"));
-            if (environment.executor === "runner") {
+            if (environment.executor === "runner" || environment.executor === "tunnel") {
                 const batch = await startSpecBatch(spec.projectId, [spec.id], spec.title, { environment });
                 const run = await runsRepository.getRun(batch.specs[0].runId);
                 return c.json({ run: run ? (await visibleRuns([run]))[0] : null, batchId: batch.id }, 202);
@@ -103,8 +103,8 @@ export function createRunsRouter(): Hono {
         try {
             const { specIds, label, environment } = c.req.valid("json");
             const batch = await startSpecBatch(c.req.param("id"), specIds, label, { environment });
-            const { batchQueues } = await runnerQueueSnapshot();
-            return c.json({ batch: { ...batch, queue: batchQueues.get(batch.id) ?? null } }, 202);
+            const { batchQueues, runQueues } = await runnerQueueSnapshot();
+            return c.json({ batch: { ...batch, queue: batchQueues.get(batch.id) ?? runQueues.get(batch.specs[0].runId) ?? null } }, 202);
         } catch (error) {
             throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
         }
@@ -113,9 +113,9 @@ export function createRunsRouter(): Hono {
     router.get("/run-batches/:id", access("viewer"), async (c) => {
         const batch = await getRunBatch(c.req.param("id"));
         if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
-        const { batchQueues } = await runnerQueueSnapshot();
-        const queue = batchQueues.get(batch.id) ?? null;
-        return c.json({ batch: { ...batch, queue, specs: batch.specs.map((item) => ({ ...item, queue: item.status === "running" ? queue : null })) }, reportUrl: `/run-batches/${encodeURIComponent(batch.id)}/report` });
+        const { batchQueues, runQueues } = await runnerQueueSnapshot();
+        const queue = batchQueues.get(batch.id) ?? batch.specs.map((item) => runQueues.get(item.runId)).find(Boolean) ?? null;
+        return c.json({ batch: { ...batch, queue, specs: batch.specs.map((item) => ({ ...item, queue: item.status === "running" ? runQueues.get(item.runId) ?? null : null })) }, reportUrl: `/run-batches/${encodeURIComponent(batch.id)}/report` });
     });
 
     router.get("/run-batches/:id/report", access("viewer"), async (c) => {

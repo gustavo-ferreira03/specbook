@@ -141,19 +141,31 @@ npx --yes --package="$SPECBOOK_URL/cli/specbook.tgz" specbook ci --environment S
 
 The server serves its own CLI package at `/api/cli/specbook.tgz`, without authentication. Docker builds include the tarball; development servers return 404 until you [build and pack it](docs/cli/README.md).
 
-### Private-network runners
+### Private-network runners and tunnels
 
-Run Specs against an app inside your network while keeping Specbook hosted elsewhere. An admin creates a named token in **Settings → Runners**, then chooses **Runner** in the project's environment settings. An optional group directs work to the matching runners. The settings list shows online/offline state and last-seen time, and lets admins revoke access.
+An admin creates a token under **Settings → Runners**, with an optional group and project restrictions. Choose **Runner** in an environment to execute its Specs inside your network. The Runners tab, waiting Specs and Run all results show queue counts, oldest wait and why work is waiting. Tokens rotate with a replacement shown once; each connected process reports its CLI/protocol version and capacity.
 
 ```sh
 export SPECBOOK_HOME=/var/lib/specbook-runner
-specbook credentials add shop --origin https://private-app.example.com
 export SPECBOOK_URL=https://specbook.example.com/api
-# Set SPECBOOK_RUNNER_TOKEN through your service's secret store.
+# Set SPECBOOK_RUNNER_TOKEN through your secret store.
 specbook runner --concurrency 1
+# Ephemeral worker:
+specbook runner --once
 ```
 
-The runner connects outbound over HTTP, renews a lease while running, and uploads the same browser evidence and results as server runs. Crashed runners return their work to the queue. Manual checks, CI, schedules and deploy signals all use the environment's executor; credentials stay in the runner's local profiles. Live chat exploration isn't available for runner environments, though saved evidence, triage and runner verification remain available. See the [runner command guide](docs/cli/README.md#private-network-runners) for service configuration and JSON events.
+Runner secrets resolve from `SPECBOOK_SECRET_<PROFILE>_<FIELD>` environment variables, a JSON provider command (`--secrets-command` / `SPECBOOK_SECRETS_COMMAND`), then local profiles. Leases and heartbeats return unfinished work to the queue after a crash or shutdown. Runner environments support saved evidence and verification; live chat exploration uses server browsers.
+
+Build the Chromium runner image with `docker build -f Dockerfile.runner -t specbook-runner:local .`. The CLI guide includes a [Kubernetes Job](docs/cli/examples/runner-job.yaml), [Deployment](docs/cli/examples/runner-deployment.yaml) and [KEDA scaler](docs/cli/examples/runner-keda.yaml). `/runner/metrics` exposes group depth as JSON or Prometheus text with runner-token or admin-token authentication. Remote CLI commands honor `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; proxy credentials stay out of output.
+
+For server-side chat exploration and Spec runs against a private app, choose **Server through a tunnel** in the environment and assign a group, then start a tunnel inside that network:
+
+```sh
+export SPECBOOK_PROJECT=YOUR_PROJECT_ID
+specbook tunnel --environment Staging
+```
+
+Use a dedicated runner token restricted to that group. The outbound WebSocket tunnel carries HTTP(S) and WebSocket traffic only for the environment's allowed origins, while logins remain in the server vault. Runs wait when no tunnel connects, and chat explains how to start one. Read the [operations guide](docs/cli/README.md#private-network-runners) for flags, rotation, proxy configuration, secret providers and JSON output.
 
 ### Serve the full product
 

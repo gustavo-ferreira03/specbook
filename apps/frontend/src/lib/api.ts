@@ -16,6 +16,7 @@ import type {
     OverviewResponse,
     Project,
     ProjectEnvironment,
+    ProjectTunnel,
     ProjectContext,
     ProjectContextRevision,
     ProjectContextState,
@@ -414,6 +415,10 @@ export function resolveChatCredentialRequest(
 
 export function getEnvironments(projectId: string, signal?: AbortSignal): Promise<{ environments: ProjectEnvironment[] }> {
     return api(apiPath`/projects/${projectId}/environments`, { signal });
+}
+
+export function getProjectTunnels(projectId: string, signal?: AbortSignal): Promise<{ tunnels: ProjectTunnel[] }> {
+    return api(apiPath`/projects/${projectId}/tunnels`, { signal });
 }
 
 

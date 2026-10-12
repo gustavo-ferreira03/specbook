@@ -48,6 +48,8 @@ export async function claimRunnerWork(runner: RunnerToken, signal: AbortSignal, 
             const current = await runnersRepository.get(runner.id);
             if (!current) throw new HTTPException(401, { message: "Runner token was revoked" });
             if (current.tokenHash !== runner.tokenHash) throw new HTTPException(401, { message: "Runner token was rotated. Configure the replacement token." });
+            const instance = await runnersRepository.instance(instanceId);
+            if (!instance || instance.disconnectedAt || instance.runnerId !== runner.id || instance.mode !== "runner") throw new HTTPException(409, { message: "Runner instance disconnected. Restart the CLI process." });
             return runnersRepository.claim(current, runnerLeaseMs(), instanceId);
         });
         if (job) return job;
@@ -66,6 +68,15 @@ export async function reportRunnerInstance(runner: RunnerToken, input: { instanc
         await runnersRepository.touch(runner.id, input);
         await runnersRepository.reportInstance(runner.id, input.instanceId, input);
     });
+}
+
+export async function disconnectRunnerInstance(runner: RunnerToken, instanceId: string): Promise<void> {
+    await withQueueLock("queue", async () => {
+        const current = await runnersRepository.get(runner.id);
+        if (!current || current.tokenHash !== runner.tokenHash) throw new HTTPException(401, { message: "Runner token changed" });
+        await runnersRepository.disconnect(runner.id, instanceId);
+    });
+    events.emit("work");
 }
 
 function leaseMatches(job: RunnerJob | null, runnerId: string, leaseId: string): job is RunnerJob {
@@ -152,6 +163,8 @@ export async function completeRunnerWork(jobId: string, runnerId: string, comple
 
 export async function revokeRunnerToken(id: string): Promise<boolean> {
     const revoked = await withQueueLock("queue", () => runnersRepository.revoke(id));
+    const { closeRunnerTunnels } = await import("../tunnel/registry");
+    closeRunnerTunnels(id);
     events.emit("work");
     return revoked;
 }
@@ -160,6 +173,8 @@ export async function rotateRunnerToken(id: string) {
     const issued = issuePrefixedToken("sb_runner_");
     const runner = await withQueueLock("queue", () => runnersRepository.rotate(id, issued.hash));
     if (!runner) throw new HTTPException(404, { message: "Runner not found" });
+    const { closeRunnerTunnels } = await import("../tunnel/registry");
+    closeRunnerTunnels(id);
     events.emit("work");
     return { token: issued.token, runner: publicRunner(runner) };
 }

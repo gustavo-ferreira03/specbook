@@ -25,6 +25,7 @@ import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import type { SpecAnalysis } from "@specbook/runtime/validate";
 import type { RunnerCompletion } from "@specbook/runtime/runner-protocol";
 import { cancelRunnerBatch, enqueueRunnerBatch, pendingRunnerBatchIds } from "../private-runner/queue";
+import { createEnvironmentTunnelProxy, TunnelWaitInterrupted, waitForTunnel } from "../tunnel/registry";
 
 type FinalRunStatus = Exclude<RunStatus, "running">;
 export type RunBatchTrigger = "deploy" | "ci" | "schedule" | "manual" | "spec_change";
@@ -64,6 +65,8 @@ export interface RunBatch {
     failReason: string | null;
     specs: RunBatchItem[];
     runnerOptions?: Pick<RunOptions, "persistFailures" | "updateSpecStatus">;
+    tunnelOptions?: Pick<RunOptions, "persistFailures" | "updateSpecStatus">;
+    waitingForTunnelAt?: string;
 }
 
 interface PreparedSpec {
@@ -222,6 +225,8 @@ async function executeBatch(
     const directory = options ? path.join(runsDir, prepared[0].run.id) : batchDirectory(batch.id);
     const results = new Map<string, { status: FinalRunStatus; durationMs: number | null; failReason: string | null; failedStep: string | null; errorCode?: ErrorCode | null }>();
     let processFailure: string | null = null;
+    let tunnelProxy: Awaited<ReturnType<typeof createEnvironmentTunnelProxy>> | undefined;
+    let suspended = false;
     try {
         await fs.mkdir(directory, { recursive: true });
         for (const entry of prepared) {
@@ -231,11 +236,21 @@ async function executeBatch(
                 fs.writeFile(path.join(runsDir, entry.run.id, "spec.yml"), entry.markdown, "utf8"),
             ]);
         }
+        if (batch.environment?.executor === "tunnel") {
+            batch.waitingForTunnelAt ??= new Date().toISOString();
+            await writeBatch(batch);
+            try { await waitForTunnel(batch.environment, batch.projectId, prepared.map((entry) => entry.run.id), options?.signal, batch.waitingForTunnelAt); }
+            catch (error) { if (error instanceof TunnelWaitInterrupted) { suspended = true; return; } throw error; }
+            tunnelProxy = await createEnvironmentTunnelProxy(batch.environment);
+            delete batch.waitingForTunnelAt;
+            await writeBatch(batch);
+        }
         const timeout = Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(RUN_TIMEOUT_MS, prepared.length * RUN_TIMEOUT_MS));
         const outcome = await withRunSlot(async () => {
             started = Date.now();
             return runPlaywrightSuite({
                 networkPolicy: await runNetworkPolicy(batch.projectId, baseUrl, batch.environment),
+                proxyServer: tunnelProxy?.server,
                 directory,
                 baseUrl,
                 specs: prepared.map((entry) => ({ key: entry.run.id, source: entry.testSource, analysis: entry.analysis, outputDir: path.join(runsDir, entry.run.id) })),
@@ -281,9 +296,13 @@ async function executeBatch(
         batch.status = "error";
         batch.failReason = message;
     } finally {
-        batch.durationMs = Date.now() - started;
-        batch.failReason = batch.failReason === null ? null : secrets.scrub(batch.failReason).slice(0, MAX_FAIL_REASON_CHARS);
-        if (!options) await writeBatch(batch);
+        await tunnelProxy?.close();
+        if (!suspended) {
+            delete batch.waitingForTunnelAt;
+            batch.durationMs = Date.now() - started;
+            batch.failReason = batch.failReason === null ? null : secrets.scrub(batch.failReason).slice(0, MAX_FAIL_REASON_CHARS);
+            if (!options || batch.environment?.executor === "tunnel") await writeBatch(batch);
+        }
     }
 }
 
@@ -413,9 +432,10 @@ async function prepareSpecBatch(
             awaitingDeploy: createdRuns[index].awaitingDeploy,
         })),
         ...(remote && options ? { runnerOptions: { persistFailures: options.persistFailures, updateSpecStatus: options.updateSpecStatus } } : {}),
+        ...(environment?.executor === "tunnel" && options ? { tunnelOptions: { persistFailures: options.persistFailures, updateSpecStatus: options.updateSpecStatus } } : {}),
     };
     try {
-        if (!options || remote) await writeBatch(batch);
+        if (!options || remote || environment?.executor === "tunnel") await writeBatch(batch);
     } catch (error) {
         await rollback();
         throw error;
@@ -550,6 +570,7 @@ export async function executeSingleSpecBatch(specId: string, options: RunOptions
         return { ...run, failedStep: manifest.failedStep };
     }
     await executeBatch(batch, prepared, batch.baseUrl!, secrets, options);
+    if (!prepared[0].finished) throw new TunnelWaitInterrupted("Backend stopped while waiting for a tunnel");
     return prepared[0].finished!;
 }
 
@@ -595,6 +616,52 @@ export async function startSpecBatch(projectId: string, specIds: string[], label
     return batch;
 }
 
+export async function pendingTunnelBatchRunIds(): Promise<string[]> {
+    const entries = await fs.readdir(runBatchesDir, { withFileTypes: true, encoding: "utf8" }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+    });
+    const batches = await Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) => getRunBatch(entry.name)));
+    return batches.filter((batch) => batch?.status === "running" && batch.environment?.executor === "tunnel" && batch.waitingForTunnelAt)
+        .flatMap((batch) => batch!.specs.filter((item) => item.status === "running").map((item) => item.runId));
+}
+
+async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
+    const release = await acquireSpecLocks(batch.specs.map((item) => item.specId));
+    try {
+        const prepared = await Promise.all(batch.specs.map(async (item): Promise<PreparedSpec> => {
+            const run = await runsRepository.getRun(item.runId);
+            if (!run || run.status !== "running") throw new Error("Queued tunnel run is missing");
+            const directory = path.join(runsDir, item.runId);
+            const [testSource, markdown] = await Promise.all([fs.readFile(path.join(directory, "spec.ts"), "utf8"), fs.readFile(path.join(directory, "spec.yml"), "utf8")]);
+            if (sourceHashOf(testSource) !== item.sourceHash || markdownHashOf(markdown) !== item.markdownHash) throw new Error("Queued tunnel Spec files changed");
+            return { run, projectId: batch.projectId, markdown, testSource, analysis: analyzeForRun(item.title, testSource, markdown), item };
+        }));
+        const refs = [...new Set(prepared.flatMap((entry) => entry.analysis.secretRefs.map((ref) => ref.envName)))];
+        const environment = await resolveRunEnvironment(batch.projectId, batch.environment!.name, batch.baseUrl);
+        if (environment.executor !== "tunnel" || environment.id !== batch.environment!.id) throw new Error("The queued run's tunnel environment changed");
+        batch.environment = environment;
+        const { env, missing } = await resolveSecretEnv(batch.projectId, refs, environment.credentialOverrides);
+        if (missing.length) throw new CodedError("credentials", `Missing credentials: ${missing.join(", ")}. Configure them in Settings → Credentials.`);
+        const secrets = { env, origins: await resolveSecretOriginPolicy(batch.projectId, refs, environment), scrub: await projectSecretScrubber(batch.projectId) };
+        const task = executeBatch(batch, prepared, batch.baseUrl!, secrets, batch.tunnelOptions).finally(release);
+        activeBatches.set(batch.id, task);
+        void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
+    } catch (error) {
+        await release();
+        const reason = error instanceof Error ? error.message : "Queued tunnel run could not resume";
+        for (const item of batch.specs) {
+            await runsRepository.finishRun(item.runId, "error", 0, reason, errorCodeOf(error) ?? "infrastructure");
+            item.status = "error";
+            item.failReason = reason;
+        }
+        batch.status = "error";
+        batch.failReason = reason;
+        delete batch.waitingForTunnelAt;
+        await writeBatch(batch);
+    }
+}
+
 export async function markInterruptedBatches(): Promise<void> {
     const pendingRunners = new Set(await pendingRunnerBatchIds());
     let entries: Dirent[];
@@ -609,6 +676,7 @@ export async function markInterruptedBatches(): Promise<void> {
         const batch = await getRunBatch(entry.name);
         if (!batch || batch.status !== "running") continue;
         if (pendingRunners.has(batch.id)) continue;
+        if (batch.environment?.executor === "tunnel" && batch.waitingForTunnelAt) { await resumeTunnelBatch(batch); continue; }
         batch.status = "error";
         batch.failReason = "Backend stopped before the batch completed";
         batch.specs = batch.specs.map((spec) => spec.status === "running" ? { ...spec, status: "error", failReason: batch.failReason } : spec);

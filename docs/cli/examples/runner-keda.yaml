@@ -16,9 +16,14 @@ spec:
   scaleTargetRef:
     name: specbook-runner
   pollingInterval: 15
-  cooldownPeriod: 300
+  cooldownPeriod: 2100
   minReplicaCount: 0
   maxReplicaCount: 10
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 1800
   triggers:
     - type: metrics-api
       metadata:

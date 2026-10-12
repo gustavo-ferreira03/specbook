@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
-import { and, asc, count, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { RunnerPayload } from "@specbook/runtime/runner-protocol";
+import { HTTPException } from "hono/http-exception";
 import { db } from "../db/client";
 import { runnerInstances, runnerJobs, runnerTokens } from "../db/schema";
 
@@ -9,20 +10,29 @@ export type RunnerJob = typeof runnerJobs.$inferSelect;
 export type RunnerInstance = typeof runnerInstances.$inferSelect;
 
 class RunnersRepository {
+    async instance(id: string): Promise<RunnerInstance | null> {
+        return (await db.select().from(runnerInstances).where(eq(runnerInstances.id, id)))[0] ?? null;
+    }
     async instances(): Promise<RunnerInstance[]> {
-        return db.select().from(runnerInstances);
+        return db.select().from(runnerInstances).where(and(isNull(runnerInstances.disconnectedAt), gt(runnerInstances.lastSeenAt, new Date(Date.now() - 90_000).toISOString())));
     }
 
     async reportInstance(runnerId: string, instanceId: string, versions: { version: string; protocolVersion: number; concurrency: number }, mode: "runner" | "tunnel" = "runner"): Promise<void> {
-        const existing = (await db.select().from(runnerInstances).where(eq(runnerInstances.id, instanceId)))[0];
-        if (existing && existing.runnerId !== runnerId) throw new Error("Runner instance belongs to another token");
+        const existing = await this.instance(instanceId);
+        if (existing && (existing.runnerId !== runnerId || existing.mode !== mode)) throw new HTTPException(403, { message: "Runner instance belongs to another connection" });
+        if (existing?.disconnectedAt) throw new HTTPException(409, { message: "Runner instance disconnected. Restart the CLI process." });
         const row = { id: instanceId, runnerId, mode, cliVersion: versions.version, protocolVersion: versions.protocolVersion,
             concurrency: versions.concurrency, lastSeenAt: new Date().toISOString() };
-        await db.insert(runnerInstances).values(row).onConflictDoUpdate({ target: runnerInstances.id, set: row });
+        const updated = await db.insert(runnerInstances).values(row).onConflictDoUpdate({ target: runnerInstances.id, set: row,
+            setWhere: and(eq(runnerInstances.runnerId, runnerId), eq(runnerInstances.mode, mode), isNull(runnerInstances.disconnectedAt)) }).returning({ id: runnerInstances.id });
+        if (!updated.length) throw new HTTPException(409, { message: "Runner instance disconnected. Restart the CLI process." });
     }
 
     async disconnect(runnerId: string, instanceId: string): Promise<void> {
-        await db.delete(runnerInstances).where(and(eq(runnerInstances.runnerId, runnerId), eq(runnerInstances.id, instanceId)));
+        const now = new Date().toISOString();
+        await db.insert(runnerInstances).values({ id: instanceId, runnerId, mode: "runner", cliVersion: "0.0.0", protocolVersion: 0,
+            concurrency: 1, lastSeenAt: now, disconnectedAt: now }).onConflictDoUpdate({ target: runnerInstances.id,
+                set: { disconnectedAt: now }, setWhere: eq(runnerInstances.runnerId, runnerId) });
         await db.update(runnerJobs).set({ status: "queued", runnerId: null, runnerInstanceId: null, leaseId: null, leaseExpiresAt: null,
             updatedAt: new Date().toISOString() }).where(and(eq(runnerJobs.runnerId, runnerId), eq(runnerJobs.runnerInstanceId, instanceId), eq(runnerJobs.status, "leased")));
     }
@@ -57,7 +67,7 @@ class RunnersRepository {
                 .where(eq(runnerTokens.id, id)).returning(),
             db.update(runnerJobs).set({ status: "queued", runnerId: null, leaseId: null, leaseExpiresAt: null, updatedAt: new Date().toISOString() })
                 .where(and(eq(runnerJobs.runnerId, id), eq(runnerJobs.status, "leased"))),
-            db.delete(runnerInstances).where(eq(runnerInstances.runnerId, id)),
+            db.update(runnerInstances).set({ disconnectedAt: new Date().toISOString() }).where(eq(runnerInstances.runnerId, id)),
         ]);
         return tokens[0] ?? null;
     }
@@ -92,9 +102,10 @@ class RunnersRepository {
 
     async claim(runner: RunnerToken, leaseMs: number, instanceId = runner.id): Promise<RunnerJob | null> {
         await this.reclaim();
+        const instance = await this.instance(instanceId);
+        if (!instance || instance.runnerId !== runner.id || instance.mode !== "runner" || instance.disconnectedAt) return null;
         const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerInstanceId, instanceId), eq(runnerJobs.status, "leased")));
-        const instance = (await db.select().from(runnerInstances).where(eq(runnerInstances.id, instanceId)))[0];
-        if (active >= (instance?.concurrency ?? runner.concurrency)) return null;
+        if (active >= instance.concurrency) return null;
         const matchingGroup = runner.group ? or(isNull(runnerJobs.group), eq(runnerJobs.group, runner.group)) : isNull(runnerJobs.group);
         const matchingProjects = runner.projectIds === null ? undefined : sql`${runnerJobs.projectId} in (select value from json_each(${JSON.stringify(runner.projectIds)}))`;
         const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), matchingGroup, matchingProjects)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];

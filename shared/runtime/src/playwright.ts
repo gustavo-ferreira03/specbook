@@ -45,6 +45,7 @@ export interface SuiteOutcome {
 
 export interface SuiteOptions {
     networkPolicy?: RunNetworkPolicy;
+    proxyServer?: string;
     signal?: AbortSignal;
     directory: string;
     baseUrl: string;
@@ -145,12 +146,12 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
     const workDir = path.join(directory, "work");
     await fs.rm(workDir, { recursive: true, force: true });
     const policy = options.networkPolicy;
-    const proxy = policy ? await createRunProxy(policy.allowPrivate ? policy.origins : []) : undefined;
+    const proxy = policy && !options.proxyServer ? await createRunProxy(policy.allowPrivate ? policy.origins : []) : undefined;
     const runtime: SpecbookRuntime = { baseURL: options.baseUrl, secretOrigins: options.secretOrigins, navigationOrigins: policy?.origins };
     const results = new Map<string, SuiteSpecResult>();
     let processFailure: string | null = null;
     try {
-        await writeWorkDir(workDir, options, proxy?.server);
+        await writeWorkDir(workDir, options, options.proxyServer ?? proxy?.server);
         const processResult = await runNodeCli(playwrightCli(), ["test", "--config", "playwright.config.mjs"], {
             cwd: workDir,
             timeoutMs: options.timeoutMs,

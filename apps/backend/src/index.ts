@@ -21,6 +21,7 @@ import { stopActiveRunProcesses } from "./core/runner/run";
 import { runMigrations } from "./infra/db/migrate";
 import { logger } from "./infra/logger";
 import { runsRepository } from "./infra/repositories/runs";
+import { attachTunnelWebSockets } from "./core/tunnel/registry";
 import {
     buildHostAllowlist,
     isAllowedHost,
@@ -60,6 +61,7 @@ const server = serve({ fetch: app.fetch, port, hostname }, () => {
 });
 
 const wss = new WebSocketServer({ noServer: true });
+const closeTunnels = attachTunnelWebSockets(server as import("node:http").Server, hostAllowlist);
 
 wss.on("connection", (websocket, request) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -74,6 +76,7 @@ wss.on("connection", (websocket, request) => {
 });
 
 server.on("upgrade", (request, socket, head) => {
+    if (request.url?.split("?")[0] === "/runner/tunnel") return;
     const headers = new Headers(Object.entries(request.headers).flatMap(([key, value]) => typeof value === "string" ? [[key, value]] : []));
     if (
         !request.url?.startsWith("/vnc/") ||
@@ -114,6 +117,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     timer.unref();
     const closed = new Promise<void>((resolve) => server.close(() => resolve()));
     for (const client of wss.clients) client.terminate();
+    closeTunnels();
     wss.close();
     stopFailureMonitor();
     stopScheduleMonitor();

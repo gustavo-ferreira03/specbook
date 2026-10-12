@@ -10,6 +10,7 @@ import { SpecGrid } from "@/components/SpecGrid";
 import { LogoMark } from "@/components/LogoMark";
 import { PageHeader } from "@/components/PageHeader";
 import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
+import { TunnelConnectionNotice } from "@/components/TunnelConnectionNotice";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -100,6 +101,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
                             {runnerEnvironment ? "Discuss saved Specs, review run evidence, or describe changes to a behavior contract." : "Describe a flow or point the agent to an area of the application. It will browse, clarify the behavior, and save the verified result as a Spec."}
                         </p>
                         {runnerEnvironment && <RunnerExplorationNotice className="mt-4" />}
+                        <TunnelConnectionNotice projectId={projectId} className="mt-4" />
                         <div className="mt-6 grid gap-2 sm:grid-cols-2">
                             {suggestions.map((suggestion) => (
                                 <button

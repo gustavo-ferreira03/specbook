@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { RUNNER_PROTOCOL_VERSION, runnerClaimRequestSchema, runnerCompleteRequestSchema, runnerDisconnectSchema, runnerHeartbeatSchema, runnerReleaseSchema } from "@specbook/runtime/runner-protocol";
 import { recordAudit } from "../../../core/accounts/audit";
 import { authenticateRunnerToken, issueRunnerToken, publicRunner, runnerIsOutdated, runnerTokenSchema } from "../../../core/private-runner/tokens";
-import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunnerWork, reportRunnerInstance, revokeRunnerToken, rotateRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
+import { claimRunnerWork, completeRunnerWork, disconnectRunnerInstance, heartbeatRunnerWork, releaseRunnerWork, reportRunnerInstance, revokeRunnerToken, rotateRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
 import { runnersRepository, type RunnerToken } from "../../repositories/runners";
 import { access } from "../access";
 import { runnerQueueSnapshot } from "../../../core/private-runner/visibility";
@@ -62,7 +62,7 @@ export function createRunnersRouter(): Hono {
     router.get("/runners", access("admin"), async (c) => {
         const [tokens, instances] = await Promise.all([runnersRepository.list(), runnersRepository.instances()]);
         return c.json({ runners: tokens.map((token) => {
-            const current = instances.filter((instance) => instance.runnerId === token.id && Date.now() - Date.parse(instance.lastSeenAt) < 90_000);
+            const current = instances.filter((instance) => instance.runnerId === token.id && !instance.disconnectedAt && Date.now() - Date.parse(instance.lastSeenAt) < 90_000);
             return { ...publicRunner(token), online: current.length > 0, instances: current.map((instance) => ({ ...instance,
                 outdated: runnerIsOutdated(instance.cliVersion, instance.protocolVersion) })) };
         }) });
@@ -111,7 +111,7 @@ export function createRunnersRouter(): Hono {
         return c.json({ leaseExpiresAt });
     });
     router.post("/runner/disconnect", access("runner-token", verifyRunner), zValidator("json", runnerDisconnectSchema), async (c) => {
-        await runnersRepository.disconnect(c.get("runner").id, c.req.valid("json").instanceId);
+        await disconnectRunnerInstance(c.get("runner"), c.req.valid("json").instanceId);
         return c.json({ ok: true });
     });
     router.post("/runner/jobs/:id/release", access("runner-token", verifyRunner), zValidator("json", runnerReleaseSchema), async (c) => {

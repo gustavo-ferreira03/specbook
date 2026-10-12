@@ -4,6 +4,7 @@ import { db } from "../../infra/db/client";
 import { environments, projects, runs } from "../../infra/db/schema";
 import { runnersRepository } from "../../infra/repositories/runners";
 import type { Run } from "../../infra/repositories/runs";
+import { hasTunnel, pendingTunnelRunIds, tunnelQueueEntries } from "../tunnel/registry";
 
 export async function runnerQueueSnapshot() {
     await runnersRepository.reclaim();
@@ -14,17 +15,18 @@ export async function runnerQueueSnapshot() {
         runnersRepository.list(),
         runnersRepository.instances(),
     ]);
-    const runIds = jobs.flatMap((job) => job.payload.specs.map((spec) => spec.runId));
+    const tunnelRunIds = new Set(pendingTunnelRunIds());
+    const runIds = [...jobs.flatMap((job) => job.payload.specs.map((spec) => spec.runId)), ...tunnelRunIds];
     const pendingRuns = runIds.length ? await db.select({ id: runs.id, environment: runs.environment }).from(runs).where(inArray(runs.id, runIds)) : [];
     const byRun = new Map(pendingRuns.map((run) => [run.id, run.environment]));
     const entries = new Map<string, RunnerQueueEntry>();
     const keyOf = (projectId: string, environmentId: string, group: string | null) => JSON.stringify([projectId, environmentId, group]);
     for (const { environment, projectName } of configured) {
-        if (environment.executor !== "runner") continue;
+        if (environment.executor === "server") continue;
         entries.set(keyOf(environment.projectId, environment.id, environment.runnerGroup), {
             projectId: environment.projectId, projectName, environmentId: environment.id, environmentName: environment.name,
-            group: environment.runnerGroup, executor: "runner", queued: 0, oldestQueuedAt: null, oldestWaitMs: 0,
-            onlineRunners: 0, busyRunners: 0, reason: null,
+            group: environment.runnerGroup, executor: environment.executor, queued: 0, oldestQueuedAt: null, oldestWaitMs: 0,
+            onlineRunners: environment.executor === "tunnel" && hasTunnel(environment.id) ? 1 : 0, busyRunners: 0, reason: null,
         });
     }
     const batchQueues = new Map<string, RunnerQueueEntry>();
@@ -47,7 +49,8 @@ export async function runnerQueueSnapshot() {
         for (const spec of job.payload.specs) runQueues.set(spec.runId, entry);
     }
     for (const entry of entries.values()) {
-        const online = instances.filter((instance) => instance.mode === "runner" && Date.now() - Date.parse(instance.lastSeenAt) < 90_000
+        if (entry.executor === "tunnel") continue;
+        const online = instances.filter((instance) => instance.mode === "runner" && !instance.disconnectedAt && Date.now() - Date.parse(instance.lastSeenAt) < 90_000
             && runners.some((runner) => runner.id === instance.runnerId && (!entry.group || runner.group === entry.group)
                 && (!runner.projectIds || runner.projectIds.includes(entry.projectId))));
         entry.onlineRunners = online.length;
@@ -58,11 +61,15 @@ export async function runnerQueueSnapshot() {
                 : entry.busyRunners === online.length ? "All runners busy." : "Waiting for a runner to claim work.";
         }
     }
+    for (const queue of await tunnelQueueEntries()) {
+        entries.set(keyOf(queue.projectId, queue.environmentId, queue.group), queue);
+        for (const id of tunnelRunIds) if (byRun.get(id)?.id === queue.environmentId) runQueues.set(id, queue);
+    }
     return { queues: [...entries.values()], batchQueues, runQueues };
 }
 
 export async function visibleRuns<T extends Run>(runs: T[]): Promise<(T & { queue: RunnerQueueEntry | null })[]> {
-    if (!runs.some((run) => run.status === "running" && run.environment?.executor === "runner")) return runs.map((run) => ({ ...run, queue: null }));
+    if (!runs.some((run) => run.status === "running" && run.environment?.executor !== "server")) return runs.map((run) => ({ ...run, queue: null }));
     const { runQueues } = await runnerQueueSnapshot();
     return runs.map((run) => ({ ...run, queue: run.status === "running" ? runQueues.get(run.id) ?? null : null }));
 }

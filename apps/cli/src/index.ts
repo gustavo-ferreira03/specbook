@@ -328,6 +328,39 @@ program.command("runner")
         }
     });
 
+program.command("tunnel")
+    .helpGroup("Host Specbook:")
+    .description("connect server browsers to a private app over an outbound tunnel")
+    .option("--url <url>", "Specbook server URL; defaults to SPECBOOK_URL")
+    .option("--server <url>", "Specbook server URL")
+    .option("--project <id>", "project id; defaults to SPECBOOK_PROJECT")
+    .option("--environment <name>", "target environment; defaults to SPECBOOK_ENVIRONMENT or Production")
+    .addHelpText("after", `\n${pc.dim("Set SPECBOOK_RUNNER_TOKEN from your secret store. The token must match the environment's runner group and project.")}`)
+    .action(async (options: { url?: string; server?: string; project?: string; environment?: string }) => {
+        const url = options.url ?? options.server ?? process.env.SPECBOOK_URL;
+        if (!url) throw new Error("SPECBOOK_URL or --url is required");
+        const project = options.project ?? process.env.SPECBOOK_PROJECT;
+        if (!project || !z.string().uuid().safeParse(project).success) throw new Error("SPECBOOK_PROJECT or --project must be a project id");
+        let token = process.env.SPECBOOK_RUNNER_TOKEN;
+        if (!token) {
+            if (!interactive) throw new Error("Set SPECBOOK_RUNNER_TOKEN when running non-interactively");
+            token = answer(await clack.password({ message: "Runner token", output: stderr }));
+        }
+        rememberToken(token);
+        const abort = new AbortController();
+        const cancel = () => abort.abort(new Error("Tunnel stopped"));
+        process.once("SIGINT", cancel);
+        process.once("SIGTERM", cancel);
+        try {
+            const { runTunnel } = await import("./tunnel");
+            await runTunnel({ url, token, project, environment: options.environment ?? process.env.SPECBOOK_ENVIRONMENT, signal: abort.signal },
+                (event) => print(event, () => ui.renderTunnelEvent(event)));
+        } finally {
+            process.removeListener("SIGINT", cancel);
+            process.removeListener("SIGTERM", cancel);
+        }
+    });
+
 program.command("serve")
     .helpGroup("Host Specbook:")
     .description("start the API, worker, steward, schedules and web UI")

@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import { ChatResultGroup } from "@/components/ChatResultGroup";
 import { ChatSettingsDialog } from "@/components/ChatSettingsDialog";
 import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
+import { TunnelConnectionNotice } from "@/components/TunnelConnectionNotice";
 import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 import { ChatSpecPreview } from "@/components/ChatSpecPreview";
 import { CredentialRequestCard } from "@/components/CredentialRequestCard";
@@ -934,6 +935,7 @@ function ChatContent({ projectId, chatId }: { projectId: string; chatId: string 
             />
 
             {runnerEnvironment && <div className="shrink-0 px-4 pb-3 md:px-8"><div className="mx-auto w-full max-w-chat"><RunnerExplorationNotice /></div></div>}
+            <div className="shrink-0 px-4 md:px-8"><div className="mx-auto w-full max-w-chat"><TunnelConnectionNotice projectId={projectId} className="mb-3" /></div></div>
 
             {discovery && revisionInfo && (
                 <div className="shrink-0 border-b border-line bg-surface-soft px-4 py-2 md:px-8" role="note" aria-label="Project discovery status">

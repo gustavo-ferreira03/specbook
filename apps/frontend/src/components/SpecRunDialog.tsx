@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, ChevronDown, CircleHelp, Clock3, Download, ExternalLink, HardDrive, Minus, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, CircleHelp, Clock3, Download, ExternalLink, HardDrive, Minus, Network, RefreshCw } from "lucide-react";
 import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
 import { StatusPill } from "@/components/StatusPill";
@@ -146,6 +146,7 @@ export function SpecRunDialog({
                     </DialogDescription>
                     {environment && <p className="mt-1 break-words text-meta text-ink-muted"><span className="font-medium text-ink">{environment.name}</span> · {environment.baseUrl}</p>}
                     {environment?.executor === "runner" && <p className="mt-1 flex items-center gap-1.5 text-meta text-ink-muted"><HardDrive size={12} aria-hidden="true" />Runs on a private-network runner{environment.runnerGroup ? ` · ${environment.runnerGroup}` : ""}</p>}
+                    {environment?.executor === "tunnel" && <p className="mt-1 flex items-center gap-1.5 text-meta text-ink-muted"><Network size={12} aria-hidden="true" />Runs on the server through a tunnel{environment.runnerGroup ? ` · ${environment.runnerGroup}` : ""}</p>}
                     <RunnerQueueNotice queue={queue} className="mt-3" />
                 </DialogHeader>
 

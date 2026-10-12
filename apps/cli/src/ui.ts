@@ -6,6 +6,7 @@ import type { LocatorCheck } from "./locators";
 import type { login, logout, connect, pull, publish } from "./remote";
 import type { CiResult } from "./ci";
 import type { RunnerEvent } from "./runner";
+import type { TunnelEvent } from "./tunnel";
 
 type Status = "passed" | "failed" | "error" | "changed_after_run" | "not_run";
 
@@ -86,6 +87,14 @@ export function renderRunnerEvent(event: RunnerEvent): string {
         case "completed": return event.results.map((result) => `${result.status === "passed" ? success(result.runId) : failure(result.runId)}${result.failReason ? `\n  ${pc.dim(result.failReason)}` : ""}`).join("\n");
         case "retrying": return `${pc.yellow("▲")} ${event.reason}${event.retryInMs ? pc.dim(` · retrying in ${event.retryInMs / 1000}s`) : ""}`;
         case "stopped": return `${pc.dim("Runner stopped")} · ${event.completedJobs} job${event.completedJobs === 1 ? "" : "s"} completed${event.failedJobs ? ` · ${event.failedJobs} with failures` : ""}`;
+    }
+}
+
+export function renderTunnelEvent(event: TunnelEvent): string {
+    switch (event.event) {
+        case "connected": return `${success(`Tunnel connected for ${pc.bold(event.environment.name)}`)}\n${fields([["Server", event.url], ["Group", event.environment.group ?? undefined], ["Allowed origins", event.origins.join(", ")]])}`;
+        case "retrying": return `${pc.yellow("▲")} ${event.reason}${pc.dim(` · retrying in ${event.retryInMs / 1000}s`)}`;
+        case "stopped": return pc.dim("Tunnel stopped");
     }
 }
 

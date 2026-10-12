@@ -1,7 +1,7 @@
 import { parse } from "@babel/parser";
 import type * as t from "@babel/types";
 import { executionSteps, type HumanSpec } from "./types.ts";
-import { isSafeRelativePath, SECRET_NAME_PATTERN, secretEnvName } from "./specbook/guard.ts";
+import { API_ROUTING_HEADERS, isSafeRelativePath, SECRET_NAME_PATTERN, secretEnvName } from "./specbook/guard.ts";
 import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, STATIC_LOCATOR_REFINERS as LOCATOR_REFINERS } from "./specbook/allowlist.ts";
 export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist.ts";
 
@@ -306,7 +306,7 @@ class Validator {
             if (key === "headers") {
                 if (property.value.type !== "ObjectExpression") fail(property, "API headers must be a literal object.");
                 for (const item of property.value.properties) {
-                    this.apiKey(item);
+                    if (API_ROUTING_HEADERS.has(this.apiKey(item).toLowerCase())) fail(item, "API routing headers are controlled by the run's origin policy.");
                     const header = item as t.ObjectProperty;
                     if (!this.secretCall(header.value) && staticString(header.value) === null) fail(header.value, "Header values must be strings or secret(...).");
                 }

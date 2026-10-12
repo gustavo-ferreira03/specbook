@@ -53,7 +53,7 @@ export interface BrowserMcp {
     close: () => Promise<void>;
 }
 
-export async function launchBrowserMcp(opts: { workDir: string; display: string; navigationOrigins?: string[] }): Promise<BrowserMcp> {
+export async function launchBrowserMcp(opts: { workDir: string; display: string; navigationOrigins?: string[]; proxyServer?: string }): Promise<BrowserMcp> {
     await fs.mkdir(opts.workDir, { recursive: true });
     const userDataDir = path.join(opts.workDir, "profile");
     const defaultProfileDir = path.join(userDataDir, "Default");
@@ -92,12 +92,13 @@ export async function launchBrowserMcp(opts: { workDir: string; display: string;
         browser: {
             browserName: "chromium",
             ...(opts.navigationOrigins ? { initPage: [initPage] } : {}),
-            contextOptions: { viewport: SPEC_VIEWPORT, ...(opts.navigationOrigins ? { serviceWorkers: "block" } : {}) },
+            contextOptions: { viewport: SPEC_VIEWPORT, ...(opts.navigationOrigins ? { serviceWorkers: "block" } : {}), ...(opts.proxyServer ? { proxy: { server: opts.proxyServer } } : {}) },
             userDataDir,
             launchOptions: {
                 headless: false,
                 args: [
                     "--disable-dev-shm-usage",
+                    ...(opts.proxyServer ? ["--proxy-bypass-list=<-loopback>", "--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : []),
                     "--disable-features=PasswordManagerOnboarding,PasswordManagerLeakDetection,PasswordManagerEnabled",
                     "--disable-notifications",
                     "--disable-session-crashed-bubble",

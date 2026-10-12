@@ -1,27 +1,31 @@
 import http from "node:http";
 import net, { type AddressInfo, type Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import { httpTarget, resolveTarget, type AddressResolver } from "./targets.ts";
 
-export async function createRunProxy(privateOrigins: string[], resolver?: AddressResolver) {
-    const sockets = new Set<Socket>();
-    const track = (socket: Socket) => {
+export type TargetConnector = (target: URL) => Promise<Duplex>;
+
+export async function createRunProxy(privateOrigins: string[], resolver?: AddressResolver, connectTarget?: TargetConnector) {
+    const sockets = new Set<Duplex>();
+    const track = <T extends Duplex>(socket: T): T => {
         sockets.add(socket);
         socket.on("error", () => socket.destroy());
         socket.on("close", () => sockets.delete(socket));
-        socket.setTimeout(30_000, () => socket.destroy());
+        if (socket instanceof net.Socket) socket.setTimeout(30_000, () => socket.destroy());
         return socket;
     };
     const server = http.createServer((request, response) => {
         void (async () => {
             const target = httpTarget(request.url ?? "");
             if (target.protocol !== "http:") throw new Error("Use CONNECT for HTTPS");
-            const address = await resolveTarget(target, privateOrigins.includes(target.origin), resolver);
-            if (request.destroyed) return;
+            if (connectTarget && !privateOrigins.includes(target.origin)) throw new Error("Network target blocked");
+            const connection = connectTarget ? track(await connectTarget(target)) : undefined;
+            const address = connection ? undefined : await resolveTarget(target, privateOrigins.includes(target.origin), resolver);
+            if (request.destroyed) { connection?.destroy(); return; }
             const { "proxy-authorization": _, "proxy-connection": __, ...headers } = request.headers;
             const upstream = http.request(target, {
                 method: request.method, headers: { ...headers, host: target.host },
-                lookup: (_hostname, options, callback) => options.all ? callback(null, [address]) : callback(null, address.address, address.family),
-                agent: false,
+                ...(connection ? { createConnection: () => connection as Socket, agent: undefined } : { lookup: (_hostname: string, options: { all?: boolean }, callback: Function) => options.all ? callback(null, [address!]) : callback(null, address!.address, address!.family), agent: false }),
             }, (result) => {
                 response.writeHead(result.statusCode ?? 502, result.headers);
                 result.pipe(response);
@@ -40,15 +44,18 @@ export async function createRunProxy(privateOrigins: string[], resolver?: Addres
             const target = httpTarget(`https://${request.url}`);
             const plain = httpTarget(`http://${request.url}`);
             const allowed = privateOrigins.includes(target.origin) || privateOrigins.includes(plain.origin);
-            const address = await resolveTarget(target, allowed, resolver);
+            if (connectTarget && !allowed) throw new Error("Network target blocked");
+            const address = connectTarget ? undefined : await resolveTarget(target, allowed, resolver);
             if (socket.destroyed) return;
-            const upstream = track(net.connect({ host: address.address, port: Number(target.port || 443) }));
-            upstream.on("connect", () => {
+            const upstream = track(connectTarget ? await connectTarget(privateOrigins.includes(target.origin) ? target : plain) : net.connect({ host: address!.address, port: Number(target.port || 443) }));
+            if (socket.destroyed || socket.readableEnded) { upstream.destroy(); socket.destroy(); return; }
+            const connected = () => {
                 socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
                 if (head.length) upstream.write(head);
                 upstream.pipe(socket);
                 socket.pipe(upstream);
-            });
+            };
+            if (connectTarget) connected(); else upstream.on("connect", connected);
             upstream.on("error", () => socket.destroy());
             socket.on("close", () => upstream.destroy());
         })().catch(() => socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"));
@@ -57,12 +64,14 @@ export async function createRunProxy(privateOrigins: string[], resolver?: Addres
         void (async () => {
             const target = httpTarget((request.url ?? "").replace(/^ws:/, "http:"));
             if (target.protocol !== "http:") throw new Error("Use CONNECT for HTTPS");
-            const address = await resolveTarget(target, privateOrigins.includes(target.origin), resolver);
-            if (socket.destroyed) return;
+            if (connectTarget && !privateOrigins.includes(target.origin)) throw new Error("Network target blocked");
+            const connection = connectTarget ? track(await connectTarget(target)) : undefined;
+            const address = connection ? undefined : await resolveTarget(target, privateOrigins.includes(target.origin), resolver);
+            if (socket.destroyed || socket.readableEnded) { connection?.destroy(); socket.destroy(); return; }
             const { "proxy-authorization": _, "proxy-connection": __, ...headers } = request.headers;
             const upstream = http.request(target, {
-                headers: { ...headers, host: target.host }, agent: false,
-                lookup: (_hostname, options, callback) => options.all ? callback(null, [address]) : callback(null, address.address, address.family),
+                headers: { ...headers, host: target.host },
+                ...(connection ? { createConnection: () => connection as Socket, agent: undefined } : { lookup: (_hostname: string, options: { all?: boolean }, callback: Function) => options.all ? callback(null, [address!]) : callback(null, address!.address, address!.family), agent: false }),
             });
             upstream.on("socket", track);
             upstream.on("upgrade", (response, connection, upstreamHead) => {

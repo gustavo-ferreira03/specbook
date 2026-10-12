@@ -1,0 +1,1 @@
+ALTER TABLE `runner_instances` ADD `disconnected_at` text;

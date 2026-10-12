@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, CircleCheck, CircleMinus, Clipboard, HardDrive, RefreshCw, RotateCw, Trash2, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, CircleCheck, CircleMinus, Clipboard, HardDrive, Network, RefreshCw, RotateCw, Trash2, TriangleAlert } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { RelativeTime } from "@/components/RelativeTime";
 import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
@@ -29,6 +29,15 @@ interface Runner {
     concurrency: number | null;
     outdated: boolean;
     projectIds: string[] | null;
+    instances: { id: string; runnerId: string; mode: "runner" | "tunnel"; cliVersion: string; protocolVersion: number; concurrency: number; lastSeenAt: string; outdated: boolean }[];
+}
+
+function RunnerProcesses({ runner }: { runner: Runner }) {
+    if (!runner.instances.length) return <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-muted">{runner.cliVersion ? <span>CLI <span className="tabular">{runner.cliVersion}</span></span> : <span>Version not reported</span>}{runner.protocolVersion !== null && <span>Protocol <span className="tabular">{runner.protocolVersion}</span></span>}{runner.outdated && <span className="inline-flex items-center gap-1.5 text-ink"><TriangleAlert size={13} className="text-warning-icon" aria-hidden="true" />Update the runner CLI</span>}</p>;
+    return <ul className="mt-2 space-y-2" aria-label={`Connected processes using ${runner.name}`}>{runner.instances.map((instance) => <li key={instance.id}>
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ink">{instance.mode === "tunnel" ? <Network size={13} aria-hidden="true" /> : <HardDrive size={13} aria-hidden="true" />}<span>{instance.mode === "tunnel" ? "Tunnel" : "Runner"} process <span className="font-mono">{instance.id.slice(0, 8)}</span></span><span className="text-ink-muted">Capacity <span className="tabular">{instance.concurrency}</span></span></p>
+        <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-muted"><span>CLI <span className="tabular">{instance.cliVersion}</span></span><span>Protocol <span className="tabular">{instance.protocolVersion}</span></span><RelativeTime value={instance.lastSeenAt} prefix="Last seen" />{instance.outdated && <span className="inline-flex items-center gap-1.5 text-ink"><TriangleAlert size={13} className="text-warning-icon" aria-hidden="true" />Update the {instance.mode === "tunnel" ? "tunnel" : "runner"} CLI</span>}</p>
+    </li>)}</ul>;
 }
 
 export function RunnersSettings() {
@@ -85,7 +94,7 @@ export function RunnersSettings() {
         try {
             const result = await api<{ token: string; runner: Runner }>("/runners", { method: "POST", body: JSON.stringify({ name: name.trim(), group: group.trim() || null, projectIds }) });
             setSecret({ id: result.runner.id, value: result.token });
-            setRunners((current) => [result.runner, ...(current ?? [])]);
+            setRunners((current) => [{ ...result.runner, instances: [] }, ...(current ?? [])]);
             setName(""); setGroup(""); setProjectIds(null); setRotate(null);
         } catch (reason) { setFeedback({ type: "error", text: errorMessage(reason) }); }
         finally { setBusy(false); }
@@ -116,7 +125,7 @@ export function RunnersSettings() {
         try {
             const result = await api<{ token: string; runner: Runner }>(apiPath`/runners/${rotate.id}/rotate`, { method: "POST" });
             setSecret({ id: result.runner.id, value: result.token });
-            setRunners((current) => current?.map((runner) => runner.id === result.runner.id ? result.runner : runner) ?? [result.runner]);
+            setRunners((current) => current?.map((runner) => runner.id === result.runner.id ? { ...result.runner, instances: [] } : runner) ?? [{ ...result.runner, instances: [] }]);
             setRotate(null); setFeedback({ type: "success", text: "Runner token rotated. The previous token has been revoked." });
         } catch (reason) { setRotateError(errorMessage(reason)); }
         finally { setBusy(false); }
@@ -134,13 +143,13 @@ export function RunnersSettings() {
                     : !queues.length ? <SettingsBlock><p className="text-body text-ink-muted">No environments use a runner yet. Choose Runner in your project's environment settings.</p></SettingsBlock>
                         : <ul aria-label="Runner queues">{queues.map((queue) => <li key={queue.environmentId} className="border-b border-line px-4 py-4 last:border-b-0 sm:px-5">
                             <div className="flex flex-wrap items-start justify-between gap-2">
-                                <div className="min-w-0"><p className="break-words text-body font-medium text-ink"><Link href={`/p/${queue.projectId}/settings`} className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{queue.projectName}</Link> · {queue.environmentName}</p><p className="mt-1 text-meta text-ink-muted">{queue.group ? `Group: ${queue.group}` : "Any runner group"}</p></div>
+                                <div className="min-w-0"><p className="break-words text-body font-medium text-ink"><Link href={`/p/${queue.projectId}/settings`} className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{queue.projectName}</Link> · {queue.environmentName}</p><p className="mt-1 flex items-center gap-1.5 text-meta text-ink-muted">{queue.executor === "tunnel" && <Network size={13} aria-hidden="true" />}{queue.executor === "tunnel" ? "Server through a tunnel · " : ""}{queue.group ? `Group: ${queue.group}` : "Any runner group"}</p></div>
                                 <p className="text-meta text-ink-muted"><span className="tabular">{queue.onlineRunners}</span> online · <span className="tabular">{queue.busyRunners}</span> busy</p>
                             </div>
                             {queue.queued > 0 ? <RunnerQueueNotice queue={queue} className="mt-3" /> : <p className="mt-3 flex items-center gap-1.5 text-control text-ink-muted"><CircleCheck size={14} aria-hidden="true" />{countLabel(0, "run")} waiting</p>}
                         </li>)}</ul>}
         </SettingsSection>
-        <SettingsSection id="runners-heading" title="Runners" description="Run Specs inside your private network. Runners connect outbound to Specbook; credentials stay on their machine.">
+        <SettingsSection id="runners-heading" title="Runners" description="Tokens connect runners and tunnels outbound to Specbook. Runner credentials stay on their machine; tunnel environments use the server vault.">
             <form onSubmit={create}>
                 <SettingsRow label="Runner name" htmlFor="runner-name" description="Identify the machine or service that will use this token."><Input id="runner-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Office runner" maxLength={80} required disabled={busy || Boolean(secret)} /></SettingsRow>
                 <SettingsRow label="Runner group" htmlFor="runner-group" description="Optional. Match an environment's runner group to send its runs to these machines."><Input id="runner-group" value={group} onChange={(event) => setGroup(event.target.value)} placeholder="private-staging" maxLength={80} disabled={busy || Boolean(secret)} /></SettingsRow>
@@ -161,7 +170,7 @@ export function RunnersSettings() {
             {!runners ? <SettingsBlock>{feedback?.type === "error" ? <Button type="button" variant="outline" onClick={() => { setFeedback(null); setRetry((value) => value + 1); }}>Try again</Button> : <div role="status" aria-label="Loading runners" aria-busy="true"><Skeleton className="h-20 w-full" /></div>}</SettingsBlock>
                 : !runners.length ? <SettingsBlock><p className="text-body text-ink-muted">Create a token, start the CLI runner, then choose Runner in your project's environment settings.</p></SettingsBlock>
                     : <ul aria-label="Runner tokens">{runners.map((runner) => <li key={runner.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 last:border-b-0 sm:px-5">
-                        <div className="min-w-0"><p className="flex items-center gap-2 break-words text-body font-medium text-ink"><HardDrive size={14} className="shrink-0 text-ink-subtle" aria-hidden="true" />{runner.name}</p><p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-muted"><span className={`inline-flex items-center gap-1.5 ${runner.online ? "text-success" : "text-ink-muted"}`}>{runner.online ? <CircleCheck size={13} aria-hidden="true" /> : <CircleMinus size={13} aria-hidden="true" />}{runner.online ? "Online" : "Offline"}</span><span>{runner.group ? `Group: ${runner.group}` : "No group"}</span>{runner.lastSeenAt ? <RelativeTime value={runner.lastSeenAt} prefix="Last seen" /> : <span>Never connected</span>}<RelativeTime value={runner.createdAt} prefix="Created" /></p><p className="mt-1 break-words text-meta text-ink-muted">{runner.projectIds ? `Projects: ${projectNames(runner.projectIds)}` : "All projects"}</p><p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-muted">{runner.cliVersion ? <span>CLI <span className="tabular">{runner.cliVersion}</span></span> : <span>Version not reported</span>}{runner.protocolVersion !== null && <span>Protocol <span className="tabular">{runner.protocolVersion}</span></span>}{runner.outdated && <span className="inline-flex items-center gap-1.5 text-ink"><TriangleAlert size={13} className="text-warning-icon" aria-hidden="true" />Update the runner CLI</span>}</p></div>
+                        <div className="min-w-0"><p className="flex items-center gap-2 break-words text-body font-medium text-ink"><HardDrive size={14} className="shrink-0 text-ink-subtle" aria-hidden="true" />{runner.name}</p><p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-muted"><span className={`inline-flex items-center gap-1.5 ${runner.online ? "text-success" : "text-ink-muted"}`}>{runner.online ? <CircleCheck size={13} aria-hidden="true" /> : <CircleMinus size={13} aria-hidden="true" />}{runner.online ? "Online" : "Offline"}</span><span>{runner.group ? `Group: ${runner.group}` : "No group"}</span>{runner.lastSeenAt ? <RelativeTime value={runner.lastSeenAt} prefix="Last seen" /> : <span>Never connected</span>}<RelativeTime value={runner.createdAt} prefix="Created" /></p><p className="mt-1 break-words text-meta text-ink-muted">{runner.projectIds ? `Projects: ${projectNames(runner.projectIds)}` : "All projects"}</p><RunnerProcesses runner={runner} /></div>
                         <div className="flex flex-wrap gap-3"><Button type="button" variant="outline" size="sm" disabled={busy || Boolean(secret)} aria-label={`Rotate ${runner.name}`} onClick={() => { setRotateError(""); setRotate(runner); }}><RotateCw size={14} />Rotate token</Button><Button type="button" variant="destructive-soft" size="sm" disabled={busy} aria-label={`Revoke ${runner.name}`} onClick={(event) => { triggerRef.current = event.currentTarget; setRevokeError(""); setRevoke(runner); }}><Trash2 size={14} />Revoke token</Button></div>
                         {rotate?.id === runner.id && <div className="w-full border-t border-line pt-3" role="status"><p className="text-control text-ink">Rotate the token for <strong>{runner.name}</strong>? The previous token will stop working immediately. Update the runner with the replacement secret before reconnecting.</p>{rotateError && <p role="alert" className="mt-2 text-control text-danger">{rotateError}</p>}<div className="mt-3 flex flex-wrap justify-end gap-3"><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setRotate(null)}>Cancel</Button><Button type="button" size="sm" disabled={busy} onClick={() => void rotateToken()}>{busy ? "Rotating…" : "Rotate token"}</Button></div></div>}
                     </li>)}</ul>}

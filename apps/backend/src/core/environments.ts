@@ -13,14 +13,17 @@ export const environmentSchema = z.object({
         return url.pathname === "/" && !url.search && !url.hostname.includes("*");
     }, "Enter an origin without a path or query").transform((value) => new URL(value).origin)).max(50).default([]),
     credentialOverrides: z.record(z.string(), z.string().uuid()).default({}),
-    executor: z.enum(["server", "runner"]).default("server"),
+    executor: z.enum(["server", "runner", "tunnel"]).default("server"),
     runnerGroup: z.string().trim().max(80).nullable().default(null).transform((value) => value || null),
 }).strict().superRefine((input, context) => {
     if (input.executor === "runner" && Object.keys(input.credentialOverrides).length) {
         context.addIssue({ code: "custom", path: ["credentialOverrides"], message: "Runner environments use credentials saved on the runner. Remove server credential overrides." });
     }
     if (input.executor === "server" && input.runnerGroup) {
-        context.addIssue({ code: "custom", path: ["runnerGroup"], message: "Choose a runner executor before selecting a runner group." });
+        context.addIssue({ code: "custom", path: ["runnerGroup"], message: "Choose a runner or tunnel executor before selecting a runner group." });
+    }
+    if (input.executor === "tunnel" && !input.runnerGroup) {
+        context.addIssue({ code: "custom", path: ["runnerGroup"], message: "Tunnel environments require a runner group. Use a token restricted to that group." });
     }
 });
 

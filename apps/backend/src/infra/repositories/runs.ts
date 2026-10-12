@@ -120,8 +120,8 @@ class RunsRepository {
 
     async markInterruptedRuns(): Promise<void> {
         const { pendingRunnerBatchIds } = await import("../../core/private-runner/queue");
-        const { getRunBatch } = await import("../../core/runner/batch");
-        const pending = new Set<string>();
+        const { getRunBatch, pendingTunnelBatchRunIds } = await import("../../core/runner/batch");
+        const pending = new Set<string>(await pendingTunnelBatchRunIds());
         for (const id of await pendingRunnerBatchIds()) {
             const batch = await getRunBatch(id);
             for (const item of batch?.specs ?? []) pending.add(item.runId);

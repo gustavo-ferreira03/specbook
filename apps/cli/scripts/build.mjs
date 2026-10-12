@@ -14,6 +14,7 @@ await fs.copyFile(`${runtime}/dist/specbook-fixtures.mjs`, 'dist/specbook-fixtur
 await fs.cp(`${runtime}/dist/assets`, 'dist/assets', { recursive: true });
 await fs.chmod('dist/index.js', 0o755);
 await fs.copyFile('../../docs/cli/README.md', 'dist/README.md');
+await fs.cp('../../docs/cli/examples', 'dist/examples', { recursive: true });
 await build({
   entryPoints: ['../backend/src/index.ts'], bundle: true, platform: 'node', format: 'esm',
   target: 'node22', outfile: 'dist/server/index.js',

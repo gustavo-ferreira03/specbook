@@ -24,6 +24,7 @@ import { fixProposalSchema } from "./schemas";
 import { isAgentPaused } from "./pause";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import { verifyRunnerCandidate } from "../runner/batch";
+import { createEnvironmentTunnelProxy, waitForTunnel } from "../tunnel/registry";
 
 export interface ProposalVerification {
     id: string;
@@ -83,14 +84,17 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         return Math.min(120_000, remaining);
     };
     const timeoutMs = await check();
+    if (environment.executor === "tunnel") await waitForTunnel(environment, job.projectId, [], signal);
     const outcome = remote ? await verifyRunnerCandidate({ specId: spec.id, testSource: patch.testSource, markdown: before.yaml, environment, directory, signal, timeoutMs }).then((run) => ({
         processFailure: run.status === "error" ? run.failReason : null,
         results: new Map([[id, run]]),
     })) : await withRunSlot(async () => {
         const timeoutMs = await check();
-        return runPlaywrightSuite({ networkPolicy: await runNetworkPolicy(job.projectId, baseUrl, environment), directory, baseUrl,
+        const proxy = environment.executor === "tunnel" ? await createEnvironmentTunnelProxy(environment) : undefined;
+        try { return await runPlaywrightSuite({ networkPolicy: await runNetworkPolicy(job.projectId, baseUrl, environment), proxyServer: proxy?.server, directory, baseUrl,
             specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, outputDir: directory }],
-            timeoutMs, secretEnv, secretOrigins, scrub, signal });
+            timeoutMs, secretEnv, secretOrigins, scrub, signal }); }
+        finally { await proxy?.close(); }
     }, signal);
     const result = outcome.results.get(id);
     const manifest = await readEvidenceManifest(directory);

@@ -15,7 +15,7 @@ export interface ProjectEnvironment {
     baseUrl: string;
     allowedOrigins: string[];
     credentialOverrides: Record<string, string>;
-    executor: "server" | "runner";
+    executor: "server" | "runner" | "tunnel";
     runnerGroup: string | null;
 }
 
@@ -32,6 +32,14 @@ export interface RunnerQueueEntry {
     onlineRunners: number;
     busyRunners: number;
     reason: string | null;
+}
+
+export interface ProjectTunnel {
+    environmentId: string;
+    environmentName: string;
+    group: string;
+    connected: boolean;
+    command: string;
 }
 
 export interface SpecCandidate {

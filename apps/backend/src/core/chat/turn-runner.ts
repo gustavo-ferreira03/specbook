@@ -64,6 +64,7 @@ import { ChatTurnTimeoutError, withTurnTimeout } from "./deadline";
 import { browserFailureMessage, providerFailure, providerFailureMessage } from "../jobs/presentation-errors";
 import type { ChatToolStepRecord } from "./types";
 import { resolveRunEnvironment } from "../environments";
+import { hasTunnel, tunnelStartCommand } from "../tunnel/registry";
 
 const agentDir = path.join(storageRoot, "pi-agent");
 
@@ -199,6 +200,13 @@ async function runReservedChatTurn(
             await fail("infrastructure", "The project for this chat no longer exists.");
             return outcome;
         }
+        if (environment?.executor === "tunnel" && !hasTunnel(environment.id)) {
+            const message = `No tunnel connected in group ${environment.runnerGroup}. Start ${tunnelStartCommand(environment, row.projectId)} inside the private network with SPECBOOK_URL and SPECBOOK_RUNNER_TOKEN, then send your message again.`;
+            ensureUserMessage(sessionManager, userText, previousUserCount);
+            appendError(sessionManager, message);
+            await fail("environment", message);
+            return outcome;
+        }
 
         const [modelRegistry, modelRuntime, { provider, model: modelName }] = await Promise.all([
             modelRegistryPromise,
@@ -241,8 +249,8 @@ async function runReservedChatTurn(
         if (!runnerEnvironment) try {
             const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
             const profiles = await credentialsRepository.listProfiles(row.projectId);
-            const origins = [...new Set([new URL(startUrl).origin, ...(turnPolicy?.environment?.allowedOrigins ?? []), ...profiles.flatMap((profile) => profile.allowedOrigins)])];
-            chatBrowser = await getOrCreateChatBrowser(id, origins);
+            const origins = environment?.executor === "tunnel" ? environment.allowedOrigins : [...new Set([new URL(startUrl).origin, ...(turnPolicy?.environment?.allowedOrigins ?? []), ...profiles.flatMap((profile) => profile.allowedOrigins)])];
+            chatBrowser = await getOrCreateChatBrowser(id, origins, environment);
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision
                 ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp, origins), sanitizeResult: scrub }

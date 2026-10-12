@@ -55,6 +55,60 @@ async function fixture() {
 }
 
 describe("CI access and quality gates", () => {
+    test("tunnel environments keep vault access and require matching group and project token scope", async () => {
+        const { configuredTunnel, waitForTunnel, tunnelQueueEntries } = await import("../../src/core/tunnel/registry");
+        const { resolveRunEnvironment } = await import("../../src/core/environments");
+        const project = await projectsRepository.createProject("Private tunnel", "http://internal.example.test:4598");
+        assert.equal(environmentSchema.safeParse({ name: "Private", baseUrl: project.baseUrl, executor: "tunnel" }).success, false);
+        const input = environmentSchema.parse({ name: "Production", baseUrl: project.baseUrl, executor: "tunnel", runnerGroup: "tunnel", credentialOverrides: { shop: crypto.randomUUID() } });
+        const previous = (await environmentsRepository.list(project.id))[0]!;
+        await environmentsRepository.update(previous, input);
+        const environment = await resolveRunEnvironment(project.id);
+        assert.deepEqual(environment.credentialOverrides, input.credentialOverrides);
+        const allowed = await issueRunnerToken("Tunnel", "tunnel", [project.id]);
+        const wrongGroup = await issueRunnerToken("Other group", "other", [project.id]);
+        const anotherProject = await projectsRepository.createProject("Another project", "https://example.com");
+        const wrongProject = await issueRunnerToken("Other project", "tunnel", [anotherProject.id]);
+        const runner = (await runnersRepository.get(allowed.runner.id))!;
+        const configured = await configuredTunnel(runner, project.id, environment.id);
+        assert.deepEqual(configured.origins, ["http://internal.example.test:4598"]);
+        await assert.rejects(async () => configuredTunnel((await runnersRepository.get(wrongGroup.runner.id))!, project.id, environment.id), /runner group/);
+        await assert.rejects(async () => configuredTunnel((await runnersRepository.get(wrongProject.runner.id))!, project.id, environment.id), /project/);
+        const abort = new AbortController();
+        const runId = crypto.randomUUID();
+        const waiting = waitForTunnel(environment, project.id, [runId], abort.signal);
+        const queue = (await tunnelQueueEntries()).find((entry) => entry.environmentId === environment.id)!;
+        assert.equal(queue.queued, 1);
+        assert.equal(queue.reason, "No tunnel connected in group tunnel.");
+        abort.abort(new Error("Verification stopped"));
+        await assert.rejects(waiting, /Verification stopped/);
+        assert.ok(!(await tunnelQueueEntries()).some((entry) => entry.environmentId === environment.id));
+        for (const token of [allowed, wrongGroup, wrongProject]) await revokeRunnerToken(token.runner.id);
+    });
+
+    test("restart preserves tunnel runs queued before browser execution", async () => {
+        const { pendingTunnelBatchRunIds } = await import("../../src/core/runner/batch");
+        const { resolveRunEnvironment } = await import("../../src/core/environments");
+        const { project, spec } = await fixture();
+        const configured = (await environmentsRepository.list(project.id))[0]!;
+        await environmentsRepository.update(configured, { ...configured, executor: "tunnel", runnerGroup: "restart" });
+        const environment = await resolveRunEnvironment(project.id);
+        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: "source", commitSha: "sha", environment });
+        const batch = { id: crypto.randomUUID(), projectId: project.id, label: "Queued tunnel", environment, baseUrl: environment.baseUrl,
+            status: "running" as const, startedAt: new Date().toISOString(), durationMs: null, failReason: null, waitingForTunnelAt: new Date().toISOString(),
+            specs: [{ runId: run.id, specId: spec.id, title: spec.title, sourceHash: "source", markdownHash: "markdown", commitSha: "sha", status: "running", durationMs: null, failReason: null }] };
+        const file = path.join(getRunBatchDirectory(batch.id), "batch.json");
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, JSON.stringify(batch));
+        assert.ok((await pendingTunnelBatchRunIds()).includes(run.id));
+        await runsRepository.markInterruptedRuns();
+        assert.equal((await runsRepository.getRun(run.id))!.status, "running");
+        await fs.writeFile(file, JSON.stringify({ ...batch, waitingForTunnelAt: undefined }));
+        await runsRepository.markInterruptedRuns();
+        assert.equal((await runsRepository.getRun(run.id))!.status, "error");
+        await fs.writeFile(file, JSON.stringify({ ...batch, status: "error", waitingForTunnelAt: undefined }));
+    });
+
     test("queue visibility counts waiting Specs per environment and explains runner availability", async () => {
         const { resolveRunEnvironment } = await import("../../src/core/environments");
         const { runnerQueueSnapshot, visibleRuns } = await import("../../src/core/private-runner/visibility");
@@ -162,9 +216,12 @@ describe("CI access and quality gates", () => {
         const outside = await issueRunnerToken("Outside", "other");
         const officeRow = (await authenticateRunnerToken(`Bearer ${office.token}`))!;
         const outsideRow = (await authenticateRunnerToken(`Bearer ${outside.token}`))!;
+        await runnersRepository.reportInstance(officeRow.id, officeRow.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        await runnersRepository.reportInstance(outsideRow.id, outsideRow.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
         const otherProject = await projectsRepository.createProject("Restricted project", "https://example.com");
         const restricted = await issueRunnerToken("Restricted", "office", [otherProject.id]);
         const restrictedRow = (await authenticateRunnerToken(`Bearer ${restricted.token}`))!;
+        await runnersRepository.reportInstance(restrictedRow.id, restrictedRow.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
         assert.equal(await runnersRepository.claim(restrictedRow, 60_000), null, "tokens cannot claim work in another project");
         await revokeRunnerToken(restrictedRow.id);
         assert.equal(await runnersRepository.claim(outsideRow, 60_000), null);
@@ -180,6 +237,10 @@ describe("CI access and quality gates", () => {
         assert.equal(await runnersRepository.claim(officeRow, 60_000, firstInstance), null);
         await runnersRepository.disconnect(officeRow.id, firstInstance);
         await runnersRepository.disconnect(officeRow.id, secondInstance);
+        assert.equal(await runnersRepository.claim(officeRow, 60_000, firstInstance), null, "late polls cannot lease work after disconnect");
+        await assert.rejects(() => runnersRepository.reportInstance(officeRow.id, firstInstance, { version: "0.1.0", protocolVersion: 1, concurrency: 1 }), /disconnected/);
+        const { claimRunnerWork } = await import("../../src/core/private-runner/queue");
+        await assert.rejects(() => claimRunnerWork(officeRow, new AbortController().signal, firstInstance), /disconnected/);
         await runnersRepository.cancelBatch(secondBatch);
         const lease = (await runnersRepository.claim(officeRow, 60_000))!;
         assert.equal(lease.attempts, 2);
@@ -236,6 +297,7 @@ describe("CI access and quality gates", () => {
             specs: [{ runId: run.id, specId: spec.id, title: spec.title, files: { "spec.ts": VALID_SPEC, "spec.yml": markdown } }] });
         const issued = await issueRunnerToken("Promotion runner", "promotion");
         const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+        await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
         const lease = (await runnersRepository.claim(token, 60_000))!;
         const completion = { leaseId: lease.leaseId!, durationMs: 200, processFailure: null,
             results: [{ runId: run.id, status: "passed" as const, durationMs: 200, failReason: null, failedStep: null, artifacts: [

@@ -267,6 +267,10 @@ describe("specbook API proxy", () => {
         assert.equal(evidence[0].responseBody?.length, 4000);
         await assert.rejects(request.get("/redirect", { headers: { Authorization: createSecret("admin", "password") } }), /API origin is not allowed for this credential/);
         assert.equal(calls.length, 2, "credential-bearing redirect is rejected before a second fetch");
+        for (const header of ["Host", "hOsT", ":authority", "Proxy-Authorization", "Proxy-Connection"]) {
+            await assert.rejects(request.get("/echo", { headers: { [header]: "other.example.com" } }), /routing headers/);
+        }
+        assert.equal(calls.length, 2, "routing headers cannot bypass the URL's origin policy");
         await assert.rejects(request.get("https://evil.example.com/"), /origin is not allowed/);
         await assert.rejects(request.get("/echo", { ignoreHTTPSErrors: true }), /not allowed/);
         await assert.rejects(request.get("/echo", { timeout: 0 }), /between 1 and 30000/);

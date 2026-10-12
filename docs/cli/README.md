@@ -10,7 +10,7 @@ npm install -g https://specbook.example.com/api/cli/specbook.tgz
 specbook init --base-url http://localhost:3000 --agent codex
 ```
 
-The server serves its own CLI tarball without authentication at `/api/cli/specbook.tgz` through the frontend, or `/cli/specbook.tgz` on the backend. The package bundles the shared runtime, its test fixtures, report fonts, writing rules and this document at `dist/README.md`; it doesn't need the monorepo after installation.
+The server serves its own CLI tarball without authentication at `/api/cli/specbook.tgz` through the frontend, or `/cli/specbook.tgz` on the backend. The package bundles the shared runtime, its test fixtures, report fonts, writing rules, this document at `dist/README.md` and the Kubernetes examples at `dist/examples`; it doesn't need the monorepo after installation.
 
 To build this checkout and run the CLI directly:
 
@@ -49,7 +49,8 @@ Each command
 | `pull` | Download remote features and Specs with their revisions. Preserve unpublished local edits and report conflicts with exit status 1. |
 | `publish [spec\|feature] [--run] [--environment <name>]` | Publish selected Specs after a passing local run of their exact current files. Check their base revisions and start changed Specs as awaiting deployment in one environment. |
 | `ci [--environment <name>] [--base-url <url>]` | Trigger remote acceptance checks with a project CI token, wait for results and write HTML, JUnit and Markdown artifacts. |
-| `runner [--url <server>] [--concurrency <count>]` | Claim queued Specs over outbound HTTP, execute them with local credentials, and upload scrubbed results and evidence. |
+| `runner [--url <server>] [--concurrency <count>] [--once | --drain-after <count>] [--secrets-command <command>]` | Claim queued Specs over outbound HTTPS, execute them with runner-side secrets, and upload scrubbed results and evidence. |
+| `tunnel [--url <server>] --project <id> [--environment <name-or-id>]` | Connect server browsers to an environment’s allowed private origins through an outbound WebSocket tunnel. |
 | `serve [--port <number>] [--host <address>] [--data <dir>] [--ui <dir>]` | Start the API, job worker, steward, schedules and standalone web UI. |
 | `spec new "<title>" --feature <name>` | Scaffold a readable contract and a valid one-step Playwright test, creating `feature.yml` when needed. Existing Specs aren't overwritten. |
 | `spec check [path]` | Validate source and YAML step titles with the same runtime as the server. With an open exploration session, count every locator on the current page and report missing or ambiguous matches. |
@@ -156,27 +157,93 @@ The CI result preserves raw execution status (`failed` or `error`) alongside `aw
 Private-network runners
 -----------------------
 
-In **Settings → Runners**, an admin creates a named runner token and, optionally, a group. Copy the token when shown; the server stores its SHA-256 hash. The list shows last-seen time and online/offline state. Revoke a token there to stop its access and return its leased work to the queue. A group limits matching work to runners with that group; environments without a group can use any runner.
+An admin creates a token under **Settings → Runners**. Choose a group to restrict it to that group's work and, when needed, select the projects it can access; the default is all projects. Copy the secret once. **Rotate token** displays a replacement once, revokes the previous secret immediately and returns its leased work to the queue. Revoking a token also closes its tunnels. Token management requires an admin web session.
 
-In **Project settings → Environments**, choose **Runner** as the executor and enter the same group if needed. Server execution remains the default. Manual runs, Run all, CI, schedules and deployment signals use the same queue. The runner needs outbound access to Specbook and browser access to the configured application origins; it doesn't need an inbound port. Private DNS resolution happens on the runner.
+Choose **Runner** in **Project settings → Environments**, then enter the matching group. Ungrouped environments can use any authorized runner; a token without a group cannot claim grouped work. Manual runs, Run all, CI, schedules and deployment signals share this queue. The runner needs outbound HTTPS access to Specbook and browser access to the application's allowed origins.
 
 ```sh
 export SPECBOOK_HOME=/var/lib/specbook-runner
-specbook credentials add shop --origin https://private-app.example.com
 export SPECBOOK_URL=https://specbook.example.com/api
-# Supply SPECBOOK_RUNNER_TOKEN through your service's secret store.
+# Supply SPECBOOK_RUNNER_TOKEN through your secret store.
+specbook credentials add shop --origin https://private-app.example.com
 specbook runner --concurrency 1
 ```
 
-`--url` (or `--server`) overrides `SPECBOOK_URL`. Without `SPECBOOK_RUNNER_TOKEN`, the command asks through a hidden terminal prompt; `--json` never prompts. There is no token argument. Use your service manager to restart the runner after a host restart. The concurrency default is 1, with a supported range of 1–32; each slot claims one batch at a time.
+`--url` or `--server` overrides `SPECBOOK_URL`; a missing token prompts without echoing it on a terminal. `--json` never prompts. Set concurrency with `--concurrency` or `SPECBOOK_RUNNER_CONCURRENCY` (1–32, default 1). Each process has its own capacity even when several replicas share a token. Settings shows their CLI and protocol versions and flags older clients. Claims and heartbeats report both versions; an incompatible protocol gets an upgrade message pointing to the server's CLI tarball.
 
-The server sends immutable `spec.ts` and `spec.yml` files, the base URL and the network policy. It never resolves or sends vault values for runner environments, and those environments don't use server credential overrides. `secret("shop", "password")` reads the runner's local `shop` profile, including its origin restrictions. A missing profile or field produces a credentials error that names the required profile and fields and gives the `specbook credentials add` command. Keep profiles in `SPECBOOK_HOME`, outside the repository.
+**Settings → Runners → Run queue** shows waiting Spec counts, oldest wait, available runners and the reason for each environment/group. Waiting Spec pages and Run all results show the same information. The admin API is `GET /runners/queue`, returning `{ queues: [{ projectId, projectName, environmentId, environmentName, group, executor, queued, oldestQueuedAt, oldestWaitMs, onlineRunners, busyRunners, reason }] }`. Counts cover waiting Specs, including every Spec in a queued batch; leased Specs leave the queue. Reasons distinguish an offline group from runners with occupied capacity.
 
-Claims carry a lease with heartbeat renewal. If the process crashes or loses its lease, the server returns the batch to the queue; a late upload from the old lease can't replace the next runner's result. SIGINT and SIGTERM abort active browser work and release unfinished claims. The default lease is 60 seconds; `SPECBOOK_RUNNER_LEASE_SECONDS` on the server accepts 5–300 seconds.
+Claims use a renewable lease. A crashed process returns unfinished batches to the queue; a late upload cannot overwrite a replacement lease. SIGINT and SIGTERM abort browser work, release unfinished leases and disconnect the instance. The server lease defaults to 60 seconds; `SPECBOOK_RUNNER_LEASE_SECONDS` accepts 5–300 seconds.
 
-Results use the same server storage, reports, Spec pages, evidence review, failure retries, triage and Inbox paths as server execution. Passing runs also promote awaiting-deploy Specs in their target environment. Evidence includes step screenshots, diagnostics, error context and failure video where the shared runtime permits recording. As with local secret runs, the runtime disables video when credentials are in use and masks credential text in screenshots. Agent investigation can read saved evidence and verify proposed repairs through the runner. Live chat browser exploration is unavailable for runner environments; the app states this limitation.
+Ephemeral processes and containers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Runner JSON output is newline-delimited because the command stays running. Every line is one event:
+```sh
+specbook runner --once
+specbook runner --drain-after 10 --concurrency 2
+```
+
+`--once` completes one claimed batch, then exits. `--drain-after <n>` completes at most n claimed batches, including all their Specs, then exits after the active slots finish. These flags are mutually exclusive. A batch's failed Spec still counts as completed work; no matching work means the runner keeps polling. Container defaults can use `SPECBOOK_RUNNER_ONCE=true` or `SPECBOOK_RUNNER_DRAIN_AFTER=10`.
+
+Build the runner image from this checkout without publishing it:
+
+```sh
+docker build -f Dockerfile.runner -t specbook-runner:local .
+docker run --rm --shm-size=512m \
+  -e SPECBOOK_URL -e SPECBOOK_RUNNER_TOKEN \
+  specbook-runner:local --once
+```
+
+The image includes the CLI and Chromium, runs as the `node` user and starts `specbook runner` under tini. `SPECBOOK_HOME` defaults to `/home/node/.config/specbook`. Mount that directory for local profiles, or inject secret environment variables. Use a versioned image built by your team in production. The [ephemeral Job](examples/runner-job.yaml) and [Deployment](examples/runner-deployment.yaml) examples read a pre-existing Kubernetes Secret named `specbook-runner`, key `token`, and allocate memory-backed `/dev/shm`. Replace the image tag and server URL before applying them.
+
+Autoscaling and metrics
+~~~~~~~~~~~~~~~~~~~~~~~
+
+`GET /runner/metrics` accepts a runner token or an admin personal token in the Authorization bearer header. Runner tokens see only their group and project scope; metrics requests do not make a worker appear online. `?group=lab` selects one group, and `?group=` selects ungrouped work. Configured groups remain present with zero depth after the queue drains.
+
+```text
+JSON: { groups: [{ group: "lab", queued: 4, oldestWaitSeconds: 12.5 }] }
+GET /runner/metrics?group=lab&format=prometheus:
+# HELP specbook_runner_queue_depth Number of Specs waiting for a runner.
+# TYPE specbook_runner_queue_depth gauge
+specbook_runner_queue_depth{runner_group="lab"} 4
+# HELP specbook_runner_oldest_wait_seconds Age of the oldest queued run in seconds.
+# TYPE specbook_runner_oldest_wait_seconds gauge
+specbook_runner_oldest_wait_seconds{runner_group="lab"} 12.5
+```
+
+The [KEDA metrics-api example](examples/runner-keda.yaml) scales the Deployment from `groups.0.queued`, using a bearer token from the Kubernetes Secret. Create the `lab` runner environment before enabling the scaler so the filtered response always contains its numeric zero. The sample starts at zero replicas, targets one queued Spec per replica and caps replicas at ten. One lease can contain several Specs, so choose a target that fits your batches and browser memory budget. The sample delays scale-down for 30 minutes and scale-to-zero for 35 minutes because claiming a batch removes it from the queue before its browser work finishes. Set those windows above your longest batch duration. KEDA scale-down sends SIGTERM; unfinished work returns to the queue. See [KEDA's metrics-api scaler documentation](https://keda.sh/docs/2.22/scalers/metrics-api/) for authentication and target configuration.
+
+To scrape Prometheus, set `metrics_path: /api/runner/metrics`, `params: { format: [prometheus], group: [lab] }`, `scheme: https`, and an `authorization.credentials_file` mounted from a Secret. Never put a token in scrape URLs or labels. Prometheus's [configuration reference](https://prometheus.io/docs/prometheus/latest/configuration/configuration/) describes that file-based authorization.
+
+Corporate HTTP proxies
+~~~~~~~~~~~~~~~~~~~~~~
+
+`login`, `connect`, `pull`, `publish`, `ci`, `runner` and `tunnel` honor `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`, including lowercase forms. HTTPS and secure WebSockets prefer `HTTPS_PROXY`, falling back to `HTTP_PROXY`; HTTP uses `HTTP_PROXY`. `NO_PROXY` accepts comma-separated hosts, domain suffixes, optional ports and `*`.
+
+Inject proxy URLs, including any credentials, through your secret store. The CLI scrubs full proxy URLs, username/password variants and basic-auth values from errors and output. These proxy variables configure the outbound control connection to Specbook; application traffic still follows the runner or tunnel's environment network policy. Install your organization's CA and set `NODE_EXTRA_CA_CERTS` when it signs the server or proxy certificate.
+
+Runner secret sources
+~~~~~~~~~~~~~~~~~~~~~
+
+For `secret("shop", "password")`, the runner checks these sources in order:
+
+1. `SPECBOOK_SECRET_SHOP_PASSWORD` in the process environment. `secretEnvName` uppercases profile and field and converts punctuation to underscores.
+2. The JSON object returned by `--secrets-command` or `SPECBOOK_SECRETS_COMMAND` for the `shop` profile.
+3. The local `shop` profile under `SPECBOOK_HOME`.
+
+```sh
+# Inject SPECBOOK_SECRET_SHOP_PASSWORD from your orchestration secret store.
+specbook runner --once
+# Or call a wrapper around Vault, 1Password or another secret manager:
+specbook runner --secrets-command /opt/specbook/read-profile
+```
+
+The runner invokes the provider command with the profile as its final argument, once per needed profile per batch. A wrapper receives `shop` as `$1` and prints one JSON object whose field values are nonempty strings. It can obtain them with a Vault or 1Password CLI, then select the required fields. If environment variables supply every needed field, the runner doesn't call the provider. Missing provider fields fall back to local profiles; provider failures stop that batch with a credentials error. Keep credentials out of the command string because process arguments are visible to local users.
+
+Provider execution has a 30-second limit and a 1 MiB stdout limit. The runner discards stderr and describes failures without its content. Environment/provider secrets are limited to the run's base origin; local values retain their saved origin restrictions. Values never enter JSON events or uploads. The runtime scrubs text evidence, masks secrets in screenshots and disables video for secret runs. Runner environments never fetch server-vault credentials or use server credential overrides.
+
+Runner JSON output uses newline-delimited events:
 
 ```text
 { event: "connected", url, runner: { id, name, group }, concurrency }
@@ -186,7 +253,35 @@ Runner JSON output is newline-delimited because the command stays running. Every
 { event: "stopped", url, completedJobs, failedJobs }
 ```
 
-Configured tokens and credential values never appear in these events. Fatal errors use the existing `{ ok: false, error }` shape and exit 1.
+Fatal errors use `{ ok: false, error }` and exit 1. Completed Spec failures remain in the uploaded results; a normally drained runner exits 0. Saved evidence, triage and candidate verification work for runner environments; live chat exploration requires server browsers.
+
+Server browsers through a tunnel
+--------------------------------
+
+Choose **Server through a tunnel** in the environment settings and set a runner group. Create a dedicated runner token restricted to that group and, preferably, the project. Open the outbound tunnel from a machine that can resolve and reach the private application:
+
+```sh
+export SPECBOOK_URL=https://specbook.example.com/api
+export SPECBOOK_PROJECT=YOUR_PROJECT_ID
+# Inject SPECBOOK_RUNNER_TOKEN; do not pass it as an argument.
+specbook tunnel --environment Staging
+```
+
+`--project` overrides `SPECBOOK_PROJECT`; `--environment` accepts a name or id and defaults to `SPECBOOK_ENVIRONMENT` or Production. Only one tunnel connects to an environment at a time. Use an HTTPS server URL in production and configure your reverse proxy to forward WebSocket upgrades for `/api/runner/tunnel` (direct backend: `/runner/tunnel`). `specbook serve` forwards these upgrades too.
+
+The server authenticates the WebSocket with a bearer header, then multiplexes browser HTTP, HTTPS and WebSocket connections. Private DNS lookup happens in the tunnel process. Both ends check each target against the environment's exact base and allowed origins; an unrelated host never gets a connection. HTTPS keeps application TLS end to end, and the existing browser/API network guard still applies.
+
+Server browsers execute Specs and explore the app in chat while credentials remain in the server vault, including environment overrides. When the tunnel disconnects, new runs wait with a **No tunnel connected** reason and chat gives the command to start it. Queued tunnel runs retain their immutable Spec files and resume waiting after a server restart. Start the tunnel before retrying the chat message. SIGINT/SIGTERM closes the tunnel; reconnections retry after three seconds, while revoked tokens and configuration changes require restarting with the correct settings.
+
+Tunnel JSON output is newline-delimited:
+
+```text
+{ event: "connected", url, environment: { id, projectId, name, group }, origins }
+{ event: "retrying", reason, retryInMs }
+{ event: "stopped", url }
+```
+
+It never contains credentials or tokens. Errors use `{ ok: false, error }`. Use **Runner** when browsers and logins must stay inside your network; use **Server through a tunnel** when server-side chat exploration needs access to a private app.
 
 Hosting with the CLI
 --------------------

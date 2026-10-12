@@ -19,6 +19,7 @@ export const STEP_ATTACHMENT_PREFIX = "specbook-step-";
 export const API_STEP_ATTACHMENT_PREFIX = "specbook-api-step-";
 export const FAILED_STEP_ANNOTATION = "specbook-failed-step";
 export const SECRET_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
+export const API_ROUTING_HEADERS: ReadonlySet<string> = new Set(["host", ":authority", "proxy-authorization", "proxy-connection"]);
 
 const STRICT_SETTLE_MS = 5000;
 
@@ -397,6 +398,7 @@ export function createGuard(options: GuardOptions) {
                 for (const key of Object.keys(requestOptions)) if (!["headers", "data", "timeout"].includes(key)) throw new Error(`API option "${key}" is not allowed`);
                 const headers = requestOptions.headers ?? {};
                 if (!headers || typeof headers !== "object" || Array.isArray(headers) || Object.values(headers).some((value) => typeof value !== "string")) throw new Error("API headers must contain string values");
+                if (Object.keys(headers).some((name) => API_ROUTING_HEADERS.has(name.toLowerCase()))) throw new CodedError("environment", "API routing headers are controlled by the run's origin policy");
                 const timeout = requestOptions.timeout ?? 15_000;
                 if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 1 || timeout > 30_000) throw new Error("API timeout must be between 1 and 30000 milliseconds");
                 let currentMethod = method;

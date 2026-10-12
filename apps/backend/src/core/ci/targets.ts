@@ -13,7 +13,7 @@ export async function projectRunPolicy(project: Project, baseUrl: string, resolv
     const origins = [...new Set([base.origin, ...selected.allowedOrigins])];
     if (!origins.includes(target.origin)) throw new NetworkTargetError("Add this origin in Settings → Environments before using it for a deployment or preview run");
     // Private hostnames are resolved inside the runner's network, never on the server.
-    if (selected.executor === "runner") return { origins, allowPrivate: true };
+    if (selected.executor === "runner" || selected.executor === "tunnel") return { origins, allowPrivate: true };
     const hostname = base.hostname.replace(/^\[|\]$/g, "");
     const allowPrivate = isIP(hostname) ? isPrivateAddress(hostname) : hostname === "localhost" || hostname.endsWith(".localhost");
     await resolveTarget(target, allowPrivate, resolver);

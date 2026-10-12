@@ -10,6 +10,7 @@ import { PageContainer } from "@/components/PageHeader";
 import { SpecGrid } from "@/components/SpecGrid";
 import { RelativeTime } from "@/components/RelativeTime";
 import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
+import { TunnelConnectionNotice } from "@/components/TunnelConnectionNotice";
 import { SectionHeader } from "@/components/SectionHeader";
 import { InlineFeedback, type InlineFeedbackValue } from "@/components/SettingsLayout";
 import { StatusDot } from "@/components/StatusDot";
@@ -255,6 +256,7 @@ export default function HomePage({ params }: { params: Promise<{ projectId: stri
         <HomeHero projectName={project?.name} baseUrl={project?.baseUrl} summary={data && !emptyProject ? data.summary : undefined} actions={agentActions} />
         <PageContainer width="data" innerClassName="space-y-9">
             {runnerEnvironment && <RunnerExplorationNotice />}
+            <TunnelConnectionNotice projectId={projectId} />
             {failed && data && <Alert variant="danger" role="alert" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{LOAD_ERROR}</AlertDescription><Button variant="outline" size="sm" onClick={tryAgain}><RefreshCw size={13} /> Try again</Button></Alert>}
             {needsContext && canEdit && !runnerEnvironment && <section aria-label="Map your app" className="sheet flex flex-wrap items-center gap-4 rounded-xl bg-surface p-5">
                 <div className="min-w-0 flex-1">

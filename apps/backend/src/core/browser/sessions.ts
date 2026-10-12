@@ -4,6 +4,8 @@ import { storageRoot } from "../paths";
 import { isChatBusy, publishChatUpdate, releaseChatTurn, tryReserveChatTurn } from "../chat/chat-registry";
 import { launchBrowserMcp, type BrowserMcp } from "./mcp";
 import { BrowserUnavailableError, getVncSession, hasVncViewers, startVncStack, stopVncStack, type VncSession } from "./vnc";
+import type { RunEnvironment } from "../../infra/db/schema";
+import { createEnvironmentTunnelProxy } from "../tunnel/registry";
 
 const BROWSER_IDLE_MS = 10 * 60 * 1000;
 
@@ -15,6 +17,7 @@ interface ChatBrowser {
     lastHealthCheck: number;
     activeTools: Map<string, number>;
     navigationPolicy: string;
+    proxy?: Awaited<ReturnType<typeof createEnvironmentTunnelProxy>>;
 }
 
 const browsers = new Map<string, ChatBrowser>();
@@ -62,10 +65,10 @@ export async function getChatBrowser(chatId: string): Promise<ChatBrowser | null
     return browser;
 }
 
-export async function getOrCreateChatBrowser(chatId: string, navigationOrigins: string[]): Promise<ChatBrowser> {
+export async function getOrCreateChatBrowser(chatId: string, navigationOrigins: string[], environment?: RunEnvironment): Promise<ChatBrowser> {
     await closing.get(chatId);
     if (deletingChats.has(chatId)) throw new Error("Chat is being deleted");
-    const navigationPolicy = [...new Set(navigationOrigins)].sort().join(";");
+    const navigationPolicy = `${environment?.executor === "tunnel" ? environment.id : "server"}:${[...new Set(navigationOrigins)].sort().join(";")}`;
     const existing = browsers.get(chatId);
     if (existing) {
         if (!getVncSession(existing.vnc.id) || existing.navigationPolicy !== navigationPolicy) {
@@ -83,14 +86,15 @@ export async function getOrCreateChatBrowser(chatId: string, navigationOrigins: 
     const inFlight = pending.get(chatId);
     if (inFlight) {
         const browser = await inFlight;
-        return browser.navigationPolicy === navigationPolicy ? browser : getOrCreateChatBrowser(chatId, navigationOrigins);
+        return browser.navigationPolicy === navigationPolicy ? browser : getOrCreateChatBrowser(chatId, navigationOrigins, environment);
     }
     const promise = (async () => {
-        const vnc = await startVncStack();
+        const proxy = environment?.executor === "tunnel" ? await createEnvironmentTunnelProxy(environment) : undefined;
+        const vnc = await startVncStack().catch(async (error) => { await proxy?.close(); throw error; });
         const workDir = path.join(storageRoot, "chat", "browser", chatId);
         try {
             await fs.rm(path.join(workDir, "profile"), { recursive: true, force: true });
-            const mcp = await launchBrowserMcp({ workDir, display: vnc.display, navigationOrigins });
+            const mcp = await launchBrowserMcp({ workDir, display: vnc.display, navigationOrigins, proxyServer: proxy?.server });
             if (deletingChats.has(chatId)) {
                 await mcp.close();
                 await stopVncStack(vnc.id);
@@ -106,11 +110,13 @@ export async function getOrCreateChatBrowser(chatId: string, navigationOrigins: 
                 lastHealthCheck: Date.now(),
                 activeTools: new Map(),
                 navigationPolicy,
+                proxy,
             };
             browsers.set(chatId, record);
             touchChatBrowser(chatId, record);
             return record;
         } catch (error) {
+            await proxy?.close();
             await stopVncStack(vnc.id);
             if (deletingChats.has(chatId)) throw error;
             throw error instanceof BrowserUnavailableError ? error : new BrowserUnavailableError(error);
@@ -136,6 +142,7 @@ export async function closeChatBrowser(chatId: string): Promise<void> {
         try {
             await record.mcp.close();
         } finally {
+            await record.proxy?.close();
             await stopVncStack(record.vnc.id);
         }
     })();

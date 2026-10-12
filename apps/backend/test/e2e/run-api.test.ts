@@ -118,6 +118,7 @@ test("runner dispatch keeps credential lookup local and survives backend recover
     assert.equal((await getRunBatch(body.batchId))!.status, "running");
     const issued = await issueRunnerToken("Recovery", "recovery");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
     const lease = (await runnersRepository.claim(token, 60_000))!;
     await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
         results: [{ runId: body.run.id, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] });
@@ -173,6 +174,7 @@ test("runner cancellation removes pending execution and isolated candidate verif
     const job = await pending();
     const issued = await issueRunnerToken("Candidate", "candidate");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
     const lease = (await runnersRepository.claim(token, 60_000))!;
     assert.equal(lease.id, job.id);
     await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
@@ -235,6 +237,7 @@ test("an offline runner retry leaves other projects' failure processing availabl
     assert.equal((await runsRepository.listRuns(offline.spec.id)).length, 2);
     const issued = await issueRunnerToken("Monitor", "monitor");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
     const lease = (await runnersRepository.claim(token, 60_000))!;
     await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
         results: [{ runId: lease.payload.specs[0].runId, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] });

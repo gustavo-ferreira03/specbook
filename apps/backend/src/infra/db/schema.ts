@@ -10,7 +10,7 @@ export interface RunEnvironment {
     baseUrl: string;
     allowedOrigins: string[];
     credentialOverrides: Record<string, string>;
-    executor?: "server" | "runner";
+    executor?: "server" | "runner" | "tunnel";
     runnerGroup?: string | null;
 }
 
@@ -48,7 +48,7 @@ export const environments = sqliteTable("environments", {
     baseUrl: text("base_url").notNull(),
     allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull().default([]),
     credentialOverrides: text("credential_overrides", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
-    executor: text("executor").$type<"server" | "runner">().notNull().default("server"),
+    executor: text("executor").$type<"server" | "runner" | "tunnel">().notNull().default("server"),
     runnerGroup: text("runner_group"),
 }, (table) => [uniqueIndex("environments_project_name_idx").on(table.projectId, table.name)]);
 
@@ -89,6 +89,7 @@ export const runnerInstances = sqliteTable("runner_instances", {
     protocolVersion: integer("protocol_version").notNull(),
     concurrency: integer("concurrency").notNull(),
     lastSeenAt: text("last_seen_at").notNull(),
+    disconnectedAt: text("disconnected_at"),
 }, (table) => [index("runner_instances_token").on(table.runnerId)]);
 
 export const features = sqliteTable(
