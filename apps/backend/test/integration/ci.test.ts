@@ -339,7 +339,7 @@ describe("CI access and quality gates", () => {
         const directory = path.join(storage, "client-results");
         const runClient = () => new Promise<{ code: number | null; output: string }>((resolve, reject) => {
             const child = spawn(process.execPath, ["--import", "tsx", path.join(backendRoot, "..", "cli", "src", "index.ts"), "ci"], {
-                env: { ...process.env, SPECBOOK_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, SPECBOOK_PROJECT: "11111111-1111-4111-8111-111111111111", SPECBOOK_TOKEN: "test-ci-token", SPECBOOK_TIMEOUT_SECONDS: "20",
+                env: { ...process.env, SPECBOOK_HOME: path.join(directory, "home"), SPECBOOK_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, SPECBOOK_PROJECT: "11111111-1111-4111-8111-111111111111", SPECBOOK_TOKEN: "test-ci-token", SPECBOOK_COMMENT_PROVIDER: "none", SPECBOOK_TIMEOUT_SECONDS: "20",
                     SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), SPECBOOK_REPORT_PATH: path.join(directory, "report.html") },
                 stdio: ["ignore", "pipe", "pipe"],
             });
@@ -440,7 +440,7 @@ describe("CI access and quality gates", () => {
         await fs.writeFile(path.join(directory, "event.json"), JSON.stringify({ pull_request: { number: 42 } }));
         const runClient = (env: Record<string, string> = {}, args: string[] = []) => new Promise<{ code: number | null; output: string }>((resolve, reject) => {
             const child = spawn(process.execPath, ["--import", "tsx", path.join(backendRoot, "..", "cli", "src", "index.ts"), "ci", ...args], {
-                env: { ...process.env, SPECBOOK_URL: `${api}/specbook`, SPECBOOK_PROJECT: "11111111-1111-4111-8111-111111111111", SPECBOOK_TOKEN: "test-ci-token", SPECBOOK_ENVIRONMENT: "production", SPECBOOK_COMMENT_PROVIDER: "none", SPECBOOK_TIMEOUT_SECONDS: "20",
+                env: { ...process.env, SPECBOOK_HOME: path.join(directory, "home"), SPECBOOK_URL: `${api}/specbook`, SPECBOOK_PROJECT: "11111111-1111-4111-8111-111111111111", SPECBOOK_TOKEN: "test-ci-token", SPECBOOK_ENVIRONMENT: "production", SPECBOOK_COMMENT_PROVIDER: "none", SPECBOOK_TIMEOUT_SECONDS: "20",
                     SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_REPORT_PATH: path.join(directory, "report.html"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), GITHUB_EVENT_PATH: path.join(directory, "event.json"), GITHUB_REPOSITORY: "example/application", GITHUB_API_URL: `${api}/github`, GITHUB_TOKEN: "github-test-token",
                     CI_API_V4_URL: `${api}/gitlab`, CI_PROJECT_ID: "123", CI_MERGE_REQUEST_PROJECT_ID: "", CI_MERGE_REQUEST_IID: "42", SPECBOOK_GITLAB_TOKEN: "gitlab-test-token", ...env },
                 stdio: ["ignore", "pipe", "pipe"],
