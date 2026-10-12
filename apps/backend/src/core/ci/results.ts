@@ -23,9 +23,10 @@ export async function ciResult(batch: RunBatch, frontendOrigin = process.env.FRO
         const knownBug = known.has(item.specId);
         const status = run?.status ?? item.status;
         const failed = ["failed", "error"].includes(status);
-        const pending = status === "running" || retry?.status === "running" || (failed && run?.automationPending === true && !retry);
-        const failsGate = !pending && ((flaky && gate.failOnFlaky) || (failed && !flaky && (!knownBug || gate.failOnKnownBugs)));
-        return { ...item, status, failReason: run?.failReason ?? item.failReason, flaky, knownBug, pending, failsGate,
+        const awaitingDeploy = failed && (run?.awaitingDeploy ?? item.awaitingDeploy ?? false);
+        const pending = status === "running" || retry?.status === "running" || (failed && !awaitingDeploy && run?.automationPending === true && !retry);
+        const failsGate = !pending && !awaitingDeploy && ((flaky && gate.failOnFlaky) || (failed && !flaky && (!knownBug || gate.failOnKnownBugs)));
+        return { ...item, status, failReason: run?.failReason ?? item.failReason, flaky, knownBug, awaitingDeploy, pending, failsGate,
             retryRunId: retry?.id ?? null,
             url: `${frontend}/p/${batch.projectId}/specs/${item.specId}#run-${item.runId}`,
             evidenceUrl: `/runs/${item.runId}/evidence` };
@@ -35,7 +36,7 @@ export async function ciResult(batch: RunBatch, frontendOrigin = process.env.FRO
     const failures = results.filter((item) => item.failsGate).length + (infrastructureError ? 1 : 0);
     const passed = complete && failures === 0 && !infrastructureError;
     const status = !complete ? "running" : passed ? "passed" : batch.status === "error" ? "error" : "failed";
-    return { batch, status, complete, qualityGate: { passed, failures, flaky: results.filter((item) => item.flaky).length, knownBugs: results.filter((item) => item.knownBug && ["failed", "error"].includes(item.status)).length }, url, results };
+    return { batch, status, complete, qualityGate: { passed, failures, flaky: results.filter((item) => item.flaky && !item.awaitingDeploy).length, knownBugs: results.filter((item) => item.knownBug && !item.awaitingDeploy && ["failed", "error"].includes(item.status)).length, awaitingDeploy: results.filter((item) => item.awaitingDeploy).length }, url, results };
 }
 
 export type CiResult = Awaited<ReturnType<typeof ciResult>>;
@@ -48,7 +49,7 @@ export function junitResult(result: CiResult): string {
     const tests = result.results.map((item) => {
         const skipped = item.pending || (!item.failsGate && (item.flaky || ["failed", "error"].includes(item.status)));
         const detail = item.failsGate ? `<failure message="${xml(item.failReason ?? (item.flaky ? "Passed only after retry" : "Spec failed"))}"/>`
-            : skipped ? `<skipped message="${item.pending ? "Still running" : item.flaky ? "Flaky: passed on retry" : "Open bug report"}"/>` : "";
+            : skipped ? `<skipped message="${item.pending ? "Still running" : item.awaitingDeploy ? "Waiting for deploy" : item.flaky ? "Flaky: passed on retry" : "Open bug report"}"/>` : "";
         return `  <testcase name="${xml(item.title)}" classname="Specbook" time="${((item.durationMs ?? 0) / 1000).toFixed(3)}">${detail}</testcase>`;
     });
     if (result.qualityGate.failures > result.results.filter((item) => item.failsGate).length) {
@@ -67,9 +68,9 @@ export function markdownResult(result: CiResult): string {
     if (result.batch.ci?.ref) lines.push(`Ref: ${markdown(result.batch.ci.ref)}`, "");
     lines.push("| Spec | Result |", "| --- | --- |");
     for (const item of result.results) {
-        const status = item.pending ? "Running" : item.flaky ? "Flaky (passed on retry)" : item.knownBug && ["failed", "error"].includes(item.status) ? "Known bug" : item.status;
+        const status = item.pending ? "Running" : item.awaitingDeploy ? "Waiting for deploy" : item.flaky ? "Flaky (passed on retry)" : item.knownBug && ["failed", "error"].includes(item.status) ? "Known bug" : item.status;
         lines.push(`| ${markdown(item.title)} | ${status}${item.failsGate ? " · fails gate" : ""} |`);
     }
-    lines.push("", `Quality gate: ${result.complete ? result.qualityGate.passed ? "passed" : "failed" : "pending"}. ${result.qualityGate.failures} failure(s), ${result.qualityGate.flaky} flaky, ${result.qualityGate.knownBugs} known bug(s).`, "");
+    lines.push("", `Quality gate: ${result.complete ? result.qualityGate.passed ? "passed" : "failed" : "pending"}. ${result.qualityGate.failures} failure(s), ${result.qualityGate.flaky} flaky, ${result.qualityGate.knownBugs} known bug(s), ${result.qualityGate.awaitingDeploy} waiting for deploy.`, "");
     return lines.join("\n");
 }

@@ -16,16 +16,18 @@ export interface ReportItem {
     pending?: boolean;
     knownBug?: boolean;
     flaky?: boolean;
+    awaitingDeploy?: boolean;
 }
 
 type Item = ReportItem;
 type StepState = "passed" | "failed" | "skipped";
-type Tone = "failed" | "known" | "flaky" | "running" | "passed";
+type Tone = "failed" | "known" | "flaky" | "waiting" | "running" | "passed";
 
 const TONES: { tone: Tone; label: string; tally: (n: number) => string }[] = [
     { tone: "failed", label: "Failed", tally: (n) => `${n} failed` },
     { tone: "known", label: "Known bugs", tally: (n) => `${n} known bug${n === 1 ? "" : "s"}` },
     { tone: "flaky", label: "Flaky", tally: (n) => `${n} flaky` },
+    { tone: "waiting", label: "Waiting for deploy", tally: (n) => `${n} waiting for deploy` },
     { tone: "running", label: "Running", tally: (n) => `${n} running` },
     { tone: "passed", label: "Passed", tally: (n) => `${n} passed` },
 ];
@@ -64,6 +66,7 @@ const image = (directory: string, file: string) => embed(directory, file, IMAGE_
 
 function toneOf(item: Item): Tone {
     if (item.pending) return "running";
+    if (item.awaitingDeploy) return "waiting";
     if (["failed", "error"].includes(item.status)) return item.knownBug ? "known" : "failed";
     return item.flaky ? "flaky" : "passed";
 }
@@ -121,9 +124,10 @@ const CROSS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6
 const BUG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6zM12 20v-9M6 13H2M22 13h-4M6.5 8.5 4 7M17.5 8.5 20 7M6 17l-2.5 1.5M18 17l2.5 1.5"/></svg>';
 const ALL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>';
 const RETRY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+const CLOCK = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
 
-const ICONS: Record<Tone, string> = { failed: CROSS, known: BUG, flaky: RETRY, running: RETRY, passed: CHECK };
-const RANK: Record<Tone, number> = { failed: 0, known: 1, flaky: 2, running: 3, passed: 4 };
+const ICONS: Record<Tone, string> = { failed: CROSS, known: BUG, flaky: RETRY, waiting: CLOCK, running: RETRY, passed: CHECK };
+const RANK: Record<Tone, number> = { failed: 0, known: 1, flaky: 2, waiting: 3, running: 4, passed: 5 };
 
 function filter(tone: Tone | "all", label: string, value: number, checked: boolean): string {
     const id = `filter-${tone}`;
@@ -132,7 +136,7 @@ function filter(tone: Tone | "all", label: string, value: number, checked: boole
 
 function stateLabel(item: Item, tone: Tone): string {
     if (tone === "failed") return item.status === "error" ? "Error" : "Failed";
-    return { known: "Known bug", flaky: "Passed on retry", running: "Running", passed: "Passed" }[tone] ?? "";
+    return { known: "Known bug", flaky: "Passed on retry", waiting: "Waiting for deploy", running: "Running", passed: "Passed" }[tone] ?? "";
 }
 
 function renderSteps(steps: ReportSection["steps"]): string {
@@ -140,7 +144,7 @@ function renderSteps(steps: ReportSection["steps"]): string {
 }
 
 function renderSection({ item, tone, path: file, expectedResult, steps, video }: ReportSection, open = false, showPath = false): string {
-    const failing = tone === "failed" || tone === "known";
+    const failing = tone === "failed" || tone === "known" || tone === "waiting";
     const shots = steps.filter((step) => step.image);
     const preconditions = steps.filter((step) => step.kind === "precondition");
     const actions = steps.filter((step) => step.kind === "step");
@@ -190,13 +194,13 @@ main.wrap{padding-top:32px;padding-bottom:24px}
 .filters{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 36px}
 .filter-input{position:absolute;opacity:0;pointer-events:none}
 .count{--c:var(--muted);display:flex;align-items:center;gap:12px;min-width:140px;padding:10px 16px 10px 12px;background:var(--surface);border:2px solid var(--c);border-radius:12px;cursor:pointer;user-select:none;transition:transform .12s ease,box-shadow .12s ease}
-.count.is-all{--c:var(--primary)}.count.is-passed{--c:var(--success)}.count.is-failed{--c:var(--danger)}.count.is-flaky{--c:var(--warning)}.count.is-known{--c:var(--muted)}.count.is-running{--c:var(--subtle)}
+.count.is-all{--c:var(--primary)}.count.is-passed{--c:var(--success)}.count.is-failed{--c:var(--danger)}.count.is-flaky{--c:var(--warning)}.count.is-known{--c:var(--muted)}.count.is-running{--c:var(--subtle)}.count.is-waiting{--c:var(--muted)}
 .count .icon{flex:none;width:34px;height:34px;border-radius:9px;background:var(--c);display:flex;align-items:center;justify-content:center}
 .count .icon svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
 .count b{display:block;font-size:26px;line-height:1;letter-spacing:-0.03em;color:var(--ink);font-variant-numeric:tabular-nums}
 .count small{display:block;margin-top:3px;font-size:12.5px;color:var(--muted)}
 .count:hover{transform:translate(-1px,-1px);box-shadow:2px 2px 0 var(--c)}
-main:has(#filter-all:checked) label[for=filter-all],main:has(#filter-failed:checked) label[for=filter-failed],main:has(#filter-known:checked) label[for=filter-known],main:has(#filter-flaky:checked) label[for=filter-flaky],main:has(#filter-running:checked) label[for=filter-running],main:has(#filter-passed:checked) label[for=filter-passed]{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--c)}
+main:has(#filter-all:checked) label[for=filter-all],main:has(#filter-failed:checked) label[for=filter-failed],main:has(#filter-known:checked) label[for=filter-known],main:has(#filter-flaky:checked) label[for=filter-flaky],main:has(#filter-running:checked) label[for=filter-running],main:has(#filter-waiting:checked) label[for=filter-waiting],main:has(#filter-passed:checked) label[for=filter-passed]{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--c)}
 .filter-input:focus-visible+.count{outline:2px solid var(--c);outline-offset:3px}
 .count.zero{--c:var(--strong);border-width:1px;padding:11px 17px 11px 13px;cursor:default}
 .count.zero:hover{transform:none;box-shadow:none}
@@ -205,6 +209,7 @@ main:has(#filter-failed:checked) .spec:not(.is-failed),main:has(#filter-failed:c
 main:has(#filter-known:checked) .spec:not(.is-known),main:has(#filter-known:checked) .feature:not(.has-known){display:none}
 main:has(#filter-flaky:checked) .spec:not(.is-flaky),main:has(#filter-flaky:checked) .feature:not(.has-flaky){display:none}
 main:has(#filter-running:checked) .spec:not(.is-running),main:has(#filter-running:checked) .feature:not(.has-running){display:none}
+main:has(#filter-waiting:checked) .spec:not(.is-waiting),main:has(#filter-waiting:checked) .feature:not(.has-waiting){display:none}
 main:has(#filter-passed:checked) .spec:not(.is-passed),main:has(#filter-passed:checked) .feature:not(.has-passed){display:none}
 .feature{margin:0 8px 34px 0}
 .feature-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 12px}
@@ -212,20 +217,20 @@ main:has(#filter-passed:checked) .spec:not(.is-passed),main:has(#filter-passed:c
 .feature-count{font-size:13px;color:var(--muted)}
 .tallies{margin-left:auto;display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--muted)}
 .tally{display:inline-flex;align-items:center;gap:6px}.tally i{width:8px;height:8px;border-radius:2px;background:var(--c)}
-.tally.is-passed{--c:var(--success)}.tally.is-failed{--c:var(--danger)}.tally.is-flaky{--c:var(--warning)}.tally.is-known{--c:var(--muted)}.tally.is-running{--c:var(--subtle)}
+.tally.is-passed{--c:var(--success)}.tally.is-failed{--c:var(--danger)}.tally.is-flaky{--c:var(--warning)}.tally.is-known{--c:var(--muted)}.tally.is-running{--c:var(--subtle)}.tally.is-waiting{--c:var(--muted)}
 .feature-sheet{border:1px solid var(--strong);border-radius:12px;background:var(--surface);box-shadow:4px 4px 0 -1px var(--surface),4px 4px 0 0 var(--strong),8px 8px 0 -1px var(--surface),8px 8px 0 0 var(--strong);overflow:hidden}
 .spec+.spec{border-top:1px solid var(--line)}
 .spec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:14px 18px}
 .spec>summary:hover{background:var(--soft)}
 .spec>summary::-webkit-details-marker{display:none}
 .seal{flex:none;display:flex;width:32px;height:32px;border-radius:8px;align-items:center;justify-content:center;color:#fff}
-.is-passed .seal{background:var(--success)}.is-failed .seal{background:var(--danger)}.is-flaky .seal{background:var(--warning)}.is-known .seal{background:var(--muted)}.is-running .seal{background:var(--subtle)}
+.is-passed .seal{background:var(--success)}.is-failed .seal{background:var(--danger)}.is-flaky .seal{background:var(--warning)}.is-known .seal{background:var(--muted)}.is-running .seal{background:var(--subtle)}.is-waiting .seal{background:var(--muted)}
 .seal svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}
 .heading{flex:1;min-width:0;display:flex;flex-direction:column}
 .title{font-weight:600}
 .path{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .state{font-size:13px;font-weight:600}
-.is-passed .state{color:var(--success)}.is-failed .state{color:var(--danger)}.is-flaky .state{color:#8a6a00}.is-known .state,.is-running .state{color:var(--muted)}
+.is-passed .state{color:var(--success)}.is-failed .state{color:var(--danger)}.is-flaky .state{color:#8a6a00}.is-waiting .state,.is-known .state,.is-running .state{color:var(--muted)}
 .time{font-size:12px;color:var(--subtle);min-width:48px;text-align:right}
 .body{border-top:1px solid var(--line);padding:6px 18px 18px;background:var(--surface)}
 h3{font-size:13px;margin:18px 0 8px}
@@ -316,7 +321,7 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
     ].filter(Boolean).join("");
     const filters = options.single ? "" : `<div class="filters" role="radiogroup" aria-label="Filter Specs by status">
     ${filter("all", "All Specs", total, true)}
-    ${TONES.filter(({ tone }) => tone !== "running" || tally("running") > 0).map(({ tone, label }) => filter(tone, label, tally(tone), false)).join("\n    ")}
+    ${TONES.filter(({ tone }) => !(["running", "waiting"].includes(tone)) || tally(tone) > 0).map(({ tone, label }) => filter(tone, label, tally(tone), false)).join("\n    ")}
   </div>`;
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

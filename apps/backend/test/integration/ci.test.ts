@@ -52,6 +52,27 @@ async function fixture() {
 }
 
 describe("CI access and quality gates", () => {
+    test("waiting failures keep evidence and skip every quality gate after promotion", async () => {
+        const { project, spec, batch } = await fixture();
+        const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: "sha", awaitingDeploy: true });
+        await runsRepository.finishRun(run.id, "failed", 100, "Deployment is not ready");
+        await specsRepository.updateSpecRecord(spec.id, { status: "passed" });
+        const waitingBatch = { ...batch, ci: { ...batch.ci, qualityGate: { failOnFlaky: true, failOnKnownBugs: true } }, specs: [{ ...batch.specs[0], runId: run.id }] };
+        const result = await ciResult(waitingBatch);
+        assert.equal(result.complete, true);
+        assert.equal(result.status, "passed");
+        assert.equal(result.qualityGate.failures, 0);
+        assert.equal(result.qualityGate.awaitingDeploy, 1);
+        assert.equal(result.results[0].status, "failed");
+        assert.equal(result.results[0].awaitingDeploy, true);
+        assert.equal(result.results[0].failsGate, false);
+        assert.match(junitResult(result), /<skipped message="Waiting for deploy"/);
+        assert.match(markdownResult(result), /Waiting for deploy/);
+        const { htmlReport, runReport } = await import("../../src/core/ci/report");
+        assert.match(await htmlReport(result), /Waiting for deploy/);
+        assert.match(await runReport(run, { projectId: project.id, title: spec.title }), /Waiting for deploy/);
+    });
+
     test("batch history remains complete across cache eviction and project switches", async () => {
         const first = await fixture();
         const second = await fixture();
@@ -119,9 +140,7 @@ describe("CI access and quality gates", () => {
         assert.equal(signals[0]?.kind, "deployment");
         assert.equal(signals[0]?.payload.url, "https://1.1.1.1");
         assert.equal((await app.request(`/projects/${project.id}/ci/token`, { method: "POST", headers })).status, 421);
-        const client = await app.request(`/ci/projects/${project.id}/client.mjs`, { headers });
-        assert.equal(client.status, 200);
-        assert.match(await client.text(), /SPECBOOK_CI_TOKEN/);
+        assert.equal((await app.request(`/ci/projects/${project.id}/client.mjs`, { headers })).status, 404);
     });
 
     test("restricts CI origins and private targets, deduplicates SHA-less deploys and persists token limits", async () => {
@@ -294,7 +313,7 @@ describe("CI access and quality gates", () => {
         assert.equal(areSpecsLocked([spec.id, other]), false);
     });
 
-    test("the standalone client recovers transient GET failures and never retries a trigger", async () => {
+    test("the CLI recovers transient GET failures and never retries a trigger", async () => {
         const { backendRoot } = await import("../../src/core/paths");
         let posts = 0;
         let polls = 0;
@@ -305,7 +324,7 @@ describe("CI access and quality gates", () => {
             if (request.method === "POST") {
                 posts++;
                 response.statusCode = failTrigger ? 503 : 202;
-                response.end(failTrigger ? "Unavailable" : JSON.stringify({ batch: { id: "batch-id" }, url: "http://example.com/results", complete: false }));
+                response.end(failTrigger ? "Unavailable" : JSON.stringify({ batch: { id: "batch-id" }, url: "http://example.com/results", complete: false, status: "running", qualityGate: { passed: false, failures: 0, flaky: 0, knownBugs: 0 }, results: [] }));
             } else if (request.url?.includes("format=junit")) response.end('<testsuite tests="1" failures="0"/>');
             else if (request.url?.includes("format=markdown")) response.end("## Specbook: passed");
             else if (request.url?.includes("format=html")) response.end("<!doctype html><title>Specbook report</title>");
@@ -313,14 +332,14 @@ describe("CI access and quality gates", () => {
                 polls++;
                 if (polls === 1) { response.statusCode = 503; response.end("Restarting"); }
                 else if (polls === 2) request.socket.destroy();
-                else response.end(JSON.stringify({ complete: true, status: "passed", qualityGate: { passed: true, failures: 0, flaky: 0, knownBugs: 0 } }));
+                else response.end(JSON.stringify({ batch: { id: "batch-id" }, url: "http://example.com/results", complete: true, status: "passed", qualityGate: { passed: true, failures: 0, flaky: 0, knownBugs: 0 }, results: [] }));
             }
         });
         await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
         const directory = path.join(storage, "client-results");
         const runClient = () => new Promise<{ code: number | null; output: string }>((resolve, reject) => {
-            const child = spawn(process.execPath, [path.join(backendRoot, "scripts", "specbook-ci.mjs")], {
-                env: { ...process.env, SPECBOOK_API_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, SPECBOOK_PROJECT_ID: "project-id", SPECBOOK_CI_TOKEN: "test-ci-token", SPECBOOK_TIMEOUT_SECONDS: "20",
+            const child = spawn(process.execPath, ["--import", "tsx", path.join(backendRoot, "..", "cli", "src", "index.ts"), "ci"], {
+                env: { ...process.env, SPECBOOK_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, SPECBOOK_PROJECT: "11111111-1111-4111-8111-111111111111", SPECBOOK_TOKEN: "test-ci-token", SPECBOOK_TIMEOUT_SECONDS: "20",
                     SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), SPECBOOK_REPORT_PATH: path.join(directory, "report.html") },
                 stdio: ["ignore", "pipe", "pipe"],
             });
@@ -376,7 +395,7 @@ describe("CI access and quality gates", () => {
                     triggerCount++;
                     environment = JSON.parse(body).environment;
                     response.statusCode = 202;
-                    response.end(JSON.stringify({ batch: { id: "batch-id" }, url: "https://example.com/results", complete: true, status: passing ? "passed" : "failed", qualityGate: { passed: passing, failures: passing ? 0 : 1, flaky: 0, knownBugs: 0 } }));
+                    response.end(JSON.stringify({ batch: { id: "batch-id" }, url: "https://example.com/results", complete: true, results: [], status: passing ? "passed" : "failed", qualityGate: { passed: passing, failures: passing ? 0 : 1, flaky: 0, knownBugs: 0 } }));
                 } else response.end(target.searchParams.get("format") === "junit" ? '<testsuite tests="1"/>' : `## Specbook: ${passing ? "passed" : "failed"}\nhttps://example.com/results\ntest-ci-token github-test-token gitlab-test-token`);
                 return;
             }
@@ -414,15 +433,15 @@ describe("CI access and quality gates", () => {
         });
         await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
         const api = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-        const marker = `<!-- specbook:${crypto.createHash("sha256").update(`${api}/specbook/project-id`).digest("hex")} -->`;
+        const marker = `<!-- specbook:${crypto.createHash("sha256").update(`${api}/specbook/11111111-1111-4111-8111-111111111111`).digest("hex")} -->`;
         comments.push({ id: 1, body: `${marker}\nHuman comment`, user: { login: "human" } });
         for (let index = 0; index < 100; index++) comments.push({ id: index + 2, body: "Other comment", user: { login: "human" } });
         notes.push({ id: 1, body: `${marker}\nSomeone else's note`, author: { id: 12 }, system: false });
         await fs.writeFile(path.join(directory, "event.json"), JSON.stringify({ pull_request: { number: 42 } }));
         const runClient = (env: Record<string, string> = {}, args: string[] = []) => new Promise<{ code: number | null; output: string }>((resolve, reject) => {
-            const child = spawn(process.execPath, [path.join(backendRoot, "scripts", "specbook-ci.mjs"), ...args], {
-                env: { ...process.env, SPECBOOK_API_URL: `${api}/specbook`, SPECBOOK_PROJECT_ID: "project-id", SPECBOOK_CI_TOKEN: "test-ci-token", SPECBOOK_ENVIRONMENT: "production", SPECBOOK_COMMENT_PROVIDER: "none", SPECBOOK_TIMEOUT_SECONDS: "20",
-                    SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), GITHUB_EVENT_PATH: path.join(directory, "event.json"), GITHUB_REPOSITORY: "example/application", GITHUB_API_URL: `${api}/github`, GITHUB_TOKEN: "github-test-token",
+            const child = spawn(process.execPath, ["--import", "tsx", path.join(backendRoot, "..", "cli", "src", "index.ts"), "ci", ...args], {
+                env: { ...process.env, SPECBOOK_URL: `${api}/specbook`, SPECBOOK_PROJECT: "11111111-1111-4111-8111-111111111111", SPECBOOK_TOKEN: "test-ci-token", SPECBOOK_ENVIRONMENT: "production", SPECBOOK_COMMENT_PROVIDER: "none", SPECBOOK_TIMEOUT_SECONDS: "20",
+                    SPECBOOK_JUNIT_PATH: path.join(directory, "junit.xml"), SPECBOOK_REPORT_PATH: path.join(directory, "report.html"), SPECBOOK_SUMMARY_PATH: path.join(directory, "summary.md"), GITHUB_EVENT_PATH: path.join(directory, "event.json"), GITHUB_REPOSITORY: "example/application", GITHUB_API_URL: `${api}/github`, GITHUB_TOKEN: "github-test-token",
                     CI_API_V4_URL: `${api}/gitlab`, CI_PROJECT_ID: "123", CI_MERGE_REQUEST_PROJECT_ID: "", CI_MERGE_REQUEST_IID: "42", SPECBOOK_GITLAB_TOKEN: "gitlab-test-token", ...env },
                 stdio: ["ignore", "pipe", "pipe"],
             });
@@ -464,10 +483,9 @@ describe("CI access and quality gates", () => {
             assert.equal(triggerCount, beforeRejected, "unsupported GitLab authentication fails before starting a batch");
             const noContext = await runClient({ SPECBOOK_COMMENT_PROVIDER: "gitlab", SPECBOOK_GITLAB_TOKEN: "", CI_MERGE_REQUEST_IID: "" });
             assert.equal(noContext.code, 0, noContext.output);
-            assert.match(noContext.output, /no merge request/);
             const beforeFailure = commentPosts;
             failComment = true;
-            const failed = await runClient({ SPECBOOK_COMMENT_PROVIDER: "github", SPECBOOK_PROJECT_ID: "other-project" });
+            const failed = await runClient({ SPECBOOK_COMMENT_PROVIDER: "github", SPECBOOK_PROJECT: "22222222-2222-4222-8222-222222222222" });
             assert.equal(failed.code, 1, "publishing failure never silently passes the CI job");
             assert.match(failed.output, /comment API returned HTTP 503; reports are saved locally/);
             assert.equal(commentPosts, beforeFailure + 1, "an ambiguous failed POST is never retried");

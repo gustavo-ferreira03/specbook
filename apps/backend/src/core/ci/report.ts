@@ -27,9 +27,9 @@ export async function htmlReport(result: CiResult, options: { single?: boolean }
         ci: batch.ci, qualityGate: result.qualityGate, sections }, options);
 }
 
-export async function runReport(run: { id: string; specId: string; status: string; startedAt: string; durationMs: number | null; failReason: string | null; environment?: RunBatch["environment"] | null }, spec: { title: string; projectId: string }): Promise<string> {
+export async function runReport(run: { id: string; specId: string; status: string; startedAt: string; durationMs: number | null; failReason: string | null; awaitingDeploy?: boolean; environment?: RunBatch["environment"] | null }, spec: { title: string; projectId: string }): Promise<string> {
     const batch = { id: run.id, label: "Spec run", projectId: spec.projectId, status: run.status, startedAt: run.startedAt, durationMs: run.durationMs, environment: run.environment ?? undefined,
-        specs: [{ specId: run.specId, runId: run.id, title: spec.title, status: run.status, durationMs: run.durationMs, failReason: run.failReason }] } as unknown as RunBatch;
+        specs: [{ specId: run.specId, runId: run.id, title: spec.title, status: run.status, durationMs: run.durationMs, failReason: run.failReason, awaitingDeploy: run.awaitingDeploy }] } as unknown as RunBatch;
     return htmlReport(await ciResult(batch), { single: true });
 }
 

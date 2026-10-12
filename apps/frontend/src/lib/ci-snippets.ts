@@ -10,14 +10,13 @@ export type CiProvider = typeof CI_PROVIDERS[number][0];
 
 export function ciSnippet(provider: CiProvider, apiUrl: string, projectId: string, failOnFlaky: boolean, failOnKnownBugs: boolean, environment = "production"): string {
     const env = {
-        SPECBOOK_API_URL: apiUrl,
-        SPECBOOK_PROJECT_ID: projectId,
+        SPECBOOK_URL: apiUrl,
+        SPECBOOK_PROJECT: projectId,
         SPECBOOK_ENVIRONMENT: environment,
         SPECBOOK_FAIL_ON_FLAKY: String(failOnFlaky),
         SPECBOOK_FAIL_ON_KNOWN_BUGS: String(failOnKnownBugs),
     };
     const yamlEnv = (indent: number) => Object.entries(env).map(([key, value]) => `${" ".repeat(indent)}${key}: ${JSON.stringify(value)}`).join("\n");
-    const download = 'curl -fsS -H "Authorization: Bearer $SPECBOOK_CI_TOKEN" "$SPECBOOK_API_URL/ci/projects/$SPECBOOK_PROJECT_ID/client.mjs" -o specbook-ci.mjs';
 
     switch (provider) {
         case "github": return `name: Specbook
@@ -33,7 +32,7 @@ jobs:
       cancel-in-progress: false
     env:
 ${yamlEnv(6)}
-      SPECBOOK_CI_TOKEN: \${{ secrets.SPECBOOK_CI_TOKEN }}
+      SPECBOOK_TOKEN: \${{ secrets.SPECBOOK_TOKEN }}
       SPECBOOK_COMMENT_PROVIDER: github
       GITHUB_TOKEN: \${{ github.token }}
       SPECBOOK_COMMIT_SHA: \${{ github.sha }}
@@ -45,8 +44,7 @@ ${yamlEnv(6)}
           node-version: 26
       - name: Verify application
         run: |
-          ${download}
-          node specbook-ci.mjs
+          npx --yes specbook ci
       - name: Upload report
         id: report
         if: always() && hashFiles('specbook-report.html') != ''
@@ -71,7 +69,7 @@ ${yamlEnv(6)}
           test ! -f specbook-summary.md || cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY"`;
         case "gitlab": return `specbook:
   image: node:26
-  resource_group: specbook-$SPECBOOK_PROJECT_ID-$CI_MERGE_REQUEST_IID
+  resource_group: specbook-$SPECBOOK_PROJECT-$CI_MERGE_REQUEST_IID
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
@@ -85,8 +83,7 @@ ${yamlEnv(4)}
     SPECBOOK_COMMENT_PROVIDER: "gitlab"
   script:
     - |
-      ${download}
-      node specbook-ci.mjs
+      npx --yes specbook ci
   artifacts:
     when: always
     reports:
@@ -107,8 +104,7 @@ ${Object.entries(env).map(([key, value]) => `          - export ${key}='${value.
           - mkdir -p test-results
           - export SPECBOOK_JUNIT_PATH="test-results/specbook.xml"
           - |
-            ${download}
-            node specbook-ci.mjs
+            npx --yes specbook ci
         artifacts:
           - test-results/specbook.xml
           - specbook-report.html
@@ -129,8 +125,7 @@ ${yamlEnv(6)}
             export SPECBOOK_REF="$CIRCLE_BRANCH"
             export SPECBOOK_BUILD_URL="$CIRCLE_BUILD_URL"
             mkdir -p test-results
-            ${download}
-            node specbook-ci.mjs
+            npx --yes specbook ci
       - store_test_results:
           path: test-results
       - store_artifacts:
@@ -142,10 +137,10 @@ workflows:
     jobs:
       - specbook`;
         case "jenkins": return `pipeline {
-  agent any // Node.js 26 and curl must be available.
+  agent any // Node.js 26 and npm must be available.
   environment {
 ${Object.entries(env).map(([key, value]) => `    ${key} = '${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`).join("\n")}
-    SPECBOOK_CI_TOKEN = credentials('specbook-ci-token')
+    SPECBOOK_TOKEN = credentials('specbook-ci-token')
   }
   stages {
     stage('Verify with Specbook') {
@@ -155,8 +150,7 @@ ${Object.entries(env).map(([key, value]) => `    ${key} = '${value.replace(/\\/g
           export SPECBOOK_COMMIT_SHA="$GIT_COMMIT"
           export SPECBOOK_REF="$BRANCH_NAME"
           export SPECBOOK_BUILD_URL="$BUILD_URL"
-          ${download}
-          node specbook-ci.mjs
+          npx --yes specbook ci
         '''
       }
     }

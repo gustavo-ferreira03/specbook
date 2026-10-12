@@ -2,8 +2,6 @@ import { acceptCiTrigger, CiRequestError, startCiRun } from "../../../core/ci/ru
 import { access, type BearerVerifier } from "../access";
 import { loadProject } from "../load-project";
 import { publicFrontendOrigin } from "../security";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { zValidator } from "@hono/zod-validator";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -13,7 +11,6 @@ import { ciRunSchema, ciResultQuerySchema, deploySchema } from "../../../core/ci
 import { ciResult, junitResult, markdownResult } from "../../../core/ci/results";
 import { htmlReport } from "../../../core/ci/report";
 import { environmentsRepository } from "../../repositories/environments";
-import { backendRoot } from "../../../core/paths";
 import { getRunBatch, listCiBatches } from "../../../core/runner/batch";
 import { ciRepository } from "../../repositories/ci";
 import { stewardRepository } from "../../repositories/steward";
@@ -79,11 +76,6 @@ export function createCiSettingsRouter(): Hono {
 
 export function createCiRouter(): Hono {
     const router = new Hono();
-    router.get("/ci/projects/:id/client.mjs", access("ci-token", verifyCiToken), projectAuth, async (c) => {
-        c.header("Content-Type", "text/javascript; charset=utf-8");
-        c.header("X-Content-Type-Options", "nosniff");
-        return c.body(await fs.readFile(path.join(backendRoot, "scripts", "specbook-ci.mjs"), "utf8"));
-    });
     router.post("/ci/projects/:id/runs", access("ci-token", verifyCiToken), projectAuth, zValidator("json", ciRunSchema), async (c) => {
         const projectId = c.req.param("id");
         const input = c.req.valid("json");

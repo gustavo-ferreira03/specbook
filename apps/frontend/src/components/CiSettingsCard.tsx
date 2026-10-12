@@ -40,9 +40,9 @@ interface CiBatch {
     };
     status: "running" | "passed" | "failed" | "error";
     complete: boolean;
-    qualityGate: { passed: boolean; failures: number; flaky: number; knownBugs: number };
+    qualityGate: { passed: boolean; failures: number; flaky: number; knownBugs: number; awaitingDeploy: number };
     url: string;
-    results: { runId: string; title: string; status: "running" | "passed" | "failed" | "error"; url: string; flaky: boolean; knownBug: boolean }[];
+    results: { runId: string; title: string; status: "running" | "passed" | "failed" | "error"; url: string; flaky: boolean; knownBug: boolean; awaitingDeploy: boolean }[];
 }
 
 interface CiSettings {
@@ -159,7 +159,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
     return (
         <div className="space-y-10">
             <SettingsSection id="ci-access-heading" title="CI access" description="Run Specs and send deploy events from your pipeline.">
-                <SettingsRow label="Project token" description="Store it as SPECBOOK_CI_TOKEN in your CI secret settings.">
+                <SettingsRow label="Project token" description="Store it as SPECBOOK_TOKEN in your CI secret settings.">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="min-w-0">
                             {settings.token.configured ? <p className="flex items-center gap-2 text-body text-ink"><KeyRound size={14} className="text-ink-subtle" aria-hidden="true" /><code className="font-mono text-meta">{settings.token.prefix}...</code></p> : <p className="text-body text-ink-muted">No CI token yet</p>}
@@ -209,7 +209,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                     </div>
                     <pre ref={snippetRef} tabIndex={0} aria-label={`${selectedProvider[1]} pipeline snippet`} className="max-h-96 overflow-auto rounded-md border border-line bg-surface-soft p-3 font-mono text-meta leading-5 text-ink focus-visible:outline-2 focus-visible:outline-ring"><code>{snippet}</code></pre>
                     {copyError === "snippet" && <p className="mt-2 text-meta text-danger" role="alert">Clipboard unavailable. The snippet is selected; press Ctrl+C or Cmd+C to copy it.</p>}
-                    <p className="mt-3 text-body text-ink-muted">{provider === "jenkins" ? "Save the token as a secret text credential named specbook-ci-token." : `Save SPECBOOK_CI_TOKEN as a ${provider === "github" ? "repository secret" : provider === "gitlab" ? "masked CI/CD variable" : provider === "bitbucket" ? "secured repository variable" : "project environment variable"}.`} GitHub pull requests receive an updated comment using the job token. GitLab merge request comments require SPECBOOK_GITLAB_TOKEN with API access, saved only in CI. For preview deployments, set <code className="font-mono text-meta">SPECBOOK_BASE_URL</code> in the pipeline.</p>
+                    <p className="mt-3 text-body text-ink-muted">{provider === "jenkins" ? "Save the token as a secret text credential named specbook-ci-token." : `Save SPECBOOK_TOKEN as a ${provider === "github" ? "repository secret" : provider === "gitlab" ? "masked CI/CD variable" : provider === "bitbucket" ? "secured repository variable" : "project environment variable"}.`} GitHub pull requests receive an updated comment using the job token. GitLab merge request comments require SPECBOOK_GITLAB_TOKEN with API access, saved only in CI. For preview deployments, set <code className="font-mono text-meta">SPECBOOK_BASE_URL</code> in the pipeline.</p>
                 </SettingsBlock>
             </SettingsSection>
 
@@ -218,7 +218,7 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                     <li key={result.batch.id} id={`ci-batch-${result.batch.id}`} className="scroll-mt-4 space-y-2 px-4 py-4 sm:px-5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <a href={result.url} className="min-w-0 break-words text-body font-medium text-ink hover:underline">{result.batch.label || "CI runs"}</a>
-                            <div className="flex flex-wrap items-center gap-2"><StatusPill status={result.batch.status} kind="run" size="sm" />{result.complete && <Badge variant={result.qualityGate.passed ? "success" : "danger"} size="sm">{result.qualityGate.passed ? <Check size={12} /> : <X size={12} />}Gate {result.qualityGate.passed ? "passed" : "failed"}</Badge>}</div>
+                            <div className="flex flex-wrap items-center gap-2"><StatusPill status={result.status} kind="run" size="sm" />{result.complete && <Badge variant={result.qualityGate.passed ? "success" : "danger"} size="sm">{result.qualityGate.passed ? <Check size={12} /> : <X size={12} />}Gate {result.qualityGate.passed ? "passed" : "failed"}</Badge>}</div>
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ink-subtle">
                             {result.batch.environment && <Badge size="sm">{result.batch.environment.name}</Badge>}
@@ -229,10 +229,10 @@ export function CiSettingsCard({ projectId, oneTimeToken, onOneTimeTokenChange }
                             {result.batch.ci.buildUrl && <a href={result.batch.ci.buildUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-ink-muted hover:underline">View build<ExternalLink size={12} /></a>}
                         </div>
                         <p className="break-all font-mono text-meta text-ink-subtle">{result.batch.baseUrl}</p>
-                        {(result.qualityGate.flaky > 0 || result.qualityGate.knownBugs > 0) && <p className="text-meta text-ink-muted">{[result.qualityGate.flaky > 0 && `${result.qualityGate.flaky} flaky`, result.qualityGate.knownBugs > 0 && countLabel(result.qualityGate.knownBugs, "known bug")].filter(Boolean).join(" · ")}</p>}
+                        {(result.qualityGate.flaky > 0 || result.qualityGate.knownBugs > 0 || result.qualityGate.awaitingDeploy > 0) && <p className="text-meta text-ink-muted">{[result.qualityGate.flaky > 0 && `${result.qualityGate.flaky} flaky`, result.qualityGate.knownBugs > 0 && countLabel(result.qualityGate.knownBugs, "known bug"), result.qualityGate.awaitingDeploy > 0 && `${result.qualityGate.awaitingDeploy} waiting for deploy`].filter(Boolean).join(" · ")}</p>}
                         <details className="text-body">
                             <summary className="cursor-pointer text-ink-muted hover:text-ink">{countLabel(result.results.length, "Spec")} · View evidence</summary>
-                            <ul className="mt-2 space-y-2">{result.results.map((item) => <li key={item.runId} className="flex flex-wrap items-center justify-between gap-2"><a href={item.url} className="min-w-0 break-words text-ink hover:underline">{item.title}</a><StatusPill status={item.status} kind="run" size="sm" /></li>)}</ul>
+                            <ul className="mt-2 space-y-2">{result.results.map((item) => <li key={item.runId} className="flex flex-wrap items-center justify-between gap-2"><a href={item.url} className="min-w-0 break-words text-ink hover:underline">{item.title}</a><StatusPill status={item.awaitingDeploy ? "awaiting_deploy" : item.status} kind="run" size="sm" /></li>)}</ul>
                         </details>
                     </li>
                 ))}</ul>}

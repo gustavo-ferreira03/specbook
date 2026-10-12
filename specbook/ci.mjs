@@ -69,8 +69,8 @@ if (indexed !== expected) throw new Error(`Expected ${expected} Specs after the 
 console.log(`Specbook: ${indexed} Specs pushed to the tester project`);
 
 const { token: ciToken } = await api("POST", `/projects/${project.id}/ci/token`);
-const run = spawnSync(process.execPath, [path.join(book, "..", "apps", "backend", "scripts", "specbook-ci.mjs")], {
+const run = spawnSync(process.execPath, [path.join(book, "..", "apps", "cli", "dist", "index.js"), "ci"], {
     stdio: "inherit",
-    env: { ...process.env, SPECBOOK_API_URL: `${tester}/api`, SPECBOOK_PROJECT_ID: project.id, SPECBOOK_CI_TOKEN: ciToken },
+    env: { ...process.env, SPECBOOK_URL: `${tester}/api`, SPECBOOK_PROJECT: project.id, SPECBOOK_TOKEN: ciToken },
 });
 process.exitCode = run.status ?? 1;
