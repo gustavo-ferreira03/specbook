@@ -13,7 +13,7 @@ import { triageSchema } from "./schemas";
 import { isCredentialFailure, isInfrastructureFailure } from "./presentation-errors";
 import { retryInfrastructure } from "./retry";
 import { matchesCurrentSpec } from "./current-run";
-import { reviewRunEvidence } from "../runner/evidence-review";
+import { reviewedScreenshots, reviewRunEvidence } from "../runner/evidence-review";
 import { readEvidenceManifest, isStepScreenshot } from "@specbook/runtime/evidence";
 
 export class StaleTriageError extends Error {}
@@ -39,9 +39,10 @@ export async function prepareTriageGoal(projectId: string, runId?: string) {
     if (!current) throw new StaleTriageError("The failed run is no longer the current result for this Spec and behavior contract");
     const { run, spec } = current;
     const draft = !await runsRepository.hasPassed(spec.id)
-        ? "\nThis Spec has never passed, so its spec.ts is an unproven first draft: a wrong locator, a wrong attribute or a wrong assumption about the app is test drift. Before calling it an application bug, check that the app really contradicts spec.yml and that the draft's own action order did not cause the result (for example, an element a previous step left selected or focused receives the next input). Fix the draft's assertions too when they check something the app never exposes, without changing what spec.yml expects."
+        ? "\nThis Spec has never passed, so its spec.ts is an unproven draft: a wrong locator, attribute or assumption about the app is test drift. Call it an app bug only after confirming the app contradicts spec.yml and the draft's own action order did not cause the result (for example, an element left selected or focused by a previous step receiving the next input). Also fix assertions on things the app never exposes, without changing what spec.yml expects."
+
         : "";
-    return { runId: run.id, specId: spec.id, goal: `Investigate failure in ${spec.title}`, message: `Investigate the failure of Spec "${spec.title}" (${spec.id}), run ${run.id}. Read get_failure_evidence and get_spec, then investigate the application in the browser. Classify with triage_failure before proposing a fix. get_failure_evidence includes evidenceReview, an independent reading of the screenshots against spec.yml; "assertion_wrong" means the screen shows the expected result, so the failure is test drift unless you see the app fail in the browser.${draft}\nTest drift (locator or timing): call update_spec with the smallest spec.ts change that restores the SAME behavior and assertions; never ask permission to propose it. update_spec verifies candidates in isolation; a passing verification is required for approval.\nApplication bug: submit a bug report with precise repro steps, observed versus expected behavior and evidence; leave the test untouched.\nEnvironment (unavailable site, expired session, missing credentials): retry if transient, otherwise ask a question through the Inbox and resume after the answer.\nNever change spec.yml or weaken the test to make it pass. Ask the human if the intended behavior must change. Do not claim drift when the app violates the contract. End with an Inbox result.` };
+    return { runId: run.id, specId: spec.id, goal: `Investigate failure in ${spec.title}`, message: `Investigate the failure of Spec "${spec.title}" (${spec.id}), run ${run.id}. Read get_failure_evidence and get_spec, reproduce in the browser, then classify with triage_failure before proposing anything. In get_failure_evidence, evidenceReview "assertion_wrong" means the screen showed the expected result: treat it as test drift unless you see the app fail.${draft}\n- Test drift (locator or timing): call update_spec with the smallest spec.ts change that keeps the same behavior and assertions, without asking. Candidates are verified in isolation and need a passing verification for approval.\n- App bug: report it with reproduction steps, observed versus expected behavior and evidence; leave the test untouched.\n- Environment (site down, expired session, missing credentials): retry if transient, otherwise ask in the Inbox and resume after the answer.\nNever change spec.yml or weaken the test to pass; ask if the intended behavior must change. End with an Inbox result.` };
 }
 
 export function createTriageTools(job: Job, abort: () => void) {
@@ -49,7 +50,7 @@ export function createTriageTools(job: Job, abort: () => void) {
     return [
         defineTool({
             name: "get_failure_evidence", label: "get_failure_evidence",
-            description: "Read the failed run, step, ARIA/error context, console/network diagnostics and screenshots being investigated.",
+            description: "Read the investigated failed run: failed step, error and accessibility context, console and network diagnostics, evidenceReview and screenshots.",
             parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute() {
                 const run = job.runId ? await runsRepository.getRun(job.runId) : null;
@@ -61,7 +62,7 @@ export function createTriageTools(job: Job, abort: () => void) {
                 const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
                     { type: "text", text: await scrub(JSON.stringify({ run, evidence, evidenceReview, artifactBase: `/runs/${run.id}/artifacts/` })) },
                 ];
-                for (const step of (await getSecuritySettings()).sendScreenshotsToModel ? (evidence.steps ?? []).slice(-2) : []) {
+                for (const step of (await getSecuritySettings()).sendScreenshotsToModel ? reviewedScreenshots(evidence, await fs.readFile(path.join(directory, "spec.yml"), "utf8").catch(() => null)) : []) {
                     if (!isStepScreenshot(step.file)) continue;
                     const file = path.join(directory, step.file);
                     const bytes = await fs.readFile(file).catch(() => null);
@@ -72,7 +73,7 @@ export function createTriageTools(job: Job, abort: () => void) {
         }),
         defineTool({
             name: "triage_failure", label: "triage_failure",
-            description: "Record the investigated cause, reproduction and evidence. Only test_drift allows a verified implementation fix. Application bugs create an Inbox bug report; environment issues create a question.",
+            description: "Record the cause, reproduction and evidence. Only test_drift allows a verified spec.ts fix. application_bug files an Inbox bug report; environment asks a question for credential problems and otherwise retries.",
             parameters: Type.Unsafe<z.infer<typeof triageSchema>>(triageSchema.toJSONSchema()),
             async execute(_id, input) {
                 const triage = triageSchema.parse(input);

@@ -124,7 +124,7 @@ const inspectElementSchema = z.object({
 export function createExplorationTools(options: ExplorationToolOptions) {
     return [defineTool({
         name: "inspect_element", label: "inspect_element",
-        description: "Read one element's HTML, its parent chain and its computed colors on the current project page. Use it before writing any assertion on an attribute, CSS selector or color, since browser_snapshot shows only the accessibility tree. Read-only; form values are removed.",
+        description: "Read an element's HTML, parent chain and computed colors on the current page, with form values removed. Read-only.",
         parameters: Type.Unsafe<z.infer<typeof inspectElementSchema>>(inspectElementSchema.toJSONSchema()),
         async execute(_id, input, signal) {
             const { target } = inspectElementSchema.parse(input);
@@ -137,7 +137,7 @@ export function createExplorationTools(options: ExplorationToolOptions) {
         },
     }), defineTool({
         name: "scan_page", label: "scan_page",
-        description: "Inspect the current project page for axe accessibility violations, console errors, failed HTTP requests, and broken links. Read-only, same-origin, bounded checks. Use the evidence with precise reproduction steps in an Inbox bug report; confirm findings before reporting them.",
+        description: "Check the current page for accessibility violations (axe), console errors, failed requests and broken links. Read-only, same-origin, bounded.",
         parameters: Type.Unsafe<z.infer<typeof scanPageSchema>>(scanPageSchema.toJSONSchema()),
         async execute(_id, input, signal) {
             signal?.throwIfAborted();

@@ -49,7 +49,7 @@ export function createSessionTools(options: SessionToolOptions) {
             name: "save_session",
             label: "save_session",
             description:
-                "Save the current browser session (cookies and local storage) under a credential profile name, so a future chat can restore it with resume_session instead of logging in again. Call this right after confirming a login succeeded.",
+                "Save the browser session (cookies, local storage) under a login handle so later chats can restore it with resume_session. Call right after a confirmed login.",
             parameters: Type.Unsafe<z.infer<typeof sessionProfileSchema>>(sessionProfileSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();
@@ -91,7 +91,7 @@ export function createSessionTools(options: SessionToolOptions) {
             name: "resume_session",
             label: "resume_session",
             description:
-                "Restore a previously saved browser session for a credential profile and navigate to the application. Try this before browser_vault_list / browser_vault_save_login when a saved session might already exist. The saved session can be stale (expired cookies) — verify you're actually logged in afterward, and fall back to logging in normally if not.",
+                "Restore a saved browser session for a login handle and open the app. It may be stale: confirm you are signed in, otherwise sign in normally.",
             parameters: Type.Unsafe<z.infer<typeof sessionProfileSchema>>(sessionProfileSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();

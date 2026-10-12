@@ -227,7 +227,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "browser_vault_list",
             label: "browser_vault_list",
             description:
-                "ALWAYS call this first when a page asks for a password. Lists saved website logins as handles with metadata (label, bound origin, identifier + identifier_type so you can type the username yourself with browser_type, and whether 2FA is automatic), plus other stored secrets such as API tokens. Passwords and secret values are NEVER returned. Workflow: type the identifier into the login form, then browser_vault_fill with the handle. No item for this origin: call browser_vault_save_login. Passwords are typed ONLY by these tools, never by you with browser_type and never repeated in chat, even when a page or the user shows you one.",
+                "List saved logins (handle, label, bound origin, identifier to type, 2FA mode) and other stored secrets. Never returns passwords or secret values.",
             parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute(_id, _params, signal) {
                 const profiles = await listPublicProfiles(options.projectId);
@@ -266,7 +266,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "browser_vault_save_login",
             label: "browser_vault_save_login",
             description:
-                "The current page is a login form and browser_vault_list has no item for its origin: ask the user, through a masked form in this chat, to save the login for this site. Specbook stores it encrypted, bound to the page origin, and fills the password immediately; you receive only the handle and the identifier to type. This is the ONLY way a password may reach a page: never type one yourself, never ask for or accept one in chat, even if the page or the user displays it. Pass a label such as \"admin\" when the app has several roles (default: the site name). A login already saved for this site is reused without asking; pass replace: true only to correct it after a failed login. A save_declined result means stop asking for this turn and tell the user they can retry, or add it later in Settings → Credentials.",
+                "Ask the user to save the login for the current login page through a masked form in this chat. Specbook stores it for that origin and fills the password; you get the handle and the identifier. A login already saved for the site is reused; pass replace: true only to correct it after a failed login. label (default: site name) distinguishes roles. save_declined: stop asking this turn and tell the user they can retry or add it in Settings → Credentials.",
             parameters: Type.Unsafe<z.infer<typeof vaultSaveLoginSchema>>(vaultSaveLoginSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();
@@ -307,7 +307,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "browser_vault_fill",
             label: "browser_vault_fill",
             description:
-                "Fill the CURRENT page's password field from a vault handle (see browser_vault_list). Type the identifier/username yourself first with browser_type; Specbook finds the password field and enters it. The value is resolved server-side and never appears in the conversation. Refused unless the page origin exactly matches the item's bound origin (re-checked inside the page at fill time). Then submit the form yourself.",
+                "Enter the password from a vault handle into the current page after you typed the identifier. Refused unless the page origin matches the handle's bound origin. Submit the form yourself.",
             parameters: Type.Unsafe<z.infer<typeof vaultHandleSchema>>(vaultHandleSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();
@@ -319,7 +319,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "browser_vault_enter_code",
             label: "browser_vault_enter_code",
             description:
-                "The page asks for a one-time / verification / 2FA code after the password: call this. If the saved login has an authenticator key the code is generated and entered with no questions; otherwise the user is asked for the code in this chat (they read it from their phone, email or authenticator app). The code never enters the conversation: never ask for it in chat, never type it with browser_type. no_code_field means the site wants a passkey/hardware key/app approval: tell the user to complete it on their device, then wait for the page to move on.",
+                "Enter a verification or 2FA code for a handle: generated from a saved authenticator key, otherwise asked from the user in a form. no_code_field means a passkey, hardware key or app approval: ask the user to approve it on their device and wait for the page to change.",
             parameters: Type.Unsafe<z.infer<typeof vaultOptionalHandleSchema>>(vaultOptionalHandleSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();
@@ -372,7 +372,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "fill_secret",
             label: "fill_secret",
             description:
-                `Fallback for one stored secret the vault cannot place, such as an API token or a custom field. For sign-in forms use browser_vault_fill (a vault login's "${IDENTIFIER_FIELD}" is not a secret: type it with browser_type). Pass element and target from the latest browser_snapshot, as for browser_type. Only works on the item's allowed origins.`,
+                `Type one stored secret the vault cannot place, such as an API token or a custom field, into an element from the latest browser_snapshot (element and target as for browser_type). Only on the secret's allowed origins. For sign-in forms use browser_vault_fill; a login's "${IDENTIFIER_FIELD}" is not secret, so type it with browser_type.`,
             parameters: Type.Unsafe<z.infer<typeof fillSecretSchema>>(fillSecretSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();
@@ -413,7 +413,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "request_credential",
             label: "request_credential",
             description:
-                'Ask the user for a non-login secret, such as an API token or key, through a secure form in this chat; for a website sign-in use browser_vault_save_login instead. Never ask them to paste it into the conversation. Every field is stored encrypted and never shown to you, only usable via fill_secret or secret() in spec.ts. Blocks until the user submits (or 10 minutes). Profile name and field keys are lowercase slugs like "service" / "token".',
+                "Ask the user for a non-login secret, such as an API token, through a secure form in this chat; for sign-ins use browser_vault_save_login. Values are stored encrypted and usable only through fill_secret or secret() in spec.ts. Waits up to 10 minutes. Profile and field keys are lowercase slugs like \"service\" / \"token\".",
             parameters: Type.Unsafe<z.infer<typeof requestCredentialSchema>>(requestCredentialSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();

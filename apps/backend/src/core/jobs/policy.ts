@@ -146,7 +146,7 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
         tools(tools) {
             const reportTool = defineTool({
                 name: "inbox_report", label: "inbox_report",
-                description: "Send a question, bug report with reproduction steps/evidence, or result to the project Inbox. Questions pause the job.",
+                description: "Send a question, a bug report (reproduction steps and evidence) or the result to the project Inbox. Questions pause the job.",
                 parameters: Type.Unsafe<ReturnType<typeof reportSchema.parse>>(reportSchema.toJSONSchema()),
                 async execute(_id, input) {
                     const report = reportSchema.parse(input);
@@ -169,7 +169,7 @@ export function createJobPolicy(job: Job, abort: () => void, baseUrl?: string, e
                 },
             });
             const listTool = defineTool({
-                name: "list_inbox", label: "list_inbox", description: "Read this job's previous proposals and human answers before continuing.",
+                name: "list_inbox", label: "list_inbox", description: "Read this job's earlier suggestions and the user's answers.",
                 parameters: Type.Unsafe(z.object({}).toJSONSchema()),
                 async execute() {
                     return result(await jobsRepository.itemsForJob(job.id));

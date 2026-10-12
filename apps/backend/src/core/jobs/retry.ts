@@ -53,7 +53,7 @@ export async function retryStalledJob(job: Job): Promise<void> {
     if (current.retryAt && Date.parse(current.retryAt) > Date.now()) return;
     const changed = await jobsRepository.requeue(current, "stalled", {
         safetyRetries: current.safetyRetries + 1, stopReason: current.stopReason,
-        pendingMessage: `Continue the unfinished investigation using a different approach. The previous attempt stopped because: ${current.stopReason ?? "it did not reach a confirmed result"}. First read the existing suggestions, failed verification and browser state. Explain what you will change in the approach before using tools. Do not repeat the same locator, timing change or browser action without new evidence. Keep spec.yml unchanged. Ask a specific question if access, missing information or a human decision is the actual blocker.`,
+        pendingMessage: `Continue the unfinished investigation with a different approach; the last attempt stopped because: ${current.stopReason ?? "it did not reach a confirmed result"}. First read the existing suggestions, the failed verification and the browser state, then say what you will change. Never repeat a locator, timing change or browser action without new evidence. Keep spec.yml unchanged. Ask a specific question only when access, missing information or a human decision blocks you.`,
     });
     if (changed) await jobsRepository.log(job.id, "different_approach", `Attempt ${current.safetyRetries + 1}: ${current.stopReason ?? "No confirmed result"}`);
 }
@@ -67,7 +67,7 @@ export async function retryInfrastructure(job: Job, error: string, code: ErrorCo
     const changed = await jobsRepository.requeue(current, current.status, {
         infrastructureRetries: attempts, systemError: message, errorCode: code, safetyRetries: current.safetyRetries, stopReason: current.stopReason,
         retryAt: new Date(Date.now() + Math.min(300_000, 15_000 * 2 ** Math.min(attempts - 1, 5))).toISOString(),
-        pendingMessage: "Specbook encountered an internal service problem and is retrying. Check the current state before repeating actions. This is not a question for the human; do not put browser, server or AI-provider failures in the Inbox.",
+        pendingMessage: "An internal service problem interrupted this work and Specbook is retrying; this is not a question for the human. Check the current state before repeating actions, and never report browser, server or AI-provider failures in the Inbox.",
     }, { to: await isAgentPaused(job.projectId) ? "paused" : "queued", activeMs });
     if (changed) await jobsRepository.log(job.id, "service_retry", message);
 }

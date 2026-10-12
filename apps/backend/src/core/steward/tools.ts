@@ -30,7 +30,7 @@ export function createBackgroundTaskTool(projectId: string, sourceKey: string, s
     return defineTool({
         name: "start_background_task",
         label: "start_background_task",
-        description: "Start background work explicitly requested in this conversation. Include the user's concrete goal and why it matters. Do not invent additional work. Use triage for a failed run, regenerate for an invalid check, coverage to find uncovered areas, explore to investigate the requested area, or run_specs to verify selected checks (omit specIds for all runnable checks). Requests wait while the agent is paused or another task is running.",
+        description: "Start background work the user requested in this chat, with their concrete goal and why it matters. Kinds: triage (a failed run), regenerate (an invalid Spec), coverage (find uncovered areas), explore (investigate an area), run_specs (run selected Specs; omit specIds for all). Waits while the agent is paused or another task runs.",
         parameters: Type.Unsafe<StewardIntentInput>(stewardIntentSchema.toJSONSchema()),
         async execute(toolCallId, input, signal) {
             signal?.throwIfAborted();
