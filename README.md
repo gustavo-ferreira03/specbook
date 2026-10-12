@@ -230,4 +230,4 @@ The frontend runs on port 4001 and proxies `/api` to the backend on port 4000. D
 
 `pnpm check` runs the type checks and tests. Browser tests need Chromium installed, and the VNC tests also need `SPECBOOK_TEST_VNC=1`.
 
-Specbook also tests itself. [`specbook/`](specbook) holds its own Specs, written by the agent against a Specbook instance. On every push, the [Specbook workflow](.github/workflows/specbook.yml) builds the image and CLI, restores a target instance from [`specbook/fixtures`](specbook/fixtures), pushes the Specs to a second instance through its Git remote and runs them with `specbook ci`.
+Specbook also tests itself. The repository is a CLI workspace: [`.specbook/`](.specbook) holds its own Specs, written by the agent against a Specbook instance. On every push, the [Specbook workflow](.github/workflows/specbook.yml) builds the image and CLI, restores a target instance from [`.specbook/ci/fixtures`](.specbook/ci/fixtures), pushes the Specs to a second instance through its Git remote and runs them with `specbook ci`.

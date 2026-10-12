@@ -46,7 +46,7 @@ jobs:
             - name: Restore the target instance from its fixture
               run: |
                   docker volume create specbook-target
-                  docker run --rm -v specbook-target:/data -v "$PWD/specbook/fixtures:/fixtures:ro" \
+                  docker run --rm -v specbook-target:/data -v "$PWD/.specbook/ci/fixtures:/fixtures:ro" \
                       --entrypoint node specbook:ci apps/backend/dist/operations-cli.js restore /fixtures/target.tar.gz
 
             - name: Start the target and the tester
@@ -60,7 +60,7 @@ jobs:
               env:
                   SPECBOOK_JUNIT_PATH: specbook-junit.xml
                   SPECBOOK_SUMMARY_PATH: specbook-summary.md
-              run: node specbook/ci.mjs
+              run: node .specbook/ci/run.mjs
 
 
             - name: Show container logs

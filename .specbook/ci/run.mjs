@@ -7,7 +7,8 @@ import path from "node:path";
 
 const tester = (process.env.SPECBOOK_TESTER_URL ?? "http://127.0.0.1:4001").replace(/\/$/, "");
 const target = (process.env.SPECBOOK_TARGET_URL ?? "http://127.0.0.1:5001").replace(/\/$/, "");
-const book = import.meta.dirname;
+// The workspace holds the Specs; this harness lives in its ci/ folder.
+const book = path.join(import.meta.dirname, "..");
 const fixtureAdmin = { email: "admin@dogfood.local", password: "dogfood-elbAHa9N8x6i" };
 
 let cookie = "";
