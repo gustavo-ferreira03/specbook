@@ -638,7 +638,7 @@ describe("scheduled runs", () => {
             const [rawNotification] = await db.select().from(webhookNotifications).where(eq(webhookNotifications.id, retry!.id));
             assert.ok(rawNotification?.webhookUrl.startsWith("v1:"));
             assert.ok(!JSON.stringify(rawNotification?.payload).includes("private-token"));
-            await deliverWebhookNotifications(new Date(at.getTime() + 11_000));
+            await deliverWebhookNotifications(new Date(retry!.nextAttemptAt!));
             const [delivered] = await schedulesRepository.notifications(project.id);
             assert.equal(delivered?.attempts, 2);
             assert.ok(delivered?.deliveredAt);
