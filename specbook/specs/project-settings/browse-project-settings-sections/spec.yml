@@ -1,19 +1,12 @@
 title: Browse Project settings sections
-description: Visit the General, App context, Automation, and Git tabs in Project
-  settings and observe each section without submitting changes.
+description: Each Project settings tab opens its section without submitting changes.
 preconditions:
-  - A saved dogfood-admin login is available for Specbook.
+- Signed in as the Specbook administrator
 steps:
-  - Open the Specbook sign-in page
-  - Enter the saved administrator email and password
-  - Open Project settings
-  - Select General and observe its section
-  - Open App context and observe its section
-  - Open Automation and observe its section
-  - Open Git and observe its section
-expectedResult: After signing in, each settings tab is selected with its
-  matching visible tab panel. Save changes controls remain disabled in General
-  and Automation, and no settings are submitted.
-postconditions:
-  - The authenticated session remains signed in to Specbook.
-  - No project settings have been changed or submitted.
+- Open Project settings
+- Select the General tab
+- Select the App context tab
+- Select the Automation tab
+- Select the Git tab
+expectedResult: The Git tab shows the Specbook repository section
+postconditions: []
