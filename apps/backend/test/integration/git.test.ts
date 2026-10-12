@@ -212,7 +212,7 @@ test("coverage gives each confirmed area the Specs of its feature and of its tes
     const apiFeature = await featuresRepository.createFeature(project.id, null, "API", "", "api");
     const addSpec = async (title: string, target: string, api = false) => {
         const source = `import { test, expect } from "specbook";\ntest(${JSON.stringify(title)}, async ({ ${api ? "request" : "page"}, step }) => {\n    await step("Open", async () => { ${api ? `const response = await request.get(${JSON.stringify(target)}); await expect(response).toBeOK();` : `await page.goto(${JSON.stringify(target)}); await expect(page.getByRole("heading")).toBeVisible();`} });\n});\n`;
-        const yaml = serializeSpecYaml({ title, description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "The Spec passes", postconditions: [] } });
+        const yaml = serializeSpecYaml({ title, description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "", postconditions: [] } });
         const spec = await specsRepository.createSpecRecord({ projectId: project.id, featureId: api ? apiFeature.id : feature.id, title, description: "", path: `specs/${sourceHashOf(title).slice(0, 8)}`, sourceHash: sourceHashOf(source), markdownHash: markdownHashOf(yaml) });
         await fs.mkdir(path.join(project.checkout, spec.path), { recursive: true });
         await fs.writeFile(path.join(project.checkout, spec.path, "spec.ts"), source);
