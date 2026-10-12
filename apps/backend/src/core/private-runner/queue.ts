@@ -59,6 +59,15 @@ export async function claimRunnerWork(runner: RunnerToken, signal: AbortSignal, 
     return null;
 }
 
+export async function reportRunnerInstance(runner: RunnerToken, input: { instanceId: string; version: string; protocolVersion: number; concurrency: number }): Promise<void> {
+    await withQueueLock("queue", async () => {
+        const current = await runnersRepository.get(runner.id);
+        if (!current || current.tokenHash !== runner.tokenHash) throw new HTTPException(401, { message: "Runner token changed. Configure the replacement token and restart the runner." });
+        await runnersRepository.touch(runner.id, input);
+        await runnersRepository.reportInstance(runner.id, input.instanceId, input);
+    });
+}
+
 function leaseMatches(job: RunnerJob | null, runnerId: string, leaseId: string): job is RunnerJob {
     return Boolean(job && job.runnerId === runnerId && job.leaseId === leaseId);
 }
