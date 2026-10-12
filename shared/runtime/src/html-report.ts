@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { HumanSpec } from "./types.ts";
+import { executionPlan, type ExecutionStepKind, type HumanSpec } from "./types.ts";
 import { readEvidenceManifest } from "./evidence.ts";
 
 const MAX_IMAGE_BYTES = 5_000_000;
@@ -30,14 +30,15 @@ const TONES: { tone: Tone; label: string; tally: (n: number) => string }[] = [
     { tone: "passed", label: "Passed", tally: (n) => `${n} passed` },
 ];
 
+
 export interface ReportSection {
     item: Item;
     tone: Tone;
     feature: string;
     path: string | null;
-    preconditions: string[];
     expectedResult: string;
-    steps: { number: number; label: string; state: StepState; image: string | null }[];
+    // number is the step() position in spec.ts; ordinal numbers only the Spec's steps.
+    steps: { number: number; ordinal: number | null; kind: ExecutionStepKind; label: string; state: StepState; image: string | null }[];
     video: string | null;
 }
 
@@ -77,7 +78,10 @@ export async function prepareReportSection(options: {
     const { item, directory, humanSpec: human } = options;
     const manifest = directory ? await readEvidenceManifest(directory) : { steps: [], video: null, failedStep: null };
     const shots = new Map(manifest.steps.map((step) => [step.number, step]));
-    const labels = human?.steps.length ? human.steps : manifest.steps.map((step) => step.label);
+    const planned = human?.steps.length
+        ? executionPlan(human)
+        : manifest.steps.map((step, index) => ({ title: step.label, kind: "step" as const, ordinal: index + 1 }));
+    const labels = planned.map((entry) => entry.title);
     const failedIndex = manifest.failedStep ? labels.findIndex((label) => label.trim() === manifest.failedStep!.trim()) : -1;
     const failed = ["failed", "error"].includes(item.status);
     const steps = await Promise.all(labels.map(async (label, index) => {
@@ -85,9 +89,10 @@ export async function prepareReportSection(options: {
         const state: StepState = !failed ? "passed"
             : failedIndex >= 0 ? (index < failedIndex ? "passed" : index === failedIndex ? "failed" : "skipped")
             : shot ? "passed" : "skipped";
-        return { number: index + 1, label: shot?.label.trim() || label, state, image: directory && shot ? await image(directory, shot.file) : null };
+        const { kind, ordinal } = planned[index]!;
+        return { number: index + 1, ordinal, kind, label: shot?.label.trim() || label, state, image: directory && shot ? await image(directory, shot.file) : null };
     }));
-    return { item, tone: toneOf(item), feature: options.feature || "Other Specs", path: options.path ?? null, preconditions: human?.preconditions ?? [], expectedResult: human?.expectedResult ?? "", steps,
+    return { item, tone: toneOf(item), feature: options.feature || "Other Specs", path: options.path ?? null, expectedResult: human?.expectedResult ?? "", steps,
         video: directory && manifest.video ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES) : null };
 }
 
@@ -130,9 +135,18 @@ function stateLabel(item: Item, tone: Tone): string {
     return { known: "Known bug", flaky: "Passed on retry", running: "Running", passed: "Passed" }[tone] ?? "";
 }
 
-function renderSection({ item, tone, path: file, preconditions, expectedResult, steps, video }: ReportSection, open = false, showPath = false): string {
+function renderSteps(steps: ReportSection["steps"]): string {
+    return `<ol class="steps">${steps.map((step) => `<li class="${step.state}">${step.ordinal === null ? '<span class="dot"></span>' : `<span class="num">${step.ordinal}</span>`}<span class="label">${escape(step.label)}</span><span class="mark">${step.state === "passed" ? CHECK : step.state === "failed" ? CROSS : ""}</span></li>`).join("")}</ol>`;
+}
+
+function renderSection({ item, tone, path: file, expectedResult, steps, video }: ReportSection, open = false, showPath = false): string {
     const failing = tone === "failed" || tone === "known";
     const shots = steps.filter((step) => step.image);
+    const preconditions = steps.filter((step) => step.kind === "precondition");
+    const actions = steps.filter((step) => step.kind === "step");
+    const proof = steps.find((step) => step.kind === "expected");
+    const postconditions = steps.filter((step) => step.kind === "postcondition");
+    const shotId = (step: ReportSection["steps"][number]) => `shot-${item.runId}-${step.number}`;
     return `<details id="run-${escape(item.runId)}" class="spec is-${tone}"${open || tone === "failed" ? " open" : ""}>
 <summary>
   <span class="seal">${ICONS[tone]}</span>
@@ -141,13 +155,15 @@ function renderSection({ item, tone, path: file, preconditions, expectedResult, 
   <span class="time">${escape(duration(item.durationMs))}</span>
 </summary>
 <div class="body">
-  ${preconditions.length ? `<h3>Preconditions</h3><ul class="bullets">${preconditions.map((entry) => `<li>${escape(entry)}</li>`).join("")}</ul>` : ""}
-  ${steps.length ? `<h3>Steps</h3><ol class="steps">${steps.map((step) => `<li class="${step.state}"><span class="num">${step.number}</span><span class="label">${escape(step.label)}</span><span class="mark">${step.state === "passed" ? CHECK : step.state === "failed" ? CROSS : ""}</span></li>`).join("")}</ol>` : ""}
-  ${expectedResult ? `<div class="expected"><h3>Expected result</h3><p>${escape(expectedResult)}</p></div>` : ""}
+  ${preconditions.length ? `<h3>Preconditions</h3>${renderSteps(preconditions)}` : ""}
+  ${actions.length ? `<h3>Steps</h3>${renderSteps(actions)}` : ""}
+  ${expectedResult ? `<div class="expected ${proof?.state ?? ""}"><h3>Expected result</h3><p>${proof ? `<span class="mark">${proof.state === "passed" ? CHECK : proof.state === "failed" ? CROSS : ""}</span>` : ""}${escape(expectedResult)}</p>${proof?.image ? `<a class="proof" href="#${escape(shotId(proof))}"><img src="${proof.image}" alt="Expected result: ${escape(expectedResult)}"></a>` : ""}</div>` : ""}
+  ${postconditions.length ? `<h3>Postconditions</h3>${renderSteps(postconditions)}` : ""}
   ${item.failReason && failing ? `<div class="failure"><h3>What failed</h3><pre>${escape(item.failReason)}</pre></div>` : ""}
   ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => {
-      const id = `shot-${item.runId}-${step.number}`;
-      return `<figure id="${escape(id)}"><a class="zoom" href="#${escape(id)}"><img src="${step.image}" alt="Step ${step.number}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>Step ${step.number}</b> ${escape(step.label)}</figcaption></figure>`;
+      const id = shotId(step);
+      const name = step.kind === "expected" ? "Expected result" : step.kind === "precondition" ? "Precondition" : step.kind === "postcondition" ? "Postcondition" : `Step ${step.ordinal}`;
+      return `<figure id="${escape(id)}"${step.kind === "expected" ? ' class="is-proof"' : ""}><a class="zoom" href="#${escape(id)}"><img src="${step.image}" alt="${name}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>${name}</b> ${escape(step.label)}</figcaption></figure>`;
   }).join("")}</div>` : ""}
   ${video ? `<h3>Recording</h3><video class="recording" controls preload="metadata" src="${video}"></video>` : ""}
 </div>
@@ -218,12 +234,19 @@ h3{font-size:13px;margin:18px 0 8px}
 .steps li{display:flex;align-items:flex-start;gap:12px;padding:5px 0}
 .num{flex:none;width:24px;height:24px;border:1px solid var(--strong);border-radius:6px;display:flex;align-items:center;justify-content:center;font:600 12px "Geist Mono",ui-monospace,monospace;color:var(--muted)}
 .label{flex:1;padding-top:1px}
+
 .mark svg{width:15px;height:15px;fill:none;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;margin-top:4px}
 .steps .passed .mark svg{stroke:var(--success)}.steps .failed .mark svg{stroke:var(--danger)}
 .steps .failed .num{border-color:var(--danger);color:var(--danger)}
+.dot{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
+.dot::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--subtle)}
+.steps .failed .dot::before{background:var(--danger)}
 .steps .skipped{color:var(--subtle)}
 .expected{border-top:1px solid var(--line);margin-top:16px}
-.expected p{margin:0;font-weight:500}
+.expected p{margin:0;font-weight:500;display:flex;gap:8px;align-items:flex-start}
+.expected .mark svg{margin-top:5px}.expected.passed .mark svg{stroke:var(--success)}.expected.failed .mark svg{stroke:var(--danger)}
+.proof{display:block;margin-top:12px;max-width:560px}
+.proof img{display:block;width:100%;border:1px solid var(--strong);border-radius:8px}
 .failure{border:1px solid var(--danger);background:var(--danger-soft);border-radius:10px;padding:2px 14px 12px;margin-top:16px}
 .failure h3{color:var(--danger)}
 .failure pre{margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}
@@ -231,14 +254,16 @@ h3{font-size:13px;margin:18px 0 8px}
 figure{margin:0}
 figure img{width:100%;border:1px solid var(--strong);border-radius:8px;display:block}
 figcaption{font-size:12px;color:var(--muted);margin-top:6px}
-.zoom{display:block;cursor:zoom-in}
+.zoom,.proof{display:block;cursor:pointer}
+.zoom img,.proof img{transition:border-color .12s ease}
+.zoom:hover img,.proof:hover img{border-color:var(--muted)}
 .close{display:none}
 figure:target{position:fixed;inset:0;z-index:10;margin:0;padding:24px;background:rgb(20 20 20/.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
 figure:target .zoom{cursor:default;position:relative;z-index:1}
 figure:target img{width:auto;max-width:min(1400px,100%);max-height:calc(100vh - 80px);border-color:#444}
 figure:target figcaption{color:#e6e6e6;position:relative;z-index:1}
 figure:target figcaption b{color:#fff}
-figure:target .close{display:block;position:absolute;inset:0;cursor:zoom-out}
+figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
 .recording{width:100%;max-width:720px;border:1px solid var(--strong);border-radius:8px;display:block;background:#000}
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;

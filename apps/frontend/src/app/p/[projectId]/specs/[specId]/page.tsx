@@ -29,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { API_URL, ApiError, errorMessage, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
 import { useDisplayStatus } from "@/lib/projectOverview";
 import { useRunEnvironment } from "@/lib/useRunEnvironment";
-import { formatDateTime, formatDuration, environmentLabel } from "@/lib/format";
+import { formatDateTime, formatDuration, environmentLabel, evidenceStepLabel } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { HumanSpec, Run, RunEvidence, SpecDetail } from "@/lib/types";
@@ -293,7 +293,7 @@ function EvidenceGallery({ runId, evidence, onSelect }: { runId: string; evidenc
                             className="group/shot flex w-48 flex-col overflow-hidden rounded-lg border border-line bg-surface text-left outline-none transition-colors hover:border-line-hover focus-visible:ring-2 focus-visible:ring-ring sm:w-52"
                         >
                             <img src={artifactUrl(runId, step.file)} alt="" loading="lazy" className="h-28 w-full border-b border-line bg-surface-soft object-cover object-top" />
-                            <span className="px-2.5 pt-2 text-meta font-medium text-ink-subtle tabular">Step {step.number}</span>
+                            <span className={cn("px-2.5 pt-2 text-meta font-medium tabular", step.kind === "expected" ? "text-success" : "text-ink-subtle")}>{evidenceStepLabel(step)}</span>
                             <span className="line-clamp-2 min-h-10 px-2.5 pt-0.5 pb-2 text-meta leading-5 break-words text-ink">{step.label}</span>
                         </button>
                     ))}
@@ -309,6 +309,7 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
     if (!loaded) return <Skeleton className="h-24 w-full rounded-lg" aria-label="Loading evidence" />;
     if (loaded.error) return <Alert variant="danger" role="alert"><AlertDescription>Could not load evidence: {loaded.error}</AlertDescription></Alert>;
     if (!evidence) return null;
+    const proof = run.status === "passed" ? evidence.steps.find((step) => step.kind === "expected") : undefined;
     const empty = evidence.steps.length === 0 && !evidence.apiSteps?.length && !evidence.video && !evidence.diagnostics?.length && !evidence.errorContext && !(run.status === "passed" && evidence.expectedResult);
     return (
         <div className="space-y-4">
@@ -317,6 +318,11 @@ function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedR
                     <Check size={14} strokeWidth={2.25} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />
                     <span><span className="font-medium text-ink">Expected result confirmed.</span> {evidence.expectedResult}</span>
                 </p>
+            )}
+            {proof && (
+                <button type="button" onClick={() => onSelect({ runId: run.id, step: proof })} className="block w-full max-w-xl overflow-hidden rounded-lg border border-line text-left outline-none transition-colors hover:border-line-hover focus-visible:ring-2 focus-visible:ring-ring">
+                    <img src={artifactUrl(run.id, proof.file)} alt={`Expected result: ${evidence.expectedResult}`} loading="lazy" className="w-full bg-surface-soft" />
+                </button>
             )}
             {evidence.video && run.status !== "passed" && (
                 <section aria-labelledby={`video-${run.id}`}>
@@ -650,7 +656,8 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
     const latestRun = runs[0];
     const crumbs: Crumb[] = [specsCrumb, ...(feature ? [{ label: feature.title, href: `/p/${projectId}/specs#feature-${feature.id}` }] : [])];
     const sourceEdited = Boolean(content && testSourceDraft !== content.testSource);
-    const stepsChanged = Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(stepsDraft)) !== JSON.stringify(content.humanSpec.steps));
+    const stepsChanged = Boolean(editing && content?.humanSpec && JSON.stringify([...splitLines(preconditionsDraft), ...splitLines(stepsDraft), expectedResultDraft.trim(), ...splitLines(postconditionsDraft)].filter(Boolean))
+        !== JSON.stringify([...content.humanSpec.preconditions, ...content.humanSpec.steps, content.humanSpec.expectedResult, ...content.humanSpec.postconditions].map((title) => title.trim()).filter(Boolean)));
 
     return (
         <div className="min-h-full bg-surface">
@@ -713,8 +720,8 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                     <Field id="spec-description" label="Description">
                                         <Textarea id="spec-description" value={descriptionDraft} onChange={(event) => setDescriptionDraft(event.target.value)} disabled={saving} rows={2} />
                                     </Field>
-                                    <Field id="spec-preconditions" label="Preconditions" hint="One per line. What must be true before the first step.">
-                                        <Textarea id="spec-preconditions" aria-describedby="spec-preconditions-hint" value={preconditionsDraft} onChange={(event) => setPreconditionsDraft(event.target.value)} disabled={saving} rows={3} placeholder="A shopper account exists" />
+                                    <Field id="spec-preconditions" label="Preconditions" hint="One per line. Who is signed in and what state the app is in before the steps. The automation sets up and checks each one.">
+                                        <Textarea id="spec-preconditions" aria-describedby="spec-preconditions-hint" value={preconditionsDraft} onChange={(event) => setPreconditionsDraft(event.target.value)} disabled={saving} rows={3} placeholder="Signed in as the shopper" />
                                     </Field>
                                     <Field id="spec-steps" label="Steps" hint="One per line, in order. Each line becomes a numbered step.">
                                         <Textarea id="spec-steps" aria-describedby={stepsChanged ? "spec-steps-hint spec-steps-note" : "spec-steps-hint"} value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)} disabled={saving} rows={6} placeholder="Open the store home page" />
@@ -723,16 +730,16 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                                                 <TriangleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-icon" />
                                                 <span>
                                                     {sourceEdited
-                                                        ? "Check that the step() titles in the automation source match these steps, in the same order, or the Spec becomes invalid."
-                                                        : <>The automation must be updated to match these steps, or the Spec becomes invalid when you save. Use <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`} className="font-medium underline underline-offset-2">Edit with AI</Link>, or change the step() titles in the automation source below.</>}
+                                                        ? "Check that the step() titles in the automation source match the preconditions, steps, expected result and postconditions, in that order, or the Spec becomes invalid."
+                                                        : <>The automation must be updated to match these preconditions, steps, expected result and postconditions, or the Spec becomes invalid when you save. Use <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`} className="font-medium underline underline-offset-2">Edit with AI</Link>, or change the step() titles in the automation source below.</>}
                                                 </span>
                                             </p>
                                         )}
                                     </Field>
-                                    <Field id="spec-expected-result" label="Expected result" hint="The observable outcome that makes this Spec pass.">
+                                    <Field id="spec-expected-result" label="Expected result" hint="One sentence the user can see on screen. The automation proves it right after the steps and keeps that screenshot as evidence.">
                                         <Textarea id="spec-expected-result" aria-describedby="spec-expected-result-hint" value={expectedResultDraft} onChange={(event) => setExpectedResultDraft(event.target.value)} disabled={saving} rows={3} />
                                     </Field>
-                                    <Field id="spec-postconditions" label="Postconditions" hint="One per line. What stays true after the run. Optional.">
+                                    <Field id="spec-postconditions" label="Postconditions" hint="One per line. Side effects checked after the expected result. Optional; most Specs have none.">
                                         <Textarea id="spec-postconditions" aria-describedby="spec-postconditions-hint" value={postconditionsDraft} onChange={(event) => setPostconditionsDraft(event.target.value)} disabled={saving} rows={2} />
                                     </Field>
                                 </div>
@@ -820,7 +827,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                 <DialogContent className="max-h-[calc(100dvh-24px)] max-w-[960px] overflow-y-auto p-4 sm:p-5">
                     <DialogHeader>
                         <DialogTitle className="flex items-baseline gap-2">
-                            Step {selectedEvidence?.step.number}
+                            {selectedEvidence ? evidenceStepLabel(selectedEvidence.step) : ""}
                             {selectedSteps.length > 1 && (
                                 <span className="text-control font-normal text-ink-subtle tabular">{selectedIndex + 1} of {selectedSteps.length}</span>
                             )}
@@ -829,7 +836,7 @@ export default function SpecPage({ params }: { params: Promise<{ projectId: stri
                     </DialogHeader>
                     {selectedEvidence && (
                         <div className="relative mt-4">
-                            <img src={artifactUrl(selectedEvidence.runId, selectedEvidence.step.file)} alt={`Evidence for step ${selectedEvidence.step.number}: ${selectedEvidence.step.label}`} className="max-h-[calc(100dvh-150px)] w-full rounded-lg border border-line bg-surface-soft object-contain" />
+                            <img src={artifactUrl(selectedEvidence.runId, selectedEvidence.step.file)} alt={`${evidenceStepLabel(selectedEvidence.step)}: ${selectedEvidence.step.label}`} className="max-h-[calc(100dvh-150px)] w-full rounded-lg border border-line bg-surface-soft object-contain" />
                             {hasPrev && (
                                 <Button
                                     type="button"

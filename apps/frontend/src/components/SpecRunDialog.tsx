@@ -12,7 +12,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, getRunEvidence, isAbortError } from "@/lib/api";
-import { countLabel, formatDuration } from "@/lib/format";
+import { countLabel, evidenceStepLabel, formatDuration } from "@/lib/format";
 import type { RunBatch, RunEvidence } from "@/lib/types";
 
 export type SpecBatchStatus = "queued" | "running" | "passed" | "failed" | "error" | "skipped" | "unknown";
@@ -72,7 +72,7 @@ export function ApiRunEvidence({ evidence }: { evidence: RunEvidence }) {
             <h4 className="text-meta font-semibold text-ink-muted">API requests by step</h4>
             {evidence.apiSteps.map((step) => (
                 <div key={step.number} className="space-y-2">
-                    <p className="text-control font-medium text-ink">{step.number}. {step.label}</p>
+                    <p className="text-control font-medium text-ink"><span className="text-ink-subtle">{evidenceStepLabel(step)}</span> {step.label}</p>
                     {step.requests.map((request, index) => (
                         <Collapsible key={index} className="group/api overflow-hidden rounded-lg border border-line">
                             <CollapsibleTrigger asChild>

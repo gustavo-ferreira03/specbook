@@ -1,3 +1,4 @@
+import { executionPlan } from "@specbook/runtime/types";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { HTTPException } from "hono/http-exception";
@@ -49,14 +50,16 @@ export async function readRunEvidence(runId: string) {
         ? await fs.readFile(path.join(directory, "spec.yml"), "utf8").then((source) => parseSpecYaml(source).humanSpec).catch(() => null)
         : null;
     const manifest: EvidenceManifest = directory ? await readEvidenceManifest(directory) : { steps: [], video: null, failedStep: null };
+    const plan = humanSpec ? executionPlan(humanSpec) : [];
     const steps = manifest.steps.flatMap((item) => {
         if (!available.has(item.file)) return [];
         const number = item.number;
+        const planned = plan[number - 1];
         return [{
             number,
-            label: item.label.trim()
-                ? item.label
-                : humanSpec?.steps[number - 1] ?? `Step ${number}`,
+            kind: planned?.kind ?? "step",
+            ordinal: planned ? planned.ordinal : number,
+            label: item.label.trim() ? item.label : planned?.title ?? `Step ${number}`,
             file: item.file,
         }];
     });

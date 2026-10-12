@@ -4,6 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { humanSpecSchema } from "@specbook/runtime/human-spec";
 import { deleteSpecData, ResourceBusyError } from "../../../core/deletion";
 import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
 import { YamlParseError } from "@specbook/runtime/yaml";
@@ -20,12 +21,6 @@ const editFilesSchema = z
         message: "Provide yaml and/or testSource content",
     });
 
-const humanSpecSchema = z.object({
-    preconditions: z.array(z.string()),
-    steps: z.array(z.string()),
-    expectedResult: z.string(),
-    postconditions: z.array(z.string()),
-});
 
 const updateSpecSchema = z
     .object({

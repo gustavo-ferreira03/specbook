@@ -99,7 +99,7 @@ describe("executeSpec (real browser)", { skip: available ? false : "Chromium for
         const feature = await writer.createFeatureInRepo(project.id, null, "Store", "");
         const { spec } = await writer.createSpecInRepo({
             projectId: project.id, featureId: feature.id, title: "Checkout", description: "",
-            humanSpec: { preconditions: [], steps: ["Check checkout"], expectedResult: "Checkout appears", postconditions: [] },
+            humanSpec: { preconditions: [], steps: ["Check checkout"], expectedResult: "", postconditions: [] },
             testSource: 'import { test, expect } from "specbook"; test("Checkout", async ({ page, step }) => { await step("Check checkout", async () => { await page.goto("/"); await expect(page.getByRole("heading")).toHaveText("Checkout", { timeout: 100 }); }); });',
         });
         await assert.rejects(() => executeSpec(spec.id, { signal: AbortSignal.abort(new Error("Cancelled before starting")) }), /Cancelled before starting/);
@@ -148,7 +148,7 @@ describe("executeSpec (real browser)", { skip: available ? false : "Chromium for
             const feature = await writer.createFeatureInRepo(project.id, null, "Redirect", "");
             const { spec } = await writer.createSpecInRepo({
                 projectId: project.id, featureId: feature.id, title: "Open preview", description: "",
-                humanSpec: { preconditions: [], steps: ["Open preview"], expectedResult: "Preview opens", postconditions: [] },
+                humanSpec: { preconditions: [], steps: ["Open preview"], expectedResult: "", postconditions: [] },
                 testSource: 'import { test, expect } from "specbook"; test("Open preview", async ({ page, step }) => { await step("Open preview", async () => { await page.goto("/"); }); });',
             });
             const run = await executeSpec(spec.id);
@@ -185,7 +185,7 @@ test("Store", async ({ page, step, secret }) => {
             featureId: feature.id,
             title: "Store",
             description: "",
-            humanSpec: { preconditions: [], steps, expectedResult: "Checkout", postconditions: [] },
+            humanSpec: { preconditions: [], steps, expectedResult: "", postconditions: [] },
             testSource,
         });
         assert.equal(spec.status, "unverified", spec.invalidReason ?? "");
@@ -246,7 +246,7 @@ test("Preview credentials", async ({ page, step, secret }) => {
 });
 `;
         const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Preview credentials", description: "",
-            humanSpec: { preconditions: [], steps, expectedResult: "Credentials received", postconditions: [] }, testSource });
+            humanSpec: { preconditions: [], steps, expectedResult: "", postconditions: [] }, testSource });
         assert.equal(spec.status, "unverified", spec.invalidReason ?? "");
         previewCredentials.length = 0;
         const blocked = await executeSpec(spec.id, { baseUrl });
@@ -287,7 +287,7 @@ test("Preview credentials", async ({ page, step, secret }) => {
             await environmentsRepository.create(project.id, { name: "Staging", baseUrl: stagingUrl!, allowedOrigins: [previewUrl!], credentialOverrides: { shopper: stagingProfile.id } });
             const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
             const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Environment sign-in", description: "",
-                humanSpec: { preconditions: [], steps: ["Enter password"], expectedResult: "The password field accepts input", postconditions: [] },
+                humanSpec: { preconditions: [], steps: ["Enter password"], expectedResult: "", postconditions: [] },
                 testSource: 'import { test, expect } from "specbook"; test("Environment sign-in", async ({ page, step, secret }) => { await step("Enter password", async () => { await page.goto("/credential-preview"); await page.getByLabel("Password").fill(secret("shopper", "password")); await expect(page.getByLabel("Password")).toBeVisible(); }); });' });
             previewCredentials.length = 0;
             const productionRun = await executeSpec(spec.id);
@@ -643,7 +643,7 @@ test("Store", async ({ page, step }) => {
         await expect(page.getByRole("heading")).toHaveText("Ready", { timeout: 500 });
     });
 });`;
-        const humanSpec = { preconditions: [], steps: ["See the store"], expectedResult: "Ready", postconditions: [] };
+        const humanSpec = { preconditions: [], steps: ["See the store"], expectedResult: "", postconditions: [] };
         const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Store", description: "", humanSpec, testSource: source });
         return { project, spec, source, humanSpec };
     }
@@ -1596,7 +1596,7 @@ describe("run repository recovery", { skip: available ? false : "Chromium is not
         await repoGit.ensureProjectRepo(project.id, { create: true });
         const feature = await writer.createFeatureInRepo(project.id, null, "Home", "");
         const testSource = 'import { test, expect } from "specbook"; test("Home", async ({ page, step }) => { await step("Open", async () => { await page.goto("/"); await expect(page.getByRole("heading", { name: "Store" })).toBeVisible(); }); });';
-        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Home", description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "Store appears", postconditions: [] }, testSource });
+        const { spec } = await writer.createSpecInRepo({ projectId: project.id, featureId: feature.id, title: "Home", description: "", humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "", postconditions: [] }, testSource });
         const sourceFile = path.join(repoGit.getRepoDir(project.id), spec.path, "spec.ts");
         const changed = testSource.replace('page.goto("/")', 'page.goto("/changed")');
         await fs.writeFile(sourceFile, changed);

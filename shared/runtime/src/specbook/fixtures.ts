@@ -19,6 +19,7 @@ import {
 
 type StepFn = (title: string, body: () => Promise<void>) => Promise<void>;
 type SecretFn = (profile: string, field: string) => object;
+type CleanupFn = (body: () => Promise<void>) => Promise<void>;
 type EvidenceState = { page?: Page; apiRequests: ApiRequestEvidence[] };
 
 hardenFunctionConstructors();
@@ -81,7 +82,7 @@ function diagnosticUrl(value: string): string | undefined {
     }
 }
 
-export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvidence: EvidenceState }>({
+export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: CleanupFn; _specbookEvidence: EvidenceState }>({
     _specbookEvidence: async ({}, use) => { await use({ apiRequests: [] }); },
     request: async ({ request, _specbookEvidence }, use) => {
         await use(guard.wrapRequest(request, (evidence) => {
@@ -183,6 +184,17 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; _specbookEvide
     },
     secret: async ({}, use) => {
         await use((profile, field) => createSecret(profile, field));
+    },
+    // Hidden teardown that resets data the Spec created: it runs after the test even when a step failed,
+    // records no evidence and never changes the result. Depending on page and request keeps both open until it ends.
+    cleanup: async ({ page: _page, request: _request }, use) => {
+        let registered: (() => Promise<void>) | undefined;
+        await use(async (body) => {
+            if (typeof body !== "function") throw new Error("cleanup() needs an async function");
+            registered = body;
+        });
+        if (!registered) return;
+        await registered().catch(() => undefined);
     },
 });
 

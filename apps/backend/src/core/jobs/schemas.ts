@@ -1,5 +1,6 @@
 import { errorCodeSchema } from "@specbook/runtime/errors";
 import { z } from "zod";
+import { agentHumanSpecSchema as humanSpecSchema } from "@specbook/runtime/human-spec";
 
 export const jobLimitsSchema = z.object({
     wallTimeMs: z.number().int().min(1000).max(86_400_000).default(3_600_000),
@@ -13,12 +14,6 @@ export const createJobSchema = z.object({
     trigger: z.enum(["manual", "schedule", "spec_failure", "webhook", "steward", "chat"]).default("manual"),
     limits: jobLimitsSchema.default(() => jobLimitsSchema.parse({})),
 }).strict();
-export const humanSpecSchema = z.object({
-    preconditions: z.array(z.string()),
-    steps: z.array(z.string()).min(1),
-    expectedResult: z.string(),
-    postconditions: z.array(z.string()),
-});
 export const featureProposalSchema = z.object({
     parentId: z.string().optional(), title: z.string().min(1), description: z.string(),
 });

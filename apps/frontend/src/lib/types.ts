@@ -216,7 +216,7 @@ export interface RunEvidence {
     environment?: ProjectEnvironment | null;
     apiSteps?: { number: number; label: string; requests: { method: string; url: string; status: number | null; requestHeaders: Record<string, string>; requestBody?: string; responseHeaders?: Record<string, string>; responseBody?: string; error?: string }[] }[];
     expectedResult: string;
-    steps: { number: number; label: string; file: string }[];
+    steps: { number: number; kind: "precondition" | "step" | "expected" | "postcondition"; ordinal: number | null; label: string; file: string }[];
     video: string | null;
     failedStep: string | null;
     diagnostics?: { kind: "console" | "pageerror" | "requestfailed" | "response"; message: string; url?: string; method?: string; status?: number }[];

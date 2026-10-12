@@ -49,7 +49,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
     if (!patch.testSource || !before.yaml) throw new Error("Proposal needs spec.ts and a behavior contract");
     const analysis = analyzeSpecSource(patch.testSource);
     if (!analysis.ok) throw new CodedError("invalid_spec", analysis.error);
-    const stepsError = stepTitlesError(analysis.analysis.steps, (patch.humanSpec ?? parseSpecYaml(before.yaml).humanSpec).steps);
+    const stepsError = stepTitlesError(analysis.analysis.steps, patch.humanSpec ?? parseSpecYaml(before.yaml).humanSpec);
     if (stepsError) throw new CodedError("invalid_spec", stepsError);
     const project = await projectsRepository.getProject(job.projectId);
     if (!project) throw new Error("Project not found");

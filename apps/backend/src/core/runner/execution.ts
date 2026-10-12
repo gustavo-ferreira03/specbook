@@ -13,7 +13,7 @@ export type ExecutedRun = Run & { failedStep: string | null };
 export function analyzeForRun(title: string, testSource: string, markdown: string): SpecAnalysis {
     const analysis = analyzeSpecSource(testSource);
     if (!analysis.ok) throw new CodedError("invalid_spec", `Spec "${title}" is invalid: ${analysis.error}`);
-    const stepsError = stepTitlesError(analysis.analysis.steps, parseSpecYaml(markdown).humanSpec.steps);
+    const stepsError = stepTitlesError(analysis.analysis.steps, parseSpecYaml(markdown).humanSpec);
     if (stepsError) throw new CodedError("invalid_spec", `Spec "${title}" is invalid: ${stepsError}`);
     return analysis.analysis;
 }

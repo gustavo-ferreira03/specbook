@@ -1,6 +1,6 @@
 import { parse } from "@babel/parser";
 import type * as t from "@babel/types";
-import type { HumanSpec } from "./types.ts";
+import { executionSteps, type HumanSpec } from "./types.ts";
 import { isSafeRelativePath, SECRET_NAME_PATTERN, secretEnvName } from "./specbook/guard.ts";
 import { LOCATOR_ACTIONS, LOCATOR_FACTORIES, STATIC_LOCATOR_REFINERS as LOCATOR_REFINERS } from "./specbook/allowlist.ts";
 export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist.ts";
@@ -16,6 +16,7 @@ export interface SecretRef {
 export interface SpecAnalysis {
     testTitle: string;
     steps: string[];
+    hasCleanup: boolean;
     secretRefs: SecretRef[];
     importSource: { start: number; end: number };
 }
@@ -23,7 +24,7 @@ export interface SpecAnalysis {
 export const SPEC_MODULE = "specbook";
 const MAX_SOURCE_CHARS = 200_000;
 const MAX_STEPS = 100;
-const FIXTURES = new Set(["page", "request", "step", "secret"]);
+const FIXTURES = new Set(["page", "request", "step", "secret", "cleanup"]);
 const IMPORTS = new Set(["test", "expect"]);
 const RESERVED = new Set([...FIXTURES, ...IMPORTS]);
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -93,6 +94,7 @@ class Validator {
     private readonly scopes: Set<string>[] = [];
     private readonly responseScopes: Set<string>[] = [];
     readonly steps: string[] = [];
+    hasCleanup = false;
     readonly secretRefs = new Map<string, SecretRef>();
     testTitle = "";
     importSource = { start: 0, end: 0 };
@@ -171,7 +173,7 @@ class Validator {
                 fail(property, "Destructure only page, request, step and secret, without defaults or renaming.");
             }
             const name = property.key.name;
-            if (!FIXTURES.has(name)) fail(property, `Fixture "${name}" is not available; use only page, request, step and secret.`);
+            if (!FIXTURES.has(name)) fail(property, `Fixture "${name}" is not available; use only page, request, step, secret and cleanup.`);
             if (this.fixtures.has(name)) fail(property, `"${name}" is destructured twice.`);
             this.fixtures.add(name);
         }
@@ -192,10 +194,14 @@ class Validator {
         const call = statement.type === "ExpressionStatement" && statement.expression.type === "AwaitExpression"
             ? statement.expression.argument
             : null;
+        if (call?.type === "CallExpression" && call.callee.type === "Identifier" && call.callee.name === "cleanup") {
+            this.cleanupStatement(call);
+            return;
+        }
         if (!call || call.type !== "CallExpression" || call.callee.type !== "Identifier" || call.callee.name !== "step") {
             fail(
                 statement,
-                'The test body may contain only await step("Title", async () => { ... }) blocks and const locator declarations. Put every action and assertion inside a named step.',
+                'The test body may contain only await step("Title", async () => { ... }) blocks, one leading await cleanup(async () => { ... }) and const locator declarations. Put every action and assertion inside a named step.',
             );
         }
         if (!this.fixtures.has("step")) fail(call, "Destructure step from the test fixtures: async ({ page, step }) => ...");
@@ -203,15 +209,29 @@ class Validator {
         if (call.arguments.length !== 2) fail(call, "step() takes a title and an async function.");
         const title = staticString(call.arguments[0]);
         if (title === null || !title.trim()) fail(call.arguments[0], "Step titles must be non-empty string literals.");
-        const fn = call.arguments[1];
+        if (this.steps.length >= MAX_STEPS) fail(call, `A Spec may have at most ${MAX_STEPS} steps.`);
+        this.steps.push(title.trim());
+        this.blockBody(call.arguments[1], `Step "${title.trim()}"`);
+    }
+
+    // cleanup() registers hidden teardown before the steps, so it also runs when a step fails.
+    private cleanupStatement(call: t.CallExpression): void {
+        if (!this.fixtures.has("cleanup")) fail(call, "Destructure cleanup from the test fixtures: async ({ page, step, cleanup }) => ...");
+        if (this.hasCleanup) fail(call, "A test may call cleanup() only once.");
+        if (this.steps.length > 0) fail(call, "Call cleanup() before the first step so it also runs when a step fails.");
+        noTypeArguments(call);
+        if (call.arguments.length !== 1) fail(call, "cleanup() takes one async function.");
+        this.hasCleanup = true;
+        this.blockBody(call.arguments[0], "cleanup()");
+    }
+
+    private blockBody(fn: t.Node, label: string): void {
         if (fn.type !== "ArrowFunctionExpression" || !fn.async || fn.params.length !== 0) {
             fail(fn, "A step body must be an async arrow function without parameters: async () => { ... }.");
         }
         if (fn.returnType || fn.typeParameters) fail(fn, "Type annotations are not allowed.");
         if (fn.body.type !== "BlockStatement") fail(fn.body, "A step body must be a block: async () => { ... }.");
         if (fn.body.directives.length > 0) fail(fn.body.directives[0], "Directives are not allowed.");
-        if (this.steps.length >= MAX_STEPS) fail(call, `A Spec may have at most ${MAX_STEPS} steps.`);
-        this.steps.push(title.trim());
         this.scopes.push(new Set());
         this.responseScopes.push(new Set());
         let awaited = 0;
@@ -228,7 +248,7 @@ class Validator {
         }
         this.scopes.pop();
         this.responseScopes.pop();
-        if (awaited === 0) fail(fn, `Step "${title.trim()}" must contain at least one action or assertion.`);
+        if (awaited === 0) fail(fn, `${label} must contain at least one action or assertion.`);
     }
 
     private isLocatorConstant(name: string): boolean {
@@ -408,7 +428,7 @@ class Validator {
         if (expression.type !== "CallExpression") fail(expression, `${this.unexpected(expression)} ${onlyActions}`);
         noTypeArguments(expression);
         const callee = expression.callee;
-        if (callee.type === "Identifier" && callee.name === "step") fail(expression, "Steps cannot be nested.");
+        if (callee.type === "Identifier" && (callee.name === "step" || callee.name === "cleanup")) fail(expression, "Steps cannot be nested, and neither can cleanup().");
         if (callee.type === "Identifier") fail(callee, `"${callee.name}" is not available. ${onlyActions}`);
         if (callee.type !== "MemberExpression") fail(callee, `${this.unexpected(callee)} ${onlyActions}`);
         if (callee.computed || callee.property.type !== "Identifier") fail(callee, "Computed property access (x[...]) is not allowed.");
@@ -675,6 +695,7 @@ export function analyzeSpecSource(source: string): { ok: true; analysis: SpecAna
             analysis: {
                 testTitle: validator.testTitle,
                 steps: validator.steps,
+                hasCleanup: validator.hasCleanup,
                 secretRefs: [...validator.secretRefs.values()],
                 importSource: validator.importSource,
             },
@@ -689,28 +710,32 @@ function comparable(title: string): string {
     return title.trim().replace(/\s+/g, " ").replace(/[.;:]+$/, "").toLowerCase();
 }
 
-export function stepTitlesError(stepTitles: string[], humanSteps: string[]): string | null {
-    const expected = humanSteps.map((step) => step.trim()).filter(Boolean);
+export function sameStepTitle(a: string, b: string): boolean {
+    return comparable(a) === comparable(b);
+}
+
+export function stepTitlesError(stepTitles: string[], humanSpec: HumanSpec): string | null {
+    const expected = executionSteps(humanSpec);
     const numbered = (titles: string[]) => titles.map((title, index) => `${index + 1}. "${title}"`).join(" ");
-    if (expected.length === 0) {
-        return `spec.yml lists no steps. Add one step per step() block of spec.ts, in order: ${numbered(stepTitles)}.`;
+    if (humanSpec.steps.every((step) => !step.trim())) {
+        return `spec.yml lists no steps. List the preconditions, steps, expected result and postconditions in spec.yml, one per step() block of spec.ts, in order: ${numbered(stepTitles)}.`;
     }
     const mismatch = expected.findIndex((title, index) => comparable(title) !== comparable(stepTitles[index] ?? ""));
     if (mismatch < 0 && expected.length === stepTitles.length) return null;
     const index = mismatch < 0 ? expected.length : mismatch;
     const detail = index < expected.length
         ? stepTitles[index] === undefined
-            ? `spec.ts has no step() for step ${index + 1} "${expected[index]}".`
-            : `step ${index + 1} of spec.ts is "${stepTitles[index]}" but spec.yml expects "${expected[index]}".`
-        : `spec.ts has an extra step ${index + 1} "${stepTitles[index]}".`;
-    return `The step() titles in spec.ts must match the steps in spec.yml, in the same order: ${detail} spec.yml steps: ${numbered(expected)}.`;
+            ? `spec.ts has no step() for "${expected[index]}".`
+            : `step() ${index + 1} of spec.ts is "${stepTitles[index]}" but spec.yml expects "${expected[index]}".`
+        : `spec.ts has an extra step() ${index + 1} "${stepTitles[index]}".`;
+    return `spec.ts must have one step() per precondition, per step, for the expected result and per postcondition, with the same titles and order as spec.yml: ${detail} Expected step() titles: ${numbered(expected)}.`;
 }
 
-export function validateSpecSource(source: string, humanSpec?: Pick<HumanSpec, "steps"> | null): SpecSourceValidation {
+export function validateSpecSource(source: string, humanSpec?: HumanSpec | null): SpecSourceValidation {
     const result = analyzeSpecSource(source);
     if (!result.ok) return result;
     if (humanSpec) {
-        const error = stepTitlesError(result.analysis.steps, humanSpec.steps);
+        const error = stepTitlesError(result.analysis.steps, humanSpec);
         if (error) return { ok: false, error };
     }
     return { ok: true };

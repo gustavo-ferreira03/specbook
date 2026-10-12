@@ -112,9 +112,9 @@ describe("project, feature and spec through the writer", () => {
     test("step() titles that differ from spec.yml make the Spec invalid", async () => {
         const projectId = await createProject();
         const feature = await writer.createFeatureInRepo(projectId, null, "F", "");
-        const { spec } = await createSpec(projectId, feature.id, "Passos", VALID_SPEC.replace('step("Abrir a página"', 'step("Outro passo"'));
+        const { spec } = await createSpec(projectId, feature.id, "Passos", VALID_SPEC.replace('step("Open the page"', 'step("Outro passo"'));
         assert.equal(spec.status, "invalid");
-        assert.match(spec.invalidReason ?? "", /must match the steps in spec\.yml/);
+        assert.match(spec.invalidReason ?? "", /same titles and order as spec\.yml/);
     });
 
     test("a manual Spec starts from a valid template", async () => {
@@ -625,7 +625,7 @@ describe("autonomous job proposals", () => {
         assert.equal(sourceFiles[0]?.before, original);
         assert.equal(sourceFiles[0]?.after, original, "unchanged YAML retains comments and formatting");
         assert.notEqual(sourceFiles[1]?.before, sourceFiles[1]?.after);
-        const behavior = await proposeMutation(job, "update_spec", { specId: spec.id, humanSpec: { ...HUMAN_SPEC, expectedResult: "Discount: applied\nTotal updated" } });
+        const behavior = await proposeMutation(job, "update_spec", { specId: spec.id, humanSpec: { ...HUMAN_SPEC, expectedResult: "the page is shown" } });
         const changed = await preview(behavior.id);
         assert.equal(changed[0]?.before, original);
         assert.notEqual(changed[0]?.before, changed[0]?.after);
@@ -1324,7 +1324,7 @@ describe("plain-language autonomous presentation", () => {
         const run = await runsRepository.createRun({ specId: spec.id, sourceHash: spec.sourceHash, commitSha: await repoGit.getHeadSha(projectId) });
         await runsRepository.finishRun(run.id, "failed", 1, "Missing results");
         await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
-        await fs.writeFile(path.join(runsDir, run.id, "evidence.json"), JSON.stringify({ failedStep: "Abrir a página", steps: [{ label: "Abrir a página", file: "evidence/step-01.png" }] }));
+        await fs.writeFile(path.join(runsDir, run.id, "evidence.json"), JSON.stringify({ failedStep: "Open the page", steps: [{ label: "Open the page", file: "evidence/step-01.png" }] }));
         const job = await jobsRepository.create({ projectId, runId: run.id, specId: spec.id, kind: "regenerate", chatId: crypto.randomUUID(), trigger: "steward", goal: "Repair", limits: jobLimitsSchema.parse({}) });
         const source = VALID_SPEC.replace('page.goto("/")', 'page.goto("/results")');
         const item = await proposeMutation(job, "update_spec", { specId: spec.id, testSource: source });
@@ -1478,7 +1478,7 @@ describe("plain-language autonomous presentation", () => {
         assert.equal(current.summary.lastCheckedAt, "2026-01-01T12:00:00.100Z");
         assert.equal(current.specHealth[spec.id]?.lastCheckedAt, current.summary.lastCheckedAt);
         assert.equal(current.failing[0]?.updatedAt, current.summary.lastCheckedAt, "triage activity does not pretend the check ran again");
-        await writer.updateSpecWithLock(spec.id, { humanSpec: { ...HUMAN_SPEC, expectedResult: "The checkout confirmation appears" } });
+        await writer.updateSpecWithLock(spec.id, { humanSpec: { ...HUMAN_SPEC, expectedResult: "The page is shown." } });
         assert.equal((await specsRepository.getSpec(spec.id))?.sourceHash, spec.sourceHash);
         const changedBehavior = await projectOverview(projectId);
         assert.equal(changedBehavior.summary.specHealth.not_checked, 1);
@@ -2284,7 +2284,7 @@ describe("results requested in chat", () => {
             assert.equal(detailed.payload.files.find((file) => file.path === "spec.ts")?.after, changedSource);
             const contract = detailed.payload.files.find((file) => file.path === "spec.yml")!;
             assert.equal(contract.before, contract.after);
-            assert.match(contract.after, /Página exibida/);
+            assert.match(contract.after, /The page is shown/);
             assert.equal(await repoGit.getHeadSha(projectId), headBeforeRead, "reading the complete proposal cannot apply its files");
             assert.match(await readText(createChatResultsTool(projectId, other.id), { itemId: proposal.id }), /not available in this conversation/);
             const before = updates;

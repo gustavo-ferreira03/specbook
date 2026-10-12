@@ -175,8 +175,8 @@ describe("analyzeSpecSource: rejected structure", () => {
 
     test("allows exactly one plain test() call", () => {
         assert.match(errorOf(`${VALID_SPEC}\n${VALID_SPEC.split("\n").slice(2).join("\n")}`), /only the specbook import and one test/);
-        assert.match(errorOf(VALID_SPEC.replace('test("Abrir', 'test.only("Abrir')), /Expected one test/);
-        assert.match(errorOf(VALID_SPEC.replace('test("Abrir a aplicação"', "test(`${1}`")), /title must be a non-empty string literal/);
+        assert.match(errorOf(VALID_SPEC.replace('test("Open', 'test.only("Open')), /Expected one test/);
+        assert.match(errorOf(VALID_SPEC.replace('test("Open the application"', "test(`${1}`")), /title must be a non-empty string literal/);
         assert.match(errorOf(VALID_SPEC.replace("async ({ page, step }) =>", "async function ({ page, step })")), /async arrow function/);
         assert.match(errorOf(VALID_SPEC.replace("async ({ page, step })", "async ({ page, step }, testInfo)")), /one destructured parameter/);
         assert.match(errorOf(VALID_SPEC.replace("{ page, step }", "{ page, step, context }")), /Fixture "context" is not available/);
@@ -192,7 +192,7 @@ describe("analyzeSpecSource: rejected structure", () => {
         assert.match(errorOf(noStep), /only await step\("Title"/);
         assert.match(errorOf(spec('await step("inner", async () => { await page.goto("/"); });')), /Steps cannot be nested/);
         assert.match(errorOf(spec("const x = 1;")), /Only locators can be stored/);
-        assert.match(errorOf(VALID_SPEC.replace('step("Abrir a página"', 'step("  "')), /non-empty string literals/);
+        assert.match(errorOf(VALID_SPEC.replace('step("Open the page"', 'step("  "')), /non-empty string literals/);
         assert.match(errorOf(VALID_SPEC.replace("async () => {", "async (x) => {")), /without parameters/);
         assert.match(errorOf(VALID_SPEC.replace("await step(", "step(")), /only await step/);
         assert.match(errorOf(spec('page.goto("/");')), /only await statements/);
@@ -336,17 +336,19 @@ describe("analyzeSpecSource: rejected expressions and escape attempts", () => {
 });
 
 describe("named steps", () => {
-    test("step() titles must match spec.yml steps in order, ignoring case and spacing", () => {
-        assert.equal(stepTitlesError(["Open the page", "Log in"], ["open  the page.", "Log in"]), null);
-        assert.match(stepTitlesError(["Log in", "Open the page"], ["Open the page", "Log in"]) ?? "", /step 1 of spec\.ts is "Log in" but spec\.yml expects "Open the page"/);
-        assert.match(stepTitlesError(["Open the page"], ["Open the page", "Log in"]) ?? "", /no step\(\) for step 2 "Log in"/);
-        assert.match(stepTitlesError(["Open the page", "Extra"], ["Open the page"]) ?? "", /extra step 2 "Extra"/);
-        assert.match(stepTitlesError(["Open the page"], []) ?? "", /spec\.yml lists no steps/);
+    test("step() titles must match spec.yml preconditions, steps, expected result and postconditions, ignoring case and spacing", () => {
+        const human = (steps: string[], more: { preconditions?: string[]; expectedResult?: string; postconditions?: string[] } = {}) => ({ preconditions: [], expectedResult: "", postconditions: [], ...more, steps });
+        assert.equal(stepTitlesError(["Open the page", "Log in"], human(["open  the page.", "Log in"])), null);
+        assert.equal(stepTitlesError(["Signed in", "Open the page", "The page shows Hello", "Sign out"], human(["Open the page"], { preconditions: ["Signed in"], expectedResult: "The page shows Hello.", postconditions: ["Sign out"] })), null);
+        assert.match(stepTitlesError(["Log in", "Open the page"], human(["Open the page", "Log in"])) ?? "", /step\(\) 1 of spec\.ts is "Log in" but spec\.yml expects "Open the page"/);
+        assert.match(stepTitlesError(["Open the page"], human(["Open the page"], { expectedResult: "Hello appears" })) ?? "", /no step\(\) for "Hello appears"/);
+        assert.match(stepTitlesError(["Open the page", "Extra"], human(["Open the page"])) ?? "", /extra step\(\) 2 "Extra"/);
+        assert.match(stepTitlesError(["Open the page"], human([])) ?? "", /spec\.yml lists no steps/);
     });
 
     test("validateSpecSource applies the rule when spec.yml is known", () => {
-        assert.deepEqual(validateSpecSource(VALID_SPEC, { steps: ["Abrir a página"] }), { ok: true });
-        assert.equal(validateSpecSource(VALID_SPEC, { steps: ["Outro"] }).ok, false);
+        assert.deepEqual(validateSpecSource(VALID_SPEC, { preconditions: [], steps: ["Open the page"], expectedResult: "The page is shown", postconditions: [] }), { ok: true });
+        assert.equal(validateSpecSource(VALID_SPEC, { preconditions: [], steps: ["Outro"], expectedResult: "", postconditions: [] }).ok, false);
         assert.deepEqual(validateSpecSource(VALID_SPEC), { ok: true });
     });
 
@@ -364,13 +366,13 @@ describe("agent instructions", () => {
         const starts = lines.map((line, index) => /^- (?:API example|Drawing example|Example)/.test(line) ? index : -1).filter((index) => index >= 0);
         assert.equal(starts.length, 3);
         for (const start of starts) {
-            const steps = JSON.parse(/humanSpec\.steps: (\[.*\])\)/.exec(lines[start])?.[1] ?? "[]") as string[];
+            const human = JSON.parse(/\(spec\.yml: (\{.*\})\):$/.exec(lines[start])?.[1] ?? "null") as { preconditions: string[]; steps: string[]; expectedResult: string; postconditions: string[] };
             const body: string[] = [];
             for (const line of lines.slice(start + 1)) {
                 if (!line.startsWith("  ")) break;
                 body.push(line.slice(2));
             }
-            assert.deepEqual(validateSpecSource(body.join("\n"), { steps }), { ok: true });
+            assert.deepEqual(validateSpecSource(body.join("\n"), human), { ok: true });
         }
     });
 });

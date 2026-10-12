@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiPath, API_URL, errorMessage, getRunEvidence, getSpec, isAbortError } from "@/lib/api";
-import { formatDuration } from "@/lib/format";
+import { evidenceStepLabel, formatDuration } from "@/lib/format";
 import type { Run, RunEvidence, SpecDetail } from "@/lib/types";
 
 export function ChatSpecPreview({ specId, runId, onClose }: { specId: string; runId?: string; onClose: () => void }) {
@@ -84,7 +84,7 @@ export function ChatSpecPreview({ specId, runId, onClose }: { specId: string; ru
                     {evidenceError && <Alert variant="danger" role="alert"><AlertDescription>{evidenceError}</AlertDescription><Button variant="outline" size="sm" onClick={() => setRetryKey((key) => key + 1)}>Retry evidence</Button></Alert>}
                     {!evidence && !evidenceError && <Skeleton className="h-20" role="status" aria-label="Loading run evidence" />}
                     {evidence && <>
-                        {evidence.steps.map((step) => <figure key={step.number} className="space-y-2"><figcaption className="text-body font-medium text-ink">{step.number}. {step.label}</figcaption><img src={artifactUrl(step.file)} alt={`Step ${step.number}: ${step.label}`} loading="lazy" className="w-full rounded-lg border border-line bg-surface-soft" /></figure>)}
+                        {evidence.steps.map((step) => <figure key={step.number} className="space-y-2"><figcaption className="text-body font-medium text-ink"><span className="text-ink-subtle">{evidenceStepLabel(step)}</span> {step.label}</figcaption><img src={artifactUrl(step.file)} alt={`${evidenceStepLabel(step)}: ${step.label}`} loading="lazy" className="w-full rounded-lg border border-line bg-surface-soft" /></figure>)}
                         {evidence.video && <video controls preload="metadata" src={artifactUrl(evidence.video)} className="w-full rounded-lg border border-line bg-surface-soft" aria-label="Run recording" />}
                         <ApiRunEvidence evidence={evidence} />
                         <RunDiagnostics evidence={evidence} />

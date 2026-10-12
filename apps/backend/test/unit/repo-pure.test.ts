@@ -48,7 +48,7 @@ describe("slug", () => {
 describe("yaml", () => {
     const humanSpec = {
         preconditions: ["Usuário cadastrado"],
-        steps: ["Abrir a página", "Informar: e-mail #1"],
+        steps: ["Open the page", "Informar: e-mail #1"],
         expectedResult: "Painel exibido",
         postconditions: [],
     };

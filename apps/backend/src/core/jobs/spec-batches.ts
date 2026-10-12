@@ -86,7 +86,7 @@ export async function proposeSpecBatch(projectId: string, chatId: string, input:
 async function enqueueSelected(item: InboxItem): Promise<void> {
     for (const candidate of batchOf(item).candidates.filter((candidate) => candidate.selected)) {
         await enqueueJob(item.projectId, { kind: "generate_spec", trigger: "chat",
-            goal: `Create only the selected Spec “${candidate.title}”. Goal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nRead the API documentation at ${candidate.apiDocsUrl}; do not invent request fields.` : ""}\nInspect the application as needed, write matching readable steps and deterministic TypeScript, and call create_spec. It saves the Spec and runs it once. If the run fails because the Spec is wrong (a locator, a wait, a wrong assumption about the app), inspect the live page again and call create_spec with the corrected Spec; it can be revised until its first pass, at most 3 runs. Ask through Inbox when blocked. Do not create unrelated Specs or edit existing behavior.` }, candidate.jobId, { sourceChatId: batchOf(item).sourceChatId || payloadOf(item).sourceChatId });
+            goal: `Create the selected Spec “${candidate.title}”.\nGoal: ${candidate.goal}\nWhy: ${candidate.why}\nFeature: ${candidate.feature}${candidate.apiDocsUrl ? `\nAPI documentation: ${candidate.apiDocsUrl} (never invent request fields)` : ""}` }, candidate.jobId, { sourceChatId: batchOf(item).sourceChatId || payloadOf(item).sourceChatId });
     }
 }
 
@@ -157,7 +157,7 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
         },
     });
     await updateCandidate(item.id, candidate.id, { resolvedFeatureId: feature.id });
-    return `${job.pendingMessage}\nSelected Spec reference: ${item.id}/${candidate.id}. Use featureId ${feature.id} and title ${JSON.stringify(candidate.title)} for create_spec. The selection authorizes this new Spec only. Existing spec.yml contracts remain unchanged. create_spec validates the files, saves the Spec and runs it once automatically; inspect its result and evidenceReview rather than running again. If the run failed or evidenceReview says the test checks the wrong thing, fix the Spec and call create_spec again with the corrected files. If this Spec already exists, use run_spec to retrieve its latest result. Use inbox_report to ask for prerequisites.`;
+    return `${job.pendingMessage}\nSelected Spec reference: ${item.id}/${candidate.id}. Call create_spec with featureId ${feature.id} and title ${JSON.stringify(candidate.title)}. The selection authorizes only this new Spec; existing contracts stay unchanged. create_spec validates, saves and runs the Spec once: read its result and evidenceReview instead of running again. If the run failed or evidenceReview says the test checks the wrong thing, fix the Spec and call create_spec again, at most 3 runs in total. If the Spec already exists, read its latest result with run_spec. Ask for prerequisites with inbox_report.`;
 }
 
 export async function selectedSpecResult(job: Job) {
@@ -167,7 +167,7 @@ export async function selectedSpecResult(job: Job) {
     const evidenceReview = run && run.status !== "running" ? await reviewRunEvidence(path.join(runsDir, run.id), run) : null;
     const attemptsLeft = spec ? Math.max(0, MAX_DRAFT_RUNS - await draftFailures(spec.id)) : MAX_DRAFT_RUNS;
     return { specId: spec?.id, runId: run?.id, status: run?.status ?? "not_started", failReason: run?.failReason ?? candidate.error ?? null, evidenceReview, attemptsLeft,
-        nextStep: run?.status === "failed" && attemptsLeft > 0 ? reviewNextStep(evidenceReview) ?? "Inspect the failure on the live page and call create_spec again with the corrected Spec." : undefined };
+        nextStep: run?.status === "failed" && attemptsLeft > 0 ? `${reviewNextStep(evidenceReview) ?? "Inspect the failure on the live page."} Then call create_spec again with the corrected Spec.` : undefined };
 }
 
 const MAX_DRAFT_RUNS = 3;

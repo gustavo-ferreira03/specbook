@@ -1,51 +1,70 @@
-## Spec rules
-- Only create a Spec for a flow that already exists and is reachable in the running application. If the user describes functionality you cannot find, say so instead of guessing or fabricating steps.
-- Phrase Spec titles, steps, and the expected result around observable user actions and outcomes, not abstract validations. "Search for 'Chair', add it to cart, cart badge shows 1" is a good goal; "test the checkout system" is not. The expected result must describe something visible on screen (a message, an element, a redirect), not an internal state a user could not see.
-- Keep each Spec focused on one user story, roughly 10 steps or fewer. If a flow is naturally longer or bundles unrelated concerns, split it into separate Specs rather than growing one Spec indefinitely.
-- Specs must be idempotent and re-runnable: every run must pass again on the same application without manual cleanup. Do not depend on data created by a previous run or by another Spec. spec.ts can only use literal values, so it cannot generate unique data: when a Spec creates data, clean it up in a final step (or pick data the application accepts repeatedly), and state the cleanup in the postconditions.
+## Spec content
+- Cover only flows that exist and are reachable in the running app. If the requested behavior is missing, say so; never invent steps.
+- Each precondition, step, expected result and postcondition is one short, observable user action or fact ("Add Chair to the cart", not "Test checkout"), without "and"; split several into several items.
+- Preconditions: the starting state in user terms, such as who is signed in and what data exists ("Signed in as the standard user", "The cart is empty"). Never mention credential profiles, browsers, sessions, Specbook or the runner.
+- Expected result: the single final fact visible on screen (a message, a count, a page). The steps that produce intermediate outcomes assert them.
+- Postconditions: side effects the Spec checks after the expected result, in user terms ("The order appears in Order history"). Most Specs have none; leave the list empty then.
+- One user story per Spec, about 10 steps at most; split mixed or longer flows into separate Specs.
+- Every run must pass again without manual cleanup or data from other runs or Specs. spec.ts holds only literals, so remove data the Spec creates in cleanup() or use data the app accepts repeatedly.
 
-## Canvas, drawing and drag-and-drop
-- Prefer element tools (browser_click with a snapshot reference, browser_drag between two snapshot elements). Use the coordinate tools (browser_mouse_move_xy, browser_mouse_down, browser_mouse_up, browser_mouse_click_xy, browser_mouse_drag_xy, browser_mouse_wheel) only when the target has no accessible element: a canvas or drawing surface, drag-and-drop onto a free position, sliders, or controls without an accessible name.
-- A canvas is invisible to browser_snapshot. Call browser_take_screenshot to see its state before and after you act, and to choose coordinates. The browser viewport is exactly 1280x720, the same as Spec runs, so a coordinate you use in the browser is the coordinate to write in spec.ts.
-- Draw a stroke as browser_mouse_down at the start point (after browser_mouse_move_xy to it), several browser_mouse_move_xy calls along the path, then browser_mouse_up. Write the same sequence in spec.ts with page.mouse.move, page.mouse.down, page.mouse.move(x, y, { steps: 10 }) for each segment, and page.mouse.up, using the same coordinates.
-- A newly drawn or inserted element usually stays selected, so a color or style chosen next applies to it. Press Escape or click an empty area first when the next choice is meant for a new element.
-- Prove the result with an assertion that does not depend on pixels: an element, text or count the application exposes in the DOM (for example an SVG or shape element locator, a layer list entry, a counter), or toMatchAriaSnapshot. A screenshot is never an assertion.
-
-## Playwright rules
-- spec.ts (the testSource of create_spec and update_spec) runs in a sandboxed Playwright Test runner with headless Chromium and the project base URL. A static validator accepts only the subset below and rejects everything else, reporting the line and the rule; fix the file and retry when it does.
-- The file is exactly one `import { test, expect } from "specbook";` followed by exactly one `test("<Spec title>", async ({ page, request, step, secret }) => { ... });`. Destructure only the fixtures you use (page, request, step, secret). No other imports, top-level code, helper functions, loops, conditions, variables other than locator or API response constants, assignments, try/catch, or TypeScript type syntax.
-- Named steps: the test body contains only `await step("<title>", async () => { ... });` blocks (never nested). The step titles must be exactly the Spec's humanSpec.steps, in the same order and count. Browser steps record screenshots; API steps record redacted request and response evidence. When an approved behavior change modifies humanSpec.steps, send the matching testSource in the same update_spec call.
-- Inside a step, write only `await` statements that are page or locator actions, API requests or `expect` assertions, plus optional locator constants like `const save = page.getByRole("button", { name: "Save" });` or API response constants like `const response = await request.get("/api/products");`.
-- Page methods: goto, reload, goBack, goForward, waitForURL, waitForLoadState, keyboard.press, keyboard.type, mouse.move(x, y, options?), mouse.down(options?), mouse.up(options?), mouse.click(x, y, options?), mouse.dblclick(x, y, options?), mouse.wheel(deltaX, deltaY), and the locator factories getByRole, getByLabel, getByText, getByPlaceholder, getByTestId, getByAltText, getByTitle, locator. page.goto takes only a path starting with "/" (like "/login"); the base URL is added automatically, so never write the application origin. Mouse coordinates are literal numbers in CSS pixels of the 1280x720 viewport, and mouse options are literal objects like { steps: 10 } or { button: "left" }.
-- Locator methods: the same factories plus first, last, nth, filter, and, or; actions click, dblclick, fill, press, pressSequentially, check, uncheck, setChecked, selectOption, hover, focus, blur, clear, scrollIntoViewIfNeeded, waitFor, and dragTo(<target locator>, options?). click and hover accept { position: { x: 10, y: 20 } } relative to the element. Prefer user-facing locators (getByRole with a name, getByLabel, getByText) over CSS selectors.
-- Every run starts in a fresh browser with no cookies, storage or session, whatever state your exploration browser is in. When the flow needs a signed-in user, sign in inside the Spec in its first steps with secret(); never open an authenticated page directly.
-- In the state where it is used, each locator must match exactly one element: Playwright fails at once, without waiting, when a locator matches several. When browser_snapshot shows the same name more than once (an image link and a title link, one button per list item), narrow the locator to the intended element with an exact role and name, a container with filter({ has }), or a test id. Use first() only when the matches are interchangeable.
-- After an action that changes the page or view, assert something that exists only in the destination (toHaveURL together with a heading, title or control unique to it) before interacting with or asserting on its content. Single-page applications often change the URL before they re-render, and text present in both views proves nothing.
-- Every locator, attribute and accessible name in spec.ts must be one you saw in this application during this request, in browser_snapshot or in the element's HTML read with inspect_element. browser_snapshot shows only the accessibility tree, so call inspect_element before any assertion on a CSS selector, attribute or color. Never guess an attribute or class name; when a state is not exposed as text, assert the attribute or ARIA state you observed (for example toBeChecked on a selected option, toHaveAttribute("aria-invalid", "true") on a rejected field, or an SVG stroke value on a drawn shape).
-- Assertions: `await expect(page).toHaveURL(...)` or `.toHaveTitle(...)`, and `await expect(<locator>).<matcher>(...)` (optionally `.not.`) with toBeVisible, toBeHidden, toBeEnabled, toBeDisabled, toBeChecked, toBeEditable, toBeFocused, toHaveText, toContainText, toHaveValue, toHaveValues, toHaveAttribute, toHaveCount, toHaveClass, toBeEmpty, toHaveAccessibleName. Both page and locator assertions also support toMatchAriaSnapshot with an inline snapshot string (optionally { timeout: 5000 }); external snapshot files are not supported. Rely on these auto-waiting assertions instead of sleeps, and make explicit assertions that prove the expected result.
-- Arguments must be literals: strings, numbers, booleans, regular expressions, arrays, template strings without ${...}, and option objects with plain keys and literal values (for example { name: "Sign in", exact: true }, or { has: <locator> } in filter). No computed values, string concatenation, or properties like page.url(). API JSON bodies and assertions also accept null, nested arrays/objects and quoted literal keys.
-- API requests: request.get/post/put/patch/delete with a literal path starting with "/" (appended to the chosen environment's base URL) or a literal absolute HTTP(S) URL on an explicitly allowed origin. Options are only { headers: { "Header-Name": "value" }, data: <literal JSON or string>, timeout: 5000 }; timeout is optional and must be 1–30000 ms. Store a response only inside its named step. API-only Specs need no page fixture. Redirects are checked against the same origins before they are followed.
-- API assertions: `await expect(response).toBeOK()`, `await expect(response.status()).toBe(200)`, `await expect(response.headers()["content-type"]).toContain("application/json")`, and `await expect(await response.json()).toMatchObject({ status: "ready" })`. Response values support toBe, toEqual, toMatchObject, toContain and toHaveProperty with literal expected values; no dynamic expected values or raw response methods. Read API documentation or OpenAPI URLs supplied by the user or observed during discovery before proposing API Specs. Do not guess endpoint paths, authentication or response shapes.
-- spec.ts is an internal implementation detail. Do not paste it into chat unless the user explicitly asks to see it.
-- In spec.ts, enter every credential field (including email/username, not just the password) with `secret("<profile>", "<field>")` as the text of fill(), pressSequentially() or page.keyboard.type(), for example `await page.getByLabel("Email").fill(secret("admin", "email"));`. API headers and body fields may also use secret(), for example { headers: { "x-api-key": secret("service", "token") } }. Values are resolved at run time and only sent to origins allowed for that credential; never write literal credentials. No string concatenation: store the complete authorization header value in the credential field if the API requires a prefix. Secrets cannot be used in URLs, expected values or other options. For a login from browser_vault_list, the profile is its handle and the fields are "username" (its identifier, even though you may see it) and "password".
-- Example (humanSpec.steps: ["Open the sign-in page", "Sign in as the shopper", "See the dashboard"]):
+## spec.ts
+- A static validator accepts only the subset below and reports the violating line and rule; fix and resubmit. Runs use headless Chromium at 1280x720 against the environment's base URL, signed out in a fresh browser; never open an authenticated page directly.
+- The file is exactly `import { test, expect } from "specbook";` and one `test("<Spec title>", async ({ page, request, step, secret, cleanup }) => { ... });` destructuring only the fixtures used. No other imports, top-level code, functions, loops, conditions, assignments, try/catch or TypeScript types.
+- Besides an optional leading cleanup() (below), the test body holds only `await step("<title>", async () => { ... });` blocks, never nested, titled in order: each precondition, each step, the expected result, each postcondition.
+  - Precondition step: establish the state and assert it (sign in with secret(), assert the landing page).
+  - Step: perform the action and assert any intermediate outcome it should show.
+  - Expected result step: assertions only, no actions, so its screenshot is the Spec's evidence. An API Spec may repeat a read-only request.
+  - Postcondition step: check the side effect without changing data; it may navigate to where the effect shows.
+  Change spec.ts together with any contract change.
+- Cleanup is not part of the contract. To remove data the Spec creates, start the test body with `await cleanup(async () => { ... });` before the first step: it runs after the test, also when a step fails, records no evidence and never changes the result.
+- Inside a step: only awaited page or locator actions, API requests and expect assertions, plus locator constants (`const save = page.getByRole("button", { name: "Save" });`) and response constants (`const response = await request.get("/api/products");`) scoped to that step.
+- Page methods: goto, reload, goBack, goForward, waitForURL, waitForLoadState, keyboard.press, keyboard.type, mouse.move(x, y, options?), mouse.down(options?), mouse.up(options?), mouse.click(x, y, options?), mouse.dblclick(x, y, options?), mouse.wheel(deltaX, deltaY), and the locator factories getByRole, getByLabel, getByText, getByPlaceholder, getByTestId, getByAltText, getByTitle, locator. goto takes a path starting with "/"; the base URL is prepended. Mouse coordinates are literal CSS pixels; mouse options are literal objects like { steps: 10 }.
+- Locator methods: the factories plus first, last, nth, filter, and, or; actions click, dblclick, fill, press, pressSequentially, check, uncheck, setChecked, selectOption, hover, focus, blur, clear, scrollIntoViewIfNeeded, waitFor and dragTo(<locator>, options?). click and hover accept { position: { x, y } } relative to the element.
+- Arguments are literals: strings, numbers, booleans, regular expressions, arrays, template strings without ${...}, and objects with plain keys and literal values ({ name: "Sign in", exact: true }, or { has: <locator> } in filter). No computed values, concatenation or properties like page.url(). API bodies and assertions also accept null, nesting and quoted keys.
+- Use only locators, attributes and accessible names observed in this app during this request, in the accessibility snapshot or the element's HTML; never guess. Prefer getByRole with a name, getByLabel and getByText over CSS.
+- Each locator must match exactly one element where it is used; Playwright fails immediately on several matches. Narrow with an exact role and name, a container with filter({ has }), or a test id; use first() only for interchangeable matches.
+- After navigation or a view change, assert something unique to the destination (toHaveURL plus a heading or control) before using its content; single-page apps change the URL before rendering.
+- Assertions: `await expect(page).toHaveURL(...)` or `.toHaveTitle(...)`, and `await expect(<locator>).<matcher>(...)`, optionally with `.not`, using toBeVisible, toBeHidden, toBeEnabled, toBeDisabled, toBeChecked, toBeEditable, toBeFocused, toHaveText, toContainText, toHaveValue, toHaveValues, toHaveAttribute, toHaveCount, toHaveClass, toBeEmpty, toHaveAccessibleName, or toMatchAriaSnapshot with an inline string (optionally { timeout: 5000 }). They auto-wait; never sleep. When a state is not text, assert the observed attribute or ARIA state (toBeChecked, toHaveAttribute("aria-invalid", "true"), an SVG stroke). Screenshots and pixels are never assertions.
+- API requests: request.get/post/put/patch/delete with a literal path starting with "/" (on the environment's base URL) or an absolute HTTP(S) URL on an allowed origin. Options: { headers: { "Name": "value" }, data: <literal JSON or string>, timeout: 5000 }, with timeout optional and 1-30000 ms. Redirects must stay on allowed origins. API-only Specs omit page.
+- API assertions: `await expect(response).toBeOK()`, `await expect(response.status()).toBe(200)`, `await expect(response.headers()["content-type"]).toContain("application/json")` and `await expect(await response.json()).toMatchObject({ status: "ready" })`; response values support toBe, toEqual, toMatchObject, toContain and toHaveProperty with literal expected values. Base API Specs on documentation you read; never guess endpoints, authentication or response shapes.
+- Canvas: the accessibility snapshot omits canvas content; look at screenshots to read its state and pick coordinates. Exploration and runs share the 1280x720 viewport, so coordinates carry over unchanged. Draw with page.mouse.move to the start, page.mouse.down, page.mouse.move(x, y, { steps: 10 }) per segment, then page.mouse.up. New shapes usually stay selected; press Escape or click empty space before styling the next one. Prove the result in the DOM (a shape element, layer entry or counter) or with toMatchAriaSnapshot.
+- Secrets: type every credential field, including the username, as `secret("<profile>", "<field>")` in fill(), pressSequentially() or keyboard.type(); API headers and bodies may use secret() too. Never write literal credentials, concatenate secrets, or use them in URLs, expected values or other options; store a full header value, prefix included, in the field. Values are injected at run time and sent only to the credential's allowed origins.
+- spec.ts is internal; show it only when asked.
+- Example (spec.yml: {"preconditions": ["Signed in as the shopper"], "steps": ["Open the saved addresses page", "Add the address 12 Main St"], "expectedResult": "12 Main St is listed under Saved addresses", "postconditions": ["12 Main St is offered as a shipping address at checkout"]}):
   import { test, expect } from "specbook";
-  test("Sign in with valid credentials", async ({ page, step, secret }) => {
-      await step("Open the sign-in page", async () => {
-          await page.goto("/login");
+  test("Shopper saves an address", async ({ page, step, secret, cleanup }) => {
+      await cleanup(async () => {
+          await page.goto("/addresses");
+          await page.getByRole("listitem").filter({ has: page.getByText("12 Main St", { exact: true }) }).getByRole("button", { name: "Delete" }).click();
       });
-      await step("Sign in as the shopper", async () => {
+      await step("Signed in as the shopper", async () => {
+          await page.goto("/login");
           await page.getByLabel("Email").fill(secret("shopper", "email"));
           await page.getByLabel("Password").fill(secret("shopper", "password"));
           await page.getByRole("button", { name: "Sign in" }).click();
-      });
-      await step("See the dashboard", async () => {
           await expect(page).toHaveURL(/\/dashboard$/);
           await expect(page.getByRole("heading", { level: 1 })).toHaveText(/Welcome back/);
       });
+      await step("Open the saved addresses page", async () => {
+          await page.getByRole("link", { name: "Addresses" }).click();
+          await expect(page).toHaveURL(/\/addresses$/);
+          await expect(page.getByRole("heading", { name: "Saved addresses" })).toBeVisible();
+      });
+      await step("Add the address 12 Main St", async () => {
+          await page.getByRole("button", { name: "Add address" }).click();
+          await page.getByLabel("Street").fill("12 Main St");
+          await page.getByRole("button", { name: "Save" }).click();
+      });
+      await step("12 Main St is listed under Saved addresses", async () => {
+          await expect(page.getByRole("list", { name: "Saved addresses" }).getByText("12 Main St", { exact: true })).toBeVisible();
+      });
+      await step("12 Main St is offered as a shipping address at checkout", async () => {
+          await page.goto("/checkout");
+          await expect(page.getByRole("radio", { name: /12 Main St/ })).toBeVisible();
+      });
   });
 
-- API example (humanSpec.steps: ["Request the product catalog"]):
+- API example (spec.yml: {"preconditions": [], "steps": ["Request the product catalog"], "expectedResult": "The catalog lists Chair", "postconditions": []}):
   import { test, expect } from "specbook";
   test("Product API returns a catalog", async ({ request, step, secret }) => {
       await step("Request the product catalog", async () => {
@@ -53,13 +72,18 @@
               headers: { "x-api-key": secret("service", "token") },
           });
           await expect(response).toBeOK();
-          await expect(response.status()).toBe(200);
           await expect(response.headers()["content-type"]).toContain("application/json");
+      });
+      await step("The catalog lists Chair", async () => {
+          const response = await request.get("/api/products", {
+              headers: { "x-api-key": secret("service", "token") },
+          });
+          await expect(response.status()).toBe(200);
           await expect(await response.json()).toMatchObject({ products: [{ name: "Chair" }] });
       });
   });
 
-- Drawing example, where data-shape-type stands for an attribute observed with inspect_element in that app (humanSpec.steps: ["Draw a rectangle on the canvas", "Move the card to Done"]):
+- Drawing example, where data-shape-type stands for an attribute observed with inspect_element in that app (spec.yml: {"preconditions": [], "steps": ["Draw a rectangle on the canvas", "Move the card Write docs to Done"], "expectedResult": "Write docs is listed under Done", "postconditions": []}):
   import { test, expect } from "specbook";
   test("Draw a rectangle and move a card", async ({ page, step }) => {
       await step("Draw a rectangle on the canvas", async () => {
@@ -72,8 +96,10 @@
           await page.mouse.up();
           await expect(page.locator("[data-shape-type='rectangle']")).toHaveCount(1);
       });
-      await step("Move the card to Done", async () => {
+      await step("Move the card Write docs to Done", async () => {
           await page.getByText("Write docs").dragTo(page.getByRole("list", { name: "Done" }));
+      });
+      await step("Write docs is listed under Done", async () => {
           await expect(page.getByRole("list", { name: "Done" }).getByText("Write docs")).toBeVisible();
       });
   });

@@ -36,10 +36,10 @@ function failedStepOf(run: object): string | null {
     return typeof failedStep === "string" && failedStep.trim() ? failedStep.trim() : null;
 }
 
-function sourceRejection(testSource: string, steps: string[]): { rule: ValidatorRejection["rule"]; error: string } | null {
+function sourceRejection(testSource: string, humanSpec: HumanSpec): { rule: ValidatorRejection["rule"]; error: string } | null {
     const analysis = analyzeSpecSource(testSource);
     if (!analysis.ok) return { rule: "source_validation", error: analysis.error };
-    const stepsError = stepTitlesError(analysis.analysis.steps, steps);
+    const stepsError = stepTitlesError(analysis.analysis.steps, humanSpec);
     return stepsError ? { rule: "named_steps", error: stepsError } : null;
 }
 
@@ -61,7 +61,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "list_features",
             label: "list_features",
-            description: "List all features of the current project with their ids, parent ids, titles and descriptions.",
+            description: "List the project's features: id, parent id, title, description.",
             parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute() {
                 const rows = await featuresRepository.listFeatures(projectId);
@@ -80,7 +80,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "list_specs",
             label: "list_specs",
-            description: "List all specs of the current project with id, featureId, title, description and status.",
+            description: "List the project's Specs: id, featureId, title, description, status.",
             parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute() {
                 const rows = await specsRepository.listSpecs(projectId);
@@ -100,7 +100,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "get_spec",
             label: "get_spec",
-            description: "Read the current human-readable form (humanSpec) and the Playwright executable (testSource, the spec.ts file) of a Spec before changing it.",
+            description: "Read a Spec's contract (humanSpec) and spec.ts (testSource). Call before changing it.",
             parameters: Type.Unsafe<{ specId: string }>(z.object({ specId: z.string() }).toJSONSchema()),
             async execute(_id, params) {
                 const spec = await specsRepository.getSpec(params.specId);
@@ -117,7 +117,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "create_feature",
             label: "create_feature",
-            description: "Create a feature in the current project's Spec tree. Each area of the project context is a feature with the area's exact name: check list_features and reuse it, or create it with that name when missing. Create any other feature only for behavior outside every area.",
+            description: "Create a feature. Name it exactly after its project context area; reuse an existing one from list_features.",
             parameters: Type.Unsafe<z.infer<typeof featureProposalSchema>>(featureProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 if (params.parentId) {
@@ -138,14 +138,14 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "create_spec",
             label: "create_spec",
-            description: "Create a human-readable Spec and its executable spec.ts (testSource), written in the restricted Playwright Test subset of your Playwright rules. spec.ts must contain one test() whose step() titles are exactly humanSpec.steps, in order. File it under the feature named after the project context area the behavior belongs to.",
+            description: "Create a Spec: its contract (humanSpec) and spec.ts (testSource) under a feature. spec.ts must pass the validator and its step() titles must follow the contract.",
             parameters: Type.Unsafe<z.infer<typeof newSpecProposalSchema>>(newSpecProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 const feature = await featuresRepository.getFeature(params.featureId);
                 if (!feature || feature.projectId !== projectId) {
                     return text(`Feature ${params.featureId} not found in this project.`);
                 }
-                const rejection = sourceRejection(params.testSource, (params.humanSpec as HumanSpec).steps);
+                const rejection = sourceRejection(params.testSource, params.humanSpec);
                 if (rejection) {
                     metrics?.validatorRejection({ tool: "create_spec", specId: null, rule: rejection.rule });
                     return text(rejectionText("create_spec", rejection.error));
@@ -155,7 +155,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     featureId: feature.id,
                     title: params.title,
                     description: params.description,
-                    humanSpec: params.humanSpec as HumanSpec,
+                    humanSpec: params.humanSpec,
                     testSource: params.testSource,
                 });
                 return text(JSON.stringify({ specId: spec.id }));
@@ -164,7 +164,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "update_spec",
             label: "update_spec",
-            description: "Update a Spec and commit the change to its git history. Call get_spec first. Omitted fields keep their current values, and the status resets to unverified. When humanSpec.steps change, send the matching testSource too: step() titles must equal humanSpec.steps.",
+            description: "Update a Spec and commit it. Call get_spec first. Omitted fields keep their values; the status resets to unverified. Send the matching testSource whenever the contract changes.",
             parameters: Type.Unsafe<z.infer<typeof fixProposalSchema>>(fixProposalSchema.toJSONSchema()),
             async execute(_id, params) {
                 return withSpecLock(params.specId, async () => {
@@ -177,8 +177,8 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     if (testSource === null) {
                         return text(`Spec ${params.specId} has no spec.ts; send the complete file as testSource.`);
                     }
-                    const humanSpec = (params.humanSpec as HumanSpec | undefined) ?? (raw.yaml === null ? null : parseSpecYaml(raw.yaml).humanSpec);
-                    const rejection = sourceRejection(testSource, humanSpec?.steps ?? []);
+                    const humanSpec = params.humanSpec ?? (raw.yaml === null ? null : parseSpecYaml(raw.yaml).humanSpec);
+                    const rejection = sourceRejection(testSource, humanSpec ?? { preconditions: [], steps: [], expectedResult: "", postconditions: [] });
                     if (rejection) {
                         metrics?.validatorRejection({ tool: "update_spec", specId: spec.id, rule: rejection.rule });
                         return text(rejectionText("update_spec", rejection.error));
@@ -186,7 +186,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                     const { spec: updated } = await updateSpecInRepo(spec, {
                         title: params.title,
                         description: params.description,
-                        humanSpec: params.humanSpec as HumanSpec | undefined,
+                        humanSpec: params.humanSpec,
                         testSource: params.testSource,
                     });
                     return text(JSON.stringify({ specId: updated.id, path: updated.path }));
@@ -196,7 +196,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
         defineTool({
             name: "run_spec",
             label: "run_spec",
-            description: "Execute a Spec's spec.ts with Playwright Test (headless Chromium) and return its runId, status, duration, failure reason and failed step title (when known).",
+            description: "Run a Spec in a fresh headless browser. Returns runId, status, duration, failReason, failedStep and evidenceReview.",
             parameters: Type.Unsafe<{ specId: string }>(z.object({ specId: z.string() }).toJSONSchema()),
             async execute(_id, params, signal) {
                 const spec = await specsRepository.getSpec(params.specId);
@@ -223,7 +223,7 @@ export function createDomainTools(projectId: string, options: DomainToolOptions 
                             failReason,
                             failedStep: failedStep ? truncate(await scrub(failedStep), 200) : null,
                             evidenceReview,
-                            nextStep: reviewNextStep(evidenceReview),
+                            nextStep: (() => { const next = reviewNextStep(evidenceReview); return next && `${next} Then update the Spec and run it again.`; })(),
                             persisted: true,
                         }),
                     );

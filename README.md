@@ -54,19 +54,20 @@ OpenAI device-code login and Anthropic's copy-the-code login work out of the box
 3. Open a Spec to run it and inspect the evidence. On a failure, the agent investigates and proposes a repair.
 4. Keep it running from **Settings → Automation**, with schedules and CI access.
 
-A Spec pairs the contract with its test, and the step titles match in both files:
+A Spec pairs the contract with its test. Preconditions, steps, the expected result and any postconditions each become a named `step()`, in that order, so every run keeps a screenshot of the expected result. A hidden `cleanup()` removes data the Spec creates:
 
 <table>
 <tr><th><code>spec.yml</code></th><th><code>spec.ts</code></th></tr>
 <tr><td>
 
 ```yaml
-title: Open the application
-description: The home page shows its heading.
-preconditions: []
+title: Cart badge counts added products
+description: Adding a product updates the cart badge.
+preconditions:
+  - Signed in as the shopper
 steps:
-  - Open the home page
-expectedResult: The application heading is visible.
+  - Add the backpack to the cart
+expectedResult: The cart badge shows 1.
 postconditions: []
 ```
 
@@ -75,10 +76,22 @@ postconditions: []
 ```ts
 import { test, expect } from "specbook";
 
-test("Open the application", async ({ page, step }) => {
-    await step("Open the home page", async () => {
+test("Cart badge counts added products", async ({ page, step, secret, cleanup }) => {
+    await cleanup(async () => {
+        await page.getByTestId("remove-backpack").click();
+    });
+    await step("Signed in as the shopper", async () => {
         await page.goto("/");
-        await expect(page.getByRole("heading")).toBeVisible();
+        await page.getByLabel("Username").fill(secret("shop", "username"));
+        await page.getByLabel("Password").fill(secret("shop", "password"));
+        await page.getByRole("button", { name: "Login" }).click();
+        await expect(page).toHaveURL(/inventory/);
+    });
+    await step("Add the backpack to the cart", async () => {
+        await page.getByTestId("add-to-cart-backpack").click();
+    });
+    await step("The cart badge shows 1.", async () => {
+        await expect(page.getByTestId("cart-badge")).toHaveText("1");
     });
 });
 ```
