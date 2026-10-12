@@ -81,6 +81,7 @@ describe("CI access and quality gates", () => {
         assert.equal((await visibleRuns([run]))[0].queue?.queued, 1);
         const issued = await issueRunnerToken("Visibility", "visibility");
         const runner = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+        await runnersRepository.reportInstance(runner.id, runner.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
         const lease = (await runnersRepository.claim(runner, 60_000))!;
         assert.equal((await visibleRuns([run]))[0].queue, null);
         await releaseRunnerWork(lease.id, runner.id, lease.leaseId!);
@@ -127,7 +128,7 @@ describe("CI access and quality gates", () => {
         assert.equal((await runnerApp.request("/runners", { method: "POST", headers: { Authorization: `Bearer ${personal}`, "content-type": "application/json" }, body: JSON.stringify({ name: "Forbidden" }) })).status, 403);
         assert.equal((await runnerApp.request("/runner/claim", { method: "POST", headers: { Authorization: `Bearer ${personal}`, "content-type": "application/json" }, body: JSON.stringify({ version: "test" }) })).status, 401);
         const runnerHeaders = { Authorization: `Bearer ${issued.token}`, "content-type": "application/json" };
-        const incompatible = await runnerApp.request("/runner/claim", { method: "POST", headers: runnerHeaders, body: JSON.stringify({ version: "0.1.0", protocolVersion: 999, concurrency: 1 }) });
+        const incompatible = await runnerApp.request("/runner/claim", { method: "POST", headers: runnerHeaders, body: JSON.stringify({ instanceId: crypto.randomUUID(), version: "0.1.0", protocolVersion: 999, concurrency: 1 }) });
         assert.equal(incompatible.status, 426);
         assert.match(await incompatible.text(), /Upgrade the CLI/);
         const missingVersion = await runnerApp.request("/runner/claim", { method: "POST", headers: runnerHeaders, body: JSON.stringify({ version: "0.1.0", concurrency: 1 }) });
@@ -167,8 +168,21 @@ describe("CI access and quality gates", () => {
         assert.equal(await runnersRepository.claim(restrictedRow, 60_000), null, "tokens cannot claim work in another project");
         await revokeRunnerToken(restrictedRow.id);
         assert.equal(await runnersRepository.claim(outsideRow, 60_000), null);
+        const secondBatch = crypto.randomUUID();
+        await enqueueRunnerBatch(secondBatch, project.id, "office", { ...payload, batchId: secondBatch });
+        const firstInstance = crypto.randomUUID();
+        const secondInstance = crypto.randomUUID();
+        await runnersRepository.reportInstance(officeRow.id, firstInstance, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        await runnersRepository.reportInstance(officeRow.id, secondInstance, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        const firstJob = (await runnersRepository.claim(officeRow, 60_000, firstInstance))!;
+        const secondJob = (await runnersRepository.claim(officeRow, 60_000, secondInstance))!;
+        assert.ok(firstJob && secondJob, "replicas sharing one token have independent capacity");
+        assert.equal(await runnersRepository.claim(officeRow, 60_000, firstInstance), null);
+        await runnersRepository.disconnect(officeRow.id, firstInstance);
+        await runnersRepository.disconnect(officeRow.id, secondInstance);
+        await runnersRepository.cancelBatch(secondBatch);
         const lease = (await runnersRepository.claim(officeRow, 60_000))!;
-        assert.equal(lease.attempts, 1);
+        assert.equal(lease.attempts, 2);
         assert.ok((await pendingRunnerBatchIds()).includes(payload.batchId));
         assert.equal(await runnersRepository.claim(officeRow, 60_000), null);
         const expiry = await heartbeatRunnerWork(lease.id, officeRow.id, lease.leaseId!);
@@ -177,7 +191,7 @@ describe("CI access and quality gates", () => {
         await runnersRepository.reclaim();
         const replacement = (await runnersRepository.claim(officeRow, 60_000))!;
         assert.equal(replacement.id, lease.id);
-        assert.equal(replacement.attempts, 2);
+        assert.equal(replacement.attempts, 3);
         assert.notEqual(replacement.leaseId, lease.leaseId);
         await assert.rejects(() => heartbeatRunnerWork(lease.id, officeRow.id, lease.leaseId!), /expired/);
         const completion = { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,

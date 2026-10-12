@@ -41,14 +41,14 @@ function waitForWork(signal: AbortSignal, milliseconds: number): Promise<void> {
     });
 }
 
-export async function claimRunnerWork(runner: RunnerToken, signal: AbortSignal): Promise<RunnerJob | null> {
+export async function claimRunnerWork(runner: RunnerToken, signal: AbortSignal, instanceId: string): Promise<RunnerJob | null> {
     const deadline = Date.now() + 25_000;
     while (!signal.aborted) {
         const job = await withQueueLock("queue", async () => {
             const current = await runnersRepository.get(runner.id);
             if (!current) throw new HTTPException(401, { message: "Runner token was revoked" });
             if (current.tokenHash !== runner.tokenHash) throw new HTTPException(401, { message: "Runner token was rotated. Configure the replacement token." });
-            return runnersRepository.claim(current, runnerLeaseMs());
+            return runnersRepository.claim(current, runnerLeaseMs(), instanceId);
         });
         if (job) return job;
         const remaining = deadline - Date.now();

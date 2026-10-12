@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
 import { httpTarget, resolveTarget } from "@specbook/runtime/network/targets";
@@ -141,6 +142,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     let completedJobs = 0;
     let failedJobs = 0;
     let retryNotice = 0;
+    const instanceId = randomUUID();
     let startedJobs = 0;
     let claimingJobs = 0;
     const send = async (route: string, body: unknown, requestSignal: AbortSignal, fallback = false): Promise<Response> => {
@@ -201,7 +203,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
                 if (heartbeatSignal.aborted) return;
                 try {
                     const response = await jsonResponse(await send(`/runner/jobs/${lease.jobId}/heartbeat`, {
-                        leaseId: lease.leaseId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
+                        leaseId: lease.leaseId, instanceId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
                     }, heartbeatSignal), runnerHeartbeatResponseSchema);
                     expires = Date.parse(response.leaseExpiresAt);
                     wait = lease.heartbeatMs;
@@ -253,7 +255,7 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             let claimed: RunnerClaim;
             try {
                 claimed = await jsonResponse(await send("/runner/claim", {
-                    version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
+                    instanceId, version: RUNNER_CLI_VERSION, protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency,
                 }, signal, !connected), runnerClaimResponseSchema);
                 if (claimed.lease) startedJobs++;
             } catch (error) {
@@ -277,6 +279,8 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
     };
     const workers = Array.from({ length: concurrency }, () => worker().catch((error) => { stop.abort(error); throw error; }));
     const settled = await Promise.allSettled(workers);
+    const disconnected = await send("/runner/disconnect", { instanceId }, AbortSignal.timeout(5000)).catch(() => null);
+    await disconnected?.body?.cancel();
     const failed = settled.find((result) => result.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
     await emit({ event: "stopped", url: api, completedJobs, failedJobs });

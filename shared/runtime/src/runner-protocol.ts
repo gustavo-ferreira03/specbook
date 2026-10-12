@@ -47,6 +47,7 @@ export const runnerQueueEntrySchema = z.object({
 export type RunnerQueueEntry = z.infer<typeof runnerQueueEntrySchema>;
 
 const runnerVersionFields = {
+    instanceId: id,
     version: z.string().regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/).max(100),
     protocolVersion: z.number().int().nonnegative(),
     concurrency: z.number().int().min(1).max(32),
@@ -67,6 +68,7 @@ export type RunnerClaim = z.infer<typeof runnerClaimResponseSchema>;
 export const runnerHeartbeatSchema = z.object({ leaseId: id, ...runnerVersionFields }).strict();
 export const runnerHeartbeatResponseSchema = z.object({ leaseExpiresAt: z.string().datetime() }).strict();
 export const runnerReleaseSchema = z.object({ leaseId: id }).strict();
+export const runnerDisconnectSchema = z.object({ instanceId: id }).strict();
 
 export const runnerCompleteRequestSchema = z.object({
     leaseId: id,

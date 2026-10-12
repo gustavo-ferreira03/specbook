@@ -2,12 +2,30 @@ import crypto from "node:crypto";
 import { and, asc, count, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { RunnerPayload } from "@specbook/runtime/runner-protocol";
 import { db } from "../db/client";
-import { runnerJobs, runnerTokens } from "../db/schema";
+import { runnerInstances, runnerJobs, runnerTokens } from "../db/schema";
 
 export type RunnerToken = typeof runnerTokens.$inferSelect;
 export type RunnerJob = typeof runnerJobs.$inferSelect;
+export type RunnerInstance = typeof runnerInstances.$inferSelect;
 
 class RunnersRepository {
+    async instances(): Promise<RunnerInstance[]> {
+        return db.select().from(runnerInstances);
+    }
+
+    async reportInstance(runnerId: string, instanceId: string, versions: { version: string; protocolVersion: number; concurrency: number }, mode: "runner" | "tunnel" = "runner"): Promise<void> {
+        const existing = (await db.select().from(runnerInstances).where(eq(runnerInstances.id, instanceId)))[0];
+        if (existing && existing.runnerId !== runnerId) throw new Error("Runner instance belongs to another token");
+        const row = { id: instanceId, runnerId, mode, cliVersion: versions.version, protocolVersion: versions.protocolVersion,
+            concurrency: versions.concurrency, lastSeenAt: new Date().toISOString() };
+        await db.insert(runnerInstances).values(row).onConflictDoUpdate({ target: runnerInstances.id, set: row });
+    }
+
+    async disconnect(runnerId: string, instanceId: string): Promise<void> {
+        await db.delete(runnerInstances).where(and(eq(runnerInstances.runnerId, runnerId), eq(runnerInstances.id, instanceId)));
+        await db.update(runnerJobs).set({ status: "queued", runnerId: null, runnerInstanceId: null, leaseId: null, leaseExpiresAt: null,
+            updatedAt: new Date().toISOString() }).where(and(eq(runnerJobs.runnerId, runnerId), eq(runnerJobs.runnerInstanceId, instanceId), eq(runnerJobs.status, "leased")));
+    }
     async list(): Promise<RunnerToken[]> {
         return db.select().from(runnerTokens).orderBy(asc(runnerTokens.createdAt));
     }
@@ -39,6 +57,7 @@ class RunnersRepository {
                 .where(eq(runnerTokens.id, id)).returning(),
             db.update(runnerJobs).set({ status: "queued", runnerId: null, leaseId: null, leaseExpiresAt: null, updatedAt: new Date().toISOString() })
                 .where(and(eq(runnerJobs.runnerId, id), eq(runnerJobs.status, "leased"))),
+            db.delete(runnerInstances).where(eq(runnerInstances.runnerId, id)),
         ]);
         return tokens[0] ?? null;
     }
@@ -52,7 +71,7 @@ class RunnersRepository {
 
     async enqueue(batchId: string, projectId: string, group: string | null, payload: RunnerPayload): Promise<RunnerJob> {
         const now = new Date().toISOString();
-        const row: RunnerJob = { id: crypto.randomUUID(), batchId, projectId, group, payload, status: "queued", runnerId: null, leaseId: null,
+        const row: RunnerJob = { id: crypto.randomUUID(), batchId, projectId, group, payload, status: "queued", runnerId: null, runnerInstanceId: null, leaseId: null,
             leaseExpiresAt: null, attempts: 0, createdAt: now, updatedAt: now };
         await db.insert(runnerJobs).values(row);
         return row;
@@ -71,15 +90,15 @@ class RunnersRepository {
             .where(and(eq(runnerJobs.status, "leased"), or(lte(runnerJobs.leaseExpiresAt, now), isNull(runnerJobs.runnerId))));
     }
 
-    async claim(runner: RunnerToken, leaseMs: number): Promise<RunnerJob | null> {
+    async claim(runner: RunnerToken, leaseMs: number, instanceId = runner.id): Promise<RunnerJob | null> {
         await this.reclaim();
-        const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerId, runner.id), eq(runnerJobs.status, "leased")));
+        const [{ active }] = await db.select({ active: count() }).from(runnerJobs).where(and(eq(runnerJobs.runnerInstanceId, instanceId), eq(runnerJobs.status, "leased")));
         if (active >= runner.concurrency) return null;
         const matchingGroup = runner.group ? or(isNull(runnerJobs.group), eq(runnerJobs.group, runner.group)) : isNull(runnerJobs.group);
         const matchingProjects = runner.projectIds === null ? undefined : sql`${runnerJobs.projectId} in (select value from json_each(${JSON.stringify(runner.projectIds)}))`;
         const candidate = (await db.select().from(runnerJobs).where(and(eq(runnerJobs.status, "queued"), matchingGroup, matchingProjects)).orderBy(asc(runnerJobs.createdAt)).limit(1))[0];
         if (!candidate) return null;
-        const updated = await db.update(runnerJobs).set({ status: "leased", runnerId: runner.id, leaseId: crypto.randomUUID(),
+        const updated = await db.update(runnerJobs).set({ status: "leased", runnerId: runner.id, runnerInstanceId: instanceId, leaseId: crypto.randomUUID(),
             leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(), attempts: sql`${runnerJobs.attempts} + 1`, updatedAt: new Date().toISOString() })
             .where(and(eq(runnerJobs.id, candidate.id), eq(runnerJobs.status, "queued"))).returning();
         return updated[0] ?? null;

@@ -4,15 +4,15 @@ import { db } from "../../infra/db/client";
 import { environments, projects, runs } from "../../infra/db/schema";
 import { runnersRepository } from "../../infra/repositories/runners";
 import type { Run } from "../../infra/repositories/runs";
-import { publicRunner } from "./tokens";
 
 export async function runnerQueueSnapshot() {
     await runnersRepository.reclaim();
-    const [configured, jobs, runners] = await Promise.all([
+    const [configured, jobs, runners, instances] = await Promise.all([
         db.select({ environment: environments, projectName: projects.name }).from(environments)
             .innerJoin(projects, eq(projects.id, environments.projectId)),
         runnersRepository.pending(),
         runnersRepository.list(),
+        runnersRepository.instances(),
     ]);
     const runIds = jobs.flatMap((job) => job.payload.specs.map((spec) => spec.runId));
     const pendingRuns = runIds.length ? await db.select({ id: runs.id, environment: runs.environment }).from(runs).where(inArray(runs.id, runIds)) : [];
@@ -47,10 +47,11 @@ export async function runnerQueueSnapshot() {
         for (const spec of job.payload.specs) runQueues.set(spec.runId, entry);
     }
     for (const entry of entries.values()) {
-        const online = runners.filter((runner) => publicRunner(runner).online && (!entry.group || runner.group === entry.group)
-            && (!runner.projectIds || runner.projectIds.includes(entry.projectId)));
+        const online = instances.filter((instance) => instance.mode === "runner" && Date.now() - Date.parse(instance.lastSeenAt) < 90_000
+            && runners.some((runner) => runner.id === instance.runnerId && (!entry.group || runner.group === entry.group)
+                && (!runner.projectIds || runner.projectIds.includes(entry.projectId))));
         entry.onlineRunners = online.length;
-        entry.busyRunners = online.filter((runner) => jobs.filter((job) => job.status === "leased" && job.runnerId === runner.id).length >= runner.concurrency).length;
+        entry.busyRunners = online.filter((instance) => jobs.filter((job) => job.status === "leased" && job.runnerInstanceId === instance.id).length >= instance.concurrency).length;
         entry.oldestWaitMs = entry.oldestQueuedAt ? Math.max(0, Date.now() - Date.parse(entry.oldestQueuedAt)) : 0;
         if (entry.queued) {
             entry.reason = !online.length ? `No runner online${entry.group ? ` in group ${entry.group}` : ""}.`

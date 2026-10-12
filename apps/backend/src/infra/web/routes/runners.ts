@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { RUNNER_PROTOCOL_VERSION, runnerClaimRequestSchema, runnerCompleteRequestSchema, runnerHeartbeatSchema, runnerReleaseSchema } from "@specbook/runtime/runner-protocol";
+import { RUNNER_CLI_VERSION, RUNNER_PROTOCOL_VERSION, runnerClaimRequestSchema, runnerCompleteRequestSchema, runnerDisconnectSchema, runnerHeartbeatSchema, runnerReleaseSchema } from "@specbook/runtime/runner-protocol";
 import { recordAudit } from "../../../core/accounts/audit";
 import { authenticateRunnerToken, issueRunnerToken, publicRunner, runnerTokenSchema } from "../../../core/private-runner/tokens";
 import { claimRunnerWork, completeRunnerWork, heartbeatRunnerWork, releaseRunnerWork, revokeRunnerToken, rotateRunnerToken, runnerLeaseMs } from "../../../core/private-runner/queue";
@@ -59,7 +59,14 @@ export function createRunnersRouter(): Hono {
         c.header("Cache-Control", "no-store");
         return c.json({ queues: (await runnerQueueSnapshot()).queues });
     });
-    router.get("/runners", access("admin"), async (c) => c.json({ runners: (await runnersRepository.list()).map(publicRunner) }));
+    router.get("/runners", access("admin"), async (c) => {
+        const [tokens, instances] = await Promise.all([runnersRepository.list(), runnersRepository.instances()]);
+        return c.json({ runners: tokens.map((token) => {
+            const current = instances.filter((instance) => instance.runnerId === token.id && Date.now() - Date.parse(instance.lastSeenAt) < 90_000);
+            return { ...publicRunner(token), online: current.length > 0, instances: current.map((instance) => ({ ...instance,
+                outdated: instance.cliVersion !== RUNNER_CLI_VERSION || instance.protocolVersion !== RUNNER_PROTOCOL_VERSION })) };
+        }) });
+    });
     router.post("/runners", access("admin"), zValidator("json", runnerTokenSchema), async (c) => {
         requireSession(c);
         const input = c.req.valid("json");
@@ -88,7 +95,8 @@ export function createRunnersRouter(): Hono {
         const input = c.req.valid("json");
         requireProtocol(input.protocolVersion);
         await runnersRepository.touch(runner.id, input);
-        const job = await claimRunnerWork(runner, c.req.raw.signal);
+        await runnersRepository.reportInstance(runner.id, input.instanceId, input);
+        const job = await claimRunnerWork(runner, c.req.raw.signal, input.instanceId);
         c.header("Cache-Control", "no-store");
         return c.json({ runner: { id: runner.id, name: runner.name, group: runner.group }, lease: job ? {
             jobId: job.id, leaseId: job.leaseId!, leaseExpiresAt: job.leaseExpiresAt!, heartbeatMs: Math.min(60_000, Math.max(1000, Math.floor(runnerLeaseMs() / 4))), work: job.payload,
@@ -98,8 +106,13 @@ export function createRunnersRouter(): Hono {
         const input = c.req.valid("json");
         requireProtocol(input.protocolVersion);
         await runnersRepository.touch(c.get("runner").id, input);
+        await runnersRepository.reportInstance(c.get("runner").id, input.instanceId, input);
         const leaseExpiresAt = await heartbeatRunnerWork(c.req.param("id"), c.get("runner").id, c.req.valid("json").leaseId);
         return c.json({ leaseExpiresAt });
+    });
+    router.post("/runner/disconnect", access("runner-token", verifyRunner), zValidator("json", runnerDisconnectSchema), async (c) => {
+        await runnersRepository.disconnect(c.get("runner").id, c.req.valid("json").instanceId);
+        return c.json({ ok: true });
     });
     router.post("/runner/jobs/:id/release", access("runner-token", verifyRunner), zValidator("json", runnerReleaseSchema), async (c) => {
         await releaseRunnerWork(c.req.param("id"), c.get("runner").id, c.req.valid("json").leaseId);

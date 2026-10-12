@@ -73,12 +73,23 @@ export const runnerJobs = sqliteTable("runner_jobs", {
     payload: text("payload", { mode: "json" }).$type<import("@specbook/runtime/runner-protocol").RunnerPayload>().notNull(),
     status: text("status").$type<"queued" | "leased" | "completed">().notNull().default("queued"),
     runnerId: text("runner_id").references(() => runnerTokens.id, { onDelete: "set null" }),
+    runnerInstanceId: text("runner_instance_id"),
     leaseId: text("lease_id"),
     leaseExpiresAt: text("lease_expires_at"),
     attempts: integer("attempts").notNull().default(0),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (table) => [index("runner_jobs_status_group").on(table.status, table.group), index("runner_jobs_lease_expiry").on(table.leaseExpiresAt)]);
+
+export const runnerInstances = sqliteTable("runner_instances", {
+    id: text("id").primaryKey(),
+    runnerId: text("runner_id").notNull().references(() => runnerTokens.id, { onDelete: "cascade" }),
+    mode: text("mode").$type<"runner" | "tunnel">().notNull(),
+    cliVersion: text("cli_version").notNull(),
+    protocolVersion: integer("protocol_version").notNull(),
+    concurrency: integer("concurrency").notNull(),
+    lastSeenAt: text("last_seen_at").notNull(),
+}, (table) => [index("runner_instances_token").on(table.runnerId)]);
 
 export const features = sqliteTable(
     "features",
