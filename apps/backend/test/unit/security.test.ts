@@ -90,6 +90,7 @@ describe("security middleware", () => {
 
     test("replay reports permit their inline scripts while retaining isolated, offline frames", async () => {
         const { createHash } = await import("node:crypto");
+        const { gzipSync } = await import("node:zlib");
         const script = "window.replayReady = true;";
         const headers = htmlReportHeaders(`<script>${script}</script><script type="application/octet-stream">events</script>`);
         const policy = headers["Content-Security-Policy"];
@@ -101,6 +102,13 @@ describe("security middleware", () => {
         assert.match(policy, /sandbox allow-scripts allow-same-origin/);
         assert.match(policy, /connect-src 'none'/);
         assert.match(htmlReportHeaders("<p>No replay</p>")["Content-Security-Policy"], /script-src 'none'/);
+        const compressed = gzipSync(script).toString("base64");
+        const compressedHeaders = htmlReportHeaders(`<script id="specbook-replay-library" type="application/octet-stream">${compressed}</script>`);
+        assert.ok(compressedHeaders["Content-Security-Policy"].includes(`'sha256-${createHash("sha256").update(script).digest("base64")}'`));
+        assert.ok(!compressedHeaders["Content-Security-Policy"].includes("unsafe-eval"));
+        for (const invalid of ["not gzip", gzipSync(Buffer.alloc(1_000_001)).toString("base64")]) {
+            assert.match(htmlReportHeaders(`<script id="specbook-replay-library" type="application/octet-stream">${invalid}</script>`)["Content-Security-Policy"], /script-src 'none'/);
+        }
     });
 
     test("HTTP replay reports can read their sandboxed frame while scripts and network requests stay blocked", { timeout: 15_000 }, async (context) => {
@@ -109,7 +117,16 @@ describe("security middleware", () => {
         if (!browser) { context.skip("Chromium unavailable"); return; }
         try {
             const page = await browser.newPage();
-            const html = `<body><script>
+            const { gzipSync } = await import("node:zlib");
+            const library = gzipSync("window.replayLibraryLoaded = true;").toString("base64");
+            const html = `<body><script id="specbook-replay-library" type="application/octet-stream">${library}</script><script>
+                (async () => {
+                    const bytes = Uint8Array.from(atob(document.getElementById('specbook-replay-library').textContent), (char) => char.charCodeAt(0));
+                    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+                    const loaded = document.createElement('script');
+                    loaded.textContent = await new Response(stream).text();
+                    document.body.appendChild(loaded);
+                })();
                 const frame = document.createElement('iframe');
                 frame.setAttribute('sandbox', 'allow-same-origin');
                 document.body.appendChild(frame);
@@ -124,7 +141,10 @@ describe("security middleware", () => {
             await page.route("**/*", (route) => route.fulfill({ status: 200, headers: htmlReportHeaders(html),
                 body: html + "<script>window.untrustedOuterExecuted = true</script>" }));
             await page.goto("http://127.0.0.1:4894/report");
-            await page.waitForFunction(() => (window as unknown as { networkBlocked?: boolean }).networkBlocked);
+            await page.waitForFunction(() => {
+                const globals = window as unknown as { networkBlocked?: boolean; replayLibraryLoaded?: boolean };
+                return globals.networkBlocked && globals.replayLibraryLoaded;
+            });
             const result = await page.evaluate(() => {
                 const globals = window as unknown as { replayFrameReadable?: boolean; untrustedOuterExecuted?: boolean };
                 const frame = document.querySelector("iframe")!;

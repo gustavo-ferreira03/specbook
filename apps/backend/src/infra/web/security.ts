@@ -2,6 +2,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { RUNNER_REQUEST_LIMIT_BYTES } from "@specbook/runtime/runner-protocol";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { logger } from "../logger";
 import { buildHostAllowlist, frontendProxyOrigin, isAllowedHost, type HostAllowlist } from "../../../../../shared/http-origin";
 export { buildHostAllowlist, frontendProxyOrigin, isAllowedHost };
@@ -21,9 +22,18 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const DEFAULT_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
 
 export function htmlReportHeaders(html: string): Record<string, string> {
-    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
+    const elements = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
+    const scripts = elements
         .filter((match) => !/\btype\s*=\s*["'](?:application\/octet-stream|application\/json)["']/i.test(match[1]))
         .map((match) => `'sha256-${createHash("sha256").update(match[2]).digest("base64")}'`);
+    const library = elements.find((match) => /\bid\s*=\s*["']specbook-replay-library["']/i.test(match[1])
+        && /\btype\s*=\s*["']application\/octet-stream["']/i.test(match[1]));
+    if (library && library[2].length <= 2_000_000) {
+        try {
+            const source = gunzipSync(Buffer.from(library[2].trim(), "base64"), { maxOutputLength: 1_000_000 });
+            scripts.push(`'sha256-${createHash("sha256").update(source).digest("base64")}'`);
+        } catch {}
+    }
     return { "Content-Type": "text/html; charset=utf-8", "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": `default-src 'none'; connect-src 'none'; script-src ${scripts.join(" ") || "'none'"}; img-src data: blob:; media-src data:; font-src data:; style-src 'unsafe-inline'; frame-src about: blob:; sandbox allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox` };
 }

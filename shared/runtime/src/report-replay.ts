@@ -1,7 +1,26 @@
+import { restoreReplayEvents } from "./replay-assets.ts";
+
 export const REPORT_REPLAY_SCRIPT = String.raw`
 (() => {
   const instances = new WeakMap();
   const starts = new WeakMap();
+  const restoreReplayEvents = ${restoreReplayEvents.toString()};
+  let library;
+  async function decompress(value) {
+    if (!window.DecompressionStream) throw new Error('unsupported browser');
+    const bytes = Uint8Array.from(atob(value.trim()), (char) => char.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).text();
+  }
+  function loadLibrary() {
+    return library ??= (async () => {
+      const source = await decompress(document.getElementById('specbook-replay-library').textContent);
+      const script = document.createElement('script');
+      script.textContent = source;
+      document.head.append(script);
+      if (!window.rrwebPlayer) throw new Error('player unavailable');
+    })();
+  }
   const kindLabels = { precondition: 'Precondition', expected: 'Expected result', postcondition: 'Postcondition' };
   const stepName = (step, ordinal) => step.kind === 'step' ? 'Step ' + ordinal : kindLabels[step.kind] || 'Step';
   async function load(section) {
@@ -10,10 +29,9 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
       const replay = section.querySelector('.replay');
       const status = replay.querySelector('.replay-status');
       try {
-        if (!window.rrwebPlayer || !window.DecompressionStream) throw new Error('unsupported browser');
-        const bytes = Uint8Array.from(atob(replay.querySelector('.replay-data').textContent.trim()), (char) => char.charCodeAt(0));
-        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-        const events = JSON.parse(await new Response(stream).text());
+        await loadLibrary();
+        const events = restoreReplayEvents(JSON.parse(await decompress(replay.querySelector('.replay-data').textContent)));
+        if (!events) throw new Error('invalid recording');
         const first = events[0].timestamp;
         const markers = new Map();
         const tags = {};
@@ -36,6 +54,21 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         const player = new Player({ target, props: { events, width, height, autoPlay: false, skipInactive: true, speedOption: [1, 2, 4, 8], tags, inactiveColor: '#ebebeb', showWarning: false, showDebug: false, UNSAFE_replayCanvas: false } });
         const progress = target.querySelector('.rr-progress');
         const total = player.getMetaData().totalTime;
+        const waitMs = Number(replay.dataset.waitMs);
+        if (waitMs > 0 && total > 0) {
+          const failed = events.find((event) => event.type === 5 && event.data.payload?.phase === 'end' && event.data.payload?.outcome === 'failed');
+          const start = failed && markers.get(failed.data.payload.number);
+          if (start) {
+            const end = Math.min(total, failed.timestamp - first);
+            const beginning = Math.max(start.offset, end - waitMs);
+            const span = document.createElement('span');
+            span.className = 'replay-wait';
+            span.style.left = (100 * beginning / total) + '%';
+            span.style.width = (100 * (end - beginning) / total) + '%';
+            span.setAttribute('aria-hidden', 'true');
+            progress.insertBefore(span, progress.querySelector('[title], .rr-progress__handler'));
+          }
+        }
         progress.tabIndex = 0;
         progress.setAttribute('role', 'slider');
         progress.setAttribute('aria-label', 'Replay timeline');
@@ -91,7 +124,7 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
     section.addEventListener('click', async (event) => {
       const link = event.target.closest('[data-replay-step]');
       if (!link) return;
-      event.preventDefault();
+      if (!link.classList.contains('zoom')) event.preventDefault();
       const player = await load(section);
       const marker = starts.get(section)?.get(Number(link.dataset.replayStep));
       if (!player || !marker) return;

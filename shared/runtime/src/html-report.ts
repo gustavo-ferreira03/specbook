@@ -4,7 +4,8 @@ import { gzipSync } from "node:zlib";
 import { executionPlan, type ExecutionStepKind, type HumanSpec } from "./types.ts";
 import { readEvidenceManifest } from "./evidence.ts";
 import { analyzeSpecSource, sameStepTitle } from "./validate.ts";
-import { readReplay } from "./replay.ts";
+import { readReplay, type ReplayEvent } from "./replay.ts";
+import { packReplayEvents } from "./replay-assets.ts";
 import { REPORT_REPLAY_SCRIPT } from "./report-replay.ts";
 
 const MAX_IMAGE_BYTES = 5_000_000;
@@ -95,7 +96,19 @@ function offlineReplay(value: unknown): unknown {
 
 async function replayData(directory: string): Promise<string | null> {
     const events = await readReplay(directory);
-    return events ? gzipSync(JSON.stringify(offlineReplay(events))).toString("base64") : null;
+    const recording = events ? packReplayEvents(offlineReplay(events) as ReplayEvent[]) : null;
+    return recording ? gzipSync(JSON.stringify(recording)).toString("base64") : null;
+}
+
+function assertionWait(reason: string | null): { ms: number; summary: string } | null {
+    if (!reason?.includes("expect(locator).toHaveCount(expected) failed")) return null;
+    const expected = reason.match(/^Expected:\s*(\d+)\s*$/m)?.[1];
+    const received = reason.match(/^Received:\s*(\d+)\s*$/m)?.[1];
+    const timeout = reason.match(/^Timeout:\s*(\d+)ms\s*$/m)?.[1];
+    if (expected === undefined || received === undefined || timeout === undefined) return null;
+    const ms = Number(timeout);
+    if (!Number.isSafeInteger(ms) || ms < 1) return null;
+    return { ms, summary: `Waited ${duration(ms)} for ${expected} element${expected === "1" ? "" : "s"}; saw ${received}` };
 }
 
 function toneOf(item: Item): Tone {
@@ -190,6 +203,7 @@ function renderSection({ item, tone, path: file, expectedResult, steps, video, r
     const actions = steps.filter((step) => step.kind === "step");
     const proof = steps.find((step) => step.kind === "expected");
     const postconditions = steps.filter((step) => step.kind === "postcondition");
+    const wait = failing ? assertionWait(item.failReason) : null;
     const shotId = (step: ReportSection["steps"][number]) => `shot-${item.runId}-${step.number}`;
     return `<details id="run-${escape(item.runId)}" class="spec is-${tone}"${open || tone === "failed" ? " open" : ""}>
 <summary>
@@ -203,12 +217,12 @@ function renderSection({ item, tone, path: file, expectedResult, steps, video, r
   ${actions.length ? `<h3>Steps</h3>${renderSteps(actions, Boolean(replay))}` : ""}
   ${expectedResult ? `<div class="expected ${proof?.state ?? ""}"><h3>Expected result</h3><p>${proof ? `<span class="mark">${proof.state === "passed" ? CHECK : proof.state === "failed" ? CROSS : ""}</span>` : ""}${replay && proof && proof.state !== "skipped" ? `<button type="button" class="step-seek" data-replay-step="${proof.number}" aria-label="Replay expected result">${escape(expectedResult)}</button>` : escape(expectedResult)}</p>${proof?.image && !replay ? `<a class="proof" href="#${escape(shotId(proof))}"><img src="${proof.image}" alt="Expected result: ${escape(expectedResult)}"></a>` : ""}</div>` : ""}
   ${postconditions.length ? `<h3>Postconditions</h3>${renderSteps(postconditions, Boolean(replay))}` : ""}
-  ${item.failReason && failing ? `<div class="failure"><h3>What failed</h3><pre>${escape(item.failReason)}</pre></div>` : ""}
-  ${replay ? `<div class="visuals"><section class="replay" aria-label="Session replay"><h3>Replay</h3><p class="replay-status">Loading replay…</p><div class="replay-player"></div><script class="replay-data" type="application/octet-stream">${replay}</script></section><section class="screenshot-section">` : ""}
+  ${item.failReason && failing ? `<div class="failure"><h3>What failed</h3>${wait ? `<p class="failure-wait">${escape(wait.summary)}</p>` : ""}<pre>${escape(item.failReason)}</pre></div>` : ""}
+  ${replay ? `<div class="visuals"><section class="replay" aria-label="Session replay"${wait ? ` data-wait-ms="${wait.ms}"` : ""}><h3>Replay</h3><p class="replay-status">Loading replay…</p><div class="replay-player"></div><script class="replay-data" type="application/octet-stream">${replay}</script></section><section class="screenshot-section">` : ""}
   ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => {
       const id = shotId(step);
       const name = step.kind === "expected" ? "Expected result" : step.kind === "precondition" ? "Precondition" : step.kind === "postcondition" ? "Postcondition" : `Step ${step.ordinal}`;
-      return `<figure id="${escape(id)}"${step.kind === "expected" ? ' class="is-proof"' : ""}><a class="zoom" href="#${escape(id)}"${replay ? ` data-replay-step="${step.number}" aria-label="Replay ${escape(name)}: ${escape(step.label)}"` : ""}><img src="${step.image}" alt="${name}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>${name}</b> ${escape(step.label)}</figcaption></figure>`;
+      return `<figure id="${escape(id)}"${step.kind === "expected" ? ' class="is-proof"' : ""}><a class="zoom" href="#${escape(id)}"${replay ? ` data-replay-step="${step.number}" aria-label="Enlarge screenshot and replay ${escape(name)}: ${escape(step.label)}"` : ""}><img src="${step.image}" alt="${name}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>${name}</b> ${escape(step.label)}</figcaption></figure>`;
   }).join("")}</div>` : ""}
   ${replay ? "</section></div>" : replayUnavailable ? `<p class="replay-note">${escape(replayUnavailable)}</p>` : ""}
   ${video ? `<h3>Recording</h3><video class="recording" controls preload="metadata" src="${video}"></video>` : ""}
@@ -296,6 +310,7 @@ h3{font-size:13px;margin:18px 0 8px}
 .proof img{display:block;width:100%;border:1px solid var(--strong);border-radius:8px}
 .failure{border:1px solid var(--danger);background:var(--danger-soft);border-radius:10px;padding:2px 14px 12px;margin-top:16px}
 .failure h3{color:var(--danger)}
+.failure-wait{margin:0 0 8px;font-size:13px;font-weight:500}
 .failure pre{margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:280px;overflow:auto}
 .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
 figure{margin:0}
@@ -322,6 +337,7 @@ figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
 .replay .rr-controller{font-family:inherit;background:var(--surface)}.replay .rr-player .rr-timeline{width:100%;padding:0 10px}
 .replay .rr-player .rr-timeline__time{font-size:12px;width:62px;color:var(--muted);font-variant-numeric:tabular-nums}
 .replay .rr-progress__handler{background:var(--primary)}.replay .rr-progress__step{background:var(--strong)}
+.replay-wait{position:absolute;top:-4px;bottom:-4px;background:var(--danger-soft);border-inline:1px solid var(--danger);pointer-events:none}.replay .rr-progress__handler{z-index:1}
 .replay .rr-player .rr-controller__btns{font-size:12px;gap:2px}.replay .rr-player .rr-controller__btns button{width:28px;height:28px;font:inherit}
 .replay .rr-player .rr-controller__btns button.active{background:var(--primary)}.replay .rr-player .rr-controller__btns button:hover{background:var(--soft);color:var(--ink)}
 .replay .rr-controller__btns button:focus-visible,.replay .rr-progress:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
@@ -354,7 +370,7 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
     const batch = data;
     const sections = data.sections;
     const hasReplay = sections.some((section) => section.replay);
-    const playerScript = hasReplay ? await publicAsset("rrweb-player.js") : "";
+    const playerScript = hasReplay ? gzipSync(await publicAsset("rrweb-player.js"), { level: 9 }).toString("base64") : "";
     const playerColors: Record<string, string> = { "#4950f680": "var(--strong)", "#4950f600": "transparent", "#4950f6": "var(--primary)", "#e0e1fe": "var(--strong)", "#11103e": "var(--muted)", "#fcfff4": "var(--surface)" };
     const playerStyle = hasReplay ? (await publicAsset("rrweb-player.css")).replace(/#(?:4950f680|4950f600|4950f6|e0e1fe|11103e|fcfff4)\b/gi, (color) => playerColors[color.toLowerCase()]) : "";
     const inlineScript = (script: string) => script.replace(/<\/script/gi, "<\\/script");
@@ -401,6 +417,6 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
   ${groups.map((group) => renderFeature(group.name, group.entries, Boolean(options.single))).join("\n")}
 </main>
 <footer class="wrap">Generated by Specbook.</footer>
-${hasReplay ? `<script>${inlineScript(playerScript)}</script><script>${inlineScript(REPORT_REPLAY_SCRIPT)}</script>` : ""}
+${hasReplay ? `<script id="specbook-replay-library" type="application/octet-stream">${playerScript}</script><script>${inlineScript(REPORT_REPLAY_SCRIPT)}</script>` : ""}
 </body></html>`;
 }

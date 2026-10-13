@@ -4,12 +4,12 @@ import path from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { describe, test } from "node:test";
 import { createSecretScrubber } from "../../src/core/credentials/scrub";
-import { isStepScreenshot, readEvidenceManifest, writeRunEvidence } from "@specbook/runtime/evidence";
+import { isStepScreenshot, readEvidenceManifest, stepScreenshotContentType, writeRunEvidence } from "@specbook/runtime/evidence";
 import { executableSource } from "@specbook/runtime/playwright";
 import { parsePlaywrightReport, stripAnsi } from "@specbook/runtime/report";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { prepareReportSection, renderHtmlReport } from "@specbook/runtime/html-report";
-import { decodeReplay, encodeReplay, MAX_REPLAY_BYTES, MAX_REPLAY_RAW_BYTES, REPLAY_FILE, REPLAY_LIMIT_NOTE, type ReplayEvent } from "@specbook/runtime/replay";
+import { decodeReplay, encodeReplay, MAX_REPLAY_BYTES, MAX_REPLAY_RAW_BYTES, packReplayEvents, restoreReplayEvents, REPLAY_FILE, REPLAY_LIMIT_NOTE, type ReplayEvent } from "@specbook/runtime/replay";
 import { tempDir, VALID_SPEC } from "../helpers/storage";
 
 function report(suites: unknown[], errors: unknown[] = []): string {
@@ -91,6 +91,55 @@ describe("parsePlaywrightReport", () => {
 });
 
 describe("run evidence", () => {
+    test("deduplicates image attributes and inline CSS while reading historical recordings", async () => {
+        const image = `data:image/webp;base64,${"abcd".repeat(20_000)}`;
+        const events: ReplayEvent[] = [
+            { type: 4, timestamp: 1, data: { width: 1280, height: 720 } },
+            { type: 2, timestamp: 2, data: { node: { attributes: { src: image }, childNodes: [
+                { attributes: { src: image, style: `background:url("${image}"); color:red` } },
+                { textContent: `body{background-image:url(${image})}` },
+            ] } } },
+        ];
+        const packed = packReplayEvents(events);
+        assert.ok(packed);
+        assert.deepEqual(packed.assets, [image]);
+        assert.ok(JSON.stringify(packed).length < JSON.stringify(events).length / 3);
+        assert.deepEqual(restoreReplayEvents(packed), events);
+        const stored = await encodeReplay(events);
+        assert.ok(stored);
+        assert.equal(JSON.parse(gunzipSync(stored).toString()).assets.length, 1);
+        assert.deepEqual(await decodeReplay(stored), events);
+        assert.deepEqual(await decodeReplay(gzipSync(JSON.stringify(events))), events);
+        const scrubbed = await encodeReplay(events, createSecretScrubber(["color:red"]));
+        assert.ok(scrubbed);
+        assert.ok(!gunzipSync(scrubbed).toString().includes("color:red"));
+    });
+
+    test("rejects malformed references, excessive nesting and expanded asset bombs", async () => {
+        const events: ReplayEvent[] = [{ type: 4, timestamp: 1 }, { type: 2, timestamp: 2 }];
+        const packed = { version: 1, assets: ["data:image/png;base64,cG5n"], events };
+        for (const invalid of [
+            { ...packed, version: 2 },
+            { ...packed, assets: ["https://example.com/image.png"] },
+            { ...packed, events: [...events, { type: 3, timestamp: 3, data: { __specbookReplayAsset: -1 } }] },
+            { ...packed, events: [...events, { type: 3, timestamp: 3, data: { __specbookReplayAsset: 1 } }] },
+            { ...packed, events: [...events, { type: 3, timestamp: 3, data: { __specbookReplayAsset: 0, extra: "ignored" } }] },
+            { ...packed, events: [...events, { type: 3, timestamp: 3, data: { __specbookReplayString: [{ unexpected: 0 }] } }] },
+        ]) assert.equal(await decodeReplay(gzipSync(JSON.stringify(invalid))), null);
+        let deep: unknown = "leaf";
+        for (let index = 0; index < 257; index++) deep = { child: deep };
+        assert.equal(restoreReplayEvents([...events, { type: 3, timestamp: 3, data: deep }]), null);
+        const bomb = { ...packed, assets: [`data:image/png;base64,${"A".repeat(Math.floor(MAX_REPLAY_RAW_BYTES / 3))}`],
+            events: [...events, { type: 3, timestamp: 3, data: Array.from({ length: 4 }, () => ({ __specbookReplayAsset: 0 })) }] };
+        assert.equal(await decodeReplay(gzipSync(JSON.stringify(bomb))), null);
+        const prototype = JSON.parse('[{"type":4,"timestamp":1},{"type":2,"timestamp":2,"data":{"__proto__":{"polluted":true}}}]');
+        const restored = restoreReplayEvents(packReplayEvents(prototype));
+        assert.ok(restored);
+        assert.deepEqual(restored, prototype);
+        assert.equal(Object.getPrototypeOf(restored[1].data), Object.prototype);
+        assert.equal(({} as Record<string, unknown>).polluted, undefined);
+    });
+
     test("stores a scrubbed compressed replay and rejects recordings beyond its limits", async () => {
         const work = tempDir();
         const output = tempDir();
@@ -143,8 +192,9 @@ describe("run evidence", () => {
         await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null, replay: { file: REPLAY_FILE, bytes: compressed.length } }));
         const section = await prepareReportSection({ directory, item: { runId: "a", title: "A", status: "passed", durationMs: 1, failReason: null }, humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "Ready", postconditions: [] } });
         assert.ok(section.replay);
-        const offline = JSON.parse(gunzipSync(Buffer.from(section.replay, "base64")).toString());
-        const nodes = offline[1].data.node.childNodes;
+        const offline = restoreReplayEvents(JSON.parse(gunzipSync(Buffer.from(section.replay, "base64")).toString()));
+        assert.ok(offline);
+        const nodes = (offline[1].data as { node: { childNodes: { attributes: Record<string, unknown>; textContent: string }[] } }).node.childNodes;
         assert.equal(nodes[0].attributes.src, undefined);
         assert.equal(nodes[0].attributes.onload, undefined);
         assert.equal(nodes[0].attributes.style, 'background:url("data:,")');
@@ -154,8 +204,15 @@ describe("run evidence", () => {
         const html = await renderHtmlReport(data);
         assert.equal((html.match(/class="replay-data"/g) ?? []).length, 2);
         assert.equal((html.match(/const instances = new WeakMap/g) ?? []).length, 1);
+        const libraries = [...html.matchAll(/<script id="specbook-replay-library" type="application\/octet-stream">([^<]+)<\/script>/g)];
+        assert.equal(libraries.length, 1);
+        assert.match(gunzipSync(Buffer.from(libraries[0][1], "base64")).toString(), /rrwebPlayer/);
+        assert.ok(!html.includes('function(e,t){"object"==typeof exports'));
         assert.match(html, /data-replay-step="1"/);
         assert.match(html, /connect-src 'none'/);
+        const waiting = await renderHtmlReport({ ...data, sections: [{ ...section, tone: "failed", item: { ...section.item, status: "failed", failReason: "Error: expect(locator).toHaveCount(expected) failed\nExpected: 2\nReceived: 1\nTimeout: 5000ms" } }] });
+        assert.match(waiting, /Waited 5\.0s for 2 elements; saw 1/);
+        assert.match(waiting, /data-wait-ms="5000"/);
         const historical = await renderHtmlReport({ ...data, sections: [{ ...section, replay: null }] });
         assert.ok(!historical.includes('class="replay"'));
         assert.ok(!historical.includes("const instances = new WeakMap"));
@@ -198,21 +255,23 @@ describe("run evidence", () => {
             await fs.writeFile(file, invalid);
             assert.deepEqual(await readEvidenceManifest(directory), empty);
         }
-        for (const valid of ["evidence/step-01.png", "evidence/step-100.png"]) assert.equal(isStepScreenshot(valid), true);
-        for (const invalid of ["evidence/step-1.png", "evidence/step-1000.png", "../evidence/step-01.png", "evidence/step-01.png/extra"]) assert.equal(isStepScreenshot(invalid), false);
+        for (const valid of ["evidence/step-01.png", "evidence/step-100.png", "evidence/step-01.webp", "evidence/step-100.webp"]) assert.equal(isStepScreenshot(valid), true);
+        for (const invalid of ["evidence/step-1.png", "evidence/step-1000.png", "../evidence/step-01.png", "evidence/step-01.png/extra", "evidence/step-1.webp", "evidence/step-01.webp/extra", "evidence/step-01.avif", "evidence/step-01.jpg"]) assert.equal(isStepScreenshot(invalid), false);
+        assert.equal(stepScreenshotContentType("evidence/step-01.png"), "image/png");
+        assert.equal(stepScreenshotContentType("evidence/step-01.webp"), "image/webp");
     });
 
     test("copies step screenshots and the failure video and writes evidence.json", async () => {
         const work = tempDir();
         const output = tempDir();
-        await fs.writeFile(path.join(work, "step1.png"), "png1");
+        await fs.writeFile(path.join(work, "step1.webp"), "webp1");
         await fs.writeFile(path.join(work, "step2.png"), "png2");
         await fs.writeFile(path.join(work, "video.webm"), "webm");
         const manifest = await writeRunEvidence(output, "failed", {
             failedStep: "Log in",
             attachments: [
                 { name: "specbook-step-02", path: path.join(work, "step2.png"), contentType: "image/png" },
-                { name: "specbook-step-01", path: path.join(work, "step1.png"), contentType: "image/png" },
+                { name: "specbook-step-01", path: path.join(work, "step1.webp"), contentType: "image/webp" },
                 { name: "specbook-step-03", path: path.join(work, "missing.png"), contentType: "image/png" },
                 { name: "trace", path: path.join(work, "trace.zip"), contentType: "application/zip" },
                 { name: "video", path: path.join(work, "video.webm"), contentType: "video/webm" },
@@ -220,7 +279,7 @@ describe("run evidence", () => {
         }, ["Open", "Log in"]);
         assert.deepEqual(manifest, {
             steps: [
-                { number: 1, label: "Open", file: "evidence/step-01.png" },
+                { number: 1, label: "Open", file: "evidence/step-01.webp" },
                 { number: 2, label: "Log in", file: "evidence/step-02.png" },
             ],
             video: "evidence/execution.webm",
@@ -229,6 +288,7 @@ describe("run evidence", () => {
         assert.deepEqual(JSON.parse(await fs.readFile(path.join(output, "evidence.json"), "utf8")), manifest);
         assert.deepEqual(await readEvidenceManifest(output), manifest);
         assert.equal(await fs.readFile(path.join(output, "evidence", "step-02.png"), "utf8"), "png2");
+        assert.equal(await fs.readFile(path.join(output, "evidence", "step-01.webp"), "utf8"), "webp1");
 
         const passed = await writeRunEvidence(tempDir(), "passed", {
             failedStep: null,

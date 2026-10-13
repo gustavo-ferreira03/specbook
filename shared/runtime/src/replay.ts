@@ -4,49 +4,39 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import { gzip, gunzip } from "node:zlib";
+import { MAX_REPLAY_RAW_BYTES, packReplayEvents, restoreReplayEvents, type ReplayEvent } from "./replay-assets.ts";
+
+export { MAX_REPLAY_RAW_BYTES, MAX_REPLAY_EVENTS, isReplayEvents, packReplayEvents, restoreReplayEvents, type ReplayEvent } from "./replay-assets.ts";
 
 export const REPLAY_FILE = "evidence/replay.json.gz";
 export const REPLAY_ATTACHMENT = "specbook-replay";
 export const REPLAY_UNAVAILABLE_ATTACHMENT = "specbook-replay-unavailable";
 export const MAX_REPLAY_BYTES = 15 * 1024 * 1024;
-export const MAX_REPLAY_RAW_BYTES = 64 * 1024 * 1024;
-export const MAX_REPLAY_EVENTS = 250_000;
 export const REPLAY_LIMIT_NOTE = "Replay omitted because it exceeded the recording limit (15 MiB compressed, 64 MiB uncompressed or 250,000 events).";
-
-export interface ReplayEvent {
-    type: number;
-    timestamp: number;
-    data?: unknown;
-}
 
 const compress = promisify(gzip);
 const decompress = promisify(gunzip);
-
-export function isReplayEvents(value: unknown): value is ReplayEvent[] {
-    return Array.isArray(value) && value.length >= 2 && value.length <= MAX_REPLAY_EVENTS
-        && value.every((event) => event && typeof event === "object"
-            && Number.isInteger(event.type) && event.type >= 0 && event.type <= 6
-            && Number.isFinite(event.timestamp) && event.timestamp >= 0)
-        && value.some((event) => event.type === 2) && value.some((event) => event.type === 4);
-}
 
 export async function decodeReplay(data: Buffer): Promise<ReplayEvent[] | null> {
     if (data.length > MAX_REPLAY_BYTES) return null;
     try {
         const raw = await decompress(data, { maxOutputLength: MAX_REPLAY_RAW_BYTES });
-        const events: unknown = JSON.parse(raw.toString("utf8"));
-        return isReplayEvents(events) ? events : null;
+        return restoreReplayEvents(JSON.parse(raw.toString("utf8")));
     } catch {
         return null;
     }
 }
 
 export async function encodeReplay(events: ReplayEvent[], scrub: (text: string) => string = (text) => text): Promise<Buffer | null> {
-    if (!isReplayEvents(events)) return null;
-    const raw = scrub(JSON.stringify([...events].sort((left, right) => left.timestamp - right.timestamp)));
-    if (Buffer.byteLength(raw) > MAX_REPLAY_RAW_BYTES) return null;
     try {
-        if (!isReplayEvents(JSON.parse(raw))) return null;
+        const source = restoreReplayEvents(events);
+        if (!source) return null;
+        const safe = scrub(JSON.stringify(source.sort((left, right) => left.timestamp - right.timestamp)));
+        if (Buffer.byteLength(safe) > MAX_REPLAY_RAW_BYTES) return null;
+        const packed = packReplayEvents(JSON.parse(safe));
+        if (!packed) return null;
+        const raw = scrub(JSON.stringify(packed));
+        if (Buffer.byteLength(raw) > MAX_REPLAY_RAW_BYTES || !restoreReplayEvents(JSON.parse(raw))) return null;
         const data = await compress(raw, { level: 6 });
         return data.length <= MAX_REPLAY_BYTES ? data : null;
     } catch {
