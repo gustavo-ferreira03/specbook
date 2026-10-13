@@ -30,7 +30,15 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
       const status = replay.querySelector('.replay-status');
       try {
         await loadLibrary();
-        const events = restoreReplayEvents(JSON.parse(await decompress(replay.querySelector('.replay-data').textContent)));
+        const recorded = restoreReplayEvents(JSON.parse(await decompress(replay.querySelector('.replay-data').textContent)));
+        // Recording starts on the blank tab; start the replay at the first real page and keep step markers from before it.
+        const page = recorded.findIndex((event) => event.type === 4 && /^https?:/.test(event.data?.href || ''));
+        const snapshot = page < 0 ? -1 : recorded.findIndex((event, index) => index > page && event.type === 2);
+        const events = snapshot < 0 ? recorded : [
+          ...recorded.slice(page, snapshot + 1),
+          ...recorded.slice(0, page).filter((event) => event.type === 5).map((event) => ({ ...event, timestamp: recorded[snapshot].timestamp })),
+          ...recorded.slice(snapshot + 1),
+        ];
         if (!events) throw new Error('invalid recording');
         const first = events[0].timestamp;
         const markers = new Map();
@@ -86,13 +94,47 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
           event.preventDefault();
           player.goto(Math.max(0, Math.min(total, next)), false);
         });
-        // Open paused where the first step ends, the moment its screenshot shows; earlier frames are the blank tab and page load.
-        const firstEnd = events.find((event) => event.type === 5 && event.data.payload?.phase === 'end');
-        const firstFrame = firstEnd || events.find((event) => event.type === 2);
-        const firstOffset = firstFrame ? firstFrame.timestamp - first : 0;
+        // The page snapshot is often empty until the app renders; open paused on its first drawn frame.
+        const start = events.findIndex((event) => event.type === 2);
+        const firstFrame = events.find((event, index) => index > start && event.type === 3 && event.data?.source === 0 && event.data.adds?.length);
+        const firstOffset = firstFrame ? firstFrame.timestamp - first + 1 : 0;
         let moved = false;
         player.addEventListener('ui-update-player-state', (event) => { if (event.payload === 'playing') moved = true; });
-        const showFirstFrame = () => { if (firstFrame && !moved && player.getReplayer().getCurrentTime() < firstOffset) player.goto(firstOffset, false); };
+        // rrweb-player only seeks on click; dragging the handle scrubs, then resumes if it was playing.
+        let playing = false;
+        player.addEventListener('ui-update-player-state', (event) => { playing = event.payload === 'playing'; });
+        let dragging = false;
+        let resume = false;
+        let pending = 0;
+        let frame = 0;
+        const scrub = (clientX) => {
+          const rect = progress.getBoundingClientRect();
+          pending = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * total;
+          if (!frame) frame = requestAnimationFrame(() => { frame = 0; player.goto(pending, false); });
+        };
+        progress.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          dragging = true;
+          moved = true;
+          resume = playing;
+          progress.setPointerCapture(event.pointerId);
+          progress.classList.add('is-dragging');
+          scrub(event.clientX);
+        });
+        progress.addEventListener('pointermove', (event) => { if (dragging) scrub(event.clientX); });
+        const release = (event) => {
+          if (!dragging) return;
+          dragging = false;
+          progress.classList.remove('is-dragging');
+          if (progress.hasPointerCapture(event.pointerId)) progress.releasePointerCapture(event.pointerId);
+          cancelAnimationFrame(frame);
+          frame = 0;
+          player.goto(pending, resume);
+        };
+        progress.addEventListener('pointerup', release);
+        progress.addEventListener('pointercancel', release);
+        const showFirstFrame = () => { if (!moved && player.getReplayer().getCurrentTime() < firstOffset) player.goto(firstOffset, false); };
         showFirstFrame();
         replay.querySelector('.replay-status').hidden = true;
         const resize = () => {

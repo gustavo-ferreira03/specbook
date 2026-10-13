@@ -336,7 +336,7 @@ figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
 .replay .rr-player{float:none;border:1px solid var(--strong);border-radius:8px;box-shadow:none;overflow:hidden;font-family:inherit}
 .replay .rr-controller{font-family:inherit;background:var(--surface)}.replay .rr-player .rr-timeline{width:100%;padding:0 10px}
 .replay .rr-player .rr-timeline__time{font-size:12px;width:62px;color:var(--muted);font-variant-numeric:tabular-nums}
-.replay .rr-progress__handler{background:var(--primary)}.replay .rr-progress__step{background:var(--strong)}
+.replay .rr-progress{touch-action:none;cursor:pointer}.replay .rr-progress__handler{background:var(--primary);cursor:grab}.replay .rr-progress.is-dragging,.replay .rr-progress.is-dragging .rr-progress__handler{cursor:grabbing}.replay .rr-progress__step{background:var(--strong)}
 .replay-wait{position:absolute;top:-4px;bottom:-4px;background:var(--danger-soft);border-inline:1px solid var(--danger);pointer-events:none}.replay .rr-progress__handler{z-index:1}
 .replay .rr-player .rr-controller__btns{font-size:12px;gap:2px}.replay .rr-player .rr-controller__btns button{width:28px;height:28px;font:inherit}
 .replay .rr-player .rr-controller__btns button.active{background:var(--primary)}.replay .rr-player .rr-controller__btns button:hover{background:var(--soft);color:var(--ink)}
