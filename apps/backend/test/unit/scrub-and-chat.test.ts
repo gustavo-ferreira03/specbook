@@ -56,9 +56,99 @@ describe("environment credential profiles", () => {
         assert.match(JSON.stringify(await session.find((tool) => tool.name === "save_session")!.execute("call", { profile: "account" }, undefined, undefined, {} as never)), /save_session refused/);
         assert.equal(typed.length, 1, "saved sessions must not cross into a different environment implicitly");
         const missing = { account: "deleted-profile" };
-        assert.deepEqual(await resolveSecretEnv(project.id, [ref], missing), { env: {}, missing: [ref] });
+        assert.deepEqual(await resolveSecretEnv(project.id, [ref], missing), { env: {}, missing: [ref], publicRefs: [] });
         assert.equal((await resolveSecretEnv(project.id, [ref])).env[ref], "production-password");
         assert.notEqual(production.id, staging.id);
+    });
+
+    test("vault fields and run masking follow sensitivity, including effective overrides", async () => {
+        const { runMigrations } = await import("../../src/infra/db/migrate");
+        const { projectsRepository } = await import("../../src/infra/repositories/projects");
+        const { createProfile, getProfileByName, resolveSecretEnv, updateProfile } = await import("../../src/core/credentials/profiles");
+        const { projectSecretScrubber } = await import("../../src/core/credentials/scrub");
+        const { resolveSecretOriginPolicy } = await import("../../src/core/runner/secrets");
+        await runMigrations();
+        const project = await projectsRepository.createProject("Field sensitivity", "https://login.example.com");
+        const fields = [
+            { key: "username", value: "visible-login", sensitive: false },
+            { key: "password", value: "hidden-password", sensitive: true },
+            { key: "tenant", value: "visible-tenant", sensitive: false },
+            { key: "token", value: "hidden-token", sensitive: true },
+        ];
+        const profile = await createProfile(project.id, { name: "account", allowedOrigins: [project.baseUrl], fields });
+        const override = await createProfile(project.id, { name: "preview-account", fields: fields.map((field) => ({ ...field, value: `preview-${field.key}-value`, sensitive: field.key !== "password" })) });
+        const refs = ["USERNAME", "PASSWORD", "TENANT", "TOKEN"].map((field) => `SPECBOOK_SECRET_ACCOUNT_${field}`);
+        assert.deepEqual((await resolveSecretEnv(project.id, refs)).publicRefs, [refs[0], refs[2]]);
+        assert.deepEqual((await resolveSecretOriginPolicy(project.id, refs)).publicRefs, [refs[0], refs[2]]);
+        const environment = { id: "preview", name: "Preview", configuredBaseUrl: "https://preview.example.com", baseUrl: "https://preview.example.com", allowedOrigins: [], credentialOverrides: { account: override.id } };
+        assert.deepEqual((await resolveSecretEnv(project.id, refs, environment.credentialOverrides)).publicRefs, [refs[1]]);
+        assert.deepEqual((await resolveSecretOriginPolicy(project.id, refs, environment)).publicRefs, [refs[1]]);
+        const written: string[] = [];
+        const controls = [
+            { index: 0, formIndex: 0, name: "username", label: "Username", autocomplete: "username", type: "text", maxLength: null },
+            { index: 1, formIndex: 0, name: "password", label: "Password", autocomplete: "current-password", type: "password", maxLength: null },
+        ];
+        const mcp = { client: { async callTool(input: { name: string; arguments: { function?: string } }) {
+            if (input.name === "browser_tabs") return { content: [{ type: "text", text: `- Page URL: ${project.baseUrl}` }] };
+            const fn = input.arguments.function!;
+            if (fn.includes("const fills =")) { written.push(fn); return { content: [{ type: "text", text: '### Result\n{"filled":1}' }] }; }
+            return { content: [{ type: "text", text: `### Result\n${JSON.stringify(controls)}` }] };
+        } } } as unknown as BrowserMcp;
+        const tools = createCredentialTools({ projectId: project.id, chatId: "sensitivity", baseUrl: project.baseUrl, mcp, workDir: "/tmp", scrub: async (value) => (await projectSecretScrubber(project.id))(value), notify: () => {} });
+        const list = tools.find((tool) => tool.name === "browser_vault_list")!;
+        const result = await list.execute("list", {}, undefined, undefined, {} as never);
+        const output = JSON.stringify(result);
+        assert.match(output, /visible-login|visible-tenant/);
+        assert.doesNotMatch(output, /hidden-password|hidden-token/);
+        assert.equal(result.content[0].type, "text");
+        const items = JSON.parse((result.content[0] as { text: string }).text).items;
+        assert.deepEqual(items.find((item: { handle: string }) => item.handle === "account").login_fields,
+            [{ key: "username", value: "visible-login", type: "username" }]);
+        const fill = tools.find((tool) => tool.name === "browser_vault_fill")!;
+        await fill.execute("fill", { handle: "account" }, undefined, undefined, {} as never);
+        assert.match(written[0], /hidden-password/);
+        assert.doesNotMatch(written[0], /visible-login/);
+        await updateProfile((await getProfileByName(project.id, profile.name))!, { fields: fields.map((field) => ({ key: field.key, sensitive: true })) });
+        assert.doesNotMatch(JSON.stringify(await list.execute("list", {}, undefined, undefined, {} as never)), /visible-login/);
+        await fill.execute("fill", { handle: "account" }, undefined, undefined, {} as never);
+        assert.match(written[1], /visible-login/);
+        const scrub = await projectSecretScrubber(project.id);
+        assert.doesNotMatch(scrub("hidden-password hidden-token"), /hidden-password|hidden-token/);
+        await updateProfile((await getProfileByName(project.id, profile.name))!, {
+            fields: fields.map((field) => ({ key: field.key, sensitive: field.key !== "password" })),
+        });
+        const publicPassword = await fill.execute("fill", { handle: "account" }, undefined, undefined, {} as never);
+        assert.match(written[2], /visible-login/);
+        assert.doesNotMatch(written[2], /hidden-password/);
+        assert.match(JSON.stringify(publicPassword), /Submit/);
+    });
+
+    test("the secure login form saves a public login field and a sensitive password", async () => {
+        const { runMigrations } = await import("../../src/infra/db/migrate");
+        const { projectsRepository } = await import("../../src/infra/repositories/projects");
+        const { createProfile, getProfileByName, publicProfile } = await import("../../src/core/credentials/profiles");
+        const { registerCredentialRequest } = await import("../../src/core/chat/credential-requests");
+        const { submitChatCredentials } = await import("../../src/core/chat/credential-submit");
+        const { projectSecretScrubber } = await import("../../src/core/credentials/scrub");
+        await runMigrations();
+        const project = await projectsRepository.createProject("Secure login", "https://login.example.com");
+        await createProfile(project.id, { name: "account", fields: [
+            { key: "email", value: "old@example.com", sensitive: false },
+            { key: "password", value: "old-password", sensitive: true },
+            { key: "tenant", value: "public-tenant", sensitive: false },
+        ] });
+        const request = registerCredentialRequest("secure-login", project.id, "account", [
+            { key: "username", sensitive: false }, { key: "password", sensitive: true },
+        ], "login", project.baseUrl);
+        await submitChatCredentials("secure-login", request.id, { action: "submit", values: { username: "new@example.com", password: "new-password" } });
+        const saved = publicProfile((await getProfileByName(project.id, "account"))!);
+        assert.deepEqual(saved.fields, [
+            { key: "email", sensitive: false, value: "new@example.com" },
+            { key: "password", sensitive: true, hasValue: true },
+            { key: "tenant", sensitive: false, value: "public-tenant" },
+        ]);
+        const scrub = await projectSecretScrubber(project.id);
+        assert.equal(scrub("new@example.com new-password public-tenant"), "new@example.com •••• public-tenant");
     });
 });
 
@@ -149,8 +239,14 @@ describe("createSecretScrubber", () => {
         assert.equal(scrub(`?p=${encodeURIComponent(secret)}`), "?p=••••");
     });
 
-    test("ignores values shorter than four characters", () => {
-        assert.equal(scrub("abc abcd"), "abc abcd");
+    test("masks short values and ignores empty values", () => {
+        assert.equal(scrub("abc abcd"), "•••• ••••d");
+        assert.equal(createSecretScrubber([""])("unchanged"), "unchanged");
+        const scrubShort = createSecretScrubber(["1"]);
+        assert.equal(scrubShort("1"), "••••");
+        assert.deepEqual(JSON.parse(scrubShort(JSON.stringify({ "1": "value1", timestamp: 123, nested: [{ value: "1", duration: 1000 }] }))), {
+            "1": "value••••", timestamp: 123, nested: [{ value: "••••", duration: 1000 }],
+        });
     });
 
     test("masks every occurrence", () => {

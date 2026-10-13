@@ -4,12 +4,38 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, runBatch, type DbQuery } from "../../infra/db/client";
 import { piAuthPath, storageRoot } from "../paths";
-import { clearEncryptionKeyCache, decryptWithKey, encryptionKeySource, encryptWithKey, keyFingerprint, loadEncryptionKey, localKeyPath, parseEncryptionKey } from "./crypto";
+import { clearEncryptionKeyCache, decryptWithKey, encryptionKeySource, encryptSecret, encryptWithKey, keyFingerprint, loadEncryptionKey, localKeyPath, parseEncryptionKey } from "./crypto";
 import { writeProtectedFile } from "./files";
 import { encryptedColumns, transformSecretColumn } from "./locations";
 
 const rotationPath = path.join(storageRoot, "key-rotation.json");
 const rotationSchema = z.object({ from: z.string(), to: z.string(), previousKey: z.string(), nextKey: z.string() }).strict();
+
+export async function migrateCredentialFields(): Promise<void> {
+    const columns = await db.all<{ name: string }>(sql`PRAGMA table_info(credential_profiles)`);
+    if (columns.length === 0) return;
+    const legacy = columns.some((column) => column.name === "identifier");
+    const rows = await db.all<{ id: string; fields: string; identifier?: string | null }>(sql.raw(
+        `SELECT id, fields${legacy ? ", identifier" : ""} FROM credential_profiles`,
+    ));
+    const queries: DbQuery[] = [];
+    for (const row of rows) {
+        const fields = (JSON.parse(row.fields) as { key: string; value: string; sensitive?: boolean }[])
+            .map((field) => ({ ...field, sensitive: field.sensitive !== false }));
+        if (row.identifier) {
+            const username = { key: "username", value: encryptSecret(row.identifier), sensitive: false };
+            const index = fields.findIndex((field) => field.key === username.key);
+            if (index === -1) fields.unshift(username);
+            else fields[index] = username;
+        }
+        const serialized = JSON.stringify(fields);
+        if (serialized === row.fields && !row.identifier) continue;
+        queries.push(db.run(legacy
+            ? sql`UPDATE credential_profiles SET fields = ${serialized}, identifier = NULL WHERE id = ${row.id}`
+            : sql`UPDATE credential_profiles SET fields = ${serialized} WHERE id = ${row.id}`));
+    }
+    await runBatch(queries);
+}
 
 async function readOptional(file: string): Promise<string | null> {
     try { return await fs.readFile(file, "utf8"); }

@@ -75,7 +75,7 @@ export function CredentialRequestCard({
                         <Label htmlFor={`credential-${field.key}`}>{field.label ?? field.key}</Label>
                         <Input
                             id={`credential-${field.key}`}
-                            type={request.kind === "login" && field.key === "username" || request.kind === "code" ? "text" : "password"}
+                            type={request.kind === "code" || !(field.sensitive ?? (request.kind !== "login" || field.key !== "username")) ? "text" : "password"}
                             inputMode={request.kind === "code" ? "numeric" : undefined}
                             autoFocus={index === 0}
                             autoComplete="off"

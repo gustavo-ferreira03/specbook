@@ -1,6 +1,6 @@
-import { listSecretValues } from "./profiles";
+import { listCredentialValues } from "./profiles";
+import { scrubJsonText } from "@specbook/runtime/scrub";
 
-const MIN_SECRET_LENGTH = 4;
 const LABEL = "••••";
 
 function xmlEscaped(value: string, quotes: boolean): string {
@@ -11,7 +11,7 @@ function xmlEscaped(value: string, quotes: boolean): string {
 export function createSecretScrubber(values: string[]): (text: string) => string {
     const needles = new Set<string>();
     for (const value of values) {
-        if (value.length < MIN_SECRET_LENGTH) continue;
+        if (value.length === 0) continue;
         needles.add(value);
         needles.add(encodeURIComponent(value));
         needles.add(xmlEscaped(value, false));
@@ -19,7 +19,8 @@ export function createSecretScrubber(values: string[]): (text: string) => string
         needles.add(JSON.stringify(value).slice(1, -1));
     }
     const sorted = [...needles].sort((a, b) => b.length - a.length);
-    return (text) => sorted.reduce((acc, needle) => acc.split(needle).join(LABEL), text);
+    const replace = (text: string) => sorted.reduce((acc, needle) => acc.split(needle).join(LABEL), text);
+    return (text) => scrubJsonText(text, replace);
 }
 
 const TRANSIENT_TTL_MS = 30 * 60_000;
@@ -39,14 +40,18 @@ function liveTransientSecrets(projectId: string): string[] {
     return [...values.keys()];
 }
 
-export async function projectSecretScrubber(projectId: string, options: { identifiers?: boolean } = {}): Promise<(text: string) => string> {
-    return createSecretScrubber([...(await listSecretValues(projectId, options)).map((secret) => secret.value), ...liveTransientSecrets(projectId)]);
+export async function projectSecretScrubber(projectId: string): Promise<(text: string) => string> {
+    const fields = await listCredentialValues(projectId);
+    const sensitive = new Set(fields.filter((field) => field.sensitive).map((field) => field.value));
+    const visible = new Set(fields.filter((field) => !field.sensitive).map((field) => field.value));
+    const transient = liveTransientSecrets(projectId).filter((value) => !visible.has(value) || sensitive.has(value));
+    return createSecretScrubber([...sensitive, ...transient]);
 }
 
-export function createProjectScrubber(projectId: string, options: { identifiers?: boolean } = {}) {
-    return Object.assign(async (text: string) => (await projectSecretScrubber(projectId, options))(text), {
+export function createProjectScrubber(projectId: string) {
+    return Object.assign(async (text: string) => (await projectSecretScrubber(projectId))(text), {
         async batch(values: string[]): Promise<string[]> {
-            const scrub = await projectSecretScrubber(projectId, options);
+            const scrub = await projectSecretScrubber(projectId);
             return values.map(scrub);
         },
     });

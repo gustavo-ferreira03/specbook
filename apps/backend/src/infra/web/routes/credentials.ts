@@ -16,19 +16,19 @@ import { projectsRepository } from "../../repositories/projects";
 const fieldSchema = z.object({
     key: z.string().min(1),
     value: z.string().optional(),
+    sensitive: z.boolean().optional(),
+    previousKey: z.string().min(1).optional(),
 });
 
 const createSchema = z.object({
     name: z.string().min(1),
     allowedOrigins: z.array(z.string()).optional(),
     fields: z.array(fieldSchema).min(1),
-    identifier: z.string().trim().max(320).nullable().optional(),
 });
 
 const updateSchema = z.object({
     allowedOrigins: z.array(z.string()).optional(),
     fields: z.array(fieldSchema).min(1),
-    identifier: z.string().trim().max(320).nullable().optional(),
 });
 
 const requestResolutionSchema = z.union([
@@ -41,7 +41,7 @@ const requestResolutionSchema = z.union([
 ]);
 
 function mapDomainError(error: unknown): never {
-    if (error instanceof Error && /Invalid|Duplicate|already exists|collides|needs a value|at least one field/.test(error.message)) {
+    if (error instanceof Error && /Invalid|Duplicate|already exists|collides|same environment name|needs a value|at least one field/.test(error.message)) {
         throw new HTTPException(400, { message: error.message });
     }
     throw error;

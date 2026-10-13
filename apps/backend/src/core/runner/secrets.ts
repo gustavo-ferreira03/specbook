@@ -1,7 +1,6 @@
 import { projectsRepository } from "../../infra/repositories/projects";
 import { credentialsRepository } from "../../infra/repositories/credentials";
 import type { RunEnvironment } from "../../infra/db/schema";
-import { IDENTIFIER_FIELD } from "../credentials/profiles";
 import { secretEnvName, type SecretOriginPolicy } from "@specbook/runtime/specbook/guard";
 
 export type { SecretOriginPolicy } from "@specbook/runtime/specbook/guard";
@@ -18,6 +17,7 @@ export async function resolveSecretOriginPolicy(
     const credentialOrigin = new URL(environment?.configuredBaseUrl ?? project.baseUrl).origin;
     const wanted = new Set(refs);
     const byRef: Record<string, string[]> = {};
+    const publicRefs: string[] = [];
     const profiles = await credentialsRepository.listProfiles(projectId);
     for (const profile of profiles) {
         const overrideId = environment?.credentialOverrides[profile.name];
@@ -27,11 +27,11 @@ export async function resolveSecretOriginPolicy(
         for (const field of profile.fields) {
             const envName = secretEnvName(profile.name, field.key);
             if (!wanted.has(envName)) continue;
-            if (!target.fields.some((item) => item.key === field.key)) continue;
+            const effectiveField = target.fields.find((item) => item.key === field.key);
+            if (!effectiveField) continue;
             byRef[envName] = origins;
+            if (effectiveField.sensitive === false) publicRefs.push(envName);
         }
-        const identifierEnv = secretEnvName(profile.name, IDENTIFIER_FIELD);
-        if (profile.identifier && target.identifier && wanted.has(identifierEnv)) byRef[identifierEnv] = origins;
     }
-    return { defaultOrigins: [...new Set([baseOrigin, ...(environment?.allowedOrigins ?? [])])], byRef };
+    return { defaultOrigins: [...new Set([baseOrigin, ...(environment?.allowedOrigins ?? [])])], byRef, publicRefs };
 }

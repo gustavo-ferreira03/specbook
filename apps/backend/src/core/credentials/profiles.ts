@@ -6,6 +6,7 @@ import {
     type CredentialProfileRow,
 } from "../../infra/repositories/credentials";
 import { secretEnvName, SECRET_NAME_PATTERN } from "@specbook/runtime/specbook/guard";
+import { isSensitiveByDefault } from "@specbook/runtime/credential-fields";
 import { decryptSecret, encryptSecret } from "./crypto";
 
 const NAME_PATTERN = SECRET_NAME_PATTERN;
@@ -14,19 +15,17 @@ const MAX_NAME_LENGTH = 40;
 export interface CredentialFieldInput {
     key: string;
     value?: string;
+    sensitive?: boolean;
+    previousKey?: string;
 }
 
-export interface PublicCredentialField {
-    key: string;
-    hasValue: boolean;
-}
-
-export const IDENTIFIER_FIELD = "username";
+export type PublicCredentialField =
+    | { key: string; sensitive: true; hasValue: boolean }
+    | { key: string; sensitive: false; value: string };
 
 export interface PublicCredentialProfile {
     id: string;
     name: string;
-    identifier: string | null;
     allowedOrigins: string[];
     fields: PublicCredentialField[];
     createdAt: string;
@@ -37,6 +36,7 @@ export interface SecretValue {
     field: string;
     envName: string;
     value: string;
+    sensitive: boolean;
 }
 
 export { secretEnvName };
@@ -70,12 +70,13 @@ function buildFields(inputs: CredentialFieldInput[], previous?: CredentialField[
         assertValidName("field key", input.key);
         if (seen.has(input.key)) throw new Error(`Duplicate field key "${input.key}".`);
         seen.add(input.key);
-        if (input.value !== undefined && input.value !== "") {
-            return { key: input.key, value: encryptSecret(input.value) };
+        const kept = previous?.find((field) => field.key === (input.previousKey ?? input.key));
+        const sensitive = input.sensitive ?? (kept ? kept.sensitive !== false : isSensitiveByDefault(input.key));
+        if (input.value !== undefined && (input.value !== "" || !sensitive)) {
+            return { key: input.key, value: encryptSecret(input.value), sensitive };
         }
-        const kept = previous?.find((field) => field.key === input.key);
         if (!kept) throw new Error(`Field "${input.key}" needs a value.`);
-        return kept;
+        return { key: input.key, value: kept.value, sensitive };
     });
 }
 
@@ -84,9 +85,8 @@ async function assertNoEnvCollision(
     profileName: string,
     fields: CredentialField[],
     ignoreProfileId?: string,
-    identifier?: string | null,
 ): Promise<void> {
-    const keys = [...fields.map((field) => field.key), ...(identifier ? [IDENTIFIER_FIELD] : [])];
+    const keys = fields.map((field) => field.key);
     const names = new Set(keys.map((key) => secretEnvName(profileName, key)));
     if (names.size !== keys.length) {
         throw new Error("Two fields map to the same environment name; rename one.");
@@ -94,7 +94,7 @@ async function assertNoEnvCollision(
     for (const row of await credentialsRepository.listProfiles(projectId)) {
         if (row.id === ignoreProfileId) continue;
         if (row.name === profileName) throw new Error(`A profile named "${profileName}" already exists.`);
-        for (const key of [...row.fields.map((field) => field.key), ...(row.identifier ? [IDENTIFIER_FIELD] : [])]) {
+        for (const { key } of row.fields) {
             const envName = secretEnvName(row.name, key);
             if (names.has(envName)) {
                 throw new Error(
@@ -109,23 +109,23 @@ export function publicProfile(row: CredentialProfileRow): PublicCredentialProfil
     return {
         id: row.id,
         name: row.name,
-        identifier: row.identifier,
         allowedOrigins: row.allowedOrigins,
         createdAt: row.createdAt,
-        fields: row.fields.map((field) => ({ key: field.key, hasValue: field.value !== "" })),
+        fields: row.fields.map((field) => field.sensitive !== false
+            ? { key: field.key, sensitive: true, hasValue: field.value !== "" }
+            : { key: field.key, sensitive: false, value: decryptSecret(field.value) }),
     };
 }
 
 export async function createProfile(
     projectId: string,
-    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
+    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[] },
 ): Promise<PublicCredentialProfile> {
     assertValidName("profile name", input.name);
     const allowedOrigins = input.allowedOrigins ?? [];
     assertValidOrigins(allowedOrigins);
     const fields = buildFields(input.fields);
-    const identifier = input.identifier?.trim() || null;
-    await assertNoEnvCollision(projectId, input.name, fields, undefined, identifier);
+    await assertNoEnvCollision(projectId, input.name, fields);
     const now = new Date().toISOString();
     const row: CredentialProfileRow = {
         id: crypto.randomUUID(),
@@ -133,7 +133,6 @@ export async function createProfile(
         name: input.name,
         allowedOrigins,
         fields,
-        identifier,
         createdAt: now,
         updatedAt: now,
     };
@@ -143,14 +142,13 @@ export async function createProfile(
 
 export async function updateProfile(
     row: CredentialProfileRow,
-    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
+    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[] },
 ): Promise<PublicCredentialProfile> {
     const allowedOrigins = input.allowedOrigins ?? row.allowedOrigins;
     assertValidOrigins(allowedOrigins);
     const fields = buildFields(input.fields, row.fields);
-    const identifier = input.identifier === undefined ? row.identifier : input.identifier?.trim() || null;
-    await assertNoEnvCollision(row.projectId, row.name, fields, row.id, identifier);
-    const patch = { allowedOrigins, fields, identifier, updatedAt: new Date().toISOString() };
+    await assertNoEnvCollision(row.projectId, row.name, fields, row.id);
+    const patch = { allowedOrigins, fields, updatedAt: new Date().toISOString() };
     await credentialsRepository.updateProfile(row.id, patch);
     return publicProfile({ ...row, ...patch });
 }
@@ -171,30 +169,30 @@ export async function getProfileByName(
     return (await credentialsRepository.listProfiles(projectId)).find((row) => row.name === name) ?? null;
 }
 
-export async function listSecretValues(projectId: string, options: { identifiers?: boolean } = {}): Promise<SecretValue[]> {
+export async function listCredentialValues(projectId: string): Promise<SecretValue[]> {
     const rows = await credentialsRepository.listProfiles(projectId);
-    return rows.flatMap((row) => [
-        ...row.fields
+    return rows.flatMap((row) => row.fields
             .filter((field) => field.value !== "")
             .map((field) => ({
                 profile: row.name,
                 field: field.key,
                 envName: secretEnvName(row.name, field.key),
                 value: decryptSecret(field.value),
-            })),
-        ...(options.identifiers && row.identifier
-            ? [{ profile: row.name, field: IDENTIFIER_FIELD, envName: secretEnvName(row.name, IDENTIFIER_FIELD), value: row.identifier }]
-            : []),
-    ]);
+                sensitive: field.sensitive !== false,
+            })));
+}
+
+export async function listSecretValues(projectId: string): Promise<SecretValue[]> {
+    return (await listCredentialValues(projectId)).filter((field) => field.sensitive);
 }
 
 export async function resolveSecretEnv(
     projectId: string,
     refs: string[],
     overrides: Record<string, string> = {},
-): Promise<{ env: Record<string, string>; missing: string[] }> {
-    if (refs.length === 0) return { env: {}, missing: [] };
-    const byEnvName = new Map((await listSecretValues(projectId, { identifiers: true })).map((secret) => [secret.envName, secret.value]));
+): Promise<{ env: Record<string, string>; missing: string[]; publicRefs: string[] }> {
+    if (refs.length === 0) return { env: {}, missing: [], publicRefs: [] };
+    const byEnvName = new Map((await listCredentialValues(projectId)).map((field) => [field.envName, { value: field.value, sensitive: field.sensitive }]));
     const profiles = await credentialsRepository.listProfiles(projectId);
     for (const [sourceName, targetId] of Object.entries(overrides)) {
         const source = profiles.find((profile) => profile.name === sourceName);
@@ -202,21 +200,20 @@ export async function resolveSecretEnv(
         for (const field of source?.fields ?? []) {
             const envName = secretEnvName(sourceName, field.key);
             byEnvName.delete(envName);
-            const value = target?.fields.find((item) => item.key === field.key)?.value;
-            if (value) byEnvName.set(envName, decryptSecret(value));
-        }
-        if (source?.identifier) {
-            const envName = secretEnvName(sourceName, IDENTIFIER_FIELD);
-            byEnvName.delete(envName);
-            if (target?.identifier) byEnvName.set(envName, target.identifier);
+            const targetField = target?.fields.find((item) => item.key === field.key);
+            if (targetField?.value) byEnvName.set(envName, { value: decryptSecret(targetField.value), sensitive: targetField.sensitive !== false });
         }
     }
     const env: Record<string, string> = {};
     const missing: string[] = [];
+    const publicRefs: string[] = [];
     for (const ref of refs) {
-        const value = byEnvName.get(ref);
-        if (value === undefined) missing.push(ref);
-        else env[ref] = value;
+        const field = byEnvName.get(ref);
+        if (!field) missing.push(ref);
+        else {
+            env[ref] = field.value;
+            if (!field.sensitive) publicRefs.push(ref);
+        }
     }
-    return { env, missing };
+    return { env, missing, publicRefs };
 }

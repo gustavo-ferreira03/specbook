@@ -383,7 +383,7 @@ async function prepareSpecBatch(
     const refsOf = (analysis: SpecAnalysis) => analysis.secretRefs.map((ref) => ref.envName);
     const refs = [...new Set(definitions.flatMap((definition) => refsOf(definition.analysis)))];
     const remote = environment?.executor === "runner";
-    const { env: secretEnv, missing } = remote ? { env: {}, missing: [] } : await resolveSecretEnv(projectId, refs, environment?.credentialOverrides);
+    const { env: secretEnv, missing } = remote ? { env: {}, missing: [] as string[] } : await resolveSecretEnv(projectId, refs, environment?.credentialOverrides);
     if (missing.length > 0) {
         const titles = definitions
             .filter((definition) => refsOf(definition.analysis).some((ref) => missing.includes(ref)))

@@ -5,7 +5,7 @@ import { KeyRound, PencilLine, Plus, Trash2, X } from "lucide-react";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { InlineFeedback, SettingsBlock, SettingsSection } from "@/components/SettingsLayout";
-import { Button } from "@/components/ui/button";
+import { Button, focusRing } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,18 +18,23 @@ import {
     updateCredentialProfile,
 } from "@/lib/api";
 import type { CredentialFieldInput, CredentialProfile } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface DraftField {
     key: string;
     value: string;
+    sensitive: boolean;
     hasValue: boolean;
+    previousKey?: string;
 }
 
 function draftFromProfile(profile: CredentialProfile): DraftField[] {
     return profile.fields.map((field) => ({
         key: field.key,
-        value: "",
-        hasValue: field.hasValue,
+        value: field.sensitive ? "" : field.value,
+        sensitive: field.sensitive,
+        hasValue: field.sensitive && field.hasValue,
+        previousKey: field.key,
     }));
 }
 
@@ -41,7 +46,6 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
     const [openId, setOpenId] = useState<string | "new" | null>(null);
     const [name, setName] = useState("");
     const [fields, setFields] = useState<DraftField[]>([]);
-    const [identifier, setIdentifier] = useState("");
     const [saving, setSaving] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<CredentialProfile | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -68,8 +72,8 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
         setOpenId("new");
         setName("");
         setFields([
-            { key: "email", value: "", hasValue: false },
-            { key: "password", value: "", hasValue: false },
+            { key: "username", value: "", sensitive: false, hasValue: false },
+            { key: "password", value: "", sensitive: true, hasValue: false },
         ]);
     }
 
@@ -78,7 +82,6 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
         setFormError("");
         setOpenId(profile.id);
         setName(profile.name);
-        setIdentifier(profile.identifier ?? "");
         setFields(draftFromProfile(profile));
     }
 
@@ -87,17 +90,26 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             setFormError("Profile name is required.");
             return;
         }
+        if (!fields.length || fields.some((field) => !field.key.trim())) {
+            setFormError("Add at least one field and give every field a name.");
+            return;
+        }
+        if (new Set(fields.map((field) => field.key.trim())).size !== fields.length) {
+            setFormError("Field names must be unique.");
+            return;
+        }
         setSaving(true);
         setFormError("");
         const inputs: CredentialFieldInput[] = fields
-            .filter((field) => field.key.trim())
             .map((field) => ({
                 key: field.key.trim(),
                 value: field.value === "" && field.hasValue ? undefined : field.value,
+                sensitive: field.sensitive,
+                previousKey: field.previousKey,
             }));
         try {
             if (openId === "new") await createCredentialProfile(projectId, { name: name.trim(), fields: inputs });
-            else if (openId) await updateCredentialProfile(openId, { fields: inputs, ...(editing?.identifier != null ? { identifier: identifier.trim() } : {}) });
+            else if (openId) await updateCredentialProfile(openId, { fields: inputs });
             setOpenId(null);
             await refresh();
         } catch (err) {
@@ -129,7 +141,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
             <SettingsSection
                 id="credentials-heading"
                 title="Credentials"
-                description="Login profiles the agent can use. Passwords and other fields are encrypted and never shown again once saved; a login saved from a chat keeps its username visible so the agent can type it."
+                description="All values are encrypted. Sensitive fields stay hidden from the agent and run evidence."
                 actions={profiles.length > 0 &&
                     <Button type="button" variant="outline" onClick={(event) => openNew(event.currentTarget)}>
                         <Plus size={14} /> New profile
@@ -177,16 +189,10 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                         {profile.name}
                                     </button>
                                     <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-meta text-ink-subtle">
-                                        {profile.identifier !== null && (
-                                            <span className="inline-flex min-w-0 items-center gap-1">
-                                                <span className="font-mono">username</span>
-                                                <span className="truncate">{profile.identifier}</span>
-                                            </span>
-                                        )}
-                                        {profile.fields.length === 0 && profile.identifier !== null ? null : profile.fields.length === 0 ? "No fields" : profile.fields.map((field) => (
-                                            <span key={field.key} className="inline-flex items-center gap-1">
+                                        {profile.fields.map((field) => (
+                                            <span key={field.key} className="inline-flex min-w-0 items-center gap-1">
                                                 <span className="font-mono">{field.key}</span>
-                                                <span aria-label={field.hasValue ? "saved" : "empty"}>{field.hasValue ? "••••" : "empty"}</span>
+                                                <span className="truncate" aria-label={field.sensitive ? field.hasValue ? "saved" : "empty" : undefined}>{field.sensitive ? field.hasValue ? "••••" : "empty" : field.value}</span>
                                             </span>
                                         ))}
                                     </p>
@@ -228,7 +234,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
 
             <Dialog open={openId !== null} onOpenChange={(open) => { if (!open && !saving) setOpenId(null); }}>
                 <DialogContent
-                    className="max-w-xl"
+                    className="max-h-[85dvh] max-w-xl overflow-y-auto"
                     onCloseAutoFocus={(event) => {
                         const trigger = triggerRef.current;
                         if (!trigger?.isConnected) return;
@@ -239,7 +245,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                     <DialogHeader>
                         <DialogTitle>{openId === "new" ? "New credential profile" : `Edit ${editing?.name ?? "profile"}`}</DialogTitle>
                         <DialogDescription>
-                            {openId === "new" ? "Values are encrypted when saved and never shown again." : "Leave a saved value blank to keep it. The profile name cannot be changed."}
+                            {openId === "new" ? "Choose which fields stay hidden from the agent and run evidence." : "Leave a saved sensitive value blank to keep it."}
                         </DialogDescription>
                     </DialogHeader>
                     <form
@@ -260,28 +266,16 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                 autoComplete="off"
                             />
                         </div>
-                        {editing?.identifier != null && (
-                            <div>
-                                <Label htmlFor="credential-identifier" className="mb-1.5">Username</Label>
-                                <Input
-                                    id="credential-identifier"
-                                    value={identifier}
-                                    onChange={(event) => setIdentifier(event.target.value)}
-                                    autoComplete="off"
-                                />
-                                <p className="mt-1 text-meta text-ink-subtle">Not encrypted: the agent sees it and types it. Specs use it as secret(&quot;{editing.name}&quot;, &quot;username&quot;).</p>
-                            </div>
-                        )}
                         <fieldset className="min-w-0">
                             <legend className="mb-1.5 text-control font-medium text-ink">Fields</legend>
                             <div className="space-y-2">
                                 {fields.length > 0 && (
-                                    <div className="hidden grid-cols-[10rem_minmax(0,1fr)_2rem] gap-2 text-meta text-ink-subtle sm:grid" aria-hidden="true">
-                                        <span>Name</span><span>Value</span><span />
+                                    <div className="hidden grid-cols-[7rem_minmax(0,1fr)_6rem_2rem] gap-2 text-meta text-ink-subtle sm:grid" aria-hidden="true">
+                                        <span>Name</span><span>Value</span><span /><span />
                                     </div>
                                 )}
                                 {fields.map((field, index) => (
-                                    <div key={index} className="grid grid-cols-[minmax(0,1fr)_2rem] gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_2rem]">
+                                    <div key={index} className="grid grid-cols-[minmax(0,1fr)_2rem] gap-2 sm:grid-cols-[7rem_minmax(0,1fr)_6rem_2rem]">
                                         <Input
                                             value={field.key}
                                             aria-label={`Field ${index + 1} name`}
@@ -293,7 +287,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                             }
                                         />
                                         <Input
-                                            type="password"
+                                            type={field.sensitive ? "password" : "text"}
                                             autoComplete="off"
                                             aria-label={`${field.key || `Field ${index + 1}`} value`}
                                             value={field.value}
@@ -303,6 +297,16 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                                 setFields(fields.map((f, i) => (i === index ? { ...f, value: event.target.value } : f)))
                                             }
                                         />
+                                        <label className="col-start-1 row-start-3 flex min-h-9 cursor-pointer items-center gap-2 text-meta text-ink-muted sm:col-start-auto sm:row-start-auto">
+                                            <input
+                                                type="checkbox"
+                                                checked={field.sensitive}
+                                                aria-label={`${field.key || `Field ${index + 1}`} sensitive`}
+                                                className={cn("size-4 shrink-0 accent-primary", focusRing)}
+                                                onChange={(event) => setFields(fields.map((f, i) => i === index ? { ...f, sensitive: event.target.checked } : f))}
+                                            />
+                                            Sensitive
+                                        </label>
                                         <Button
                                             type="button"
                                             variant="ghost"
@@ -320,7 +324,7 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
                                     size="sm"
                                     variant="ghost"
                                     className="-ml-1"
-                                    onClick={() => setFields([...fields, { key: "", value: "", hasValue: false }])}
+                                    onClick={() => setFields([...fields, { key: "", value: "", sensitive: true, hasValue: false }])}
                                 >
                                     <Plus size={14} /> Add field
                                 </Button>

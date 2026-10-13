@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 export interface CredentialRequestField {
     key: string;
     label?: string;
+    sensitive?: boolean;
 }
 
 export type CredentialRequestKind = "login" | "code" | "fields";

@@ -169,19 +169,19 @@ export function renderReport(result: { run: string; report: string }) {
     return [success(`Report for run ${pc.dim(result.run)}`), "", fields([["File", relative(result.report)]])].join("\n");
 }
 
-export function renderProfiles(profiles: { name: string; fields: string[]; origins: string[] }[]) {
+export function renderProfiles(profiles: { name: string; fields: string[]; sensitive: string[]; origins: string[] }[]) {
     if (!profiles.length) return `${pc.dim("No credential profiles yet.")}\n${next("specbook credentials add <profile>")}`;
     return [
         pc.bold(`Credential profiles ${pc.dim(`(${profiles.length})`)}`), "",
-        table([[pc.dim("PROFILE"), pc.dim("FIELDS"), pc.dim("ORIGINS")], ...profiles.map((profile) => [pc.bold(profile.name), profile.fields.join(", "), profile.origins.join(", ") || pc.dim("base URL")])]),
+        table([[pc.dim("PROFILE"), pc.dim("FIELDS"), pc.dim("SENSITIVE"), pc.dim("ORIGINS")], ...profiles.map((profile) => [pc.bold(profile.name), profile.fields.join(", "), profile.sensitive.join(", ") || pc.dim("none"), profile.origins.join(", ") || pc.dim("base URL")])]),
         `\n${pc.dim("Values live in a private file on this machine and are never printed.")}`,
     ].join("\n");
 }
 
-export function renderProfileAdded(result: { profile: string; fields: string[]; origins: string[] }) {
+export function renderProfileAdded(result: { profile: string; fields: string[]; sensitive: string[]; origins: string[] }) {
     return [
         success(`Saved profile ${pc.bold(result.profile)}`), "",
-        fields([["Fields", result.fields.join(", ")], ["Origins", result.origins.join(", ") || pc.dim("the workspace base URL")], ["Use in a Spec", pc.cyan(`secret("${result.profile}", "${result.fields[0]}")`)]]),
+        fields([["Fields", result.fields.join(", ")], ["Sensitive", result.sensitive.join(", ") || pc.dim("none")], ["Origins", result.origins.join(", ") || pc.dim("the workspace base URL")], ["Use in a Spec", pc.cyan(`secret("${result.profile}", "${result.fields[0]}")`)]]),
     ].join("\n");
 }
 

@@ -1,4 +1,5 @@
 import { invalidate, resourceForPath } from "./invalidation";
+import type { ReplayRecording } from "@specbook/runtime/replay-assets";
 import type {
     Chat,
     ChatState,
@@ -160,6 +161,10 @@ export function deleteFeature(featureId: string): Promise<void> {
 
 export function getRunEvidence(runId: string, signal?: AbortSignal): Promise<RunEvidence> {
     return api(apiPath`/runs/${runId}/evidence`, { signal });
+}
+
+export function getRunReplay(runId: string, signal?: AbortSignal): Promise<ReplayRecording> {
+    return api(apiPath`/runs/${runId}/replay`, { signal });
 }
 
 export interface DiscoveryBriefInput {
@@ -380,7 +385,7 @@ export function listCredentialProfiles(projectId: string): Promise<{ profiles: C
 
 export function createCredentialProfile(
     projectId: string,
-    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
+    input: { name: string; allowedOrigins?: string[]; fields: CredentialFieldInput[] },
 ): Promise<{ profile: CredentialProfile }> {
     return api(`/projects/${encodeURIComponent(projectId)}/credentials`, {
         method: "POST",
@@ -390,7 +395,7 @@ export function createCredentialProfile(
 
 export function updateCredentialProfile(
     profileId: string,
-    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[]; identifier?: string | null },
+    input: { allowedOrigins?: string[]; fields: CredentialFieldInput[] },
 ): Promise<{ profile: CredentialProfile }> {
     return api(`/credentials/${encodeURIComponent(profileId)}`, {
         method: "PUT",

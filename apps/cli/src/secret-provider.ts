@@ -8,8 +8,9 @@ const fieldsSchema = z.record(z.string().regex(SECRET_NAME_PATTERN), z.string().
 const originsSchema = z.array(z.string().refine((value) => {
     try { return httpTarget(value).origin === value; } catch { return false; }
 })).min(1).max(100);
-const profileSchema = z.object({ fields: fieldsSchema, origins: originsSchema }).strict();
-export type ProviderProfile = { fields: Record<string, string>; origins: string[] };
+const profileSchema = z.object({ fields: fieldsSchema, origins: originsSchema, sensitive: z.array(z.string().regex(SECRET_NAME_PATTERN)).optional() })
+    .strict().refine((profile) => profile.sensitive?.every((field) => Object.hasOwn(profile.fields, field)) ?? true);
+export type ProviderProfile = { fields: Record<string, string>; origins: string[]; sensitive?: string[] };
 
 export async function providerProfile(command: string, profile: string, signal?: AbortSignal): Promise<ProviderProfile> {
     if (!command.trim() || command.length > 16_384) throw new CodedError("credentials", "Provide a nonempty secret provider command");

@@ -220,7 +220,7 @@ export interface ChatCredentialRequest {
     kind: "login" | "code" | "fields";
     origin: string | null;
     profileName: string;
-    fields: { key: string; label?: string }[];
+    fields: { key: string; label?: string; sensitive?: boolean }[];
 }
 
 export interface ChatState {
@@ -246,6 +246,8 @@ export interface RunEvidence {
     expectedResult: string;
     steps: { number: number; kind: "precondition" | "step" | "expected" | "postcondition"; ordinal: number | null; label: string; file: string }[];
     video: string | null;
+    replay?: { file: string; bytes: number } | null;
+    replayUnavailable?: string | null;
     failedStep: string | null;
     diagnostics?: { kind: "console" | "pageerror" | "requestfailed" | "response"; message: string; url?: string; method?: string; status?: number }[];
     errorContext?: string;
@@ -329,15 +331,13 @@ export interface LlmOAuthPoll {
     error?: string;
 }
 
-export interface CredentialFieldPublic {
-    key: string;
-    hasValue: boolean;
-}
+export type CredentialFieldPublic =
+    | { key: string; sensitive: true; hasValue: boolean }
+    | { key: string; sensitive: false; value: string };
 
 export interface CredentialProfile {
     id: string;
     name: string;
-    identifier: string | null;
     allowedOrigins: string[];
     fields: CredentialFieldPublic[];
     createdAt: string;
@@ -346,6 +346,8 @@ export interface CredentialProfile {
 export interface CredentialFieldInput {
     key: string;
     value?: string;
+    sensitive: boolean;
+    previousKey?: string;
 }
 
 export interface InboxItem {

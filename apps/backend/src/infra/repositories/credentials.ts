@@ -11,7 +11,7 @@ class CredentialsRepository {
 
     async updateProfile(
         id: string,
-        patch: Pick<CredentialProfileRow, "allowedOrigins" | "fields" | "identifier" | "updatedAt">,
+        patch: Pick<CredentialProfileRow, "allowedOrigins" | "fields" | "updatedAt">,
     ): Promise<void> {
         await db.update(credentialProfiles).set(patch).where(eq(credentialProfiles.id, id));
     }

@@ -7,6 +7,8 @@ export type { ApiRequestEvidence } from "../evidence.ts";
 export interface SecretOriginPolicy {
     defaultOrigins: string[];
     byRef: Record<string, string[]>;
+    /** Env names of credential fields not marked sensitive, such as usernames; evidence shows them. */
+    publicRefs?: string[];
 }
 
 export interface SpecbookRuntime {
@@ -62,6 +64,7 @@ export function parseRuntime(raw: string | undefined): SpecbookRuntime {
         secretOrigins: {
             defaultOrigins: Array.isArray(policy?.defaultOrigins) ? policy.defaultOrigins.map(String) : [],
             byRef: policy?.byRef && typeof policy.byRef === "object" ? policy.byRef : {},
+            publicRefs: Array.isArray(policy?.publicRefs) ? policy.publicRefs.map(String) : [],
         },
     };
 }
@@ -188,12 +191,12 @@ export function createGuard(options: GuardOptions) {
         return runtime.secretOrigins.byRef[envName] ?? [];
     }
 
-    function secretValue(token: object): { value: string; envName: string } {
+    function secretValue(token: object): { value: string; envName: string; sensitive: boolean } {
         const ref = secretRefs.get(token);
         if (!ref) throw new Error("Not a Specbook secret");
         const value = options.readSecret(ref.envName);
         if (value === undefined) throw new CodedError("credentials", `${ref.label} is not configured for this run`);
-        return { value, envName: ref.envName };
+        return { value, envName: ref.envName, sensitive: !runtime.secretOrigins.publicRefs?.includes(ref.envName) };
     }
 
     function assertPageOrigin(page: RawPage, envName: string): void {
@@ -209,8 +212,9 @@ export function createGuard(options: GuardOptions) {
     async function textArgument(page: RawPage, value: unknown, target: RawLocator | null): Promise<string> {
         if (typeof value === "string") return value;
         if (!isSecret(value)) throw new Error("Text must be a string literal or secret(...)");
-        const { value: secret, envName } = secretValue(value as object);
+        const { value: secret, envName, sensitive } = secretValue(value as object);
         assertPageOrigin(page, envName);
+        if (!sensitive) return secret;
         if (target) {
             const handle = await target.elementHandle();
             try {

@@ -4,7 +4,7 @@ import * as clack from "@clack/prompts";
 import pc from "picocolors";
 import { z } from "zod";
 import { initWorkspace, workspaceDirectory, newSpec, detectAgents, loadConfig } from "./workspace";
-import { addProfile, listProfiles, removeProfile, scrub } from "./credentials";
+import { addProfile, defaultSensitive, listProfiles, removeProfile, scrub } from "./credentials";
 import { checkSpecs } from "./check";
 import { runLocal } from "./run";
 import { generateReport } from "./report";
@@ -83,8 +83,12 @@ async function promptCredentials(name: string | undefined) {
     })).split(",").map((field) => field.trim()).filter(Boolean);
     const fields: Record<string, string> = {};
     for (const field of names) fields[field] = answer(await clack.password({ message: field, output: stderr }));
+    const sensitive = answer(await clack.multiselect({
+        message: "Sensitive fields (hidden in evidence)", output: stderr, required: false,
+        options: names.map((field) => ({ value: field, label: field })), initialValues: defaultSensitive(names),
+    }));
     clack.outro(pc.dim("Values are stored only on this machine."), { output: stderr });
-    return { profile, fields };
+    return { profile, fields, sensitive };
 }
 
 function exitWith(reply: ChatReply) {
@@ -441,18 +445,19 @@ credentials.command("add")
     .argument("[profile]", "profile name, e.g. admin")
     .option("--stdin-json", "read {\"field\":\"value\"} JSON from stdin")
     .option("--origin <url...>", "origins allowed to receive these values")
-    .action(async (name: string | undefined, options: { stdinJson?: boolean; origin?: string[] }) => {
+    .option("--sensitive <field...>", "fields hidden in evidence (default: all but the username)")
+    .action(async (name: string | undefined, options: { stdinJson?: boolean; origin?: string[]; sensitive?: string[] }) => {
         let profile = name;
-        let input: { fields: Record<string, string>; origins?: string[] };
+        let input: { fields: Record<string, string>; origins?: string[]; sensitive?: string[] };
         if (options.stdinJson) {
             if (!profile) throw new Error("Provide the profile name");
             input = await credentialInput();
         } else {
             const prompted = await promptCredentials(name);
             profile = prompted.profile;
-            input = { fields: prompted.fields };
+            input = { fields: prompted.fields, sensitive: prompted.sensitive };
         }
-        const result = await addProfile(profile!, input.fields, options.origin ?? input.origins) as Parameters<typeof ui.renderProfileAdded>[0];
+        const result = await addProfile(profile!, input.fields, options.origin ?? input.origins, options.sensitive ?? input.sensitive) as Parameters<typeof ui.renderProfileAdded>[0];
         await print(result, () => ui.renderProfileAdded(result));
     });
 credentials.command("list")

@@ -196,6 +196,7 @@ export const runs = sqliteTable(
 export interface CredentialField {
     key: string;
     value: string;
+    sensitive: boolean;
 }
 
 export const credentialProfiles = sqliteTable("credential_profiles", {
@@ -206,7 +207,6 @@ export const credentialProfiles = sqliteTable("credential_profiles", {
     name: text("name").notNull(),
     allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull(),
     fields: text("fields", { mode: "json" }).$type<CredentialField[]>().notNull(),
-    identifier: text("identifier"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 });

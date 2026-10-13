@@ -7,6 +7,10 @@ import type { SecretRef } from "@specbook/runtime/validate";
 import { httpTarget } from "@specbook/runtime/network/targets";
 import { CodedError } from "@specbook/runtime/errors";
 import { providerProfile, type ProviderProfile } from "./secret-provider";
+import { defaultSensitive, isSensitiveByDefault } from "@specbook/runtime/credential-fields";
+import { scrubJsonText } from "@specbook/runtime/scrub";
+
+export { defaultSensitive } from "@specbook/runtime/credential-fields";
 
 const nameSchema = z.string().regex(SECRET_NAME_PATTERN);
 const profileSchema = z.object({
@@ -14,13 +18,25 @@ const profileSchema = z.object({
     origins: z.array(z.string().refine((origin) => {
         try { return httpTarget(origin).origin === origin; } catch { return false; }
     }, "Use an HTTP(S) origin without credentials, path or fragment")).default([]),
+    sensitive: z.array(nameSchema).optional(),
 });
 const storeSchema = z.record(nameSchema, profileSchema);
 type Store = z.infer<typeof storeSchema>;
+type Profile = z.infer<typeof profileSchema>;
 const runnerSecretValues = new Set<string>();
 
-function rememberEnvironmentSecrets(): void {
-    for (const [name, value] of Object.entries(process.env)) if (name.startsWith("SPECBOOK_SECRET_") && !name.endsWith("_ORIGINS") && value) runnerSecretValues.add(value);
+function sensitiveFields(profile: Profile): string[] {
+    return profile.sensitive ?? defaultSensitive(Object.keys(profile.fields));
+}
+
+function rememberEnvironmentSecrets(store: Store): void {
+    const marked = new Map(Object.entries(store).flatMap(([name, profile]) => Object.keys(profile.fields)
+        .map((field) => [secretEnvName(name, field), sensitiveFields(profile).includes(field)] as const)));
+    for (const [name, value] of Object.entries(process.env)) {
+        if (!name.startsWith("SPECBOOK_SECRET_") || name.endsWith("_ORIGINS") || !value) continue;
+        const sensitive = marked.get(name) ?? isSensitiveByDefault(name.slice(name.lastIndexOf("_") + 1));
+        if (sensitive) runnerSecretValues.add(value);
+    }
 }
 
 function environmentProfileOrigins(profile: string): string[] {
@@ -69,19 +85,21 @@ async function writeStore(store: Store): Promise<void> {
     }
 }
 
-export async function addProfile(name: string, fields: Record<string, string>, origins: string[] = []): Promise<unknown> {
+export async function addProfile(name: string, fields: Record<string, string>, origins: string[] = [], sensitive?: string[]): Promise<unknown> {
     nameSchema.parse(name);
     if (!Object.keys(fields).length) throw new Error("Provide at least one credential field");
+    const unknown = sensitive?.find((field) => !Object.hasOwn(fields, field));
+    if (unknown) throw new Error(`Sensitive field ${unknown} is not one of the profile's fields`);
     const normalized = origins.map((origin) => httpTarget(origin).origin);
-    const profile = profileSchema.parse({ fields, origins: [...new Set(normalized)] });
+    const profile = profileSchema.parse({ fields, origins: [...new Set(normalized)], sensitive: sensitive ?? defaultSensitive(Object.keys(fields)) });
     const store = await readStore();
     store[name] = profile;
     await writeStore(store);
-    return { profile: name, fields: Object.keys(fields), origins: profile.origins };
+    return { profile: name, fields: Object.keys(fields), sensitive: profile.sensitive, origins: profile.origins };
 }
 
-export async function listProfiles(): Promise<{ name: string; fields: string[]; origins: string[] }[]> {
-    return Object.entries(await readStore()).map(([name, profile]) => ({ name, fields: Object.keys(profile.fields), origins: profile.origins }));
+export async function listProfiles(): Promise<{ name: string; fields: string[]; sensitive: string[]; origins: string[] }[]> {
+    return Object.entries(await readStore()).map(([name, profile]) => ({ name, fields: Object.keys(profile.fields), sensitive: sensitiveFields(profile), origins: profile.origins }));
 }
 
 export async function removeProfile(name: string): Promise<unknown> {
@@ -114,19 +132,21 @@ export async function resolveRunSecrets(refs: SecretRef[], baseUrl: string) {
     const store = await readStore();
     const secretEnv: Record<string, string> = {};
     const byRef: Record<string, string[]> = {};
+    const publicRefs: string[] = [];
     for (const ref of refs) {
         const profile = store[ref.profile];
         const value = profile?.fields[ref.field];
         if (value === undefined) throw new Error(`Credential field ${ref.profile}.${ref.field} is not configured`);
         secretEnv[secretEnvName(ref.profile, ref.field)] = value;
         byRef[ref.envName] = profile.origins.length ? profile.origins : [new URL(baseUrl).origin];
+        if (!sensitiveFields(profile).includes(ref.field)) publicRefs.push(ref.envName);
     }
-    return { secretEnv, secretOrigins: { defaultOrigins: [new URL(baseUrl).origin], byRef }, scrub: scrubber(store) };
+    return { secretEnv, secretOrigins: { defaultOrigins: [new URL(baseUrl).origin], byRef, publicRefs }, scrub: scrubber(store) };
 }
 
 export async function resolveRunnerSecrets(refs: SecretRef[], baseUrl: string, options: { command?: string; signal?: AbortSignal; allowedOrigins?: string[]; jobOrigins?: string[] } = {}) {
-    rememberEnvironmentSecrets();
     const store = await readStore();
+    rememberEnvironmentSecrets(store);
     const jobOrigins = options.jobOrigins ?? [httpTarget(baseUrl).origin];
     const sourceOrigins = (options.allowedOrigins ?? []).filter((origin) => jobOrigins.includes(origin));
     if (refs.length && !sourceOrigins.length) throw new CodedError("credentials", "Runner secret sources require locally configured --allow-origin values matching the job");
@@ -135,11 +155,11 @@ export async function resolveRunnerSecrets(refs: SecretRef[], baseUrl: string, o
         for (const profile of new Set(refs.filter((ref) => !process.env[secretEnvName(ref.profile, ref.field)]).map((ref) => ref.profile))) {
             const supplied = await providerProfile(options.command, profile, options.signal);
             provided.set(profile, supplied);
-            for (const value of Object.values(supplied.fields)) runnerSecretValues.add(value);
         }
     }
     const secretEnv: Record<string, string> = {};
     const byRef: Record<string, string[]> = {};
+    const publicRefs: string[] = [];
     for (const ref of refs) {
         const envName = secretEnvName(ref.profile, ref.field);
         const environment = process.env[envName] || undefined;
@@ -154,18 +174,22 @@ export async function resolveRunnerSecrets(refs: SecretRef[], baseUrl: string, o
             : profile?.origins ?? [];
         const origins = declaredOrigins.filter((origin) => sourceOrigins.includes(origin));
         if (!origins.length) throw new CodedError("credentials", `Credential profile ${ref.profile} needs explicit origins matching this job; set ${secretEnvName(ref.profile, "ORIGINS")}, return provider origins, or configure credentials add ${ref.profile} --origin <allowed-origin>`);
-        runnerSecretValues.add(value);
+        const sensitive = provider !== undefined && supplied?.sensitive
+            ? supplied.sensitive.includes(ref.field)
+            : profile && Object.hasOwn(profile.fields, ref.field)
+                ? sensitiveFields(profile).includes(ref.field) : isSensitiveByDefault(ref.field);
+        if (sensitive) runnerSecretValues.add(value);
+        else publicRefs.push(ref.envName);
         secretEnv[envName] = value;
         byRef[ref.envName] = origins;
     }
-    return { secretEnv, secretOrigins: { defaultOrigins: sourceOrigins, byRef }, scrub: scrubber(store) };
+    return { secretEnv, secretOrigins: { defaultOrigins: sourceOrigins, byRef, publicRefs }, scrub: scrubber(store) };
 }
 
 function textScrubber(store: Store): (text: string) => string {
-    rememberEnvironmentSecrets();
-    // Profile and field names are chosen by the user and shown everywhere; a value equal to one is not hidden.
-    const names = new Set([...Object.keys(store), ...Object.values(store).flatMap((profile) => Object.keys(profile.fields))]);
-    const values = [...new Set([...Object.values(store).flatMap((profile) => Object.values(profile.fields)), ...runnerSecretValues])].filter((value) => !names.has(value));
+    rememberEnvironmentSecrets(store);
+    const fields = Object.values(store).flatMap((profile) => sensitiveFields(profile).flatMap((field) => Object.hasOwn(profile.fields, field) ? [profile.fields[field]] : []));
+    const values = [...new Set([...fields, ...runnerSecretValues])];
     const variants = [...new Set(values.flatMap((value) => {
         const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         return [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1), escaped, escaped.replace(/"/g, "&quot;").replace(/'/g, "&#39;"), escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;")];
@@ -175,15 +199,7 @@ function textScrubber(store: Store): (text: string) => string {
 
 function scrubber(store: Store): (text: string) => string {
     const replace = textScrubber(store);
-    const visit = (value: unknown): unknown => {
-        if (typeof value === "string") return replace(value);
-        if (Array.isArray(value)) return value.map(visit);
-        if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item)]));
-        return value;
-    };
-    return (text) => {
-        try { return JSON.stringify(visit(JSON.parse(text))); } catch { return replace(text); }
-    };
+    return (text) => scrubJsonText(text, replace);
 }
 
 export async function scrub(text: string): Promise<string> {

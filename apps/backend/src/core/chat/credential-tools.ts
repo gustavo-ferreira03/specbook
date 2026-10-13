@@ -9,12 +9,13 @@ import {
     classifyOtpControls,
     fillFunction,
     inspectionFunction,
+    loginFieldKeys,
     parsePageControls,
     selectLoginFills,
     selectOtpFills,
     type ControlFill,
 } from "../credentials/login-classifier";
-import { getProfileByName, IDENTIFIER_FIELD, listPublicProfiles } from "../credentials/profiles";
+import { getProfileByName, listPublicProfiles, publicProfile } from "../credentials/profiles";
 import { resolveCredentialProfile } from "../credentials/resolve";
 import { createSecretScrubber, registerTransientSecret } from "../credentials/scrub";
 import { generateTotp } from "../credentials/totp";
@@ -41,8 +42,8 @@ const vaultOptionalHandleSchema = z.object({ handle: z.string().optional() });
 const vaultSaveLoginSchema = z.object({ label: z.string().optional(), replace: z.boolean().optional() });
 
 const LOGIN_FIELDS: CredentialRequestField[] = [
-    { key: "username", label: "Email or username" },
-    { key: "password", label: "Password" },
+    { key: "username", label: "Email or username", sensitive: false },
+    { key: "password", label: "Password", sensitive: true },
 ];
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -56,17 +57,15 @@ function text(value: string) {
 
 const json = (value: unknown) => text(JSON.stringify(value));
 
-export function loginFieldKeys(keys: string[]): { identifier?: string; password?: string; totp?: string } {
-    const password = keys.find((key) => /pass|senha|pwd/.test(key));
-    const totp = keys.find((key) => /^(totp|otp|2fa|mfa|authenticator)/.test(key));
-    const rest = keys.filter((key) => key !== password && key !== totp);
-    const identifier = rest.find((key) => /^(username|user|email|login|identifier|phone|cpf|usuario)/.test(key))
-        ?? (password && rest.length === 1 ? rest[0] : undefined);
-    return { identifier, password, totp };
+function publicFields(profile: CredentialProfileRow) {
+    return publicProfile(profile).fields;
 }
 
-export function identifierType(identifier: string): "email" | "phone" | "username" {
-    return identifier.includes("@") ? "email" : /^\+?[\d\s()-]+$/.test(identifier) ? "phone" : "username";
+function publicLoginFields(profile: CredentialProfileRow) {
+    const keys = loginFieldKeys(profile.fields.map((field) => field.key));
+    return publicFields(profile).filter((field) => field.key === keys.identifier || field.key === keys.password)
+        .flatMap((field) => field.sensitive ? [] : [{ key: field.key, value: field.value, type: field.key === keys.password ? "password"
+            : field.value.includes("@") ? "email" : /^\+?[\d\s()-]+$/.test(field.value) ? "phone" : "username" }]);
 }
 
 function handleFor(label: string, origin: string): string {
@@ -178,8 +177,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
         if (typeof resolved === "string") return { success: false, error: `${resolved} Use browser_vault_list.` };
         const { profile } = resolved;
         const keys = loginFieldKeys(profile.fields.map((field) => field.key));
-        const identifierField = profile.identifier === null ? keys.identifier : undefined;
-        if (!keys.password && !identifierField) {
+        if (!keys.password && !keys.identifier) {
             return { success: false, error_type: "not_a_login", error: `Vault item "${handle}" holds no login. Use fill_secret for its fields.` };
         }
         const origin = await activeOrigin(signal);
@@ -188,18 +186,23 @@ export function createCredentialTools(options: CredentialToolOptions) {
             return { success: false, error_type: "origin_mismatch",
                 error: `Refused: current page origin (${origin}) does not match the vault item's bound origin(s) (${[...resolved.allowed].join(", ")}). Vault fills only run on the exact origin(s) the credential was saved for.` };
         }
+        const loginFields = publicLoginFields(profile);
         const value = (key?: string) => {
-            const stored = key ? profile.fields.find((field) => field.key === key)?.value : undefined;
-            return stored ? decryptSecret(stored) : undefined;
+            const field = key ? profile.fields.find((item) => item.key === key) : undefined;
+            return field?.sensitive !== false && field?.value ? decryptSecret(field.value) : undefined;
         };
-        const values = { identifier: value(identifierField), password: value(keys.password) };
+        const values = { identifier: value(keys.identifier), password: value(keys.password) };
+        if (!values.identifier && !values.password) {
+            return { success: true, filled_fields: 0, kind: "login", origin, login_fields: loginFields,
+                next: "Type the non-sensitive login fields, then submit." };
+        }
         const mask = createSecretScrubber(Object.values(values).filter((item): item is string => Boolean(item)));
         try {
             const outcome = await fillPage(origin, (controls) => {
                 const fills = selectLoginFills(controls, values);
                 if (fills.length > 0) return fills;
-                return profile.identifier
-                    ? "No password field on this page. If it asks for the email or username first, type the identifier, continue to the password step, then call browser_vault_fill again."
+                return loginFields.length > 0
+                    ? "No sensitive login field on this page. Type the non-sensitive login fields, continue, then call browser_vault_fill again."
                     : "No login form fields were found on the current page.";
             }, signal);
             if ("error" in outcome) return { success: false, error_type: outcome.errorType, error: mask(await options.scrub(outcome.error)) };
@@ -210,11 +213,11 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 filled_fields: outcome.filled,
                 kind: "login",
                 origin,
-                next: passwordFilled
+                next: passwordFilled || !values.password
                     ? `Submit. If the site then asks for a verification code, call browser_vault_enter_code with this handle${twoFactor}.`
-                    : profile.identifier
-                        ? "No password field on this page: type the identifier, continue to the password step, then call browser_vault_fill again."
-                        : "Only the identifier was on this page. Continue to the password step, then call browser_vault_fill again.",
+                    : loginFields.length > 0
+                        ? "Type the non-sensitive login fields, continue to the password step, then call browser_vault_fill again."
+                        : "Only the username or email field was on this page. Continue to the password step, then call browser_vault_fill again.",
             };
         } catch (error) {
             signal?.throwIfAborted();
@@ -227,7 +230,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "browser_vault_list",
             label: "browser_vault_list",
             description:
-                "List saved logins (handle, label, bound origin, identifier to type, 2FA mode) and other stored secrets. Never returns passwords or secret values.",
+                "List saved credential fields, login handles, bound origins and 2FA mode. Non-sensitive values are visible; sensitive values are never returned. Type login_fields with browser_type, then use browser_vault_fill.",
             parameters: Type.Unsafe(z.object({}).toJSONSchema()),
             async execute(_id, _params, signal) {
                 const profiles = await listPublicProfiles(options.projectId);
@@ -237,8 +240,8 @@ export function createCredentialTools(options: CredentialToolOptions) {
                     const { profile, allowed } = resolved;
                     const keys = loginFieldKeys(profile.fields.map((field) => field.key));
                     const origins = [...allowed];
-                    if (!keys.password && !profile.identifier) {
-                        return { handle: item.name, kind: "secret", origin: origins[0], fields: profile.fields.filter((field) => field.value !== "").map((field) => field.key) };
+                    if (!keys.password && !keys.identifier) {
+                        return { handle: item.name, kind: "secret", origin: origins[0], fields: publicFields(profile) };
                     }
                     return {
                         handle: item.name,
@@ -246,9 +249,8 @@ export function createCredentialTools(options: CredentialToolOptions) {
                         label: item.name,
                         origin: origins[0],
                         ...(origins.length > 1 ? { allowed_origins: origins } : {}),
-                        ...(profile.identifier
-                            ? { identifier: profile.identifier, identifier_type: identifierType(profile.identifier) }
-                            : { identifier: "encrypted: browser_vault_fill enters it", spec_fields: profile.fields.map((field) => field.key) }),
+                        fields: publicFields(profile),
+                        login_fields: publicLoginFields(profile),
                         two_factor: keys.totp ? "automatic" : "the user is asked for the code",
                     };
                 }));
@@ -266,7 +268,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "browser_vault_save_login",
             label: "browser_vault_save_login",
             description:
-                "Ask the user to save the login for the current login page through a masked form in this chat. Specbook stores it for that origin and fills the password; you get the handle and the identifier. A login already saved for the site is reused; pass replace: true only to correct it after a failed login. label (default: site name) distinguishes roles. save_declined: stop asking this turn and tell the user they can retry or add it in Settings → Credentials.",
+                "Ask the user to save a login through the secure form in this chat. Username is non-sensitive; password is sensitive. The login is bound to the page's origin. Saved logins are reused; replace: true corrects a failed login. label distinguishes roles. save_declined: stop asking this turn; the user can retry or add it in Settings → Credentials.",
             parameters: Type.Unsafe<z.infer<typeof vaultSaveLoginSchema>>(vaultSaveLoginSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();
@@ -278,7 +280,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 const existing = await resolveProfile(handle);
                 if (!params.replace && typeof existing !== "string" && existing.allowed.has(origin) && loginFieldKeys(existing.profile.fields.map((field) => field.key)).password) {
                     return json({ success: true, already_saved: true, handle, origin,
-                        ...(existing.profile.identifier ? { identifier: existing.profile.identifier, identifier_type: identifierType(existing.profile.identifier) } : {}),
+                        login_fields: publicLoginFields(existing.profile),
                         next: "A login is already saved for this site. On the login page, use browser_vault_fill with this handle. Pass replace: true only to correct it after a failed login." });
                 }
                 const outcome = await waitForUser("login", handle, LOGIN_FIELDS, origin, signal);
@@ -289,16 +291,16 @@ export function createCredentialTools(options: CredentialToolOptions) {
                     return json({ success: false, error_type: "timeout", error: "The user has not submitted the login form yet. Tell them it is waiting in the chat, or call browser_vault_save_login again when they are ready." });
                 }
                 const saved = await getProfileByName(options.projectId, handle);
-                const identifier = saved?.identifier ?? null;
+                const loginFields = saved ? publicLoginFields(saved) : [];
                 const fill = await vaultFill(handle, signal);
                 return json({
                     success: true,
                     handle,
                     origin,
-                    ...(identifier ? { identifier, identifier_type: identifierType(identifier) } : {}),
+                    login_fields: loginFields,
                     fill,
-                    next: identifier
-                        ? "Type the identifier into the username field if the form has one, then submit."
+                    next: loginFields.length > 0
+                        ? "Type the non-sensitive login fields if the form has them, then submit."
                         : "Submit the form.",
                 });
             },
@@ -307,7 +309,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "browser_vault_fill",
             label: "browser_vault_fill",
             description:
-                "Enter the password from a vault handle into the current page after you typed the identifier. Refused unless the page origin matches the handle's bound origin. Submit the form yourself.",
+                "Enter sensitive login fields from a vault handle after you typed its non-sensitive login_fields. Refused unless the page origin matches the handle's bound origin. Submit the form yourself.",
             parameters: Type.Unsafe<z.infer<typeof vaultHandleSchema>>(vaultHandleSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();
@@ -372,7 +374,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
             name: "fill_secret",
             label: "fill_secret",
             description:
-                `Type one stored secret the vault cannot place, such as an API token or a custom field, into an element from the latest browser_snapshot (element and target as for browser_type). Only on the secret's allowed origins. For sign-in forms use browser_vault_fill; a login's "${IDENTIFIER_FIELD}" is not secret, so type it with browser_type.`,
+                "Type a stored field the vault cannot place, such as an API token or a custom field, into an element from the latest browser_snapshot. Only on its allowed origins. For sign-ins use browser_vault_fill for sensitive fields; type non-sensitive values from browser_vault_list with browser_type.",
             parameters: Type.Unsafe<z.infer<typeof fillSecretSchema>>(fillSecretSchema.toJSONSchema()),
             async execute(_id, params, signal) {
                 signal?.throwIfAborted();

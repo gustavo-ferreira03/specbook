@@ -7,7 +7,7 @@
         "browser:install": "node scripts/install-browsers.mjs",
         "browser:install:docker": "node scripts/install-browsers.mjs --with-deps",
         "db:generate": "drizzle-kit generate",
-        "db:migrate": "drizzle-kit migrate",
+        "db:migrate": "node --import tsx scripts/migrate.mjs",
         "start": "node dist/index.js",
         "test": "node --import tsx --test \"test/**/*.test.ts\"",
         "typecheck": "tsc --noEmit",

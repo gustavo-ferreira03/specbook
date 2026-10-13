@@ -30,7 +30,7 @@ export function createSetupRouter(): Hono {
         try {
             await createProfile(project.id, {
                 name: "demo", allowedOrigins: ["https://www.saucedemo.com"],
-                fields: [{ key: "username", value: "standard_user" }, { key: "password", value: "secret_sauce" }],
+                fields: [{ key: "username", value: "standard_user", sensitive: false }, { key: "password", value: "secret_sauce", sensitive: true }],
             });
         } catch (error) {
             await deleteProjectData(project.id);

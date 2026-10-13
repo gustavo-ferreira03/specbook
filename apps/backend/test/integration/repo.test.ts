@@ -416,7 +416,7 @@ describe("first-run setup", () => {
     test("demo creates an ordinary project with public credentials and discovery requires a connected model", async () => {
         const setup = await setupApp();
         const { settingsRepository } = await import("../../src/infra/repositories/settings");
-        const { listSecretValues } = await import("../../src/core/credentials/profiles");
+        const { listCredentialValues, listSecretValues } = await import("../../src/core/credentials/profiles");
         const { projectContextsRepository } = await import("../../src/infra/repositories/project-contexts");
         const { chatsRepository } = await import("../../src/infra/repositories/chats");
         await settingsRepository.updateLlmSettings({ provider: "", model: "" });
@@ -429,9 +429,10 @@ describe("first-run setup", () => {
         const { project } = await response.json();
         assert.equal(project.baseUrl, "https://www.saucedemo.com");
         assert.equal(await repoBare.bareExists(project.id), true);
-        assert.deepEqual((await listSecretValues(project.id)).map(({ field, value }) => ({ field, value })), [
+        assert.deepEqual((await listCredentialValues(project.id)).map(({ field, value }) => ({ field, value })), [
             { field: "username", value: "standard_user" }, { field: "password", value: "secret_sauce" },
         ]);
+        assert.deepEqual((await listSecretValues(project.id)).map(({ field }) => field), ["password"]);
         assert.deepEqual(await chatsRepository.listChatRows(project.id), []);
         const discovery = await setup.request(`/projects/${project.id}/context-discoveries`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
         assert.equal(discovery.status, 409);
@@ -1819,6 +1820,94 @@ describe("repository recovery", () => {
 });
 
 describe("encrypted credentials and operations", () => {
+    test("credential fields expose only public values and retain encrypted values while renaming", async () => {
+        const { createCredentialsRouter } = await import("../../src/infra/web/routes/credentials");
+        const { credentialsRepository } = await import("../../src/infra/repositories/credentials");
+        const { decryptSecret } = await import("../../src/core/credentials/crypto");
+        const { projectSecretScrubber, registerTransientSecret } = await import("../../src/core/credentials/scrub");
+        const projectId = await createProject("Credential field flags");
+        const credentials = new Hono();
+        credentials.use("*", async (c, next) => {
+            c.set("user", { id: "credential-admin", email: "admin@example.com", name: "Admin", role: "admin", passwordHash: null, disabledAt: null, createdAt: "", updatedAt: "" });
+            await next();
+        });
+        credentials.onError((error, c) => error instanceof HTTPException ? c.json({ error: error.message }, error.status) : c.json({ error: String(error) }, 500));
+        credentials.route("/", createCredentialsRouter());
+        const request = (method: string, url: string, body?: unknown) => credentials.request(url, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+        const created = await request("POST", `/projects/${projectId}/credentials`, { name: "account", fields: [
+            { key: "username", value: "visible-user" },
+            { key: "password", value: "hidden-password" },
+            { key: "token", value: "visible-token", sensitive: false },
+        ] });
+        assert.equal(created.status, 200);
+        const { profile } = await created.json();
+        assert.equal("identifier" in profile, false);
+        assert.deepEqual(profile.fields, [
+            { key: "username", sensitive: false, value: "visible-user" },
+            { key: "password", sensitive: true, hasValue: true },
+            { key: "token", sensitive: false, value: "visible-token" },
+        ]);
+        const stored = (await credentialsRepository.getProfile(profile.id))!;
+        assert.ok(stored.fields.every((field) => field.value.startsWith("v1:")));
+        assert.doesNotMatch(JSON.stringify(stored), /visible-user|hidden-password|visible-token/);
+        const changed = await request("PUT", `/credentials/${profile.id}`, { fields: [
+            { key: "email", previousKey: "username", sensitive: false, value: "edited@example.com" },
+            { key: "api-password", previousKey: "password", sensitive: true },
+            { key: "token", sensitive: true },
+        ] });
+        assert.equal(changed.status, 200);
+        assert.deepEqual((await changed.json()).profile.fields, [
+            { key: "email", sensitive: false, value: "edited@example.com" },
+            { key: "api-password", sensitive: true, hasValue: true },
+            { key: "token", sensitive: true, hasValue: true },
+        ]);
+        assert.equal(decryptSecret((await credentialsRepository.getProfile(profile.id))!.fields[1].value), "hidden-password");
+        assert.equal((await projectSecretScrubber(projectId))("edited@example.com hidden-password visible-token"), "edited@example.com •••• ••••");
+        registerTransientSecret(projectId, "edited@example.com");
+        assert.equal((await projectSecretScrubber(projectId))("edited@example.com"), "edited@example.com");
+        assert.equal((await request("POST", `/projects/${projectId}/credentials`, { name: "duplicate", fields: [{ key: "password", value: "one" }, { key: "password", value: "two" }] })).status, 400);
+        assert.equal((await request("POST", `/projects/${projectId}/credentials`, { name: "empty", fields: [] })).status, 400);
+        const visible = await request("PUT", `/credentials/${profile.id}`, { fields: [{ key: "password", previousKey: "api-password", sensitive: false }] });
+        assert.equal(visible.status, 200);
+        assert.deepEqual((await visible.json()).profile.fields, [{ key: "password", sensitive: false, value: "hidden-password" }]);
+    });
+
+    test("startup encrypts legacy identifiers as public username fields before removing the column", { timeout: 30_000 }, async () => {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const { backendRoot } = await import("../../src/core/paths");
+        const directory = tempDir("specbook-credential-migration-");
+        const migrations = path.join(directory, "drizzle");
+        await fs.cp(path.join(backendRoot, "drizzle"), migrations, { recursive: true });
+        const journalPath = path.join(migrations, "meta", "_journal.json");
+        const journal = JSON.parse(await fs.readFile(journalPath, "utf8"));
+        journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 43);
+        await fs.writeFile(journalPath, JSON.stringify(journal));
+        const environment = { ...process.env, SPECBOOK_STORAGE_DIR: path.join(directory, "storage"), SPECBOOK_ENCRYPTION_KEY: "", SPECBOOK_ENCRYPTION_KEY_FILE: "" };
+        const setup = `
+            const {runMigrations}=await import('./src/infra/db/migrate.ts'); await runMigrations();
+            const {projectsRepository}=await import('./src/infra/repositories/projects.ts'); const p=await projectsRepository.createProject('Old credentials','https://example.com');
+            const {db}=await import('./src/infra/db/client.ts'); const {sql}=await import('drizzle-orm'); const {encryptSecret}=await import('./src/core/credentials/crypto.ts');
+            const fields=JSON.stringify([{key:'password',value:encryptSecret('legacy-password')}]);
+            await db.run(sql\`INSERT INTO credential_profiles (id,project_id,name,allowed_origins,fields,identifier,created_at,updated_at) VALUES ('legacy',\${p.id},'legacy','[]',\${fields},'legacy-user','2026-10-13','2026-10-13')\`);
+        `;
+        const exec = promisify(execFile);
+        await exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", setup], { cwd: backendRoot, env: { ...environment, SPECBOOK_MIGRATIONS_DIR: migrations } });
+        const verify = `
+            import assert from 'node:assert/strict';
+            const {runMigrations}=await import('./src/infra/db/migrate.ts'); await runMigrations();
+            const {db}=await import('./src/infra/db/client.ts'); const {sql}=await import('drizzle-orm');
+            assert.equal((await db.all(sql\`PRAGMA table_info(credential_profiles)\`)).some(column=>column.name==='identifier'),false);
+            const {credentialsRepository}=await import('./src/infra/repositories/credentials.ts'); const row=await credentialsRepository.getProfile('legacy');
+            const {publicProfile,resolveSecretEnv}=await import('./src/core/credentials/profiles.ts');
+            assert.deepEqual(publicProfile(row).fields,[{key:'username',sensitive:false,value:'legacy-user'},{key:'password',sensitive:true,hasValue:true}]);
+            assert.ok(row.fields.every(field=>field.value.startsWith('v1:')));
+            assert.deepEqual((await resolveSecretEnv(row.projectId,['SPECBOOK_SECRET_LEGACY_USERNAME','SPECBOOK_SECRET_LEGACY_PASSWORD'])).publicRefs,['SPECBOOK_SECRET_LEGACY_USERNAME']);
+            await runMigrations(); assert.deepEqual((await credentialsRepository.getProfile('legacy')).fields,row.fields);
+        `;
+        await exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", verify], { cwd: backendRoot, env: environment });
+    });
+
     test("rotates every stored secret and restores an independent backup", { timeout: 60_000 }, async () => {
         const { execFile } = await import("node:child_process");
         const { promisify } = await import("node:util");
@@ -1966,6 +2055,11 @@ describe("accounts, roles and session security", () => {
         const viewer = await invite("viewer");
         const editor = await invite("editor");
         assert.equal((await call("GET", "/projects", undefined, viewer.cookie)).status, 200);
+        const missingReplay = "/runs/00000000-0000-4000-8000-000000000000/replay";
+        assert.equal((await call("GET", missingReplay, undefined, "")).status, 401);
+        const viewerReplay = await call("GET", missingReplay, undefined, viewer.cookie);
+        assert.equal(viewerReplay.status, 404, "viewers reach the replay artifact handler");
+        assert.equal((await viewerReplay.json()).error, "Run not found");
         assert.equal((await call("POST", "/projects", { name: "Forbidden", baseUrl: "https://example.com" }, viewer.cookie)).status, 403);
         assert.equal((await call("GET", "/settings/members", undefined, viewer.cookie)).status, 403);
         assert.equal((await call("GET", "/settings/llm", undefined, editor.cookie)).status, 403);

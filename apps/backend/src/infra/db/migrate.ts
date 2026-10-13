@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db, initializeDatabase } from "./client";
+import { migrateCredentialFields } from "../../core/credentials/migration";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,5 +21,7 @@ function migrationsFolder(): string {
 
 export async function runMigrations(): Promise<void> {
     await initializeDatabase();
+    // Encrypt legacy usernames before the schema migration removes their plaintext column.
+    await migrateCredentialFields();
     await migrate(db, { migrationsFolder: migrationsFolder() });
 }

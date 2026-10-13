@@ -1,0 +1,1 @@
+ALTER TABLE `credential_profiles` DROP COLUMN `identifier`;

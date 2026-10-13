@@ -32,6 +32,15 @@ const TEL = /\b(?:phone|telephone|mobile|celular|telefone)\b/;
 const USERNAME = /\b(?:user\s*name|username|login|account|member|usuario|cpf)\b/;
 const OTP = /\b(?:one\s?time|verification|verificacao|security|seguranca|auth(?:entication|enticator)?|2fa|two\s?factor|mfa|totp|otp|passcode|sms)\b.*\b(?:code|codigo|pin|token)\b|\b(?:otp|totp|2fa|mfa|verification\s*code|codigo\s*de\s*verificacao|passcode)\b/;
 
+export function loginFieldKeys(keys: string[]): { identifier?: string; password?: string; totp?: string } {
+    const password = keys.find((key) => /pass|senha|pwd/.test(key));
+    const totp = keys.find((key) => /^(totp|otp|2fa|mfa|authenticator)/.test(key));
+    const rest = keys.filter((key) => key !== password && key !== totp);
+    const identifier = rest.find((key) => /^(username|user|email|login|identifier|phone|cpf|usuario)/.test(key))
+        ?? (password && rest.length === 1 ? rest[0] : undefined);
+    return { identifier, password, totp };
+}
+
 function normalize(value: string): string {
     return value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
