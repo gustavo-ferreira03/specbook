@@ -34,13 +34,28 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         // Recording starts on the blank tab; start the replay at the first real page and keep step markers from before it.
         const page = recorded.findIndex((event) => event.type === 4 && /^https?:/.test(event.data?.href || ''));
         const snapshot = page < 0 ? -1 : recorded.findIndex((event, index) => index > page && event.type === 2);
-        const events = snapshot < 0 ? recorded : [
+        const trimmed = snapshot < 0 ? recorded : [
           ...recorded.slice(page, snapshot + 1),
           ...recorded.slice(0, page).filter((event) => event.type === 5).map((event) => ({ ...event, timestamp: recorded[snapshot].timestamp })),
           ...recorded.slice(snapshot + 1),
         ];
-        if (!events) throw new Error('invalid recording');
-        const first = events[0].timestamp;
+        if (!trimmed) throw new Error('invalid recording');
+        // The page snapshot is often empty until the app renders; collapse the time before its first drawn frame so every replay opens on it at 00:00.
+        const fullSnapshot = trimmed.findIndex((event) => event.type === 2);
+        const drawsContent = (node) => (node.type === 3 && node.textContent?.trim()) || (node.type === 2 && /^(img|svg|input|button|canvas|video)$/.test(node.tagName));
+        const mutations = trimmed.filter((event, index) => index > fullSnapshot && event.type === 3 && event.data?.source === 0 && event.data.adds?.length);
+        // Frameworks add invisible nodes (e.g. Next's route announcer) before the page renders.
+        const drawn = mutations.find((event) => event.data.adds.some((add) => drawsContent(add.node))) || mutations[0];
+        // Let images and loading states settle briefly so the opening frame isn't mid-render.
+        let firstFrame = drawn;
+        for (let index = trimmed.indexOf(drawn) + 1; drawn && index < trimmed.length; index++) {
+          const event = trimmed[index];
+          if (event.type === 2 || event.type === 4 || event.timestamp > drawn.timestamp + 100) break;
+          if (event.type === 3 && event.data?.source === 0) firstFrame = event;
+        }
+        const opening = firstFrame?.timestamp ?? trimmed[0].timestamp;
+        const events = trimmed.map((event) => event.timestamp < opening ? { ...event, timestamp: opening } : event);
+        const first = opening;
         const markers = new Map();
         const tags = {};
         // One marker per step, at its start and colored by its outcome; end markers would overlap the next step's start.
@@ -98,20 +113,7 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
           event.preventDefault();
           player.goto(Math.max(0, Math.min(total, next)), false);
         });
-        // The page snapshot is often empty until the app renders; open paused on its first drawn frame.
-        const start = events.findIndex((event) => event.type === 2);
-        const drawsContent = (node) => (node.type === 3 && node.textContent?.trim()) || (node.type === 2 && /^(img|svg|input|button|canvas|video)$/.test(node.tagName));
-        const mutations = events.filter((event, index) => index > start && event.type === 3 && event.data?.source === 0 && event.data.adds?.length);
-        // Frameworks add invisible nodes (e.g. Next's route announcer) before the page renders.
-        const drawn = mutations.find((event) => event.data.adds.some((add) => drawsContent(add.node))) || mutations[0];
-        // Let images and loading states settle briefly so the opening frame isn't mid-render.
-        let firstFrame = drawn;
-        for (let index = events.indexOf(drawn) + 1; drawn && index < events.length; index++) {
-          const event = events[index];
-          if (event.type === 2 || event.type === 4 || event.timestamp > drawn.timestamp + 100) break;
-          if (event.type === 3 && event.data?.source === 0) firstFrame = event;
-        }
-        const firstOffset = firstFrame ? firstFrame.timestamp - first + 1 : 0;
+        const firstOffset = 1;
         let moved = false;
         player.addEventListener('ui-update-player-state', (event) => { if (event.payload === 'playing') moved = true; });
         // rrweb-player only seeks on click; dragging the handle scrubs, then resumes if it was playing.
@@ -177,6 +179,18 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         progress.addEventListener('pointercancel', release);
         const showFirstFrame = () => { if (!moved && player.getReplayer().getCurrentTime() < firstOffset) player.goto(firstOffset, false); };
         showFirstFrame();
+        // Signal that this is playable media: a play button over the frame until it plays, and again at the end.
+        const cover = document.createElement('button');
+        cover.type = 'button';
+        cover.className = 'replay-start';
+        cover.setAttribute('aria-label', 'Play replay');
+        cover.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>';
+        target.querySelector('.rr-player__frame').append(cover);
+        const ended = () => player.getReplayer().getCurrentTime() >= total - 100;
+        const syncCover = () => { cover.hidden = playing || (moved && !ended()); };
+        cover.addEventListener('click', () => { if (ended()) player.goto(0, true); else player.play(); });
+        player.addEventListener('ui-update-player-state', syncCover);
+        player.addEventListener('ui-update-current-time', syncCover);
         replay.querySelector('.replay-status').hidden = true;
         const resize = () => {
           const nextWidth = Math.floor(target.getBoundingClientRect().width);
