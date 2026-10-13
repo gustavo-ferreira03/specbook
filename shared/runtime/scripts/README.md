@@ -1,8 +1,8 @@
 # Report font
 
 The report uses Recursive at weights 400, 500, 600 and 700, with `CASL=0.35`.
-Its original Latin font already has `MONO=0` and an upright shape; `MONO`, `slnt`
-and `CRSV` are not variable in that file. Report paths, times and code use system
+Its original Latin font already fixes `MONO=0`, `slnt=0` and `CRSV=0.5`; only
+`CASL` and `wght` are variable. Report paths, times and code use system
 monospace fonts. The wordmark's Geist bold asset stays unchanged.
 
 `regenerate-report-font.py` pins CASL and keeps only the weight range 400–700.
