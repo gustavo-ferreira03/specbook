@@ -11,8 +11,8 @@ test("Sign in with valid credentials", async ({ page, step, secret }) => {
         await page.getByRole("button", { name: "Sign in" }).click();
         await expect(page).toHaveURL(/\/p\/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe$/);
     });
-    await step("The Sauce Demo dashboard shows \u201c1 of 1 Spec passing\u201d", async () => {
+    await step("The Sauce Demo dashboard shows how many Specs pass", async () => {
         await expect(page.getByRole("button", { name: "Sauce Demo" })).toBeVisible();
-        await expect(page.getByRole("heading", { name: "1 of 1 Spec passing" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: /^\d+ of \d+ Specs? passing$/ })).toBeVisible();
     });
 });

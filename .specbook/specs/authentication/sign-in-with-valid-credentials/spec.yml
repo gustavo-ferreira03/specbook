@@ -5,5 +5,5 @@ preconditions: []
 steps:
 - Open the Specbook sign-in page
 - Sign in with the administrator email and password
-expectedResult: The Sauce Demo dashboard shows “1 of 1 Spec passing”
+expectedResult: The Sauce Demo dashboard shows how many Specs pass
 postconditions: []

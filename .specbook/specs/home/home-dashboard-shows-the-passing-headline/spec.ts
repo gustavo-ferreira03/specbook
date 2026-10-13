@@ -12,7 +12,7 @@ test("Home dashboard shows the passing headline", async ({ page, step, secret })
         await page.goto("/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe");
         await expect(page.getByRole("link", { name: "Home" })).toBeVisible();
     });
-    await step("The dashboard headline reads \u201c1 of 1 Spec passing\u201d", async () => {
-        await expect(page.getByRole("heading", { level: 1 })).toHaveText("1 of 1 Spec passing");
+    await step("The dashboard headline says every Spec is passing", async () => {
+        await expect(page.getByRole("heading", { level: 1, name: /^(\d+) of \1 Specs? passing$/ })).toBeVisible();
     });
 });

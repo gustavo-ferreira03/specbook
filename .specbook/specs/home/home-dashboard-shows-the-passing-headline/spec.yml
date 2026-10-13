@@ -4,5 +4,5 @@ preconditions:
 - Signed in as the Specbook administrator
 steps:
 - Open the project Home dashboard
-expectedResult: The dashboard headline reads “1 of 1 Spec passing”
+expectedResult: The dashboard headline says every Spec is passing
 postconditions: []

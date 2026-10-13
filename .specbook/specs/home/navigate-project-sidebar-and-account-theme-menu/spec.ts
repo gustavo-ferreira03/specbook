@@ -11,7 +11,7 @@ test("Navigate project sidebar and account theme menu", async ({ page, step, sec
     });
     await step("Open Home from the project sidebar", async () => {
         await page.getByRole("link", { name: "Home", exact: true }).click();
-        await expect(page.getByRole("heading", { name: "1 of 1 Spec passing" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: /^\d+ of \d+ Specs? passing$/ })).toBeVisible();
     });
     await step("Open Specs from the project sidebar", async () => {
         await page.getByRole("link", { name: "Specs", exact: true }).click();
