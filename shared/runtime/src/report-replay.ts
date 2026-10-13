@@ -100,7 +100,17 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         });
         // The page snapshot is often empty until the app renders; open paused on its first drawn frame.
         const start = events.findIndex((event) => event.type === 2);
-        const firstFrame = events.find((event, index) => index > start && event.type === 3 && event.data?.source === 0 && event.data.adds?.length);
+        const drawsContent = (node) => (node.type === 3 && node.textContent?.trim()) || (node.type === 2 && /^(img|svg|input|button|canvas|video)$/.test(node.tagName));
+        const mutations = events.filter((event, index) => index > start && event.type === 3 && event.data?.source === 0 && event.data.adds?.length);
+        // Frameworks add invisible nodes (e.g. Next's route announcer) before the page renders.
+        const drawn = mutations.find((event) => event.data.adds.some((add) => drawsContent(add.node))) || mutations[0];
+        // Let images and loading states settle briefly so the opening frame isn't mid-render.
+        let firstFrame = drawn;
+        for (let index = events.indexOf(drawn) + 1; drawn && index < events.length; index++) {
+          const event = events[index];
+          if (event.type === 2 || event.type === 4 || event.timestamp > drawn.timestamp + 100) break;
+          if (event.type === 3 && event.data?.source === 0) firstFrame = event;
+        }
         const firstOffset = firstFrame ? firstFrame.timestamp - first + 1 : 0;
         let moved = false;
         player.addEventListener('ui-update-player-state', (event) => { if (event.payload === 'playing') moved = true; });
