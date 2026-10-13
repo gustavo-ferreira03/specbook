@@ -19,6 +19,7 @@ import { resolveSecretEnv } from "../credentials/profiles";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { acquireSpecLocks, ResourceBusyError, withSpecLock } from "../specs/lifecycle";
 import { runPlaywrightSuite } from "@specbook/runtime/playwright";
+import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { withRunSlot } from "@specbook/runtime/process";
 import { analyzeForRun, MAX_FAIL_REASON_CHARS, MAX_FAILED_STEP_CHARS, RUN_TIMEOUT_MS, StaleRunError, type ExecutedRun, type RunOptions } from "./execution";
 import { resolveSecretOriginPolicy, type SecretOriginPolicy } from "./secrets";
@@ -266,7 +267,8 @@ async function executeBatch(
                 proxyServer: tunnelProxy?.server,
                 directory,
                 baseUrl,
-                specs: prepared.map((entry) => ({ key: entry.run.id, source: entry.testSource, analysis: entry.analysis, outputDir: path.join(runsDir, entry.run.id) })),
+                specs: prepared.map((entry) => ({ key: entry.run.id, source: entry.testSource, analysis: entry.analysis,
+                    humanSpec: parseSpecYaml(entry.markdown).humanSpec, outputDir: path.join(runsDir, entry.run.id) })),
                 timeoutMs: timeout,
                 secretEnv: secrets.env,
                 secretOrigins: secrets.origins,

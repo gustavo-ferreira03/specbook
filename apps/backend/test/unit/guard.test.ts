@@ -25,6 +25,12 @@ interface Call {
 
 function fakePage(options: { url?: string; frameOfElement?: "main" | "child"; activeIframe?: boolean } = {}) {
     const calls: Call[] = [];
+    const marks: { target: string; kind: string; value: string }[] = [];
+    const element = (target: string) => ({
+        tagName: "INPUT",
+        classList: { add: (value: string) => { marks.push({ target, kind: "class", value }); } },
+        setAttribute: (value: string) => { marks.push({ target, kind: "attribute", value }); },
+    });
     const mainFrame = { name: "main" };
     const childFrame = { name: "child" };
     let currentUrl = options.url ?? "https://app.example.com/shop/login";
@@ -38,6 +44,7 @@ function fakePage(options: { url?: string; frameOfElement?: "main" | "child"; ac
         };
         return new Proxy({}, {
             get(_target, property: string) {
+                if (property === "evaluate") return async (callback: (node: unknown) => unknown) => callback(element(description));
                 if (property === "elementHandle") {
                     return async () => ({
                         ownerFrame: async () => (options.frameOfElement === "child" ? childFrame : mainFrame),
@@ -59,7 +66,15 @@ function fakePage(options: { url?: string; frameOfElement?: "main" | "child"; ac
             method,
             async (...args: unknown[]) => calls.push({ target: "mouse", method, args }),
         ])) as RawPage["mouse"],
-        evaluate: async () => options.activeIframe ?? false,
+        evaluate: async (callback: () => unknown) => {
+            const document = Object.getOwnPropertyDescriptor(globalThis, "document");
+            Object.defineProperty(globalThis, "document", { configurable: true, value: { activeElement: options.activeIframe ? { tagName: "IFRAME" } : element("keyboard") } });
+            try { return callback(); }
+            finally {
+                if (document) Object.defineProperty(globalThis, "document", document);
+                else Reflect.deleteProperty(globalThis, "document");
+            }
+        },
         goto: async (...args: unknown[]) => {
             calls.push({ target: "page", method: "goto", args });
             currentUrl = String(args[0]);
@@ -80,7 +95,7 @@ function fakePage(options: { url?: string; frameOfElement?: "main" | "child"; ac
         },
         context: () => "raw-context",
     };
-    return { page, calls, setUrl: (url: string) => (currentUrl = url) };
+    return { page, calls, marks, setUrl: (url: string) => (currentUrl = url) };
 }
 
 function guarded(options: Parameters<typeof fakePage>[0] = {}, secrets: Record<string, string> = { SPECBOOK_SECRET_ADMIN_PASSWORD: "hunter22" }) {
@@ -139,6 +154,7 @@ describe("specbook page proxy", () => {
         const allowed = guarded();
         await allowed.wrapped.getByLabel("Password").fill(createSecret("admin", "password"));
         assert.deepEqual(allowed.calls.at(-1), { target: "label", method: "fill", args: ["hunter22", undefined] });
+        assert.deepEqual(allowed.marks, [{ target: "label", kind: "class", value: "__specbookSecret" }, { target: "label", kind: "attribute", value: "data-specbook-secret" }]);
 
         const otherAllowed = guarded({ url: "https://login.example.com/sso" });
         await otherAllowed.wrapped.getByLabel("Password").fill(createSecret("admin", "password"));
@@ -161,6 +177,7 @@ describe("specbook page proxy", () => {
         const plain = guarded();
         await plain.wrapped.keyboard.type(createSecret("admin", "password"));
         assert.deepEqual(plain.calls.at(-1), { target: "keyboard", method: "type", args: ["hunter22", undefined] });
+        assert.deepEqual(plain.marks, [{ target: "keyboard", kind: "class", value: "__specbookSecret" }, { target: "keyboard", kind: "attribute", value: "data-specbook-secret" }]);
         const framed = guarded({ activeIframe: true });
         await assert.rejects(framed.wrapped.keyboard.type(createSecret("admin", "password")), /main frame/);
         await assert.rejects(plain.wrapped.keyboard.type({ toString: () => "x" }), /string literal or secret/);

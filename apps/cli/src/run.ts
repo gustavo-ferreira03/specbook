@@ -46,7 +46,7 @@ export async function runLocal(workspace: string, selector?: string, options: { 
         const safeSpec = JSON.parse(secrets.scrub(JSON.stringify({ title: spec.title, description: spec.description, humanSpec: spec.humanSpec })));
         await fs.writeFile(path.join(outputDir, "spec.yml"), serializeSpecYaml(safeSpec));
         await fs.writeFile(path.join(outputDir, "spec.ts"), secrets.scrub(spec.source));
-        selected.push({ key: `spec-${index}`, source: spec.source, analysis: spec.analysis, outputDir });
+        selected.push({ key: `spec-${index}`, source: spec.source, analysis: spec.analysis, humanSpec: spec.humanSpec, outputDir });
     }
     const outcome = await runPlaywrightSuite({
         directory, baseUrl: config.baseUrl, specs: selected,

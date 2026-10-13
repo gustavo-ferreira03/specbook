@@ -1,7 +1,10 @@
 import { specErrorCode } from "../errors.ts";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { expect as baseExpect, test as base, type ConsoleMessage, type Page, type Request, type Response } from "@playwright/test";
 import type { RunDiagnostic } from "../evidence.ts";
+import { MAX_REPLAY_EVENTS, MAX_REPLAY_RAW_BYTES, REPLAY_ATTACHMENT, REPLAY_LIMIT_NOTE, REPLAY_UNAVAILABLE_ATTACHMENT, readRecorderSource, type ReplayEvent } from "../replay.ts";
+import type { ExecutionStepKind } from "../types.ts";
 import {
     createGuard,
     createSecret,
@@ -20,7 +23,7 @@ import {
 type StepFn = (title: string, body: () => Promise<void>) => Promise<void>;
 type SecretFn = (profile: string, field: string) => object;
 type CleanupFn = (body: () => Promise<void>) => Promise<void>;
-type EvidenceState = { page?: Page; apiRequests: ApiRequestEvidence[] };
+type EvidenceState = { page?: Page; apiRequests: ApiRequestEvidence[]; replay?: ReplayCapture };
 
 hardenFunctionConstructors();
 
@@ -31,6 +34,99 @@ const guard = createGuard({ runtime, readSecret: (name) => process.env[name] });
 const secretValues = [...new Set(Object.entries(process.env)
     .filter(([name, value]) => name.startsWith("SPECBOOK_SECRET_") && value)
     .map(([, value]) => value!))];
+
+const secretVariants = [...new Set(secretValues.flatMap((value) => {
+    const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1), escaped,
+        escaped.replace(/"/g, "&quot;").replace(/'/g, "&#39;"), escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;")];
+}))].sort((left, right) => right.length - left.length);
+
+function scrubReplay(text: string): string {
+    return secretVariants.reduce((safe, value) => value ? safe.split(value).join("[REDACTED]") : safe, text);
+}
+
+class ReplayCapture {
+    private events: string[] = [];
+    private bytes = 2;
+    private stopped = false;
+    unavailable: string | undefined;
+
+    receive(event: ReplayEvent): void {
+        if (this.stopped || this.unavailable) return;
+        try {
+            const value = JSON.stringify(event, (_key, value) => {
+                if (typeof value === "string") return scrubReplay(value);
+                if (value && typeof value === "object" && !Array.isArray(value)) {
+                    return Object.fromEntries(Object.entries(value).map(([key, item]) => [scrubReplay(key), item]));
+                }
+                return value;
+            });
+            const size = Buffer.byteLength(value) + 1;
+            if (this.bytes + size > MAX_REPLAY_RAW_BYTES || this.events.length >= MAX_REPLAY_EVENTS) {
+                this.unavailable = REPLAY_LIMIT_NOTE;
+                this.events = [];
+                return;
+            }
+            this.bytes += size;
+            this.events.push(value);
+        } catch {
+            this.unavailable = "Replay could not be recorded.";
+            this.events = [];
+        }
+    }
+
+    marker(number: number, title: string, kind: ExecutionStepKind, phase: "start" | "end", outcome: "running" | "passed" | "failed"): void {
+        this.receive({ type: 5, timestamp: Date.now(), data: { tag: "specbook-step", payload: { number, title, kind, phase, outcome } } });
+    }
+
+    stop(): void { this.stopped = true; }
+
+    serialized(): string { return `[${this.events.join(",")}]`; }
+}
+
+async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
+    const binding = "__specbookReplayEvent";
+    await page.exposeBinding(binding, ({ frame }, event: ReplayEvent) => {
+        if (frame === page.mainFrame()) replay.receive(event);
+    });
+    const content = `${await readRecorderSource()}\n;(${function () {
+        if (window !== window.top) return;
+        const target = globalThis as unknown as {
+            rrweb: { record: (options: Record<string, unknown>) => (() => void) | undefined };
+            __specbookReplayEvent: (event: unknown) => Promise<void>;
+            __specbookStopReplay?: () => Promise<void>;
+        };
+        const pending = new Set<Promise<void>>();
+        const stop = target.rrweb.record({
+            emit: (event: unknown) => {
+                const delivered = target.__specbookReplayEvent(event).catch(() => undefined);
+                pending.add(delivered);
+                void delivered.finally(() => pending.delete(delivered));
+            },
+            maskAllInputs: true,
+            blockClass: "__specbookSecret",
+            blockSelector: "[data-specbook-secret]",
+            maskTextClass: "__specbookSecret",
+            recordCrossOriginIframes: false,
+            recordCanvas: false,
+            inlineStylesheet: true,
+            inlineImages: true,
+            dataURLOptions: { type: "image/webp", quality: 0.8 },
+            collectFonts: false,
+        });
+        target.__specbookStopReplay = async () => {
+            stop?.();
+            await Promise.all(pending);
+        };
+    }.toString()})();`;
+    await page.addInitScript({ content });
+    await page.evaluate(content);
+}
+
+async function stopReplay(page: Page, replay: ReplayCapture): Promise<void> {
+    await page.evaluate(() => (globalThis as unknown as { __specbookStopReplay?: () => Promise<void> }).__specbookStopReplay?.()).catch(() => undefined);
+    replay.stop();
+}
 
 async function screenshot(page: Page, file: string): Promise<void> {
     if (!secretValues.length) {
@@ -92,6 +188,9 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
     },
     page: async ({ page, _specbookEvidence }, use, testInfo) => {
         _specbookEvidence.page = page;
+        const replay = _specbookEvidence.replay = new ReplayCapture();
+        try { await startReplay(page, replay); }
+        catch { replay.unavailable = "Replay could not be recorded."; }
         const navigation = runtime.navigationOrigins ? await page.context().newCDPSession(page) : null;
         if (navigation) {
             navigation.on("Fetch.requestPaused", (event) => {
@@ -127,6 +226,16 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
         try {
             await use(guard.wrapPage(page as unknown as RawPage) as never);
         } finally {
+            await stopReplay(page, replay);
+            if (replay.unavailable) {
+                const file = testInfo.outputPath("specbook-replay-unavailable.txt");
+                await fs.writeFile(file, replay.unavailable, "utf8");
+                await testInfo.attach(REPLAY_UNAVAILABLE_ATTACHMENT, { path: file, contentType: "text/plain" });
+            } else {
+                const file = testInfo.outputPath("specbook-replay.json");
+                await fs.writeFile(file, replay.serialized(), "utf8");
+                await testInfo.attach(REPLAY_ATTACHMENT, { path: file, contentType: "application/json" });
+            }
             await navigation?.detach().catch(() => undefined);
             page.off("console", onConsole);
             page.off("pageerror", onPageError);
@@ -151,11 +260,16 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
             const number = String(count).padStart(2, "0");
             _specbookEvidence.apiRequests = [];
             const real = _specbookEvidence.page;
+            const replay = _specbookEvidence.replay;
+            const kind = runtime.executionPlans?.[path.basename(testInfo.file)]?.[count - 1]?.kind ?? "step";
+            let outcome: "passed" | "failed" = "passed";
+            replay?.marker(count, title, kind, "start", "running");
             try {
                 await base.step(title, async () => {
                     await body();
                 });
             } catch (error) {
+                outcome = "failed";
                 testInfo.annotations.push({ type: FAILED_STEP_ANNOTATION, description: title });
                 testInfo.annotations.push({ type: "specbook-error-code", description: specErrorCode(error) });
                 try {
@@ -180,6 +294,11 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
                     await screenshot(real, file);
                     await testInfo.attach(`${STEP_ATTACHMENT_PREFIX}${number}`, { path: file, contentType: "image/png" });
                 } catch {}
+                if (real && replay && !replay.unavailable) {
+                    // A loaded image can arrive after its first DOM snapshot.
+                    await real.evaluate(() => (globalThis as unknown as { rrweb?: { record: { takeFullSnapshot: () => void } } }).rrweb?.record.takeFullSnapshot()).catch(() => undefined);
+                }
+                replay?.marker(count, title, kind, "end", outcome);
             }
         });
     },
@@ -188,13 +307,14 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
     },
     // Hidden teardown that resets data the Spec created: it runs after the test even when a step failed,
     // records no evidence and never changes the result. Depending on page and request keeps both open until it ends.
-    cleanup: async ({ page: _page, request: _request }, use, testInfo) => {
+    cleanup: async ({ page: _page, request: _request, _specbookEvidence }, use, testInfo) => {
         let registered: (() => Promise<void>) | undefined;
         await use(async (body) => {
             if (typeof body !== "function") throw new Error("cleanup() needs an async function");
             registered = body;
         });
         if (!registered) return;
+        if (_specbookEvidence.page && _specbookEvidence.replay) await stopReplay(_specbookEvidence.page, _specbookEvidence.replay);
         testInfo.setTimeout(testInfo.timeout + CLEANUP_BUDGET_MS + 1000);
         let timer: NodeJS.Timeout | undefined;
         try {

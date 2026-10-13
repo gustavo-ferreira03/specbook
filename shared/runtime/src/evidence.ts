@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { RunStatus } from "./types.ts";
 import type { SpecFileResult } from "./report.ts";
 import { API_STEP_ATTACHMENT_PREFIX, STEP_ATTACHMENT_PREFIX } from "./specbook/guard.ts";
+import { encodeReplay, isReplayEvents, MAX_REPLAY_BYTES, MAX_REPLAY_RAW_BYTES, REPLAY_ATTACHMENT, REPLAY_FILE, REPLAY_LIMIT_NOTE, REPLAY_UNAVAILABLE_ATTACHMENT } from "./replay.ts";
 
 export interface EvidenceStep {
     number: number;
@@ -41,6 +42,8 @@ export interface EvidenceManifest {
     diagnostics?: RunDiagnostic[];
     errorContext?: string;
     apiSteps?: ApiStepEvidence[];
+    replay?: { file: typeof REPLAY_FILE; bytes: number } | null;
+    replayUnavailable?: string;
 }
 
 export function isStepScreenshot(file: string): boolean {
@@ -64,6 +67,8 @@ const evidenceManifestSchema = z.object({
         label: z.string(),
         requests: z.array(apiRequestEvidenceSchema).max(30),
     })).optional(),
+    replay: z.object({ file: z.literal(REPLAY_FILE), bytes: z.number().int().positive().max(MAX_REPLAY_BYTES) }).nullable().optional(),
+    replayUnavailable: z.string().max(500).optional(),
 });
 
 export async function readEvidenceManifest(runDir: string): Promise<EvidenceManifest> {
@@ -104,6 +109,7 @@ export async function writeRunEvidence(
 ): Promise<EvidenceManifest> {
     const evidenceDir = path.join(outputDir, "evidence");
     await fs.mkdir(evidenceDir, { recursive: true });
+    await fs.rm(path.join(outputDir, REPLAY_FILE), { force: true });
     const steps: EvidenceStep[] = [];
     for (const attachment of result?.attachments ?? []) {
         const match = new RegExp(`^${STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`).exec(attachment.name);
@@ -124,6 +130,7 @@ export async function writeRunEvidence(
         }
     }
     const manifest: EvidenceManifest = { steps, video, failedStep: status === "passed" ? null : result?.failedStep ?? null };
+    await fs.rm(path.join(outputDir, REPLAY_FILE), { force: true });
     for (const attachment of result?.attachments ?? []) {
         const apiMatch = new RegExp(`^${API_STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`).exec(attachment.name);
         if (apiMatch && attachment.contentType === "application/json") {
@@ -136,6 +143,21 @@ export async function writeRunEvidence(
                     (manifest.apiSteps ??= []).push({ number, label: stepTitles[number - 1], requests: parsed.data });
                 }
             } catch {}
+        } else if (attachment.name === REPLAY_ATTACHMENT && attachment.contentType === "application/json") {
+            const text = await readText(attachment.path, MAX_REPLAY_RAW_BYTES);
+            if (!text) { manifest.replayUnavailable = REPLAY_LIMIT_NOTE; continue; }
+            try {
+                const events: unknown = JSON.parse(scrub(text));
+                if (!isReplayEvents(events)) { manifest.replayUnavailable = "Replay could not be recorded."; continue; }
+                const data = await encodeReplay(events);
+                if (data) {
+                    await fs.writeFile(path.join(outputDir, REPLAY_FILE), data);
+                    manifest.replay = { file: REPLAY_FILE, bytes: data.length };
+                } else manifest.replayUnavailable = REPLAY_LIMIT_NOTE;
+            } catch { manifest.replayUnavailable = "Replay could not be recorded."; }
+        } else if (attachment.name === REPLAY_UNAVAILABLE_ATTACHMENT && attachment.contentType === "text/plain") {
+            const text = await readText(attachment.path, 500);
+            if (text) manifest.replayUnavailable = scrub(text).slice(0, 500);
         } else if (attachment.name === "specbook-diagnostics" && attachment.contentType === "application/json") {
             const text = await readText(attachment.path, 1_000_000);
             if (!text) continue;

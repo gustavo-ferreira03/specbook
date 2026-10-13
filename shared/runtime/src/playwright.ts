@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RunStatus } from "./types.ts";
+import { executionPlan, type HumanSpec, type RunStatus } from "./types.ts";
 import type { RunNetworkPolicy } from "./network/targets.ts";
 import { createRunProxy } from "./network/proxy.ts";
 import { sanitizeTechnicalDetails } from "./sanitize.ts";
@@ -28,6 +28,7 @@ export interface SuiteSpec {
     source: string;
     analysis: SpecAnalysis;
     outputDir: string;
+    humanSpec?: HumanSpec;
 }
 
 export interface SuiteSpecResult {
@@ -147,7 +148,11 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
     await fs.rm(workDir, { recursive: true, force: true });
     const policy = options.networkPolicy;
     const proxy = policy && !options.proxyServer ? await createRunProxy(policy.allowPrivate ? policy.origins : []) : undefined;
-    const runtime: SpecbookRuntime = { baseURL: options.baseUrl, secretOrigins: options.secretOrigins, navigationOrigins: policy?.origins };
+    const runtime: SpecbookRuntime = {
+        baseURL: options.baseUrl, secretOrigins: options.secretOrigins, navigationOrigins: policy?.origins,
+        executionPlans: Object.fromEntries(options.specs.map((spec) => [`${spec.key}.spec.ts`, spec.humanSpec
+            ? executionPlan(spec.humanSpec) : spec.analysis.steps.map((title) => ({ title, kind: "step" as const }))])),
+    };
     const results = new Map<string, SuiteSpecResult>();
     let processFailure: string | null = null;
     try {

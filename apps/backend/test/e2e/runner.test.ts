@@ -9,6 +9,7 @@ import { createSecretScrubber } from "../../src/core/credentials/scrub";
 import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { tempDir } from "../helpers/storage";
+import { readReplay, REPLAY_FILE, MAX_REPLAY_BYTES } from "@specbook/runtime/replay";
 
 const SECRET = "correct-horse-battery";
 
@@ -44,7 +45,7 @@ before(async () => {
     evil = await listen((request, response) => {
         externalRequests.push(request.url ?? "");
         response.setHeader("content-type", "text/html");
-        response.end('<h1>Phishing</h1><label>Password <input type="password"></label>');
+        response.end('<h1>Phishing</h1><p>Cross-origin frame private content</p><label>Password <input type="password"></label>');
     });
     app = await listen((request, response) => {
         response.setHeader("content-type", "text/html");
@@ -96,9 +97,10 @@ setTimeout(() => { throw new Error('Page failure ${SECRET}'); }, 0);
 </script>`);
         } else if (request.url?.startsWith("/login")) {
             response.end(`<h1>Sign in</h1>
-<label>Password <input id="password" type="password"></label>
+<label>Username <input value="prefilled-public-value"></label>
+<label>Password <input id="password" type="password" value="prefilled-private-value"></label>
 <button onclick="document.querySelector('h1').textContent = document.getElementById('password').value === '${SECRET}' ? 'Welcome back' : 'Wrong password'">Sign in</button>
-<a href="${origin(evil)}/">Partner login</a>`);
+<a href="${origin(evil)}/">Partner login</a><iframe src="${origin(evil)}/"></iframe>`);
         } else {
             response.end("<h1>Home</h1>");
         }
@@ -120,6 +122,7 @@ const LOGIN = `import { test, expect } from "specbook";
 test("Sign in", async ({ page, step, secret }) => {
     await step("Open the sign-in page", async () => {
         await page.goto("/login");
+        await page.reload();
     });
     await step("Enter the password", async () => {
         await page.getByLabel("Password").fill(secret("shopper", "password"));
@@ -164,7 +167,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         const outcome = await runPlaywrightSuite({
             directory: path.join(directory, "batch"),
             baseUrl: `${origin(app)}/`,
-            specs: [suiteSpec("pass", LOGIN, passDir), suiteSpec("guard", PHISHING, guardDir)],
+            specs: [{ ...suiteSpec("pass", LOGIN, passDir), humanSpec: { preconditions: ["Open the sign-in page"], steps: ["Enter the password"], expectedResult: "See the welcome message", postconditions: [] } }, suiteSpec("guard", PHISHING, guardDir)],
             timeoutMs: 150_000,
             secretEnv: { SPECBOOK_SECRET_SHOPPER_PASSWORD: SECRET },
             secretOrigins: { defaultOrigins: [origin(app)], byRef: { SPECBOOK_SECRET_SHOPPER_PASSWORD: [origin(app)] } },
@@ -179,6 +182,23 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.deepEqual(pass.steps.map((step: { label: string }) => step.label), ["Open the sign-in page", "Enter the password", "See the welcome message"]);
         assert.equal(pass.video, null);
         for (const step of pass.steps) assert.ok(existsSync(path.join(passDir, step.file)));
+        assert.equal(pass.replay.file, REPLAY_FILE);
+        assert.ok(pass.replay.bytes > 0 && pass.replay.bytes <= MAX_REPLAY_BYTES);
+        const events = await readReplay(passDir);
+        assert.ok(events);
+        assert.ok(events.filter((event) => event.type === 2).length >= 3, "replay survives the first navigation and reload");
+        assert.ok(events.every((event, index) => index === 0 || events[index - 1].timestamp <= event.timestamp));
+        const recorded = JSON.stringify(events);
+        assert.ok(!recorded.includes(SECRET), "DOM text, scripts and input values are scrubbed before replay is stored");
+        assert.ok(!recorded.includes("prefilled-public-value") && !recorded.includes("prefilled-private-value"), "initial text and password input values are masked");
+        assert.ok(!recorded.includes("Cross-origin frame private content"), "cross-origin iframe contents are excluded");
+        assert.ok(recorded.includes("__specbookSecret"), "secret fields are blocked in addition to masking every input");
+        const markers = events.filter((event) => event.type === 5).map((event) => event.data as { tag: string; payload: { number: number; kind: string; phase: string; outcome: string } });
+        assert.deepEqual(markers.map(({ tag, payload }) => [tag, payload.number, payload.kind, payload.phase, payload.outcome]), [
+            ["specbook-step", 1, "precondition", "start", "running"], ["specbook-step", 1, "precondition", "end", "passed"],
+            ["specbook-step", 2, "step", "start", "running"], ["specbook-step", 2, "step", "end", "passed"],
+            ["specbook-step", 3, "expected", "start", "running"], ["specbook-step", 3, "expected", "end", "passed"],
+        ]);
 
         const guard = outcome.results.get("guard");
         assert.equal(guard?.status, "failed");
@@ -187,6 +207,10 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         const guardEvidence = JSON.parse(await fs.readFile(path.join(guardDir, "evidence.json"), "utf8"));
         assert.equal(guardEvidence.failedStep, "Type the password on the other origin");
         assert.equal(guardEvidence.video, null, "secret runs must not record values in failure videos");
+        const blockedEvents = await readReplay(guardDir);
+        assert.ok(blockedEvents);
+        assert.ok(JSON.stringify(blockedEvents).includes('"outcome":"failed"'));
+        assert.ok(!JSON.stringify(blockedEvents).includes(SECRET));
 
         assert.ok(!existsSync(path.join(directory, "batch", "report")));
         assert.ok(!existsSync(path.join(directory, "batch", "work")), "the work directory (traces, test-results) is removed");
@@ -215,6 +239,10 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.equal(evidence.steps.length, 2);
         assert.equal(evidence.video, "evidence/execution.webm");
         assert.match(evidence.errorContext, /heading "Home"/);
+        const events = await readReplay(directory);
+        assert.ok(events);
+        const ending = events.filter((event) => event.type === 5).at(-1)?.data as { payload: { number: number; outcome: string } };
+        assert.deepEqual({ number: ending.payload.number, outcome: ending.payload.outcome }, { number: 2, outcome: "failed" });
     });
 
     test("retains console, page and network failures with scrubbed error context", { timeout: 120_000 }, async () => {
@@ -263,7 +291,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
 describe("Playwright runner (API)", () => {
     test("slow cleanup has a separate budget and leaves a passing result intact", { timeout: 30_000 }, async () => {
         const directory = tempDir();
-        const source = 'import { test, expect } from "specbook"; test("Cleanup budget", async ({ request, step, cleanup }) => { await cleanup(async () => { await request.get("/slow-cleanup"); }); await step("Check the page", async () => { const response = await request.get("/"); await expect(response).toBeOK(); }); });';
+        const source = 'import { test, expect } from "specbook"; test("Cleanup budget", async ({ page, request, step, cleanup }) => { await cleanup(async () => { await page.goto("/diagnostics"); await request.get("/slow-cleanup"); }); await step("Check the page", async () => { const response = await request.get("/"); await expect(response).toBeOK(); }); });';
         const write = fs.writeFile;
         fs.writeFile = async (file, contents, options) => write(file, String(file).endsWith("playwright.config.mjs") ? String(contents).replace('"timeout": 100000', '"timeout": 3000') : contents, options);
         let outcome;
@@ -274,6 +302,9 @@ describe("Playwright runner (API)", () => {
         assert.equal(outcome.processFailure, null);
         assert.equal(outcome.results.get("cleanup")?.status, "passed");
         assert.ok(explorationRequests.includes("GET /slow-cleanup"), "registered cleanup runs after the check");
+        const replay = await readReplay(path.join(directory, "output"));
+        assert.ok(replay);
+        assert.ok(!JSON.stringify(replay).includes("Diagnostics"), "registered cleanup is excluded from replay evidence");
     });
 
     test("uses no browser page, redacts secret request/response evidence and rejects off-origin redirects", { timeout: 90_000 }, async () => {

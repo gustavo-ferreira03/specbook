@@ -1,6 +1,7 @@
 import { CodedError } from "../errors.ts";
 import { LOCATOR_FACTORIES, LOCATOR_REFINERS, RUNTIME_LOCATOR_ACTIONS as LOCATOR_ACTIONS } from "./allowlist.ts";
 import type { ApiRequestEvidence } from "../evidence.ts";
+import type { ExecutionStepKind } from "../types.ts";
 export type { ApiRequestEvidence } from "../evidence.ts";
 
 export interface SecretOriginPolicy {
@@ -12,6 +13,7 @@ export interface SpecbookRuntime {
     navigationOrigins?: string[];
     baseURL: string;
     secretOrigins: SecretOriginPolicy;
+    executionPlans?: Record<string, { title: string; kind: ExecutionStepKind }[]>;
 }
 
 export const RUNTIME_ENV = "SPECBOOK_RUNTIME";
@@ -56,6 +58,7 @@ export function parseRuntime(raw: string | undefined): SpecbookRuntime {
     return {
         baseURL: value.baseURL,
         navigationOrigins: value.navigationOrigins?.map(String),
+        executionPlans: value.executionPlans,
         secretOrigins: {
             defaultOrigins: Array.isArray(policy?.defaultOrigins) ? policy.defaultOrigins.map(String) : [],
             byRef: policy?.byRef && typeof policy.byRef === "object" ? policy.byRef : {},
@@ -214,12 +217,20 @@ export function createGuard(options: GuardOptions) {
                 if (!handle || (await handle.ownerFrame()) !== page.mainFrame()) {
                     throw new CodedError("credential_origin", "Refusing to type a secret into an element outside the page's main frame.");
                 }
+                await target.evaluate((element: Element) => {
+                    element.classList.add("__specbookSecret");
+                    element.setAttribute("data-specbook-secret", "");
+                });
             } finally {
                 await handle?.dispose().catch(() => undefined);
             }
         } else {
             const intoFrame = await page.evaluate(() => {
-                const active = (globalThis as unknown as { document?: { activeElement?: { tagName?: string } | null } }).document?.activeElement;
+                const active = (globalThis as unknown as { document?: { activeElement?: Element | null } }).document?.activeElement;
+                if (active && active.tagName !== "IFRAME" && active.tagName !== "FRAME") {
+                    active.classList.add("__specbookSecret");
+                    active.setAttribute("data-specbook-secret", "");
+                }
                 return active?.tagName === "IFRAME" || active?.tagName === "FRAME";
             });
             if (intoFrame) throw new CodedError("credential_origin", "Refusing to type a secret into an element outside the page's main frame.");

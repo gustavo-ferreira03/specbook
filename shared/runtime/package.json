@@ -19,6 +19,8 @@
     "dependencies": {
         "@babel/parser": "7.29.9",
         "@playwright/test": "1.62.0",
+        "rrweb": "2.1.1",
+        "rrweb-player": "2.1.1",
         "yaml": "^2.9.0",
         "zod": "^4.4.3"
     },
