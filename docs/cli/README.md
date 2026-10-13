@@ -412,7 +412,8 @@ Workspace files
         spec.ts
         evidence.json
         evidence/step-01.png
-        evidence/execution.webm
+        evidence/replay.json.gz
+        evidence/execution.webm  # failures without credentials
   chats/
     c-7f3a91b2/
       conversation.json      # history, status, proposals, Specs, brain session id
@@ -421,7 +422,11 @@ Workspace files
 
 `init` also installs `.agents/skills/specbook/SKILL.md` and `.claude/skills/specbook/SKILL.md`. These instructions teach the user's coding agent to start a chat, answer or select according to its status, hand credential entry to the human and stop at `done`. Existing agent skill files aren't overwritten; copy `.specbook/SKILL.md` over them when upgrading an existing workspace. The CLI copies the writing rules from `@specbook/runtime`; the backend includes that same source in its system prompt. The contract format is `title`, `description`, `preconditions` (the starting state), `steps`, `expectedResult` (the final state the user sees) and `postconditions` (side effects checked afterwards, usually none). Tests import `test` and `expect` from `"specbook"` and have one named `step()` per precondition, per step, for the expected result and per postcondition, in that order, so every run records a screenshot of the expected result. An optional leading `cleanup()` block removes data the Spec creates; it runs after the test, even on failure, and stays out of the contract and evidence. The shared validator rejects arbitrary JavaScript, imports, filesystem access and browser evaluation.
 
-Run evidence includes screenshots after each browser step, API request evidence where applicable, failure context and diagnostics. Failure video is available for runs without secrets. Runs with secret environment values disable video and traces; screenshots mask fields and visible DOM text containing known credential values. Temporary Playwright files disappear after execution. Reports embed their fonts, screenshots and eligible videos, so they can be opened offline.
+Run evidence includes screenshots after each browser step, a DOM session replay, API request evidence where applicable, failure context and diagnostics. Specbook records snapshots and mutations with rrweb 2.1.1 and embeds rrweb-player 2.1.1, including runs that use credentials. Recording survives page navigation and reloads. The runtime masks input values and password fields, protects targets filled through `secret()`, and scrubs recorded events with the same credential scrubber as other evidence. It excludes cross-origin iframe contents and canvas drawing operations. Failure video remains available for runs without secrets, including canvas Specs; runs with secret environment values disable video and traces. Screenshots mask fields and visible DOM text containing known credential values.
+
+Each browser run stores compressed events in `evidence/replay.json.gz` and references that file in `evidence.json`. The replay limits per Spec are 15 MiB compressed, 64 MiB uncompressed and 250,000 events. A run that exceeds a limit keeps its screenshots and reports why replay is unavailable. Runner uploads include replay within the existing artifact and request limits; if a completion exceeds the server limit, the runner retries without video, then without replay and records the omission. Runner protocol 2 requires a matching server and CLI. Replay follows the run's existing artifact retention policy. Temporary Playwright files disappear after execution.
+
+Open `report.html` from disk to play a replay beside the screenshots. The report embeds its fonts, player code, styles and compressed events, so playback needs no server or network. Use play/pause, playback speed, the scrubber and skip inactivity to review a run. Timeline markers identify preconditions, numbered Spec steps, the expected result and postconditions, with their outcomes. Click a step or screenshot to seek to its start. Older runs and API-only Specs omit the player. The Spec page's **View report** link opens the same replay in server reports.
 
 Exploration runs in a detached process with a private local socket (a named pipe on Windows). Sessions persist across CLI commands and expire after 30 idle minutes. Each conversation has its own brain exploration session, separate from other conversations and from manual `browse` commands. Refs come from the latest accessibility snapshot; navigation invalidates them. Exploration state never becomes a run's storage state. Each run starts signed out.
 
