@@ -53,22 +53,21 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
           event.preventDefault();
           player.goto(Math.max(0, Math.min(total, next)), false);
         });
+        // Open paused where the first step ends, the moment its screenshot shows; earlier frames are the blank tab and page load.
+        const firstEnd = events.find((event) => event.type === 5 && event.data.payload?.phase === 'end');
+        const firstFrame = firstEnd || events.find((event) => event.type === 2);
+        const firstOffset = firstFrame ? firstFrame.timestamp - first : 0;
+        let moved = false;
+        player.addEventListener('ui-update-player-state', (event) => { if (event.payload === 'playing') moved = true; });
+        const showFirstFrame = () => { if (firstFrame && !moved && player.getReplayer().getCurrentTime() < firstOffset) player.goto(firstOffset, false); };
+        showFirstFrame();
         replay.querySelector('.replay-status').hidden = true;
-        const buttons = replay.querySelector('.replay-steps');
-        for (const [number, marker] of markers) {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.dataset.replayStep = number;
-          button.textContent = marker.name;
-          button.title = marker.title;
-          button.setAttribute('aria-label', 'Replay ' + marker.name + ': ' + marker.title);
-          buttons.append(button);
-        }
         const resize = () => {
           const nextWidth = Math.floor(target.getBoundingClientRect().width);
           if (!section.open || nextWidth < 1) return;
           player.$set({ width: nextWidth, height: Math.max(180, Math.round(nextWidth * Math.min(1, viewport.height / viewport.width))) });
           player.triggerResize();
+          showFirstFrame();
         };
         new ResizeObserver(resize).observe(target);
         section.addEventListener('toggle', () => { if (!section.open) player.pause(); else resize(); });

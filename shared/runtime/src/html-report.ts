@@ -204,7 +204,7 @@ function renderSection({ item, tone, path: file, expectedResult, steps, video, r
   ${expectedResult ? `<div class="expected ${proof?.state ?? ""}"><h3>Expected result</h3><p>${proof ? `<span class="mark">${proof.state === "passed" ? CHECK : proof.state === "failed" ? CROSS : ""}</span>` : ""}${replay && proof && proof.state !== "skipped" ? `<button type="button" class="step-seek" data-replay-step="${proof.number}" aria-label="Replay expected result">${escape(expectedResult)}</button>` : escape(expectedResult)}</p>${proof?.image && !replay ? `<a class="proof" href="#${escape(shotId(proof))}"><img src="${proof.image}" alt="Expected result: ${escape(expectedResult)}"></a>` : ""}</div>` : ""}
   ${postconditions.length ? `<h3>Postconditions</h3>${renderSteps(postconditions, Boolean(replay))}` : ""}
   ${item.failReason && failing ? `<div class="failure"><h3>What failed</h3><pre>${escape(item.failReason)}</pre></div>` : ""}
-  ${replay ? `<div class="visuals"><section class="replay" aria-label="Session replay"><h3>Replay</h3><p class="replay-status">Loading replay…</p><div class="replay-player"></div><div class="replay-steps" role="group" aria-label="Seek to a Spec step"></div><script class="replay-data" type="application/octet-stream">${replay}</script></section><section class="screenshot-section">` : ""}
+  ${replay ? `<div class="visuals"><section class="replay" aria-label="Session replay"><h3>Replay</h3><p class="replay-status">Loading replay…</p><div class="replay-player"></div><script class="replay-data" type="application/octet-stream">${replay}</script></section><section class="screenshot-section">` : ""}
   ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => {
       const id = shotId(step);
       const name = step.kind === "expected" ? "Expected result" : step.kind === "precondition" ? "Precondition" : step.kind === "postcondition" ? "Postcondition" : `Step ${step.ordinal}`;
@@ -313,10 +313,10 @@ figure:target figcaption b{color:#fff}
 figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
 .recording{width:100%;max-width:720px;border:1px solid var(--strong);border-radius:8px;display:block;background:#000}
 .step-seek{font:inherit;text-align:left;line-height:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;border-radius:3px}
-.step-seek:hover{text-decoration:underline;text-underline-offset:3px}.step-seek:focus-visible,.replay-steps button:focus-visible,.zoom:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
+.step-seek:hover{text-decoration:underline;text-underline-offset:3px}.step-seek:focus-visible,.zoom:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
 .step-seek.is-current{font-weight:600}.zoom.is-current img{border:2px solid var(--primary)}
-.visuals{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:18px;align-items:start}
-.replay,.screenshot-section{min-width:0}.screenshot-section .shots{grid-template-columns:1fr;max-height:540px;overflow:auto;padding:2px}
+.visuals{display:flex;flex-direction:column;gap:18px}
+.replay,.screenshot-section{min-width:0}.screenshot-section .shots{display:flex;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x proximity}.screenshot-section .shots figure{flex:0 0 220px;scroll-snap-align:start}
 .replay-player{width:100%;min-height:180px}.replay-status,.replay-note{font-size:12px;color:var(--muted)}
 .replay .rr-player{float:none;border:1px solid var(--strong);border-radius:8px;box-shadow:none;overflow:hidden;font-family:inherit}
 .replay .rr-controller{font-family:inherit;background:var(--surface)}.replay .rr-player .rr-timeline{width:100%;padding:0 10px}
@@ -327,10 +327,7 @@ figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
 .replay .rr-controller__btns button:focus-visible,.replay .rr-progress:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .replay .switch label::before{background:var(--strong)}.replay .switch input:checked+label::before{background:var(--primary)}
 .replay .rr-player .switch .label{flex:none;padding:0;margin:0 6px}
-.replay-steps{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.replay-steps button{font:inherit;font-size:12px;line-height:1.5;padding:3px 7px;border:1px solid var(--strong);border-radius:5px;background:var(--surface);color:var(--muted);cursor:pointer}
-.replay-steps button:hover{background:var(--soft);color:var(--ink)}.replay-steps button.is-current{border-color:var(--primary);color:var(--ink)}
-@media(max-width:760px){.visuals{grid-template-columns:1fr}.screenshot-section .shots{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));max-height:none}.wrap{padding-left:16px;padding-right:16px}.body{padding-left:12px;padding-right:12px}}
+@media(max-width:760px){.visuals{grid-template-columns:1fr}.screenshot-section .shots figure{flex-basis:170px}.wrap{padding-left:16px;padding-right:16px}.body{padding-left:12px;padding-right:12px}}
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;
 
