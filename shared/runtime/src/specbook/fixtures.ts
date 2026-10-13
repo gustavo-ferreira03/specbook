@@ -3,11 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { expect as baseExpect, test as base, type ConsoleMessage, type Page, type Request, type Response } from "@playwright/test";
 import type { RunDiagnostic } from "../evidence.ts";
-import { MAX_REPLAY_EVENTS, MAX_REPLAY_RAW_BYTES, REPLAY_ATTACHMENT, REPLAY_LIMIT_NOTE, REPLAY_UNAVAILABLE_ATTACHMENT, readRecorderSource, type ReplayEvent } from "../replay.ts";
+import { MAX_REPLAY_EVENTS, MAX_REPLAY_RAW_BYTES, REPLAY_ATTACHMENT, REPLAY_MASK_ATTRIBUTE as MASK_ATTRIBUTE, REPLAY_LIMIT_NOTE, REPLAY_UNAVAILABLE_ATTACHMENT, readRecorderSource, type ReplayEvent } from "../replay.ts";
 import type { ExecutionStepKind } from "../types.ts";
 import { captureStepScreenshot } from "./screenshot.ts";
 import { withEvidenceTimeout } from "./evidence-timeout.ts";
 import { createReplayImageRecorder } from "./replay-images.ts";
+import { scrubJson } from "../scrub.ts";
 import {
     createGuard,
     createSecret,
@@ -35,7 +36,7 @@ const CLEANUP_BUDGET_MS = 5000;
 const guard = createGuard({ runtime, readSecret: (name) => process.env[name] });
 
 const secretValues = [...new Set(Object.entries(process.env)
-    .filter(([name, value]) => name.startsWith("SPECBOOK_SECRET_") && value)
+    .filter(([name, value]) => name.startsWith("SPECBOOK_SECRET_") && !runtime.secretOrigins.publicRefs?.includes(name) && value)
     .map(([, value]) => value!))];
 
 const secretVariants = [...new Set(secretValues.flatMap((value) => {
@@ -44,9 +45,15 @@ const secretVariants = [...new Set(secretValues.flatMap((value) => {
         escaped.replace(/"/g, "&quot;").replace(/'/g, "&#39;"), escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;")];
 }))].sort((left, right) => right.length - left.length);
 
-function scrubReplay(text: string): string {
-    return secretVariants.reduce((safe, value) => value ? safe.split(value).join("[REDACTED]") : safe, text);
-}
+
+const hasSecret = (value: unknown): boolean => typeof value === "string" && secretVariants.some((secret) => secret && value.includes(secret));
+
+type ReplayNode = { id?: number; type?: number; tagName?: string; attributes?: Record<string, unknown>; childNodes?: ReplayNode[] };
+const INPUT_TAGS = new Set(["input", "textarea", "select"]);
+type ReplayMutation = {
+    source?: number; id?: number; text?: unknown;
+    adds?: { node: ReplayNode }[]; attributes?: { id: number; attributes: Record<string, unknown> }[];
+};
 
 class ReplayCapture {
     private events: string[] = [];
@@ -54,16 +61,54 @@ class ReplayCapture {
     private stopped = false;
     unavailable: string | undefined;
 
+    // Preserve input length before scrubbing the remaining event text.
+    private inputs = new Set<number>();
+    private sensitive = new Set<number>();
+
+    private masks(event: ReplayEvent): number[] {
+        const data = event.data as ReplayMutation & { node?: ReplayNode } | undefined;
+        const marked: number[] = [];
+        const hidden = (value: unknown) => typeof value === "string" ? "*".repeat(value.length) : value;
+        const marks = (attributes: Record<string, unknown>) => String(attributes.class ?? "").split(/\s+/).includes("__specbookSecret") || "data-specbook-secret" in attributes;
+        const visit = (node: ReplayNode): void => {
+            const attributes = node.attributes;
+            if (node.type === 2 && attributes && node.id !== undefined && INPUT_TAGS.has(String(node.tagName))) {
+                this.inputs.add(node.id);
+                if (marks(attributes)) this.sensitive.add(node.id);
+                if (this.sensitive.has(node.id) || hasSecret(attributes.value)) {
+                    attributes.value = hidden(attributes.value);
+                    attributes[MASK_ATTRIBUTE] = "";
+                }
+            }
+            node.childNodes?.forEach(visit);
+        };
+        if (!data) return marked;
+        if (event.type === 2 && data.node) { this.inputs.clear(); this.sensitive.clear(); visit(data.node); }
+        if (event.type !== 3) return marked;
+        if (data.source === 0) {
+            for (const add of data.adds ?? []) visit(add.node);
+            for (const change of data.attributes ?? []) {
+                if (!this.inputs.has(change.id)) continue;
+                if (marks(change.attributes)) this.sensitive.add(change.id);
+                if (!this.sensitive.has(change.id) && !hasSecret(change.attributes.value)) continue;
+                if ("value" in change.attributes) change.attributes.value = hidden(change.attributes.value);
+                change.attributes[MASK_ATTRIBUTE] = "";
+            }
+            return [];
+        }
+        if (data.source === 5 && data.id !== undefined && (this.sensitive.has(data.id) || hasSecret(data.text))) {
+            data.text = hidden(data.text);
+            marked.push(data.id);
+        }
+        return marked;
+    }
+
     receive(event: ReplayEvent): void {
         if (this.stopped || this.unavailable) return;
+        const marked = this.masks(event);
+        if (marked.length) this.receive({ type: 3, timestamp: event.timestamp, data: { source: 0, adds: [], removes: [], texts: [], attributes: marked.map((id) => ({ id, attributes: { [MASK_ATTRIBUTE]: "" } })) } });
         try {
-            const value = JSON.stringify(event, (_key, value) => {
-                if (typeof value === "string") return scrubReplay(value);
-                if (value && typeof value === "object" && !Array.isArray(value)) {
-                    return Object.fromEntries(Object.entries(value).map(([key, item]) => [scrubReplay(key), item]));
-                }
-                return value;
-            });
+            const value = JSON.stringify(scrubJson(event, (text) => secretVariants.reduce((safe, secret) => secret ? safe.split(secret).join("••••") : safe, text)));
             const size = Buffer.byteLength(value) + 1;
             if (this.bytes + size > MAX_REPLAY_RAW_BYTES || this.events.length >= MAX_REPLAY_EVENTS) {
                 this.unavailable = REPLAY_LIMIT_NOTE;
@@ -110,10 +155,6 @@ async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
         const images = createImages(deliveries.send, target.rrweb.record.mirror);
         const stop = target.rrweb.record({
             emit(event: unknown): void { deliveries.send(images.process(event)); },
-            maskAllInputs: true,
-            blockClass: "__specbookSecret",
-            blockSelector: "[data-specbook-secret]",
-            maskTextClass: "__specbookSecret",
             recordCrossOriginIframes: false,
             recordCanvas: false,
             inlineStylesheet: true,

@@ -73,6 +73,8 @@ export async function readRunEvidence(runId: string) {
         expectedResult: humanSpec?.expectedResult ?? "",
         steps,
         video,
+        replay: manifest.replay && available.has(manifest.replay.file) ? manifest.replay : null,
+        replayUnavailable: manifest.replayUnavailable ?? null,
         failedStep: manifest.failedStep,
         reportAvailable: true,
         reportUrl: `/runs/${encodeURIComponent(run.id)}/report`,

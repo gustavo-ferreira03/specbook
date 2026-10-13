@@ -214,6 +214,9 @@ importers:
       '@novnc/novnc':
         specifier: ^1.7.0
         version: 1.7.0
+      '@specbook/runtime':
+        specifier: workspace:*
+        version: link:../../shared/runtime
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -247,6 +250,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      rrweb-player:
+        specifier: 2.1.1
+        version: 2.1.1
       tailwind-merge:
         specifier: 3.6.0
         version: 3.6.0

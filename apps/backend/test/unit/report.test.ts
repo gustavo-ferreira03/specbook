@@ -110,9 +110,6 @@ describe("run evidence", () => {
         assert.equal(JSON.parse(gunzipSync(stored).toString()).assets.length, 1);
         assert.deepEqual(await decodeReplay(stored), events);
         assert.deepEqual(await decodeReplay(gzipSync(JSON.stringify(events))), events);
-        const scrubbed = await encodeReplay(events, createSecretScrubber(["color:red"]));
-        assert.ok(scrubbed);
-        assert.ok(!gunzipSync(scrubbed).toString().includes("color:red"));
     });
 
     test("rejects malformed references, excessive nesting and expanded asset bombs", async () => {
@@ -140,26 +137,27 @@ describe("run evidence", () => {
         assert.equal(({} as Record<string, unknown>).polluted, undefined);
     });
 
-    test("stores a scrubbed compressed replay and rejects recordings beyond its limits", async () => {
+    test("scrubs sensitive page content in a compressed replay and rejects recordings beyond its limits", async () => {
         const work = tempDir();
         const output = tempDir();
-        const secret = "private-replay-password";
+        const pageText = "text the page itself shows";
         const events: ReplayEvent[] = [
             { type: 4, timestamp: 1, data: { width: 1280, height: 720, href: "https://example.com" } },
-            { type: 2, timestamp: 2, data: { node: { type: 0, childNodes: [{ type: 3, textContent: secret }] } } },
+            { type: 2, timestamp: 2, data: { node: { type: 0, childNodes: [{ type: 3, textContent: pageText }] } } },
         ];
         const data = await encodeReplay(events);
         assert.ok(data);
         const file = path.join(work, "replay.json");
         await fs.writeFile(file, JSON.stringify(events));
-        const manifest = await writeRunEvidence(output, "passed", { failedStep: null, attachments: [{ name: "specbook-replay", path: file, contentType: "application/json" }] }, [], createSecretScrubber([secret]));
+        const manifest = await writeRunEvidence(output, "passed", { failedStep: null, attachments: [{ name: "specbook-replay", path: file, contentType: "application/json" }] }, [], createSecretScrubber([pageText, "1"]));
         assert.equal(manifest.replay?.file, REPLAY_FILE);
         const stored = await fs.readFile(path.join(output, REPLAY_FILE));
         assert.equal(manifest.replay?.bytes, stored.length);
         const replay = await decodeReplay(stored);
         assert.ok(replay);
-        assert.ok(!JSON.stringify(replay).includes(secret));
-        assert.match(JSON.stringify(replay), /••••/);
+        assert.ok(!JSON.stringify(replay).includes(pageText), "sensitive values are scrubbed from recorded text");
+        assert.ok(JSON.stringify(replay).includes("••••"));
+        assert.equal(replay[0].timestamp, 1, "scrubbing short secrets preserves numeric event data");
         assert.deepEqual(await readEvidenceManifest(output), manifest);
         for (const invalid of [Buffer.from("not gzip"), gzipSync("{}"), gzipSync("[]"), Buffer.alloc(MAX_REPLAY_BYTES + 1), gzipSync(Buffer.alloc(MAX_REPLAY_RAW_BYTES + 1))]) {
             assert.equal(await decodeReplay(invalid), null);
@@ -203,7 +201,8 @@ describe("run evidence", () => {
         const data = { startedAt: "2026-10-12T00:00:00Z", durationMs: 2, qualityGate: { passed: true, failures: 0 }, sections: [section, { ...section, item: { ...section.item, runId: "b" } }] };
         const html = await renderHtmlReport(data);
         assert.equal((html.match(/class="replay-data"/g) ?? []).length, 2);
-        assert.equal((html.match(/const instances = new WeakMap/g) ?? []).length, 1);
+        assert.equal((html.match(/id="specbook-replay-bootstrap"/g) ?? []).length, 1);
+        assert.ok(html.includes("replay-hit") && html.includes("Replay timeline"));
         const libraries = [...html.matchAll(/<script id="specbook-replay-library" type="application\/octet-stream">([^<]+)<\/script>/g)];
         assert.equal(libraries.length, 1);
         assert.match(gunzipSync(Buffer.from(libraries[0][1], "base64")).toString(), /rrwebPlayer/);
@@ -215,7 +214,7 @@ describe("run evidence", () => {
         assert.match(waiting, /data-wait-ms="5000"/);
         const historical = await renderHtmlReport({ ...data, sections: [{ ...section, replay: null }] });
         assert.ok(!historical.includes('class="replay"'));
-        assert.ok(!historical.includes("const instances = new WeakMap"));
+        assert.ok(!historical.includes('id="specbook-replay-bootstrap"'));
         const capped = await renderHtmlReport({ ...data, sections: [{ ...section, replay: null, replayUnavailable: REPLAY_LIMIT_NOTE }] });
         assert.match(capped, /Replay omitted because it exceeded/);
     });

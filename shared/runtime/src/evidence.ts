@@ -5,6 +5,7 @@ import type { RunStatus } from "./types.ts";
 import type { SpecFileResult } from "./report.ts";
 import { API_STEP_ATTACHMENT_PREFIX, STEP_ATTACHMENT_PREFIX } from "./specbook/guard.ts";
 import { encodeReplay, isReplayEvents, MAX_REPLAY_BYTES, MAX_REPLAY_RAW_BYTES, REPLAY_ATTACHMENT, REPLAY_FILE, REPLAY_LIMIT_NOTE, REPLAY_UNAVAILABLE_ATTACHMENT } from "./replay.ts";
+import { scrubJson } from "./scrub.ts";
 
 export interface EvidenceStep {
     number: number;
@@ -141,7 +142,7 @@ export async function writeRunEvidence(
             const text = await readText(attachment.path, 1_000_000);
             if (!text) continue;
             try {
-                const parsed = z.array(apiRequestEvidenceSchema).max(30).safeParse(JSON.parse(scrub(text)));
+                const parsed = z.array(apiRequestEvidenceSchema).max(30).safeParse(scrubJson(JSON.parse(text), scrub));
                 const number = Number(apiMatch[1]);
                 if (parsed.success && number >= 1 && number <= stepTitles.length && !manifest.apiSteps?.some((step) => step.number === number)) {
                     (manifest.apiSteps ??= []).push({ number, label: stepTitles[number - 1], requests: parsed.data });
@@ -151,7 +152,7 @@ export async function writeRunEvidence(
             const text = await readText(attachment.path, MAX_REPLAY_RAW_BYTES);
             if (!text) { manifest.replayUnavailable = REPLAY_LIMIT_NOTE; continue; }
             try {
-                const events: unknown = JSON.parse(scrub(text));
+                const events: unknown = scrubJson(JSON.parse(text), scrub);
                 if (!isReplayEvents(events)) { manifest.replayUnavailable = "Replay could not be recorded."; continue; }
                 const data = await encodeReplay(events);
                 if (data) {
@@ -166,7 +167,7 @@ export async function writeRunEvidence(
             const text = await readText(attachment.path, 1_000_000);
             if (!text) continue;
             try {
-                const diagnostics = z.array(runDiagnosticSchema).max(100).safeParse(JSON.parse(scrub(text)));
+                const diagnostics = z.array(runDiagnosticSchema).max(100).safeParse(scrubJson(JSON.parse(text), scrub));
                 if (diagnostics.success) manifest.diagnostics = diagnostics.data;
             } catch {}
         } else if (status !== "passed" && ["specbook-error-context", "error-context"].includes(attachment.name)) {

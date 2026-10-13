@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { HTTPException } from "hono/http-exception";
 import { RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES, runnerArtifactPathSchema, runnerPayloadSchema, type RunnerCompletion, type RunnerPayload } from "@specbook/runtime/runner-protocol";
 import { decodeReplay, encodeReplay, MAX_REPLAY_BYTES, REPLAY_FILE } from "@specbook/runtime/replay";
+import { scrubJson } from "@specbook/runtime/scrub";
 import { MAX_RUNNER_ATTEMPTS, RUNNER_EXECUTION_GRACE_MS, runnerJobDeadline, runnerQueueTimeoutMs, runnersRepository, type RunnerJob, type RunnerToken } from "../../infra/repositories/runners";
 import { runsDir } from "../paths";
 import { createKeyedLock } from "../operations/keyed-lock";
@@ -170,11 +171,14 @@ export async function completeRunnerWork(jobId: string, runnerId: string, comple
                         if (content.length > MAX_REPLAY_BYTES) throw new HTTPException(413, { message: "Runner replay exceeds the compressed limit" });
                         const events = await decodeReplay(content);
                         if (!events) throw new HTTPException(400, { message: "Invalid runner replay recording" });
-                        const safe = await encodeReplay(events, scrub);
-                        if (!safe) { replayUnavailable = "Replay was omitted because it exceeded recording limits after secret masking."; continue; }
+                        const safe = await encodeReplay(scrubJson(events, scrub));
+                        if (!safe) { replayUnavailable = "Replay was omitted because it exceeded recording limits."; continue; }
                         content = safe;
                         replayBytes = content.length;
-                    } else if (artifact.path === "evidence.json") content = Buffer.from(scrub(content.toString("utf8")));
+                    } else if (artifact.path === "evidence.json") {
+                        try { content = Buffer.from(JSON.stringify(scrubJson(JSON.parse(content.toString("utf8")), scrub))); }
+                        catch { throw new HTTPException(400, { message: "Invalid runner evidence manifest" }); }
+                    }
                     storedBytes += content.length;
                     if (storedBytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES || content.length > 32 * 1024 * 1024) throw new HTTPException(413, { message: "Runner artifacts exceed the upload limit" });
                     const file = path.join(staging, result.runId, artifact.path);

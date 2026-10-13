@@ -8,6 +8,7 @@ import { MAX_REPLAY_RAW_BYTES, packReplayEvents, restoreReplayEvents, type Repla
 
 export { MAX_REPLAY_RAW_BYTES, MAX_REPLAY_EVENTS, isReplayEvents, packReplayEvents, restoreReplayEvents, type ReplayEvent } from "./replay-assets.ts";
 
+export { REPLAY_MASK_ATTRIBUTE } from "./replay-constants.ts";
 export const REPLAY_FILE = "evidence/replay.json.gz";
 export const REPLAY_ATTACHMENT = "specbook-replay";
 export const REPLAY_UNAVAILABLE_ATTACHMENT = "specbook-replay-unavailable";
@@ -27,15 +28,15 @@ export async function decodeReplay(data: Buffer): Promise<ReplayEvent[] | null> 
     }
 }
 
-export async function encodeReplay(events: ReplayEvent[], scrub: (text: string) => string = (text) => text): Promise<Buffer | null> {
+export async function encodeReplay(events: ReplayEvent[]): Promise<Buffer | null> {
     try {
         const source = restoreReplayEvents(events);
         if (!source) return null;
-        const safe = scrub(JSON.stringify(source.sort((left, right) => left.timestamp - right.timestamp)));
-        if (Buffer.byteLength(safe) > MAX_REPLAY_RAW_BYTES) return null;
-        const packed = packReplayEvents(JSON.parse(safe));
+        const sorted = JSON.stringify(source.sort((left, right) => left.timestamp - right.timestamp));
+        if (Buffer.byteLength(sorted) > MAX_REPLAY_RAW_BYTES) return null;
+        const packed = packReplayEvents(JSON.parse(sorted));
         if (!packed) return null;
-        const raw = scrub(JSON.stringify(packed));
+        const raw = JSON.stringify(packed);
         if (Buffer.byteLength(raw) > MAX_REPLAY_RAW_BYTES || !restoreReplayEvents(JSON.parse(raw))) return null;
         const data = await compress(raw, { level: 6 });
         return data.length <= MAX_REPLAY_BYTES ? data : null;

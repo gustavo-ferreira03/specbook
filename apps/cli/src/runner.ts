@@ -9,6 +9,7 @@ import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright
 import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { decodeReplay, encodeReplay, REPLAY_FILE } from "@specbook/runtime/replay";
+import { scrubJson } from "@specbook/runtime/scrub";
 import {
     runnerArtifactPathSchema, runnerClaimResponseSchema, runnerCompleteRequestSchema,
     runnerHeartbeatResponseSchema, type RunnerClaim, type RunnerCompletion,
@@ -59,7 +60,7 @@ async function artifacts(directory: string, scrubText: (text: string) => string)
         let data: Buffer = await fs.readFile(full);
         if (file === REPLAY_FILE) {
             const events = await decodeReplay(data);
-            const safe = events ? await encodeReplay(events, scrubText) : null;
+            const safe = events ? await encodeReplay(scrubJson(events, scrubText)) : null;
             if (!safe) { replayUnavailable = "Replay was omitted because it exceeded recording limits or was invalid."; continue; }
             data = safe;
             replayBytes = data.length;

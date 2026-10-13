@@ -15,6 +15,8 @@ import { batchReport, runReport } from "../../../core/ci/report";
 import { resolveRunEnvironment } from "../../../core/environments";
 import { runnerQueueSnapshot, visibleRuns } from "../../../core/private-runner/visibility";
 import { htmlReportHeaders } from "../security";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
+import { readOfflineReplay } from "@specbook/runtime/replay-data";
 
 function reportHeaders(c: Context, name: string, html: string): Record<string, string> {
     const headers = htmlReportHeaders(html);
@@ -156,6 +158,18 @@ export function createRunsRouter(): Hono {
     });
 
     router.get("/runs/:id/evidence", access("viewer"), async (c) => c.json(await readRunEvidence(c.req.param("id"))));
+
+    router.get("/runs/:id/replay", access("viewer"), async (c) => {
+        const runId = c.req.param("id");
+        await requireRun(runId);
+        const directory = await realRunDirectory(runId);
+        const manifest = directory ? await readEvidenceManifest(directory) : null;
+        const recording = directory && manifest?.replay ? await readOfflineReplay(directory) : null;
+        if (!recording) throw new HTTPException(404, { message: "Replay not found" });
+        c.header("Cache-Control", "private, no-store");
+        c.header("X-Content-Type-Options", "nosniff");
+        return c.json(recording);
+    });
 
     router.get("/runs/:id/artifacts/:file{.+}", access("viewer"), async (c) => {
         const runId = c.req.param("id");

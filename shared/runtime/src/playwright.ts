@@ -1,6 +1,7 @@
 import type { ErrorCode } from "./errors.ts";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
+import { scrubJsonText } from "./scrub.ts";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -171,7 +172,7 @@ export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOu
         });
         const output = stripAnsi(processResult.output).trim();
         const rawReport = await fs.readFile(path.join(workDir, "results.json"), "utf8").catch(() => null);
-        const report = rawReport === null ? null : options.scrub(rawReport);
+        const report = rawReport === null ? null : scrubJsonText(rawReport, options.scrub);
         if (report !== null) await fs.writeFile(path.join(directory, "results.json"), report, "utf8");
 
         if (processResult.timedOut) processFailure = `Run timed out after ${Math.round(options.timeoutMs / 1000)}s`;

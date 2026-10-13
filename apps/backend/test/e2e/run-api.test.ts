@@ -103,6 +103,7 @@ test("runner dispatch keeps credential lookup local and survives backend recover
     const project = await projectsRepository.createProject("Runner recovery", "http://private-app.invalid:4300");
     const secretValue = "server-known-replay-secret";
     await createProfile(project.id, { name: "protected", fields: [{ key: "password", value: secretValue }] });
+    await createProfile(project.id, { name: "short", fields: [{ key: "token", value: "1", sensitive: true }] });
     await repoGit.ensureProjectRepo(project.id, { create: true });
     const production = (await environmentsRepository.list(project.id))[0]!;
     await environmentsRepository.update(production, { ...production, executor: "runner", runnerGroup: "recovery" });
@@ -140,7 +141,7 @@ test("runner dispatch keeps credential lookup local and survives backend recover
             { type: 2, id: 2, tagName: "html", attributes: {}, childNodes: [
                 { type: 2, id: 3, tagName: "head", attributes: {}, childNodes: [] },
                 { type: 2, id: 4, tagName: "body", attributes: {}, childNodes: [
-                    { type: 3, id: 5, textContent: secretValue },
+                    { type: 3, id: 5, textContent: `${secretValue} 1` },
                 ] },
             ] },
         ] }, initialOffset: { left: 0, top: 0 } } },
@@ -161,7 +162,9 @@ test("runner dispatch keeps credential lookup local and survives backend recover
     const directory = path.join(runsDir, body.run.id);
     const savedReplay = await readReplay(directory);
     assert.ok(savedReplay);
-    assert.ok(!JSON.stringify(savedReplay).includes(secretValue));
+    assert.ok(!JSON.stringify(savedReplay).includes(secretValue), "replays scrub sensitive page content before storage");
+    assert.equal(savedReplay[0].timestamp, 1000, "short sensitive values do not corrupt replay metadata");
+    assert.ok(JSON.stringify(savedReplay).includes('"textContent":"•••• ••••"'));
     const manifest = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8"));
     assert.equal(manifest.replay.file, REPLAY_FILE);
     assert.equal(manifest.replay.bytes, (await fs.stat(path.join(directory, REPLAY_FILE))).size);
@@ -536,6 +539,10 @@ test("historical evidence maps step kinds by title and falls back for unknown la
     assert.equal(response.status, 200);
     const evidence = await response.json();
     assert.deepEqual(evidence.steps.map((step: { kind: string; ordinal: number | null }) => [step.kind, step.ordinal]), [["step", 1], ["expected", null], ["step", 3]]);
+    assert.equal(evidence.replay, null);
+    assert.equal(evidence.replayUnavailable, null);
+    assert.equal((await app.request(`/runs/${run.id}/replay`)).status, 404, "older runs have no replay");
+    assert.equal((await app.request("/runs/00000000-0000-4000-8000-000000000000/replay")).status, 404);
     const screenshot = await app.request(`/runs/${run.id}/artifacts/evidence/step-01.png`);
     assert.equal(screenshot.status, 200);
     assert.equal(screenshot.headers.get("content-type"), "image/png");
@@ -545,6 +552,58 @@ test("historical evidence maps step kinds by title and falls back for unknown la
     await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [1, 2, 3, 4].map((number) => ({ number, label: "Check state", file: `evidence/step-0${number}.png` })), video: null, failedStep: null }));
     const duplicates = await (await app.request(`/runs/${run.id}/evidence`)).json();
     assert.deepEqual(duplicates.steps.map((step: { kind: string; ordinal: number | null }) => [step.kind, step.ordinal]), [["precondition", null], ["step", 1], ["expected", null], ["postcondition", null]]);
+
+    const { encodeReplay, REPLAY_FILE, restoreReplayEvents } = await import("@specbook/runtime/replay");
+    const { readOfflineReplay } = await import("@specbook/runtime/replay-data");
+    const image = "data:image/webp;base64,aW1hZ2U=";
+    const replay = (await encodeReplay([
+        { type: 4, timestamp: 1000, data: { href: baseUrl, width: 800, height: 600 } },
+        { type: 2, timestamp: 1001, data: { node: { type: 0, id: 1, childNodes: [
+            { type: 2, id: 2, tagName: "img", attributes: { src: image, onload: "alert('unsafe')" }, childNodes: [] },
+            { type: 2, id: 3, tagName: "img", attributes: { src: image }, childNodes: [] },
+            { type: 2, id: 4, tagName: "input", attributes: { type: "password", value: "********", "data-specbook-mask": "" }, childNodes: [] },
+            { type: 2, id: 5, tagName: "iframe", attributes: { src: "https://outside.invalid/", srcdoc: "<script>unsafe()</script>" }, childNodes: [] },
+            { type: 3, id: 6, textContent: '@import "https://outside.invalid/style.css"; .page{background:url(https://outside.invalid/image.png)}' },
+        ] }, initialOffset: { left: 0, top: 0 } } },
+        { type: 3, timestamp: 1002, data: { source: 0, texts: [], removes: [], adds: [], attributes: [
+            { id: 2, attributes: { src: image, onclick: "unsafe()", href: "https://outside.invalid/" } },
+        ] } },
+    ]))!;
+    await fs.writeFile(path.join(directory, REPLAY_FILE), replay);
+    await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null,
+        replay: { file: REPLAY_FILE, bytes: replay.length } }));
+    const replayResponse = await app.request(`/runs/${run.id}/replay`);
+    assert.equal(replayResponse.status, 200);
+    assert.equal(replayResponse.headers.get("cache-control"), "private, no-store");
+    assert.equal(replayResponse.headers.get("x-content-type-options"), "nosniff");
+    const recording = await replayResponse.json();
+    assert.deepEqual(recording, await readOfflineReplay(directory), "the app receives the report's packed, sanitized recording");
+    assert.ok(recording);
+    assert.equal(recording.version, 1);
+    assert.deepEqual(recording.assets, [image]);
+    const events = restoreReplayEvents(recording)!;
+    const nodes = ((events[1].data as { node: { childNodes: { attributes?: Record<string, string>; textContent?: string }[] } }).node.childNodes);
+    assert.deepEqual(nodes[0].attributes, { src: image });
+    assert.deepEqual(nodes[3].attributes, {});
+    assert.equal(nodes[2].attributes?.value, "********");
+    assert.equal(nodes[2].attributes?.["data-specbook-mask"], "");
+    assert.ok(!JSON.stringify(recording).includes("outside.invalid"));
+    assert.ok(!JSON.stringify(recording).includes("unsafe()"));
+    assert.deepEqual((events[2].data as { attributes: { id: number; attributes: Record<string, string> }[] }).attributes, [{ id: 2, attributes: { src: image } }]);
+    const withReplay = await (await app.request(`/runs/${run.id}/evidence`)).json();
+    assert.deepEqual(withReplay.replay, { file: REPLAY_FILE, bytes: replay.length });
+
+    await fs.writeFile(path.join(directory, REPLAY_FILE), "invalid gzip");
+    assert.equal((await app.request(`/runs/${run.id}/replay`)).status, 404, "invalid replay data fails closed");
+    await fs.rm(path.join(directory, REPLAY_FILE));
+    await fs.symlink(path.join(directory, "spec.yml"), path.join(directory, REPLAY_FILE));
+    assert.equal((await app.request(`/runs/${run.id}/replay`)).status, 404, "replay reads reject symlinks");
+    await fs.rm(path.join(directory, REPLAY_FILE));
+    await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null,
+        replayUnavailable: "Replay omitted because it exceeded the recording limit." }));
+    const unavailable = await (await app.request(`/runs/${run.id}/evidence`)).json();
+    assert.equal(unavailable.replay, null);
+    assert.equal(unavailable.replayUnavailable, "Replay omitted because it exceeded the recording limit.");
 });
 
 test("an offline runner retry leaves other projects' failure processing available", async () => {

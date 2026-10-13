@@ -1,3 +1,5 @@
+import { stepName } from "@specbook/runtime/replay-player";
+
 const LOCALE = "en-US";
 
 const dateFormatter = new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium" });
@@ -83,9 +85,7 @@ export function environmentLabel(name: string | null | undefined): string | unde
     return name && name !== "Production" ? name : undefined;
 }
 
-const EVIDENCE_LABELS = { precondition: "Precondition", expected: "Expected result", postcondition: "Postcondition" } as const;
-
 // Only the Spec's steps are numbered; preconditions, the expected result and postconditions are named.
 export function evidenceStepLabel(step: { kind?: "precondition" | "step" | "expected" | "postcondition"; ordinal?: number | null; number: number }): string {
-    return !step.kind || step.kind === "step" ? `Step ${step.ordinal ?? step.number}` : EVIDENCE_LABELS[step.kind];
+    return stepName({ kind: step.kind ?? "step" }, step.ordinal ?? step.number);
 }

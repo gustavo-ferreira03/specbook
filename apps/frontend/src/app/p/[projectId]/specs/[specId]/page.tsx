@@ -16,6 +16,7 @@ import { RunDiagnostics } from "@/components/RunDiagnostics";
 import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
 import { RunStateAnnouncement } from "@/components/RunStateAnnouncement";
 import { SectionHeader } from "@/components/SectionHeader";
+import { SessionReplay } from "@/components/SessionReplay";
 import { SpecFolio } from "@/components/SpecFolio";
 import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
 import { ApiRunEvidence } from "@/components/SpecRunDialog";
@@ -36,6 +37,7 @@ import { formatDateTime, formatDuration, environmentLabel, evidenceStepLabel } f
 import { statusMeta } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { HumanSpec, Run, RunEvidence, SpecDetail } from "@/lib/types";
+import type { ReplayController } from "@specbook/runtime/replay-player";
 
 function splitLines(raw: string): string[] {
     return raw
@@ -292,24 +294,26 @@ function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
     );
 }
 
-function EvidenceGallery({ runId, passed, evidence, onSelect }: { runId: string; passed: boolean; evidence: RunEvidence; onSelect: (step: RunEvidence["steps"][number]) => void }) {
+function EvidenceGallery({ runId, passed, evidence, currentStep, onSelect }: { runId: string; passed: boolean; evidence: RunEvidence; currentStep: number | null; onSelect: (step: RunEvidence["steps"][number]) => void }) {
     if (evidence.steps.length === 0) return null;
     return (
-        <section aria-labelledby={`evidence-${runId}`}>
-            <h4 id={`evidence-${runId}`} className="flex items-center gap-1.5 text-meta font-semibold text-ink-muted"><Images size={13} aria-hidden="true" /> Screenshots by step</h4>
+        <section className="screenshot-section min-w-0" aria-labelledby={`evidence-${runId}`}>
+            <h4 id={`evidence-${runId}`} className="flex items-center gap-1.5 text-meta font-semibold text-ink-muted"><Images size={13} aria-hidden="true" /> Screenshots</h4>
             <ScrollArea orientation="horizontal" className="mt-2 w-full pb-2.5">
-                <div className="flex w-max gap-2.5">
+                <div className="shots flex w-max gap-3.5">
                     {evidence.steps.map((step) => (
-                        <button
-                            key={step.file}
-                            type="button"
-                            onClick={() => onSelect(step)}
-                            className="group/shot flex w-48 flex-col overflow-hidden rounded-lg border border-line bg-surface text-left outline-none transition-colors hover:border-line-hover focus-visible:ring-2 focus-visible:ring-ring sm:w-52"
-                        >
-                            <img src={artifactUrl(runId, step.file)} alt="" loading="lazy" className="h-28 w-full border-b border-line bg-surface-soft object-cover object-top" />
-                            <span className={cn("px-2.5 pt-2 text-meta font-medium tabular", step.kind === "expected" && passed ? "text-success" : "text-ink-subtle")}>{evidenceStepLabel(step)}</span>
-                            <span className="line-clamp-2 min-h-10 px-2.5 pt-0.5 pb-2 text-meta leading-5 break-words text-ink">{step.label}</span>
-                        </button>
+                        <figure key={step.file} className={cn("w-[170px] shrink-0 sm:w-[220px]", step.kind === "expected" && "is-proof")}>
+                            <button
+                                type="button"
+                                onClick={() => onSelect(step)}
+                                aria-label={`Enlarge screenshot${evidence.replay ? " and replay" : ""} ${evidenceStepLabel(step)}: ${step.label}`}
+                                data-replay-step={step.number}
+                                className={cn("zoom block w-full overflow-hidden rounded-lg border border-line-strong outline-none transition-colors hover:border-line-hover focus-visible:ring-2 focus-visible:ring-ring", currentStep === step.number && "is-current border-2 border-primary")}
+                            >
+                                <img src={artifactUrl(runId, step.file)} alt={`${evidenceStepLabel(step)}: ${step.label}`} loading="lazy" className="aspect-video w-full bg-surface-soft object-cover object-top" />
+                            </button>
+                            <figcaption className="mt-1.5 text-meta leading-5 break-words text-ink-muted"><b className={cn("font-semibold", step.kind === "expected" && passed && "text-success")}>{evidenceStepLabel(step)}</b> {step.label}</figcaption>
+                        </figure>
                     ))}
                 </div>
             </ScrollArea>
@@ -318,33 +322,39 @@ function EvidenceGallery({ runId, passed, evidence, onSelect }: { runId: string;
 }
 
 function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedRunEvidence | undefined; onSelect: (selection: EvidenceSelection) => void }) {
+    const replay = useRef<ReplayController | null>(null);
+    const pendingStep = useRef<number | null>(null);
+    const [currentStep, setCurrentStep] = useState<number | null>(null);
+    const onReplayReady = useCallback((controller: ReplayController) => {
+        const step = pendingStep.current;
+        if (step !== null && controller.seekToStep(step)) {
+            setCurrentStep(step);
+            pendingStep.current = null;
+        }
+    }, []);
     const evidence = loaded?.data;
     if (run.status === "running") return <p role="status" className="text-body text-ink-muted">This run is in progress. Evidence appears when it finishes.</p>;
     if (!loaded) return <Skeleton className="h-24 w-full rounded-lg" aria-label="Loading evidence" />;
     if (loaded.error) return <Alert variant="danger" role="alert"><AlertDescription>Could not load evidence: {loaded.error}</AlertDescription></Alert>;
     if (!evidence) return null;
-    const proof = run.status === "passed" ? evidence.steps.find((step) => step.kind === "expected") : undefined;
-    const empty = evidence.steps.length === 0 && !evidence.apiSteps?.length && !evidence.video && !evidence.diagnostics?.length && !evidence.errorContext && !(run.status === "passed" && evidence.expectedResult);
+    const empty = evidence.steps.length === 0 && !evidence.apiSteps?.length && !evidence.video && !evidence.replay && !evidence.replayUnavailable && !evidence.diagnostics?.length && !evidence.errorContext;
     return (
         <div className="space-y-4">
-            {run.status === "passed" && evidence.expectedResult && (
-                <p className="flex items-start gap-2 text-control text-ink-muted">
-                    <Check size={14} strokeWidth={2.25} aria-hidden="true" className="mt-0.5 shrink-0 text-success" />
-                    <span><span className="font-medium text-ink">Expected result confirmed.</span> {evidence.expectedResult}</span>
-                </p>
-            )}
-            {proof && (
-                <button type="button" onClick={() => onSelect({ runId: run.id, step: proof })} className="block w-full max-w-xl overflow-hidden rounded-lg border border-line text-left outline-none transition-colors hover:border-line-hover focus-visible:ring-2 focus-visible:ring-ring">
-                    <img src={artifactUrl(run.id, proof.file)} alt={`Expected result: ${evidence.expectedResult}`} loading="lazy" className="w-full bg-surface-soft" />
-                </button>
-            )}
+            {evidence.replay && <SessionReplay runId={run.id} failReason={run.failReason} controls={replay} onReady={onReplayReady} />}
+            {!evidence.replay && evidence.replayUnavailable && <p className="text-meta text-ink-muted">{evidence.replayUnavailable}</p>}
+            <EvidenceGallery runId={run.id} passed={run.status === "passed"} evidence={evidence} currentStep={currentStep} onSelect={(step) => {
+                if (replay.current?.seekToStep(step.number)) {
+                    setCurrentStep(step.number);
+                    pendingStep.current = null;
+                } else pendingStep.current = step.number;
+                onSelect({ runId: run.id, step });
+            }} />
             {evidence.video && run.status !== "passed" && (
                 <section aria-labelledby={`video-${run.id}`}>
                     <h4 id={`video-${run.id}`} className="flex items-center gap-1.5 text-meta font-semibold text-ink-muted"><Video size={13} aria-hidden="true" /> Recording</h4>
                     <video controls preload="metadata" className="mt-2 aspect-video w-full rounded-lg border border-line bg-browser" src={artifactUrl(run.id, evidence.video)} />
                 </section>
             )}
-            <EvidenceGallery runId={run.id} passed={run.status === "passed"} evidence={evidence} onSelect={(step) => onSelect({ runId: run.id, step })} />
             <ApiRunEvidence evidence={evidence} />
             <RunDiagnostics evidence={evidence} />
             {empty && <p className="text-control text-ink-subtle">No evidence was recorded for this run.</p>}
@@ -427,7 +437,7 @@ function RunEntry({
                 )}
                 {run.status !== "passed" && run.failReason && <FailureReason reason={run.failReason} tone={waiting ? "neutral" : "danger"} />}
                 <CollapsibleContent className="pt-3">
-                    <RunEvidencePanel run={run} loaded={loaded} onSelect={onSelect} />
+                    {open && <RunEvidencePanel run={run} loaded={loaded} onSelect={onSelect} />}
                 </CollapsibleContent>
             </Collapsible>
         </li>

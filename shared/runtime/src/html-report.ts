@@ -4,9 +4,9 @@ import { gzipSync } from "node:zlib";
 import { executionPlan, type ExecutionStepKind, type HumanSpec } from "./types.ts";
 import { readEvidenceManifest } from "./evidence.ts";
 import { analyzeSpecSource, sameStepTitle } from "./validate.ts";
-import { readReplay, type ReplayEvent } from "./replay.ts";
-import { packReplayEvents } from "./replay-assets.ts";
-import { REPORT_REPLAY_SCRIPT } from "./report-replay.ts";
+import { readOfflineReplay } from "./replay-data.ts";
+import { assertionWait, stepName } from "./replay-player.ts";
+import { REPLAY_PLAYER_STYLES } from "./replay-player-styles.ts";
 
 const MAX_IMAGE_BYTES = 5_000_000;
 const MAX_VIDEO_BYTES = 8_000_000;
@@ -93,45 +93,9 @@ async function embed(directory: string, file: string, type: string | undefined, 
 
 const image = (directory: string, file: string) => embed(directory, file, IMAGE_TYPES[path.extname(file).toLowerCase()], MAX_IMAGE_BYTES);
 
-function offlineReplay(value: unknown): unknown {
-    if (typeof value === "string") return value.replace(/@import\s+(?:url\([^)]*\)|["'][^"']*["'])[^;]*;?/gi, "")
-        .replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi, (_match, _quote, url: string) => /^(?:data:|#)/i.test(url.trim()) ? `url("${url.trim().replace(/"/g, "%22")}")` : 'url("data:,")');
-    if (Array.isArray(value)) return value.map(offlineReplay);
-    if (!value || typeof value !== "object") return value;
-    const entry = value as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(entry)) {
-        // Mutation events carry a list of { id, attributes } changes; nodes carry the attribute map itself.
-        if (key === "attributes" && item && typeof item === "object" && !Array.isArray(item)) {
-            const attributes: Record<string, unknown> = {};
-            for (const [name, attribute] of Object.entries(item)) {
-                if (["src", "poster", "background", "xlink:href", "srcset", "srcdoc", "action", "formaction"].includes(name)) {
-                    if (name !== "srcdoc" && name !== "srcset" && typeof attribute === "string" && /^data:(?:image|font|audio|video)\//i.test(attribute)) attributes[name] = attribute;
-                } else if (name === "href") {
-                    if (typeof attribute === "string" && attribute.startsWith("#")) attributes[name] = attribute;
-                } else if (!name.toLowerCase().startsWith("on") && name !== "http-equiv") attributes[name] = offlineReplay(attribute);
-            }
-            result[key] = attributes;
-        } else result[key] = offlineReplay(item);
-    }
-    return result;
-}
-
 async function replayData(directory: string): Promise<string | null> {
-    const events = await readReplay(directory);
-    const recording = events ? packReplayEvents(offlineReplay(events) as ReplayEvent[]) : null;
+    const recording = await readOfflineReplay(directory);
     return recording ? gzipSync(JSON.stringify(recording)).toString("base64") : null;
-}
-
-function assertionWait(reason: string | null): { ms: number; summary: string } | null {
-    if (!reason?.includes("expect(locator).toHaveCount(expected) failed")) return null;
-    const expected = reason.match(/^Expected:\s*(\d+)\s*$/m)?.[1];
-    const received = reason.match(/^Received:\s*(\d+)\s*$/m)?.[1];
-    const timeout = reason.match(/^Timeout:\s*(\d+)ms\s*$/m)?.[1];
-    if (expected === undefined || received === undefined || timeout === undefined) return null;
-    const ms = Number(timeout);
-    if (!Number.isSafeInteger(ms) || ms < 1) return null;
-    return { ms, summary: `Waited ${duration(ms)} for ${expected} element${expected === "1" ? "" : "s"}; saw ${received}` };
 }
 
 function toneOf(item: Item): Tone {
@@ -244,7 +208,7 @@ function renderSection({ item, tone, path: file, expectedResult, steps, video, r
   ${replay ? `<div class="visuals"><section class="replay" aria-label="Session replay"${wait ? ` data-wait-ms="${wait.ms}"` : ""}><h3>Replay</h3><p class="replay-status">Loading replay…</p><div class="replay-player"></div><script class="replay-data" type="application/octet-stream">${replay}</script></section><section class="screenshot-section">` : ""}
   ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => {
       const id = shotId(step);
-      const name = step.kind === "expected" ? "Expected result" : step.kind === "precondition" ? "Precondition" : step.kind === "postcondition" ? "Postcondition" : `Step ${step.ordinal}`;
+      const name = stepName(step, step.ordinal ?? step.number);
       return `<figure id="${escape(id)}"${step.kind === "expected" ? ' class="is-proof"' : ""}><a class="zoom" href="#${escape(id)}"${replay ? ` data-replay-step="${step.number}" aria-label="Enlarge screenshot and replay ${escape(name)}: ${escape(step.label)}"` : ""}><img src="${step.image}" alt="${name}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>${name}</b> ${escape(step.label)}</figcaption></figure>`;
   }).join("")}</div>` : ""}
   ${replay ? "</section></div>" : replayUnavailable ? `<p class="replay-note">${escape(replayUnavailable)}</p>` : ""}
@@ -356,20 +320,7 @@ figure:target .close,figure.is-zoomed .close{display:block;position:absolute;ins
 .visuals{display:flex;flex-direction:column;gap:18px}
 .replay,.screenshot-section{min-width:0}.screenshot-section .shots{display:flex;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x proximity}.screenshot-section .shots figure{flex:0 0 220px;scroll-snap-align:start}
 .replay-player{width:100%;min-height:180px}.replay-status,.replay-note{font-size:12px;color:var(--muted)}
-.replay{position:relative}.replay .rr-player{float:none;margin:0 auto;border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;box-shadow:none;overflow:hidden;background:var(--soft)}
-.replay .rr-player__frame{position:relative}.replay-hit{position:absolute;inset:0;z-index:2;display:grid;place-items:center;width:100%;padding:0;border:0;background:transparent;cursor:pointer}.replay-hit:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
-.replay-hit.is-idle,.replay-hit.is-ended{background:rgba(0,0,0,.24)}.replay-big{display:none;place-items:center;width:60px;height:60px;border-radius:50%;background:#fff;color:var(--primary);transition:transform .2s ease}.replay-hit.is-idle .replay-big,.replay-hit.is-ended .replay-big{display:grid}.replay-hit:hover .replay-big{transform:scale(1.06)}.replay-big svg{width:26px;height:26px;fill:currentColor}.replay-hit.is-idle .replay-big svg{margin-left:3px}
-.replay-bar{padding:6px 12px 4px;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;background:var(--surface)}
-.replay-seek{position:relative;display:flex;align-items:center;height:16px;cursor:pointer;touch-action:none}.replay-seek:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}.replay-track{position:relative;flex:1;height:4px;border-radius:2px;background:var(--line)}
-.replay-fill{position:absolute;inset:0 auto 0 0;border-radius:2px;background:var(--primary)}.replay-knob{position:absolute;top:50%;z-index:2;width:12px;height:12px;border-radius:50%;background:var(--primary);transform:translate(-50%,-50%);transition:transform .2s ease}.replay-seek:hover .replay-knob,.replay-seek.is-dragging .replay-knob{transform:translate(-50%,-50%) scale(1.2)}
-.replay-mark{position:absolute;top:-2px;z-index:1;width:3px;height:8px;margin-left:-1px;border-radius:1px;background:var(--subtle)}.replay-mark.is-passed{background:var(--success)}.replay-mark.is-failed,.replay-mark.is-error{background:var(--danger)}.replay-mark::before{content:"";position:absolute;inset:-6px -5px}
-.replay-wait{position:absolute;top:-3px;bottom:-3px;background:var(--danger-soft);border-inline:1px solid var(--danger);pointer-events:none}
-.replay-row{display:flex;align-items:center;gap:8px;min-height:36px}.replay-button,.replay-speed{display:grid;place-items:center;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink);cursor:pointer;transition:background-color .2s ease}.replay-button{width:28px}.replay-button svg{width:18px;height:18px;fill:currentColor}.replay-button:hover,.replay-speed:hover{background:var(--soft)}
-.replay-speed{min-width:36px;padding:0 8px;border:1px solid var(--line);font:inherit;font-size:12px;font-variant-numeric:tabular-nums}.replay-button:focus-visible,.replay-speed:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
-.replay-time{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}.replay-label{min-width:0;overflow:hidden;font-size:12px;white-space:nowrap;text-overflow:ellipsis}.replay-label b{font-weight:600}.replay-spacer{flex:1}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
-.replay:fullscreen{display:flex;flex-direction:column;justify-content:center;padding:16px;background:var(--surface)}.replay:fullscreen h3{display:none}.replay:fullscreen .replay-bar{width:100%;max-width:var(--replay-width,none);margin:0 auto}
-.replay{position:relative}.replay-tip{position:absolute;opacity:0;transition:opacity .2s ease;z-index:5;transform:translateX(-50%);max-width:280px;padding:4px 8px;border-radius:6px;background:var(--primary);color:#fff;font-size:12px;font-weight:500;line-height:1.5;pointer-events:none;white-space:normal}.replay-tip.is-visible{opacity:1}.replay-tip b{font-weight:700}.replay-tip span{display:block;font-size:11px;opacity:.8}.replay-tip .replay-tip-failed{color:#ffb3ad;opacity:1}.replay-tip::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);border:5px solid transparent;border-top-color:var(--primary)}
 @media(max-width:760px){.visuals{grid-template-columns:1fr}.screenshot-section .shots figure{flex-basis:170px}.wrap{padding-left:16px;padding-right:16px}.body{padding-left:12px;padding-right:12px}}
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;
@@ -398,8 +349,8 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
     const sections = data.sections;
     const hasReplay = sections.some((section) => section.replay);
     const playerScript = hasReplay ? gzipSync(await publicAsset("rrweb-player.js"), { level: 9 }).toString("base64") : "";
-    const playerColors: Record<string, string> = { "#4950f680": "var(--strong)", "#4950f600": "transparent", "#4950f6": "var(--primary)", "#e0e1fe": "var(--strong)", "#11103e": "var(--muted)", "#fcfff4": "var(--surface)" };
-    const playerStyle = hasReplay ? (await publicAsset("rrweb-player.css")).replace(/#(?:4950f680|4950f600|4950f6|e0e1fe|11103e|fcfff4)\b/gi, (color) => playerColors[color.toLowerCase()]) : "";
+    const playerStyle = hasReplay ? REPLAY_PLAYER_STYLES : "";
+    const reportScript = hasReplay ? await publicAsset("report-replay.js") : "";
     const inlineScript = (script: string) => script.replace(/<\/script/gi, "<\\/script");
     const results = sections.map((section) => section.item);
     const byFeature = new Map<string, ReportSection[]>();
@@ -445,6 +396,6 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
 </main>
 <footer class="wrap">Generated by Specbook.</footer>
 <script>${inlineScript(ZOOM_SCRIPT)}</script>
-${hasReplay ? `<script id="specbook-replay-library" type="application/octet-stream">${playerScript}</script><script>${inlineScript(REPORT_REPLAY_SCRIPT)}</script>` : ""}
+${hasReplay ? `<script id="specbook-replay-library" type="application/octet-stream">${playerScript}</script><script id="specbook-replay-bootstrap">${inlineScript(reportScript)}</script>` : ""}
 </body></html>`;
 }

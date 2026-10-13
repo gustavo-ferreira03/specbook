@@ -9,11 +9,27 @@ import { createSecretScrubber } from "../../src/core/credentials/scrub";
 import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { tempDir } from "../helpers/storage";
-import { readReplay, readRecorderSource, REPLAY_FILE, MAX_REPLAY_BYTES } from "@specbook/runtime/replay";
+import { readReplay, readRecorderSource, REPLAY_FILE, REPLAY_MASK_ATTRIBUTE, MAX_REPLAY_BYTES } from "@specbook/runtime/replay";
 import { captureStepScreenshot } from "@specbook/runtime/specbook/screenshot";
 import { createReplayImageRecorder } from "@specbook/runtime/specbook/replay-images";
 
 const SECRET = "correct-horse-battery";
+
+function recordedInputValues(events: { data?: unknown }[]): string[] {
+    const values: unknown[] = [];
+    const collect = (node: { tagName?: string; attributes?: Record<string, unknown>; childNodes?: unknown[] }) => {
+        if (["input", "textarea"].includes(String(node.tagName))) values.push(node.attributes?.value);
+        for (const child of node.childNodes ?? []) collect(child as typeof node);
+    };
+    for (const event of events) {
+        const data = event.data as { node?: object; source?: number; text?: unknown; adds?: { node: object }[]; attributes?: { attributes: Record<string, unknown> }[] } | undefined;
+        if (data?.node) collect(data.node);
+        for (const add of data?.adds ?? []) collect(add.node);
+        for (const change of data?.attributes ?? []) values.push(change.attributes.value);
+        if (data?.source === 5) values.push(data.text);
+    }
+    return values.filter((value): value is string => typeof value === "string");
+}
 
 async function chromiumAvailable(): Promise<boolean> {
     try {
@@ -287,7 +303,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         } finally { await browser.close(); }
     });
 
-    test("captures WebP with secret masks across frames and shadow roots, and safely falls back to PNG", { timeout: 30_000 }, async () => {
+    test("captures WebP with input masks across frames and shadow roots, and safely falls back to PNG", { timeout: 30_000 }, async () => {
         const { chromium } = await import("@playwright/test");
         const browser = await chromium.launch({ headless: true });
         try {
@@ -298,6 +314,12 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
                 <input data-specbook-secret value="marked-secret" style="top:50px">
                 <span style="top:90px">${SECRET}</span>
                 <div id="shadow" style="position:absolute;left:10px;top:130px"></div>
+                <input type="password" value="unconfigured-password" style="left:400px;top:10px">
+                <input type="password" value="marked-secret" style="left:400px;top:50px">
+                <span style="left:400px;top:90px">••••</span>
+                <span style="top:170px">standard_user</span>
+                <span style="left:400px;top:170px">standard_user</span>
+                <input type="password" value="${SECRET}" style="left:400px;top:130px">
                 <iframe style="position:absolute;left:200px;top:10px;width:160px;height:100px;border:0" srcdoc="<body style='margin:0'><input value='${SECRET}' style='position:absolute;left:10px;top:10px;width:140px;height:30px;border:0;box-sizing:border-box'>"></iframe>`);
             await page.locator("#shadow").evaluate((host, secret) => {
                 const root = host.attachShadow({ mode: "open" });
@@ -322,12 +344,26 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
                     canvas.height = image.height;
                     const context = canvas.getContext("2d")!;
                     context.drawImage(image, 0, 0);
-                    return { width: image.width, height: image.height,
-                        colors: [[50, 25], [50, 65], [50, 105], [50, 145], [250, 35]].map(([x, y]) => [...context.getImageData(x, y, 1, 1).data]) };
+                    // Mean channel difference from a password field with the same value; WebP is lossy, so identical renders differ slightly.
+                    const pairs: Record<string, number[]> = { password: [10, 10, 400, 10], marked: [10, 50, 400, 50], shadow: [10, 130, 400, 130], framed: [210, 20, 400, 130], pageText: [10, 90, 400, 90], publicText: [10, 170, 400, 170] };
+                    const differences: Record<string, number> = {};
+                    for (const [name, [ax, ay, bx, by]] of Object.entries(pairs)) {
+                        const a = context.getImageData(ax, ay, 140, 30).data, b = context.getImageData(bx, by, 140, 30).data;
+                        let total = 0;
+                        for (let index = 0; index < a.length; index++) total += Math.abs(a[index] - b[index]);
+                        differences[name] = total / a.length;
+                    }
+                    return { width: image.width, height: image.height, differences };
                 }, `data:${result.contentType};base64,${bytes.toString("base64")}`);
                 assert.equal(pixels.width, 600);
                 assert.equal(pixels.height, 300);
-                for (const color of pixels.colors) assert.ok(color.slice(0, 3).every((channel) => Math.abs(channel - 119) <= 3), JSON.stringify(color));
+                const { pageText, publicText, ...inputs } = pixels.differences;
+                for (const [name, value] of Object.entries(inputs)) assert.ok(value < 3, `${name} input renders as password dots (${value})`);
+                assert.ok(pageText < 3, "sensitive values in page text are hidden");
+                assert.ok(publicText < 3, "non-sensitive page text stays visible");
+                assert.equal(await page.locator('span[style="top:90px"]').innerText(), SECRET, "the original page text is restored after capture");
+                assert.equal(await page.locator("input[data-specbook-secret]").evaluate((input) => getComputedStyle(input).getPropertyValue("-webkit-text-security")), "none");
+                assert.equal(await page.locator("[data-specbook-evidence-style]").count(), 0);
                 assert.equal(await page.locator("[data-specbook-evidence-mask], [popover]").count(), 0);
                 assert.equal(await page.locator("input[data-specbook-secret]").inputValue(), "marked-secret");
             };
@@ -388,10 +424,12 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         assert.ok(events.filter((event) => event.type === 2).length >= 3, "replay survives the first navigation and reload");
         assert.ok(events.every((event, index) => index === 0 || events[index - 1].timestamp <= event.timestamp));
         const recorded = JSON.stringify(events);
-        assert.ok(!recorded.includes(SECRET), "DOM text, scripts and input values are scrubbed before replay is stored");
-        assert.ok(!recorded.includes("prefilled-public-value") && !recorded.includes("prefilled-private-value"), "initial text and password input values are masked");
+        assert.ok(!recorded.includes(SECRET), "sensitive values never reach recorded text or inputs");
+        assert.ok(!recordedInputValues(events).some((value) => value.includes(SECRET)), "typed secret values never reach the recording");
+        assert.ok(recorded.includes("prefilled-public-value"), "plain input values stay visible, as in screenshots");
+        assert.ok(!recorded.includes("prefilled-private-value"), "password inputs are blocked");
         assert.ok(!recorded.includes("Cross-origin frame private content"), "cross-origin iframe contents are excluded");
-        assert.ok(recorded.includes("__specbookSecret"), "secret fields are blocked in addition to masking every input");
+        assert.ok(recorded.includes(REPLAY_MASK_ATTRIBUTE), "secret and password fields are covered like in screenshots");
         const markers = events.filter((event) => event.type === 5).map((event) => event.data as { tag: string; payload: { number: number; kind: string; phase: string; outcome: string } });
         assert.deepEqual(markers.map(({ tag, payload }) => [tag, payload.number, payload.kind, payload.phase, payload.outcome]), [
             ["specbook-step", 1, "precondition", "start", "running"], ["specbook-step", 1, "precondition", "end", "passed"],
@@ -409,7 +447,7 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         const blockedEvents = await readReplay(guardDir);
         assert.ok(blockedEvents);
         assert.ok(JSON.stringify(blockedEvents).includes('"outcome":"failed"'));
-        assert.ok(!JSON.stringify(blockedEvents).includes(SECRET));
+        assert.ok(!recordedInputValues(blockedEvents).some((value) => value.includes(SECRET)));
 
         assert.ok(!existsSync(path.join(directory, "batch", "report")));
         assert.ok(!existsSync(path.join(directory, "batch", "work")), "the work directory (traces, test-results) is removed");
