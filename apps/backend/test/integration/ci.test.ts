@@ -369,8 +369,9 @@ describe("CI access and quality gates", () => {
         const lease = (await runnersRepository.claim(token, 60_000))!;
         const completion = { leaseId: lease.leaseId!, durationMs: 200, processFailure: null,
             results: [{ runId: run.id, status: "passed" as const, durationMs: 200, failReason: null, failedStep: null, artifacts: [
-                { path: "evidence.json", content: Buffer.from(JSON.stringify({ steps: [{ number: 1, label: "Open the page", file: "evidence/step-01.png" }], video: null, failedStep: null, diagnostics: [{ kind: "console", message: "Private page loaded" }] })).toString("base64") },
-                { path: "evidence/step-01.png", content: Buffer.from("screenshot").toString("base64") },
+                { path: "evidence.json", content: Buffer.from(JSON.stringify({ steps: [{ number: 1, label: "Open the page", file: "evidence/step-01.webp" }, { number: 2, label: "The page is shown", file: "evidence/step-02.png" }], video: null, failedStep: null, diagnostics: [{ kind: "console", message: "Private page loaded" }] })).toString("base64") },
+                { path: "evidence/step-01.webp", content: Buffer.from("webp screenshot").toString("base64") },
+                { path: "evidence/step-02.png", content: Buffer.from("png screenshot").toString("base64") },
             ] }] };
         await completeRunnerWork(lease.id, token.id, completion);
         await completeRunnerWork(lease.id, token.id, completion);
@@ -379,7 +380,9 @@ describe("CI access and quality gates", () => {
         assert.equal(await specEnvironmentsRepository.awaiting(spec, environment.id), false);
         assert.equal((await specsRepository.getSpec(spec.id))!.status, "passed");
         const evidence = await readRunEvidence(run.id);
-        assert.equal(evidence.steps[0].file, "evidence/step-01.png");
+        assert.deepEqual(evidence.steps.map((step: { file: string }) => step.file), ["evidence/step-01.webp", "evidence/step-02.png"]);
+        assert.equal(await fs.readFile(path.join(runDirectory, "evidence/step-01.webp"), "utf8"), "webp screenshot");
+        assert.equal(await fs.readFile(path.join(runDirectory, "evidence/step-02.png"), "utf8"), "png screenshot");
         assert.equal(evidence.diagnostics[0].message, "Private page loaded");
         assert.ok(!(await pendingRunnerBatchIds()).includes(batch.id));
         assert.equal((await runnersRepository.job(lease.id))!.status, "completed");

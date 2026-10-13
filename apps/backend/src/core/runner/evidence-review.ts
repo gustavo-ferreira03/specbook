@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getSecuritySettings } from "../chat/safety-settings";
 import { configuredModel, modelRuntimePromise } from "../llm/runtime";
 import { logger } from "../../infra/logger";
-import { readEvidenceManifest, isStepScreenshot, type EvidenceManifest } from "@specbook/runtime/evidence";
+import { readEvidenceManifest, isStepScreenshot, stepScreenshotContentType, type EvidenceManifest } from "@specbook/runtime/evidence";
 import { sameStepTitle } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 
@@ -71,7 +71,7 @@ export async function reviewRunEvidence(directory: string, outcome: { status: st
                 if (!isStepScreenshot(step.file)) continue;
                 const bytes = await fs.readFile(path.join(directory, step.file)).catch(() => null);
                 if (!bytes || bytes.byteLength > 4 * 1024 * 1024) continue;
-                content.push({ type: "text", text: `Screenshot after step "${step.label}":` }, { type: "image", data: bytes.toString("base64"), mimeType: "image/png" });
+                content.push({ type: "text", text: `Screenshot after step "${step.label}":` }, { type: "image", data: bytes.toString("base64"), mimeType: stepScreenshotContentType(step.file) });
             }
         }
         const runtime = await modelRuntimePromise;

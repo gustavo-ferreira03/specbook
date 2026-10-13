@@ -30,6 +30,7 @@ const CONTENT_TYPES: Record<string, string> = {
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
     ".png": "image/png",
+    ".webp": "image/webp",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".webm": "video/webm",

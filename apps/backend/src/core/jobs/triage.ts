@@ -14,7 +14,7 @@ import { isCredentialFailure, isInfrastructureFailure } from "./presentation-err
 import { retryInfrastructure } from "./retry";
 import { matchesCurrentSpec } from "./current-run";
 import { reviewedScreenshots, reviewRunEvidence } from "../runner/evidence-review";
-import { readEvidenceManifest, isStepScreenshot } from "@specbook/runtime/evidence";
+import { readEvidenceManifest, isStepScreenshot, stepScreenshotContentType } from "@specbook/runtime/evidence";
 
 export class StaleTriageError extends Error {}
 
@@ -69,7 +69,7 @@ export function createTriageTools(job: Job, abort: () => void) {
                     if (!isStepScreenshot(step.file)) continue;
                     const file = path.join(directory, step.file);
                     const bytes = await fs.readFile(file).catch(() => null);
-                    if (bytes && bytes.byteLength <= 4 * 1024 * 1024) content.push({ type: "image", data: bytes.toString("base64"), mimeType: "image/png" });
+                    if (bytes && bytes.byteLength <= 4 * 1024 * 1024) content.push({ type: "image", data: bytes.toString("base64"), mimeType: stepScreenshotContentType(step.file) });
                 }
                 return { content, details: undefined };
             },

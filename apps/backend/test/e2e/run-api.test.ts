@@ -536,6 +536,9 @@ test("historical evidence maps step kinds by title and falls back for unknown la
     assert.equal(response.status, 200);
     const evidence = await response.json();
     assert.deepEqual(evidence.steps.map((step: { kind: string; ordinal: number | null }) => [step.kind, step.ordinal]), [["step", 1], ["expected", null], ["step", 3]]);
+    const screenshot = await app.request(`/runs/${run.id}/artifacts/evidence/step-01.png`);
+    assert.equal(screenshot.status, 200);
+    assert.equal(screenshot.headers.get("content-type"), "image/png");
     await fs.writeFile(path.join(directory, "spec.yml"), serializeSpecYaml({ title: "Duplicate titles", description: "", humanSpec: { preconditions: ["Check state"], steps: ["Check state"], expectedResult: "Check state", postconditions: ["Check state"] } }));
     await fs.writeFile(path.join(directory, "spec.ts"), 'import { test } from "specbook"; test("Duplicate titles", async ({ step, page }) => { await step("Check state", async () => { await page.goto("/"); }); await step("Check state", async () => {}); await step("Check state", async () => {}); await step("Check state", async () => {}); });');
     await fs.writeFile(path.join(directory, "evidence/step-04.png"), "png");
@@ -777,7 +780,7 @@ test("Store", async ({ page, step, secret }) => {
         assert.equal(report.status, 200);
         assert.ok(!(await report.text()).includes("s3cret-value"), "the report never contains secrets");
         const screenshot = await app.request(`/runs/${run.id}/artifacts/${evidence.steps[0].file}`);
-        assert.equal(screenshot.headers.get("content-type"), "image/png");
+        assert.equal(screenshot.headers.get("content-type"), "image/webp");
         assert.equal(screenshot.headers.get("content-security-policy"), "sandbox");
 
         const { files } = (await (await app.request(`/runs/${run.id}/artifacts`)).json()) as { files: string[] };

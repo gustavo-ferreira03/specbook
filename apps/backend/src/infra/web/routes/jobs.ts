@@ -21,7 +21,7 @@ import { projectsRepository } from "../../repositories/projects";
 import { chatsRepository } from "../../repositories/chats";
 import { chatTitle, createChat, startChatTurn } from "../../../core/chat/session";
 import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
-import { isStepScreenshot } from "@specbook/runtime/evidence";
+import { isStepScreenshot, stepScreenshotContentType } from "@specbook/runtime/evidence";
 
 
 async function projectJob(projectId: string, jobId: string) {
@@ -85,7 +85,7 @@ export function createJobsRouter(): Hono {
         const directory = proposalDirectory(item, verification.id);
         const target = path.join(directory, file);
         if (await fs.realpath(target) !== target) throw new HTTPException(400, { message: "Invalid artifact path" });
-        return c.body(new Uint8Array(await fs.readFile(target)), 200, { "Content-Type": "image/png", "Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff" });
+        return c.body(new Uint8Array(await fs.readFile(target)), 200, { "Content-Type": stepScreenshotContentType(file), "Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff" });
     });
     router.post("/projects/:id/inbox/:itemId/promote", access("editor"), async (c) => {
         const item = await projectItem(c.req.param("id"), c.req.param("itemId"));

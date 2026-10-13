@@ -10,6 +10,7 @@ import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { tempDir } from "../helpers/storage";
 import { readReplay, REPLAY_FILE, MAX_REPLAY_BYTES } from "@specbook/runtime/replay";
+import { captureStepScreenshot } from "@specbook/runtime/specbook/screenshot";
 
 const SECRET = "correct-horse-battery";
 
@@ -160,6 +161,58 @@ test("Home shows a greeting", async ({ page, step }) => {
 `;
 
 describe("Playwright runner (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
+    test("captures WebP with secret masks across frames and shadow roots, and safely falls back to PNG", { timeout: 30_000 }, async () => {
+        const { chromium } = await import("@playwright/test");
+        const browser = await chromium.launch({ headless: true });
+        try {
+            const context = await browser.newContext({ viewport: { width: 600, height: 300 } });
+            const page = await context.newPage();
+            await page.setContent(`<style>body{margin:0}input,span{position:absolute;left:10px;width:140px;height:30px;box-sizing:border-box}input{border:0;background:white}span{display:block;background:white}</style>
+                <input type="password" value="unconfigured-password" style="top:10px">
+                <input data-specbook-secret value="marked-secret" style="top:50px">
+                <span style="top:90px">${SECRET}</span>
+                <div id="shadow" style="position:absolute;left:10px;top:130px"></div>
+                <iframe style="position:absolute;left:200px;top:10px;width:160px;height:100px;border:0" srcdoc="<body style='margin:0'><input value='${SECRET}' style='position:absolute;left:10px;top:10px;width:140px;height:30px;border:0;box-sizing:border-box'>"></iframe>`);
+            await page.locator("#shadow").evaluate((host, secret) => {
+                const root = host.attachShadow({ mode: "open" });
+                root.innerHTML = `<input value="${secret}" style="width:140px;height:30px;border:0;box-sizing:border-box">`;
+            }, SECRET);
+            const directory = tempDir("specbook-screenshot-");
+            const capture = async (extension: "webp" | "png") => {
+                const result = await captureStepScreenshot(page, path.join(directory, extension), [SECRET]);
+                assert.equal(result.contentType, `image/${extension}`);
+                assert.ok(result.file.endsWith(`.${extension}`));
+                const bytes = await fs.readFile(result.file);
+                if (extension === "webp") {
+                    assert.equal(bytes.subarray(0, 4).toString(), "RIFF");
+                    assert.equal(bytes.subarray(8, 12).toString(), "WEBP");
+                }
+                const pixels = await page.evaluate(async (source) => {
+                    const image = new Image();
+                    image.src = source;
+                    await image.decode();
+                    const canvas = document.createElement("canvas");
+                    canvas.width = image.width;
+                    canvas.height = image.height;
+                    const context = canvas.getContext("2d")!;
+                    context.drawImage(image, 0, 0);
+                    return { width: image.width, height: image.height,
+                        colors: [[50, 25], [50, 65], [50, 105], [50, 145], [250, 35]].map(([x, y]) => [...context.getImageData(x, y, 1, 1).data]) };
+                }, `data:${result.contentType};base64,${bytes.toString("base64")}`);
+                assert.equal(pixels.width, 600);
+                assert.equal(pixels.height, 300);
+                for (const color of pixels.colors) assert.ok(color.slice(0, 3).every((channel) => Math.abs(channel - 119) <= 3), JSON.stringify(color));
+                assert.equal(await page.locator("[data-specbook-evidence-mask], [popover]").count(), 0);
+                assert.equal(await page.locator("input[data-specbook-secret]").inputValue(), "marked-secret");
+            };
+            await capture("webp");
+            const newSession = context.newCDPSession;
+            context.newCDPSession = async () => { throw new Error("CDP unavailable"); };
+            try { await capture("png"); }
+            finally { context.newCDPSession = newSession; }
+        } finally { await browser.close(); }
+    });
+
     test("runs a batch with secrets: a passing login and a blocked cross-origin secret", { timeout: 180_000 }, async () => {
         const directory = tempDir();
         const passDir = path.join(directory, "runs", "pass");
@@ -181,7 +234,10 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
         const pass = JSON.parse(await fs.readFile(path.join(passDir, "evidence.json"), "utf8"));
         assert.deepEqual(pass.steps.map((step: { label: string }) => step.label), ["Open the sign-in page", "Enter the password", "See the welcome message"]);
         assert.equal(pass.video, null);
-        for (const step of pass.steps) assert.ok(existsSync(path.join(passDir, step.file)));
+        for (const step of pass.steps) {
+            assert.ok(existsSync(path.join(passDir, step.file)));
+            assert.ok(step.file.endsWith(".webp"));
+        }
         assert.equal(pass.replay.file, REPLAY_FILE);
         assert.ok(pass.replay.bytes > 0 && pass.replay.bytes <= MAX_REPLAY_BYTES);
         const events = await readReplay(passDir);

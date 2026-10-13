@@ -46,8 +46,12 @@ export interface EvidenceManifest {
     replayUnavailable?: string;
 }
 
+export function stepScreenshotContentType(file: string): "image/png" | "image/webp" {
+    return file.endsWith(".webp") ? "image/webp" : "image/png";
+}
+
 export function isStepScreenshot(file: string): boolean {
-    return /^evidence\/step-\d{2,3}\.png$/.test(file);
+    return /^evidence\/step-\d{2,3}\.(?:png|webp)$/.test(file);
 }
 
 const evidenceStepSchema = z.object({
@@ -113,10 +117,11 @@ export async function writeRunEvidence(
     const steps: EvidenceStep[] = [];
     for (const attachment of result?.attachments ?? []) {
         const match = new RegExp(`^${STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`).exec(attachment.name);
-        if (!match || attachment.contentType !== "image/png") continue;
+        if (!match || !["image/png", "image/webp"].includes(attachment.contentType)) continue;
         const number = Number(match[1]);
         if (steps.some((step) => step.number === number)) continue;
-        const file = `evidence/step-${match[1]}.png`;
+        const extension = attachment.contentType === "image/webp" ? "webp" : "png";
+        const file = `evidence/step-${match[1]}.${extension}`;
         if (await copyFile(attachment.path, path.join(outputDir, file))) {
             steps.push({ number, label: stepTitles[number - 1] ?? `Step ${number}`, file });
         }
@@ -130,7 +135,6 @@ export async function writeRunEvidence(
         }
     }
     const manifest: EvidenceManifest = { steps, video, failedStep: status === "passed" ? null : result?.failedStep ?? null };
-    await fs.rm(path.join(outputDir, REPLAY_FILE), { force: true });
     for (const attachment of result?.attachments ?? []) {
         const apiMatch = new RegExp(`^${API_STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`).exec(attachment.name);
         if (apiMatch && attachment.contentType === "application/json") {

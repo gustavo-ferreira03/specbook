@@ -3,7 +3,7 @@ import { errorCodeSchema } from "./errors.ts";
 import { httpTarget } from "./network/targets.ts";
 import { MAX_REPLAY_BYTES } from "./replay.ts";
 
-export const RUNNER_PROTOCOL_VERSION = 2;
+export const RUNNER_PROTOCOL_VERSION = 3;
 export const RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES = 64 * 1024 * 1024;
 export const RUNNER_REQUEST_LIMIT_BYTES = 90 * 1024 * 1024;
 
@@ -15,7 +15,7 @@ const baseUrl = z.string().max(2000).refine((value) => {
     try { return !httpTarget(value).search; } catch { return false; }
 }, "Use an HTTP(S) URL without credentials, query or fragment");
 
-export const runnerArtifactPathSchema = z.string().regex(/^(?:spec\.(?:ts|yml)|evidence\.json|evidence\/step-\d{2,3}\.png|evidence\/execution\.webm|evidence\/replay\.json\.gz)$/);
+export const runnerArtifactPathSchema = z.string().regex(/^(?:spec\.(?:ts|yml)|evidence\.json|evidence\/step-\d{2,3}\.(?:png|webp)|evidence\/execution\.webm|evidence\/replay\.json\.gz)$/);
 
 export const runnerPayloadSchema = z.object({
     batchId: id,
