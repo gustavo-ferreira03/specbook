@@ -10,6 +10,16 @@ export function areSpecsLocked(specIds: string[]): boolean {
 
 export const withSpecLock = locks.run;
 
+// A run's result is visible before its batch finishes writing the report, so callers may wait out that short tail.
+export async function settleSpecLocks(specIds: string[], timeoutMs = 10_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (areSpecsLocked(specIds)) {
+        if (Date.now() >= deadline) return false;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return true;
+}
+
 export async function withSpecLocks<T>(specIds: string[], work: () => Promise<T>): Promise<T> {
     const ids = [...new Set(specIds)].sort();
     async function acquire(index: number): Promise<T> {

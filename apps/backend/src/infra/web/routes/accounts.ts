@@ -14,14 +14,19 @@ import { access, browserSession, requireBrowserSession, requireRole } from "../a
 import { logger } from "../../logger";
 
 const attempts = new Map<string, { count: number; resets: number }>();
-function limit(key: string, maximum = 10): void {
+function attempt(key: string): { count: number; resets: number } {
     const now = Date.now();
     for (const [entry, value] of attempts) if (value.resets <= now) attempts.delete(entry);
     while (attempts.size >= 10_000) attempts.delete(attempts.keys().next().value!);
     const entry = attempts.get(key) ?? { count: 0, resets: now + 60_000 };
-    entry.count++;
     attempts.set(key, entry);
-    if (entry.count > maximum) throw new HTTPException(429, { message: "Too many sign-in attempts. Wait a minute and try again." });
+    return entry;
+}
+const tooMany = () => new HTTPException(429, { message: "Too many sign-in attempts. Wait a minute and try again." });
+function limit(key: string, maximum = 10): void {
+    const entry = attempt(key);
+    entry.count++;
+    if (entry.count > maximum) throw tooMany();
 }
 
 const actor = (user: User) => ({ id: user.id, name: user.name, email: user.email, kind: "user" as const });
@@ -83,13 +88,16 @@ export function createAccountsRouter(): Hono {
 
     router.post("/auth/login", access("public"), zValidator("json", loginSchema), async (c) => {
         const { email, password } = c.req.valid("json");
-        limit(`login:${tokenHash(email)}`);
+        // Only failed passwords count, so repeated valid sign-ins (CI, scripted checks) are never locked out.
+        const failures = attempt(`login:${tokenHash(email)}`);
+        if (failures.count >= 10) throw tooMany();
         if (!(await accountsRepository.getSso()).passwordLoginEnabled) throw new HTTPException(403, { message: "Password sign-in is disabled. Use single sign-on." });
         const user = await accountsRepository.userByEmail(email);
         let valid = false;
         try { valid = await verifyPassword(password, user?.passwordHash ?? null); }
         catch { throw new HTTPException(429, { message: "Another sign-in is being processed. Wait a moment and try again." }); }
         if (!valid || !user || user.disabledAt) {
+            failures.count++;
             await recordAudit("auth.login.failed", {});
             throw new HTTPException(401, { message: "Email or password is incorrect." });
         }

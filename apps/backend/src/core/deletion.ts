@@ -9,7 +9,7 @@ import { repoBare } from "./repo/bare";
 import { repoGit } from "./repo/git";
 import { deleteFeatureDirectory, deleteSpecFiles } from "./repo/writer";
 import { getRunBatch, getRunBatchDirectory } from "./runner/batch";
-import { areSpecsLocked, ResourceBusyError, withSpecLock, withSpecLocks } from "./specs/lifecycle";
+import { areSpecsLocked, ResourceBusyError, settleSpecLocks, withSpecLock, withSpecLocks } from "./specs/lifecycle";
 import { db, runBatch } from "../infra/db/client";
 import { chatSessions, chats, credentialProfiles, features, projects, runs, specs } from "../infra/db/schema";
 import { chatsRepository } from "../infra/repositories/chats";
@@ -84,7 +84,9 @@ export async function deleteChatData(id: string): Promise<boolean> {
 }
 
 export async function deleteSpecData(id: string): Promise<boolean> {
-    if (areSpecsLocked([id])) throw new ResourceBusyError("Wait for the current Spec operation to finish before deleting it");
+    if (areSpecsLocked([id]) && (await runsRepository.hasRunningRuns([id]) || !(await settleSpecLocks([id])))) {
+        throw new ResourceBusyError("Wait for the current Spec operation to finish before deleting it");
+    }
     return withSpecLock(id, async () => {
         const spec = await specsRepository.getSpec(id);
         if (!spec) return false;
@@ -105,7 +107,7 @@ export async function deleteSpecData(id: string): Promise<boolean> {
 export async function deleteFeatureData(id: string): Promise<boolean> {
     const specIds = await featuresRepository.getFeatureDeletionSpecIds(id);
     if (!specIds) return false;
-    if (areSpecsLocked(specIds)) {
+    if (areSpecsLocked(specIds) && (await runsRepository.hasRunningRuns(specIds) || !(await settleSpecLocks(specIds)))) {
         throw new ResourceBusyError("Wait for active Spec operations in this Feature to finish before deleting it");
     }
     return withSpecLocks(specIds, async () => {
