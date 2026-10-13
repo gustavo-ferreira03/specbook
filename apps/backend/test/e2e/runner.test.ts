@@ -210,6 +210,23 @@ describe("Playwright runner (real browser)", { skip: available ? false : "Chromi
             context.newCDPSession = async () => { throw new Error("CDP unavailable"); };
             try { await capture("png"); }
             finally { context.newCDPSession = newSession; }
+            const frame = page.mainFrame();
+            const evaluateHandle = frame.evaluateHandle;
+            const screenshot = page.screenshot;
+            let unsafeCaptures = 0;
+            frame.evaluateHandle = async () => new Promise<never>(() => {});
+            context.newCDPSession = async () => { unsafeCaptures++; throw new Error("Unexpected capture"); };
+            page.screenshot = async () => { unsafeCaptures++; throw new Error("Unexpected capture"); };
+            try {
+                const target = path.join(directory, "unavailable");
+                await assert.rejects(captureStepScreenshot(page, target, [SECRET]), /Browser evidence timed out/);
+                assert.equal(unsafeCaptures, 0, "unavailable secret mask discovery never falls back to an unmasked capture");
+                assert.ok(!existsSync(`${target}.webp`) && !existsSync(`${target}.png`));
+            } finally {
+                frame.evaluateHandle = evaluateHandle;
+                context.newCDPSession = newSession;
+                page.screenshot = screenshot;
+            }
         } finally { await browser.close(); }
     });
 

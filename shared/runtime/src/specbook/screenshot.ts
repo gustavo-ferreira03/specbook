@@ -1,26 +1,25 @@
 import fs from "node:fs/promises";
 import type { Frame, Locator, Page } from "@playwright/test";
+import { withEvidenceTimeout } from "./evidence-timeout.ts";
 
-async function captureWebP(page: Page, file: string): Promise<void> {
-    const session = await page.context().newCDPSession(page);
-    let timer: NodeJS.Timeout | undefined;
+function remaining(deadline: number): number { return Math.max(1, deadline - Date.now()); }
+
+async function captureWebP(page: Page, file: string, deadline: number): Promise<void> {
+    const session = await withEvidenceTimeout(() => page.context().newCDPSession(page), remaining(deadline));
     try {
-        const result = await Promise.race([
-            (async () => {
-                await Promise.all(page.frames().map((frame) => frame.evaluate(() => document.fonts.ready.then(() => undefined))));
-                return session.send("Page.captureScreenshot", { format: "webp", quality: 80, fromSurface: true, captureBeyondViewport: false });
-            })(),
-            new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Screenshot timed out")), 5000); }),
-        ]);
+        const result = await withEvidenceTimeout(async () => {
+            await Promise.all(page.frames().map((frame) => frame.evaluate(() => document.fonts.ready.then(() => undefined))));
+            return session.send("Page.captureScreenshot", { format: "webp", quality: 80, fromSurface: true, captureBeyondViewport: false });
+        }, remaining(deadline));
         await fs.writeFile(file, Buffer.from(result.data, "base64"));
     } finally {
-        clearTimeout(timer);
-        await session.detach().catch(() => undefined);
+        await withEvidenceTimeout(() => session.detach(), 1000).catch(() => undefined);
     }
 }
 
-async function addMasks(mask: Locator, marker: string): Promise<void> {
-    await mask.evaluateAll((elements, marker) => {
+async function addMasks(mask: Locator, marker: string, deadline: number): Promise<void> {
+    await mask.evaluateAll((elements, { marker, deadline }) => {
+        if (Date.now() > deadline) return;
         const overlay = document.createElement("div");
         overlay.id = marker;
         overlay.className = "__specbookSecret";
@@ -36,19 +35,29 @@ async function addMasks(mask: Locator, marker: string): Promise<void> {
         document.documentElement.appendChild(overlay);
         // The top layer also covers secret fields inside dialogs.
         overlay.showPopover();
-    }, marker);
+    }, { marker, deadline });
 }
 
-async function removeMasks(frames: Frame[], marker: string): Promise<void> {
-    await Promise.all(frames.map((frame) => frame.evaluate((marker) => document.getElementById(marker)?.remove(), marker).catch(() => undefined)));
+async function removeMasks(frames: Frame[], marker: string, attribute?: string): Promise<void> {
+    // Failed navigations can leave a frame without an execution context.
+    await withEvidenceTimeout(() => Promise.all(frames.map((frame) => frame.evaluate(({ marker, attribute }) => {
+        document.getElementById(marker)?.remove();
+        if (!attribute) return;
+        const roots: (Document | ShadowRoot)[] = [document];
+        for (const root of roots) for (const element of root.querySelectorAll("*")) {
+            if (element.shadowRoot) roots.push(element.shadowRoot);
+            if (element.getAttribute(attribute)?.startsWith(marker + "-")) element.removeAttribute(attribute);
+        }
+    }, { marker, attribute }).catch(() => undefined))).then(() => undefined), 1000).catch(() => undefined);
 }
 
 export async function captureStepScreenshot(page: Page, file: string, secrets: string[]): Promise<{ file: string; contentType: "image/webp" | "image/png" }> {
     const attribute = "data-specbook-evidence-mask";
     const marker = crypto.randomUUID();
     const frames = page.frames();
+    const deadline = Date.now() + 5000;
     try {
-        const masks = await Promise.all(frames.map(async (frame) => {
+        const masks = await withEvidenceTimeout(() => Promise.all(frames.map(async (frame) => {
             const state = await frame.evaluateHandle(() => {
                 const roots: (Document | ShadowRoot)[] = [document];
                 const elements: Element[] = [];
@@ -69,17 +78,18 @@ export async function captureStepScreenshot(page: Page, file: string, secrets: s
                 const indices = candidates.filter((candidate) => candidate.sensitive || secrets.some((secret) => candidate.value.includes(secret) || candidate.alt.includes(secret)
                     || candidate.text.includes(secret) && !candidate.children.some((text) => text.includes(secret))))
                     .map((candidate) => candidate.index);
-                await state.evaluate(({ elements }, { indices, attribute, marker }) => {
+                await state.evaluate(({ elements }, { indices, attribute, marker, deadline }) => {
+                    if (Date.now() > deadline) return;
                     for (const index of indices) elements[index].setAttribute(attribute, `${marker}-${index}`);
-                }, { indices, attribute, marker });
+                }, { indices, attribute, marker, deadline });
                 return indices.length ? frame.locator(indices.map((index) => `[${attribute}="${marker}-${index}"]`).join(",")) : null;
-            } finally { await state.dispose(); }
-        }));
+            } finally { await withEvidenceTimeout(() => state.dispose(), remaining(deadline)).catch(() => undefined); }
+        })), remaining(deadline));
         const selected = masks.filter((mask) => mask !== null);
         try {
-            await Promise.all(selected.map((mask) => addMasks(mask, marker)));
+            await withEvidenceTimeout(() => Promise.all(selected.map((mask) => addMasks(mask, marker, deadline))).then(() => undefined), remaining(deadline));
             const target = `${file}.webp`;
-            await captureWebP(page, target);
+            await captureWebP(page, target, deadline);
             return { file: target, contentType: "image/webp" };
         } catch {
             await removeMasks(frames, marker);
@@ -88,13 +98,6 @@ export async function captureStepScreenshot(page: Page, file: string, secrets: s
             return { file: target, contentType: "image/png" };
         }
     } finally {
-        await removeMasks(frames, marker);
-        await Promise.all(frames.map((frame) => frame.evaluate(({ attribute, marker }) => {
-            const roots: (Document | ShadowRoot)[] = [document];
-            for (const root of roots) for (const element of root.querySelectorAll("*")) {
-                if (element.shadowRoot) roots.push(element.shadowRoot);
-                if (element.getAttribute(attribute)?.startsWith(marker + "-")) element.removeAttribute(attribute);
-            }
-        }, { attribute, marker }).catch(() => undefined)));
+        await removeMasks(frames, marker, attribute);
     }
 }

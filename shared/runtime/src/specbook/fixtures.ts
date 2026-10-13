@@ -6,6 +6,7 @@ import type { RunDiagnostic } from "../evidence.ts";
 import { MAX_REPLAY_EVENTS, MAX_REPLAY_RAW_BYTES, REPLAY_ATTACHMENT, REPLAY_LIMIT_NOTE, REPLAY_UNAVAILABLE_ATTACHMENT, readRecorderSource, type ReplayEvent } from "../replay.ts";
 import type { ExecutionStepKind } from "../types.ts";
 import { captureStepScreenshot } from "./screenshot.ts";
+import { withEvidenceTimeout } from "./evidence-timeout.ts";
 import {
     createGuard,
     createSecret,
@@ -125,7 +126,7 @@ async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
 }
 
 async function stopReplay(page: Page, replay: ReplayCapture): Promise<void> {
-    await page.evaluate(() => (globalThis as unknown as { __specbookStopReplay?: () => Promise<void> }).__specbookStopReplay?.()).catch(() => undefined);
+    await withEvidenceTimeout(() => page.evaluate(() => (globalThis as unknown as { __specbookStopReplay?: () => Promise<void> }).__specbookStopReplay?.()), 1000).catch(() => undefined);
     replay.stop();
 }
 
@@ -196,7 +197,7 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
                 await fs.writeFile(file, replay.serialized(), "utf8");
                 await testInfo.attach(REPLAY_ATTACHMENT, { path: file, contentType: "application/json" });
             }
-            await navigation?.detach().catch(() => undefined);
+            if (navigation) await withEvidenceTimeout(() => navigation.detach(), 1000).catch(() => undefined);
             page.off("console", onConsole);
             page.off("pageerror", onPageError);
             page.off("requestfailed", onRequestFailed);
@@ -256,7 +257,7 @@ export const test = base.extend<{ step: StepFn; secret: SecretFn; cleanup: Clean
                 } catch {}
                 if (real && replay && !replay.unavailable) {
                     // A loaded image can arrive after its first DOM snapshot.
-                    await real.evaluate(() => (globalThis as unknown as { rrweb?: { record: { takeFullSnapshot: () => void } } }).rrweb?.record.takeFullSnapshot()).catch(() => undefined);
+                    await withEvidenceTimeout(() => real.evaluate(() => (globalThis as unknown as { rrweb?: { record: { takeFullSnapshot: () => void } } }).rrweb?.record.takeFullSnapshot()), 1000).catch(() => undefined);
                 }
                 replay?.marker(count, title, kind, "end", outcome);
             }

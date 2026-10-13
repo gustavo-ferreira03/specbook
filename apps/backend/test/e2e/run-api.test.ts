@@ -723,6 +723,7 @@ describe("executeSpec (real browser)", { skip: available ? false : "Chromium for
             const run = await executeSpec(spec.id);
             assert.equal(run.status, "failed", run.failReason ?? "");
             assert.match(run.failReason ?? "", /BLOCKED_BY_CLIENT|blockedbyclient/i);
+            assert.ok((run.durationMs ?? Infinity) < 20_000, "unavailable evidence frames do not consume the Spec timeout");
             assert.equal(privateRequests, 0, "the redirect target receives no browser request");
         } finally {
             for (const server of [preview, privateSite]) { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
