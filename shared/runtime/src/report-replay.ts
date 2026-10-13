@@ -231,7 +231,7 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         };
         seek.addEventListener('pointerup', release);
         seek.addEventListener('pointercancel', release);
-        const tip = element('div', 'replay-tip', { hidden: true });
+        const tip = element('div', 'replay-tip');
         tip.setAttribute('role', 'tooltip');
         replay.append(tip);
         seek.addEventListener('pointerover', (event) => {
@@ -240,13 +240,13 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
           const step = mark.replayStep;
           tip.replaceChildren(element('b', '', { textContent: step.name }), ' ' + step.title);
           if (step.outcome) tip.append(element('span', 'replay-tip-' + step.outcome, { textContent: step.outcome[0].toUpperCase() + step.outcome.slice(1) }));
-          tip.hidden = false;
+          tip.classList.add('is-visible');
           const box = mark.getBoundingClientRect();
           const area = replay.getBoundingClientRect();
           tip.style.left = Math.max(tip.offsetWidth / 2, Math.min(area.width - tip.offsetWidth / 2, box.left + box.width / 2 - area.left)) + 'px';
           tip.style.top = (box.top - area.top - tip.offsetHeight - 8) + 'px';
         });
-        seek.addEventListener('pointerout', (event) => { if (event.target.closest('.replay-mark')) tip.hidden = true; });
+        seek.addEventListener('pointerout', (event) => { if (event.target.closest('.replay-mark')) tip.classList.remove('is-visible'); });
         goto(0);
         replay.querySelector('.replay-status').hidden = true;
         const resize = () => {
