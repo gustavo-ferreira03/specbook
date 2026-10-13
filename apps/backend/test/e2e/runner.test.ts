@@ -9,8 +9,9 @@ import { createSecretScrubber } from "../../src/core/credentials/scrub";
 import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { tempDir } from "../helpers/storage";
-import { readReplay, REPLAY_FILE, MAX_REPLAY_BYTES } from "@specbook/runtime/replay";
+import { readReplay, readRecorderSource, REPLAY_FILE, MAX_REPLAY_BYTES } from "@specbook/runtime/replay";
 import { captureStepScreenshot } from "@specbook/runtime/specbook/screenshot";
+import { createReplayImageRecorder } from "@specbook/runtime/specbook/replay-images";
 
 const SECRET = "correct-horse-battery";
 
@@ -161,6 +162,131 @@ test("Home shows a greeting", async ({ page, step }) => {
 `;
 
 describe("Playwright runner (real browser)", { skip: available ? false : "Chromium for @playwright/test is not installed" }, () => {
+    test("inlines replay images at rendered resolution and refreshes loaded, revealed and resized images", { timeout: 30_000 }, async () => {
+        const { chromium } = await import("@playwright/test");
+        const browser = await chromium.launch({ headless: true });
+        try {
+            const context = await browser.newContext({ deviceScaleFactor: 3 });
+            const page = await context.newPage();
+            await page.setContent(`<img id="small" style="width:50px;height:25px"><img id="hidden" style="display:none;width:70px;height:35px">
+                <img id="contained" style="width:80px;height:80px;object-fit:contain"><img id="large" style="width:800px;height:400px">
+                <img id="filled" style="width:100px;height:100px">
+                <img id="auto" style="width:53.1px;height:auto"><img id="max" style="max-width:71px;height:auto"><img id="natural">
+                <img id="late" style="width:30px;height:15px"><div class="__specbookSecret"><img id="blocked" style="width:20px;height:10px"></div>`);
+            await page.evaluate(async () => {
+                const canvas = document.createElement("canvas");
+                canvas.width = 400;
+                canvas.height = 200;
+                const context = canvas.getContext("2d")!;
+                context.fillStyle = "#4466aa";
+                context.fillRect(0, 0, 400, 200);
+                const source = canvas.toDataURL();
+                await Promise.all([...document.images].filter((image) => image.id !== "late").map(async (image) => { image.src = source; await image.decode(); }));
+            });
+            await page.addScriptTag({ content: await readRecorderSource() });
+            const result = await page.evaluate(async (factory) => {
+                const events: { type: number; timestamp: number; data: { node?: { tagName?: string; id: number; attributes?: Record<string, string>; childNodes?: unknown[] }; attributes?: { id: number; attributes: Record<string, string> }[] } }[] = [];
+                const target = globalThis as unknown as { rrweb: {
+                    record: ((options: unknown) => () => void) & { mirror: unknown };
+                    Replayer: new (events: unknown[], options: unknown) => { pause: (time: number) => void; getMirror: () => { getNode: (id: number) => Node }; destroy: () => void };
+                } };
+                const prototypes = [HTMLCanvasElement.prototype.toDataURL, CanvasRenderingContext2D.prototype.drawImage];
+                const images = (0, eval)(`(${factory})`)((event: never) => events.push(event), target.rrweb.record.mirror);
+                const stop = target.rrweb.record({ emit(event: never) { events.push(images.process(event)); }, inlineImages: true,
+                    dataURLOptions: { type: "image/webp", quality: 0.8 }, blockClass: "__specbookSecret", recordCanvas: false });
+                const initial: Record<string, { size: number[] | null; id: number }> = {};
+                const before: Record<string, number[]> = {};
+                const inspect = {
+                    async dimensions(source: string): Promise<number[]> {
+                        const image = new Image();
+                        image.src = source;
+                        await image.decode();
+                        return [image.naturalWidth, image.naturalHeight];
+                    },
+                    async visit(node: { tagName?: string; id: number; attributes?: Record<string, string>; childNodes?: unknown[] }): Promise<void> {
+                        if (node.tagName === "img" && node.attributes?.id) initial[node.attributes.id] = {
+                            size: node.attributes.rr_dataURL ? await inspect.dimensions(node.attributes.rr_dataURL) : null, id: node.id };
+                        await Promise.all((node.childNodes ?? []).map((child) => inspect.visit(child as Parameters<typeof inspect.visit>[0])));
+                    },
+                    box(element: Element): number[] {
+                        const rectangle = element.getBoundingClientRect();
+                        return [rectangle.width, rectangle.height];
+                    },
+                };
+                await inspect.visit(events.find((event) => event.type === 2)!.data.node!);
+                document.querySelectorAll("img[id]").forEach((image) => { before[image.id] = inspect.box(image); });
+                const initialEvents = events.slice();
+                const source = (document.getElementById("small") as HTMLImageElement).src;
+                const small = document.getElementById("small")!;
+                small.style.width = "120px";
+                small.style.height = "60px";
+                document.getElementById("hidden")!.style.display = "inline";
+                const late = document.getElementById("late") as HTMLImageElement;
+                late.src = source;
+                await late.decode();
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const updates: Record<string, number[]> = {};
+                for (const event of events) {
+                    for (const change of event.data.attributes ?? []) {
+                        if (!change.attributes.rr_dataURL) continue;
+                        const element = (target.rrweb.record.mirror as { getNode: (id: number) => Element | null }).getNode(change.id);
+                        if (element?.id) updates[element.id] = await inspect.dimensions(change.attributes.rr_dataURL);
+                    }
+                }
+                images.stop();
+                stop();
+                const count = events.length;
+                small.style.width = "160px";
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const root = document.createElement("div");
+                root.style.position = "fixed";
+                root.style.left = "-10000px";
+                document.body.appendChild(root);
+                const player = new target.rrweb.Replayer(initialEvents, { root, showWarning: false });
+                player.pause(initialEvents[initialEvents.length - 1].timestamp - initialEvents[0].timestamp + 1);
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const replayBoxes: Record<string, number[]> = {};
+                for (const [name, image] of Object.entries(initial)) {
+                    const element = player.getMirror().getNode(image.id) as HTMLImageElement;
+                    if (element.src) await element.decode().catch(() => undefined);
+                    replayBoxes[name] = inspect.box(element);
+                }
+                player.destroy();
+                const updatedPlayer = new target.rrweb.Replayer(events, { root, showWarning: false });
+                updatedPlayer.pause(events[events.length - 1].timestamp - events[0].timestamp + 1);
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const updatedSources: Record<string, number[]> = {};
+                for (const name of ["small", "hidden", "late"]) {
+                    const element = updatedPlayer.getMirror().getNode(initial[name].id) as HTMLImageElement;
+                    await element.decode();
+                    updatedSources[name] = [element.naturalWidth, element.naturalHeight];
+                }
+                updatedPlayer.destroy();
+                return { initial, updates, originalSize: [(small as HTMLImageElement).naturalWidth, (small as HTMLImageElement).naturalHeight],
+                    unchangedPrototypes: prototypes[0] === HTMLCanvasElement.prototype.toDataURL && prototypes[1] === CanvasRenderingContext2D.prototype.drawImage,
+                    stopped: count === events.length, before, replayBoxes, updatedSources };
+            }, createReplayImageRecorder.toString());
+            assert.deepEqual(result.initial.small.size, [100, 50], "DPR is capped at 2x");
+            assert.deepEqual(result.initial.contained.size, [160, 80], "object-fit keeps the source aspect ratio");
+            assert.deepEqual(result.initial.filled.size, [200, 200], "object-fit fill uses both rendered dimensions");
+            assert.deepEqual(result.initial.hidden.size, [400, 200], "hidden images retain their quality until laid out");
+            assert.deepEqual(result.initial.large.size, [400, 200], "images are never upscaled");
+            assert.equal(result.initial.late.size, null);
+            assert.deepEqual(result.updates.small, [240, 120]);
+            assert.deepEqual(result.updates.hidden, [140, 70]);
+            assert.deepEqual(result.updates.late, [60, 30]);
+            assert.deepEqual(result.updatedSources.small, [240, 120], "resize refresh updates the player image source");
+            assert.deepEqual(result.updatedSources.hidden, [140, 70]);
+            assert.deepEqual(result.updatedSources.late, [60, 30]);
+            for (const name of ["small", "contained", "large", "auto", "max", "natural"]) {
+                assert.deepEqual(result.replayBoxes[name], result.before[name], `${name}: intrinsic resizing keeps the original layout`);
+            }
+            assert.ok(!result.updates.blocked, "blocked images are never inlined");
+            assert.deepEqual(result.originalSize, [400, 200]);
+            assert.ok(result.unchangedPrototypes && result.stopped);
+        } finally { await browser.close(); }
+    });
+
     test("captures WebP with secret masks across frames and shadow roots, and safely falls back to PNG", { timeout: 30_000 }, async () => {
         const { chromium } = await import("@playwright/test");
         const browser = await chromium.launch({ headless: true });

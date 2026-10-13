@@ -7,6 +7,7 @@ import { MAX_REPLAY_EVENTS, MAX_REPLAY_RAW_BYTES, REPLAY_ATTACHMENT, REPLAY_LIMI
 import type { ExecutionStepKind } from "../types.ts";
 import { captureStepScreenshot } from "./screenshot.ts";
 import { withEvidenceTimeout } from "./evidence-timeout.ts";
+import { createReplayImageRecorder } from "./replay-images.ts";
 import {
     createGuard,
     createSecret,
@@ -91,20 +92,24 @@ async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
     await page.exposeBinding(binding, ({ frame }, event: ReplayEvent) => {
         if (frame === page.mainFrame()) replay.receive(event);
     });
-    const content = `${await readRecorderSource()}\n;(${function () {
+    const content = `${await readRecorderSource()}\n;(${function (createImages: typeof createReplayImageRecorder) {
         if (window !== window.top) return;
         const target = globalThis as unknown as {
-            rrweb: { record: (options: Record<string, unknown>) => (() => void) | undefined };
+            rrweb: { record: ((options: Record<string, unknown>) => (() => void) | undefined) & { mirror: Parameters<typeof createReplayImageRecorder>[1] } };
             __specbookReplayEvent: (event: unknown) => Promise<void>;
             __specbookStopReplay?: () => Promise<void>;
         };
         const pending = new Set<Promise<void>>();
-        const stop = target.rrweb.record({
-            emit: (event: unknown) => {
+        const deliveries = {
+            send(event: unknown): void {
                 const delivered = target.__specbookReplayEvent(event).catch(() => undefined);
                 pending.add(delivered);
                 void delivered.finally(() => pending.delete(delivered));
             },
+        };
+        const images = createImages(deliveries.send, target.rrweb.record.mirror);
+        const stop = target.rrweb.record({
+            emit(event: unknown): void { deliveries.send(images.process(event)); },
             maskAllInputs: true,
             blockClass: "__specbookSecret",
             blockSelector: "[data-specbook-secret]",
@@ -117,10 +122,11 @@ async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
             collectFonts: false,
         });
         target.__specbookStopReplay = async () => {
+            images.stop();
             stop?.();
             await Promise.all(pending);
         };
-    }.toString()})();`;
+    }.toString()})(${createReplayImageRecorder.toString()});`;
     await page.addInitScript({ content });
     await page.evaluate(content);
 }
