@@ -57,8 +57,7 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         const events = trimmed.map((event) => event.timestamp < opening ? { ...event, timestamp: opening } : event);
         const first = opening;
         const markers = new Map();
-        const tags = {};
-        // One marker per step, at its start and colored by its outcome; end markers would overlap the next step's start.
+        // One marker per step, at its start and colored by its outcome.
         const outcomes = new Map(events.filter((event) => event.type === 5 && event.data.tag === 'specbook-step' && event.data.payload.phase === 'end').map((event) => [event.data.payload.number, event.data.payload.outcome]));
         let ordinal = 0;
         for (const event of events) {
@@ -67,9 +66,7 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
           if (step.kind === 'step') ordinal += 1;
           const name = stepName(step, ordinal);
           const outcome = outcomes.get(step.number);
-          event.data.tag = name + ': ' + step.title + (outcome ? ' (' + outcome + ')' : '');
-          tags[event.data.tag] = outcome === 'failed' || outcome === 'error' ? '#bd5149' : outcome === 'passed' ? '#1f7a4d' : '#8f8f8f';
-          markers.set(step.number, { offset: Math.max(0, event.timestamp - first), name, title: step.title });
+          markers.set(step.number, { offset: Math.max(0, event.timestamp - first), name, title: step.title, outcome });
         }
         const playerEvents = events.filter((event) => !(event.type === 5 && event.data.tag === 'specbook-step'));
         starts.set(section, markers);
@@ -78,134 +75,199 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         const viewport = events.find((event) => event.type === 4)?.data || { width: 1280, height: 720 };
         const height = Math.max(180, Math.round(width * Math.min(1, viewport.height / viewport.width)));
         const Player = window.rrwebPlayer.default;
-        const player = new Player({ target, props: { events: playerEvents, width, height, autoPlay: false, skipInactive: true, speedOption: [1, 2, 4, 8], tags, inactiveColor: '#ebebeb', showWarning: false, showDebug: false, UNSAFE_replayCanvas: false } });
-        const progress = target.querySelector('.rr-progress');
+        const player = new Player({ target, props: { events: playerEvents, width, height, autoPlay: false, skipInactive: true, showController: false, showWarning: false, showDebug: false, UNSAFE_replayCanvas: false } });
+        const replayer = player.getReplayer();
         const total = player.getMetaData().totalTime;
+        const icons = {
+          play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+          pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>',
+          replay: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>',
+          expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h5v2H7v3H5zm9 0h5v5h-2V7h-3zM5 14h2v3h3v2H5zm12 0h2v5h-5v-2h3z"/></svg>',
+          collapse: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h2v5H5V8h3zm6 0h2v3h3v2h-5zM5 14h5v5H8v-3H5zm9 0h5v2h-3v3h-2z"/></svg>',
+        };
+        const element = (tag, className, attributes = {}) => Object.assign(document.createElement(tag), { className }, attributes);
+        // Clicking the frame plays or pauses; before the first play and at the end it shows a large play or replay button.
+        const hit = element('button', 'replay-hit', { type: 'button' });
+        const big = element('span', 'replay-big');
+        hit.append(big);
+        target.querySelector('.rr-player__frame').append(hit);
+        const bar = element('div', 'replay-bar');
+        const seek = element('div', 'replay-seek', { tabIndex: 0 });
+        seek.setAttribute('role', 'slider');
+        seek.setAttribute('aria-label', 'Replay timeline');
+        seek.setAttribute('aria-valuemin', '0');
+        seek.setAttribute('aria-valuemax', String(Math.ceil(total / 1000)));
+        const track = element('div', 'replay-track');
+        const fill = element('span', 'replay-fill');
+        const knob = element('span', 'replay-knob');
+        const percent = (offset) => (total > 0 ? 100 * Math.max(0, Math.min(total, offset)) / total : 0) + '%';
         const waitMs = Number(replay.dataset.waitMs);
-        if (waitMs > 0 && total > 0) {
-          const failed = events.find((event) => event.type === 5 && event.data.payload?.phase === 'end' && event.data.payload?.outcome === 'failed');
-          const start = failed && markers.get(failed.data.payload.number);
-          if (start) {
-            const end = Math.min(total, failed.timestamp - first);
-            const beginning = Math.max(start.offset, end - waitMs);
-            const span = document.createElement('span');
-            span.className = 'replay-wait';
-            span.style.left = (100 * beginning / total) + '%';
-            span.style.width = (100 * (end - beginning) / total) + '%';
-            span.setAttribute('aria-hidden', 'true');
-            progress.insertBefore(span, progress.querySelector('[title], .rr-progress__handler'));
-          }
+        const failed = events.find((event) => event.type === 5 && event.data.payload?.phase === 'end' && event.data.payload?.outcome === 'failed');
+        const failedStart = failed && markers.get(failed.data.payload.number);
+        if (waitMs > 0 && failedStart) {
+          const end = Math.min(total, failed.timestamp - first);
+          const beginning = Math.max(failedStart.offset, end - waitMs);
+          const span = element('span', 'replay-wait');
+          span.style.left = percent(beginning);
+          span.style.width = percent(end - beginning);
+          track.append(span);
         }
-        progress.tabIndex = 0;
-        progress.setAttribute('role', 'slider');
-        progress.setAttribute('aria-label', 'Replay timeline');
-        progress.setAttribute('aria-valuemin', '0');
-        progress.setAttribute('aria-valuemax', String(Math.ceil(total / 1000)));
-        progress.setAttribute('aria-valuenow', '0');
-        player.addEventListener('ui-update-current-time', (event) => {
-          replay.dataset.currentTimeMs = String(event.payload);
-          progress.setAttribute('aria-valuenow', String(Math.round(event.payload / 1000)));
+        track.append(fill);
+        const steps = [...markers.values()].sort((a, b) => a.offset - b.offset);
+        for (const step of steps) {
+          const mark = element('span', 'replay-mark is-' + (step.outcome || 'pending'));
+          mark.style.left = percent(step.offset);
+          mark.replayStep = step;
+          track.append(mark);
+        }
+        track.append(knob);
+        seek.append(track);
+        const row = element('div', 'replay-row');
+        const toggle = element('button', 'replay-button', { type: 'button' });
+        const time = element('span', 'replay-time');
+        const label = element('span', 'replay-label');
+        const speed = element('button', 'replay-speed', { type: 'button', textContent: '1×' });
+        speed.setAttribute('aria-label', 'Playback speed 1×');
+        const expand = element('button', 'replay-button', { type: 'button', innerHTML: icons.expand });
+        expand.setAttribute('aria-label', 'Full screen');
+        row.append(toggle, time, label, element('span', 'replay-spacer'), speed, expand);
+        bar.append(seek, row);
+        target.after(bar);
+        const clock = (ms) => { const seconds = Math.floor(Math.max(0, ms) / 1000); return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0'); };
+        let playing = false;
+        let shownStep = null;
+        const current = () => Math.max(0, Math.min(total, replayer.getCurrentTime()));
+        const render = () => {
+          const now = current();
+          const ended = !playing && now >= total - 100;
+          const idle = !playing && now < 50;
+          replay.dataset.currentTimeMs = String(Math.round(now));
+          fill.style.width = percent(now);
+          knob.style.left = percent(now);
+          seek.setAttribute('aria-valuenow', String(Math.round(now / 1000)));
+          seek.setAttribute('aria-valuetext', clock(now) + ' of ' + clock(total));
+          time.textContent = clock(now) + ' / ' + clock(total);
+          const state = playing ? 'pause' : ended ? 'replay' : 'play';
+          if (toggle.dataset.state !== state) {
+            toggle.dataset.state = state;
+            toggle.innerHTML = icons[state];
+            toggle.setAttribute('aria-label', state === 'pause' ? 'Pause replay' : state === 'replay' ? 'Replay from the start' : 'Play replay');
+          }
+          hit.classList.toggle('is-idle', idle);
+          hit.classList.toggle('is-ended', ended);
+          big.innerHTML = ended ? icons.replay : idle ? icons.play : '';
+          hit.setAttribute('aria-label', playing ? 'Pause replay' : ended ? 'Replay from the start' : 'Play replay');
+          const step = steps.filter((entry) => entry.offset <= now + 1).pop() || null;
+          if (step !== shownStep) {
+            shownStep = step;
+            label.replaceChildren();
+            if (step) label.append(element('b', '', { textContent: step.name }), ' · ' + step.title);
+          }
+        };
+        let frame = 0;
+        const loop = () => { render(); frame = playing ? requestAnimationFrame(loop) : 0; };
+        const setPlaying = (value) => { playing = value; if (playing && !frame) frame = requestAnimationFrame(loop); render(); };
+        replayer.on('start', () => setPlaying(true));
+        replayer.on('resume', () => setPlaying(true));
+        replayer.on('pause', () => setPlaying(false));
+        replayer.on('finish', () => setPlaying(false));
+        // rrweb only rebuilds the opening frame for offsets after its first event.
+        const goto = (offset, play = false) => { player.goto(Math.max(1, Math.min(total, offset)), play); requestAnimationFrame(render); };
+        const playPause = () => {
+          if (playing) player.pause();
+          else if (current() >= total - 100) goto(0, true);
+          else player.play();
+        };
+        toggle.addEventListener('click', playPause);
+        hit.addEventListener('click', playPause);
+        const speeds = [1, 2, 4];
+        speed.addEventListener('click', () => {
+          const next = speeds[(speeds.indexOf(Number(speed.dataset.speed || 1)) + 1) % speeds.length];
+          speed.dataset.speed = String(next);
+          speed.textContent = next + '×';
+          speed.setAttribute('aria-label', 'Playback speed ' + next + '×');
+          player.setSpeed(next);
         });
-        progress.addEventListener('keydown', (event) => {
-          const current = player.getReplayer().getCurrentTime();
-          const next = event.key === 'ArrowRight' ? current + 1000 : event.key === 'ArrowLeft' ? current - 1000 : event.key === 'Home' ? 0 : event.key === 'End' ? total : null;
+        expand.addEventListener('click', () => { if (document.fullscreenElement === replay) document.exitFullscreen(); else replay.requestFullscreen?.(); });
+        seek.addEventListener('keydown', (event) => {
+          const now = current();
+          const next = event.key === 'ArrowRight' ? now + 1000 : event.key === 'ArrowLeft' ? now - 1000 : event.key === 'Home' ? 0 : event.key === 'End' ? total : null;
           if (next === null) return;
           event.preventDefault();
-          player.goto(Math.max(0, Math.min(total, next)), false);
+          goto(next, playing);
         });
-        const firstOffset = 1;
-        let moved = false;
-        player.addEventListener('ui-update-player-state', (event) => { if (event.payload === 'playing') moved = true; });
-        // rrweb-player only seeks on click; dragging the handle scrubs, then resumes if it was playing.
-        let playing = false;
-        player.addEventListener('ui-update-player-state', (event) => { playing = event.payload === 'playing'; });
+        // Dragging scrubs, then resumes if it was playing.
         let dragging = false;
         let resume = false;
         let pending = 0;
-        let frame = 0;
+        let scrubFrame = 0;
         const scrub = (clientX) => {
-          const rect = progress.getBoundingClientRect();
+          const rect = track.getBoundingClientRect();
           pending = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * total;
-          if (!frame) frame = requestAnimationFrame(() => { frame = 0; player.goto(pending, false); });
+          fill.style.width = percent(pending);
+          knob.style.left = percent(pending);
+          if (!scrubFrame) scrubFrame = requestAnimationFrame(() => { scrubFrame = 0; player.goto(Math.max(1, pending), false); render(); });
         };
-        progress.addEventListener('pointerdown', (event) => {
+        seek.addEventListener('pointerdown', (event) => {
           if (event.button !== 0) return;
           event.preventDefault();
+          seek.focus();
           dragging = true;
-          moved = true;
           resume = playing;
-          progress.setPointerCapture(event.pointerId);
-          progress.classList.add('is-dragging');
+          if (playing) player.pause();
+          seek.setPointerCapture(event.pointerId);
+          seek.classList.add('is-dragging');
           scrub(event.clientX);
         });
-        progress.addEventListener('pointermove', (event) => { if (dragging) scrub(event.clientX); });
+        seek.addEventListener('pointermove', (event) => { if (dragging) scrub(event.clientX); });
         const release = (event) => {
           if (!dragging) return;
           dragging = false;
-          progress.classList.remove('is-dragging');
-          if (progress.hasPointerCapture(event.pointerId)) progress.releasePointerCapture(event.pointerId);
-          cancelAnimationFrame(frame);
-          frame = 0;
-          player.goto(pending, resume);
+          seek.classList.remove('is-dragging');
+          if (seek.hasPointerCapture(event.pointerId)) seek.releasePointerCapture(event.pointerId);
+          cancelAnimationFrame(scrubFrame);
+          scrubFrame = 0;
+          goto(pending, resume);
         };
-        progress.addEventListener('pointerup', release);
-        // Step markers carry native title tooltips; show the app's tooltip instead.
-        const tip = document.createElement('div');
-        tip.className = 'replay-tip';
+        seek.addEventListener('pointerup', release);
+        seek.addEventListener('pointercancel', release);
+        const tip = element('div', 'replay-tip', { hidden: true });
         tip.setAttribute('role', 'tooltip');
-        tip.hidden = true;
         replay.append(tip);
-        progress.addEventListener('pointerover', (event) => {
-          const marker = event.target.closest('.rr-progress > [title], .rr-progress > [data-tip]');
-          if (!marker) return;
-          if (marker.title) { marker.dataset.tip = marker.title; marker.removeAttribute('title'); }
-          const text = marker.dataset.tip || '';
-          const split = text.indexOf(': ');
-          const outcome = / \((passed|failed|error|skipped)\)$/.exec(text);
-          tip.replaceChildren();
-          const name = document.createElement('b');
-          name.textContent = split > 0 ? text.slice(0, split) : text;
-          tip.append(name);
-          if (split > 0) tip.append(' ' + text.slice(split + 2, outcome ? outcome.index : undefined));
-          if (outcome) { const state = document.createElement('span'); state.className = 'replay-tip-' + outcome[1]; state.textContent = outcome[1][0].toUpperCase() + outcome[1].slice(1); tip.append(state); }
+        seek.addEventListener('pointerover', (event) => {
+          const mark = event.target.closest('.replay-mark');
+          if (!mark) return;
+          const step = mark.replayStep;
+          tip.replaceChildren(element('b', '', { textContent: step.name }), ' ' + step.title);
+          if (step.outcome) tip.append(element('span', 'replay-tip-' + step.outcome, { textContent: step.outcome[0].toUpperCase() + step.outcome.slice(1) }));
           tip.hidden = false;
-          const box = marker.getBoundingClientRect();
+          const box = mark.getBoundingClientRect();
           const area = replay.getBoundingClientRect();
-          const left = Math.max(tip.offsetWidth / 2, Math.min(area.width - tip.offsetWidth / 2, box.left + box.width / 2 - area.left));
-          tip.style.left = left + 'px';
+          tip.style.left = Math.max(tip.offsetWidth / 2, Math.min(area.width - tip.offsetWidth / 2, box.left + box.width / 2 - area.left)) + 'px';
           tip.style.top = (box.top - area.top - tip.offsetHeight - 8) + 'px';
         });
-        progress.addEventListener('pointerout', (event) => { if (event.target.closest('.rr-progress > [data-tip]')) tip.hidden = true; });
-        progress.addEventListener('pointercancel', release);
-        const showFirstFrame = () => { if (!moved && player.getReplayer().getCurrentTime() < firstOffset) player.goto(firstOffset, false); };
-        showFirstFrame();
-        // Signal that this is playable media: a play button over the frame until it plays, and again at the end.
-        const cover = document.createElement('button');
-        cover.type = 'button';
-        cover.className = 'replay-start';
-        cover.setAttribute('aria-label', 'Play replay');
-        cover.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>';
-        target.querySelector('.rr-player__frame').append(cover);
-        const ended = () => player.getReplayer().getCurrentTime() >= total - 100;
-        const syncCover = () => { cover.hidden = playing || (moved && !ended()); };
-        cover.addEventListener('click', () => { if (ended()) player.goto(0, true); else player.play(); });
-        player.addEventListener('ui-update-player-state', syncCover);
-        player.addEventListener('ui-update-current-time', syncCover);
+        seek.addEventListener('pointerout', (event) => { if (event.target.closest('.replay-mark')) tip.hidden = true; });
+        goto(0);
         replay.querySelector('.replay-status').hidden = true;
         const resize = () => {
-          const nextWidth = Math.floor(target.getBoundingClientRect().width);
+          let nextWidth = Math.floor(target.getBoundingClientRect().width);
           if (!section.open || nextWidth < 1) return;
-          player.$set({ width: nextWidth, height: Math.max(180, Math.round(nextWidth * Math.min(1, viewport.height / viewport.width))) });
+          const ratio = Math.min(1, viewport.height / viewport.width);
+          if (document.fullscreenElement === replay) nextWidth = Math.min(nextWidth, Math.floor((window.innerHeight - bar.offsetHeight - 32) / ratio));
+          player.$set({ width: nextWidth, height: Math.max(180, Math.round(nextWidth * ratio)) });
+          replay.style.setProperty('--replay-width', (nextWidth + 2) + 'px');
           player.triggerResize();
-          showFirstFrame();
+          render();
         };
         new ResizeObserver(resize).observe(target);
+        document.addEventListener('fullscreenchange', () => {
+          const full = document.fullscreenElement === replay;
+          expand.innerHTML = full ? icons.collapse : icons.expand;
+          expand.setAttribute('aria-label', full ? 'Exit full screen' : 'Full screen');
+          resize();
+        });
         section.addEventListener('toggle', () => { if (!section.open) player.pause(); else resize(); });
-        const controls = [...target.querySelectorAll('.rr-controller__btns button')];
-        for (const [index, button] of controls.entries()) {
-          button.setAttribute('aria-label', button.textContent.trim() ? 'Replay speed ' + button.textContent.trim() : index === 0 ? 'Play or pause replay' : 'Full screen replay');
-        }
-        return player;
+        return { goto };
       } catch {
         status.textContent = 'Replay could not be loaded. Open this report in a current browser.';
         status.setAttribute('role', 'status');
@@ -222,10 +284,10 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
       const link = event.target.closest('[data-replay-step]');
       if (!link) return;
       if (!link.classList.contains('zoom')) event.preventDefault();
-      const player = await load(section);
+      const controls = await load(section);
       const marker = starts.get(section)?.get(Number(link.dataset.replayStep));
-      if (!player || !marker) return;
-      player.goto(marker.offset, false);
+      if (!controls || !marker) return;
+      controls.goto(marker.offset);
       section.querySelectorAll('[data-replay-step]').forEach((entry) => entry.classList.toggle('is-current', entry.dataset.replayStep === link.dataset.replayStep));
       section.querySelector('.replay').dataset.currentStep = link.dataset.replayStep;
     });
