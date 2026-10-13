@@ -101,7 +101,8 @@ function offlineReplay(value: unknown): unknown {
     const entry = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(entry)) {
-        if (key === "attributes" && item && typeof item === "object") {
+        // Mutation events carry a list of { id, attributes } changes; nodes carry the attribute map itself.
+        if (key === "attributes" && item && typeof item === "object" && !Array.isArray(item)) {
             const attributes: Record<string, unknown> = {};
             for (const [name, attribute] of Object.entries(item)) {
                 if (["src", "poster", "background", "xlink:href", "srcset", "srcdoc", "action", "formaction"].includes(name)) {
