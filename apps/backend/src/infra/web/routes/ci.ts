@@ -10,6 +10,7 @@ import { authenticateCiToken, ciTokenInfo, issueCiToken } from "../../../core/ci
 import { ciRunSchema, ciResultQuerySchema, deploySchema } from "../../../core/ci/schemas";
 import { ciResult, junitResult, markdownResult } from "../../../core/ci/results";
 import { htmlReport } from "../../../core/ci/report";
+import { htmlReportHeaders } from "../security";
 import { environmentsRepository } from "../../repositories/environments";
 import { getRunBatch, listCiBatches } from "../../../core/runner/batch";
 import { ciRepository } from "../../repositories/ci";
@@ -104,7 +105,10 @@ export function createCiRouter(): Hono {
         }
         if (format === "junit") return c.body(junitResult(result), 200, { "Content-Type": "application/xml; charset=utf-8" });
         if (format === "markdown") return c.body(markdownResult(result), 200, { "Content-Type": "text/markdown; charset=utf-8" });
-        if (format === "html") return c.body(await htmlReport(result), 200, { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" });
+        if (format === "html") {
+            const html = await htmlReport(result);
+            return c.body(html, 200, htmlReportHeaders(html));
+        }
         return c.json(result);
     });
     router.post("/ci/projects/:id/deploy", access("ci-token", verifyCiToken), projectAuth, zValidator("json", deploySchema), async (c) => {

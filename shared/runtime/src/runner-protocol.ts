@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { errorCodeSchema } from "./errors.ts";
 import { httpTarget } from "./network/targets.ts";
+import { MAX_REPLAY_BYTES } from "./replay.ts";
 
-export const RUNNER_PROTOCOL_VERSION = 1;
+export const RUNNER_PROTOCOL_VERSION = 2;
+export const RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES = 64 * 1024 * 1024;
+export const RUNNER_REQUEST_LIMIT_BYTES = 90 * 1024 * 1024;
 
 const id = z.string().uuid();
 const origin = z.string().max(2000).refine((value) => {
@@ -12,7 +15,7 @@ const baseUrl = z.string().max(2000).refine((value) => {
     try { return !httpTarget(value).search; } catch { return false; }
 }, "Use an HTTP(S) URL without credentials, query or fragment");
 
-export const runnerArtifactPathSchema = z.string().regex(/^(?:spec\.(?:ts|yml)|evidence\.json|evidence\/step-\d{2,3}\.png|evidence\/execution\.webm)$/);
+export const runnerArtifactPathSchema = z.string().regex(/^(?:spec\.(?:ts|yml)|evidence\.json|evidence\/step-\d{2,3}\.png|evidence\/execution\.webm|evidence\/replay\.json\.gz)$/);
 
 export const runnerPayloadSchema = z.object({
     batchId: id,
@@ -82,8 +85,11 @@ export const runnerCompleteRequestSchema = z.object({
         errorCode: errorCodeSchema.nullable().optional(),
         artifacts: z.array(z.object({
             path: runnerArtifactPathSchema,
-            content: z.string().max(48 * 1024 * 1024).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
-        }).strict()).max(104),
+            // Flat matching avoids regexp stack exhaustion on large artifacts.
+            content: z.string().max(48 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/)
+                .refine((value) => value.length % 4 === 0, "Use padded base64 artifact content"),
+        }).strict().refine((artifact) => artifact.path !== "evidence/replay.json.gz" || Buffer.byteLength(artifact.content, "base64") <= MAX_REPLAY_BYTES,
+            "Replay exceeds the 15 MB compressed limit")).max(105),
     }).strict()).min(1).max(1000),
 }).strict();
 export type RunnerCompletion = z.infer<typeof runnerCompleteRequestSchema>;

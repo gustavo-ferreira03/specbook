@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { Hono } from "hono";
+import { RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
 import type { RunBatch } from "../../src/core/runner/batch";
 import { HUMAN_SPEC, useTempStorage, VALID_SPEC } from "../helpers/storage";
 
@@ -96,7 +97,12 @@ test("runner dispatch keeps credential lookup local and survives backend recover
     const { completeRunnerWork } = await import("../../src/core/private-runner/queue");
     const { issueRunnerToken, authenticateRunnerToken } = await import("../../src/core/private-runner/tokens");
     const { getRunBatch, markInterruptedBatches } = await import("../../src/core/runner/batch");
+    const { runsDir } = await import("../../src/core/paths");
+    const { encodeReplay, MAX_REPLAY_BYTES, MAX_REPLAY_RAW_BYTES, readReplay, REPLAY_FILE } = await import("@specbook/runtime/replay");
+    const { gzipSync } = await import("node:zlib");
     const project = await projectsRepository.createProject("Runner recovery", "http://private-app.invalid:4300");
+    const secretValue = "server-known-replay-secret";
+    await createProfile(project.id, { name: "protected", fields: [{ key: "password", value: secretValue }] });
     await repoGit.ensureProjectRepo(project.id, { create: true });
     const production = (await environmentsRepository.list(project.id))[0]!;
     await environmentsRepository.update(production, { ...production, executor: "runner", runnerGroup: "recovery" });
@@ -119,11 +125,53 @@ test("runner dispatch keeps credential lookup local and survives backend recover
     assert.equal((await getRunBatch(body.batchId))!.status, "running");
     const issued = await issueRunnerToken("Recovery", "recovery");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
     const lease = (await runnersRepository.claim(token, 60_000))!;
-    await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
-        results: [{ runId: body.run.id, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] });
+    const complete = (artifacts: { path: string; content: string }[]) => completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
+        results: [{ runId: body.run.id, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts }] });
+    await assert.rejects(() => complete([{ path: "../escaped.json", content: Buffer.from("unsafe").toString("base64") }]), /Invalid runner artifact path/);
+    await assert.rejects(() => complete([{ path: REPLAY_FILE, content: Buffer.from("invalid gzip").toString("base64") }]), /Invalid runner replay/);
+    await assert.rejects(() => complete([{ path: REPLAY_FILE, content: Buffer.alloc(MAX_REPLAY_BYTES + 1).toString("base64") }]), /compressed limit/);
+    const bomb = gzipSync(Buffer.alloc(MAX_REPLAY_RAW_BYTES + 1));
+    await assert.rejects(() => complete([{ path: REPLAY_FILE, content: bomb.toString("base64") }]), /Invalid runner replay/);
+    const replay = (await encodeReplay([
+        { type: 4, timestamp: 1000, data: { href: "https://example.com", width: 800, height: 600 } },
+        { type: 2, timestamp: 1001, data: { node: { type: 0, id: 1, childNodes: [
+            { type: 2, id: 2, tagName: "html", attributes: {}, childNodes: [
+                { type: 2, id: 3, tagName: "head", attributes: {}, childNodes: [] },
+                { type: 2, id: 4, tagName: "body", attributes: {}, childNodes: [
+                    { type: 3, id: 5, textContent: secretValue },
+                ] },
+            ] },
+        ] }, initialOffset: { left: 0, top: 0 } } },
+    ]))!;
+    assert.ok(replay);
+    const outside = await fs.mkdtemp(path.join(runsDir, ".outside-upload-"));
+    const sentinel = path.join(outside, "keep.txt");
+    await fs.writeFile(sentinel, secretValue);
+    await fs.symlink(outside, path.join(runsDir, body.run.id, "evidence"));
+    await complete([
+        { path: REPLAY_FILE, content: replay.toString("base64") },
+        { path: "evidence.json", content: Buffer.from(JSON.stringify({ steps: [], video: null, failedStep: null,
+            replay: { file: REPLAY_FILE, bytes: replay.length }, diagnostics: [{ kind: "console", message: secretValue }] })).toString("base64") },
+    ]);
     assert.equal((await runsRepository.getRun(body.run.id))!.status, "passed");
+    assert.equal(await fs.readFile(sentinel, "utf8"), secretValue, "uploads replace evidence symlinks without touching their targets");
+    await fs.rm(outside, { recursive: true, force: true });
+    const directory = path.join(runsDir, body.run.id);
+    const savedReplay = await readReplay(directory);
+    assert.ok(savedReplay);
+    assert.ok(!JSON.stringify(savedReplay).includes(secretValue));
+    const manifest = JSON.parse(await fs.readFile(path.join(directory, "evidence.json"), "utf8"));
+    assert.equal(manifest.replay.file, REPLAY_FILE);
+    assert.equal(manifest.replay.bytes, (await fs.stat(path.join(directory, REPLAY_FILE))).size);
+    assert.ok(!JSON.stringify(manifest).includes(secretValue));
+    const report = await app.request(`/runs/${body.run.id}/report`);
+    assert.equal(report.status, 200);
+    const html = await report.text();
+    assert.ok(html.includes("Replay"));
+    assert.ok(!html.includes(secretValue));
+    assert.match(report.headers.get("content-security-policy")!, /script-src 'sha256-/);
 });
 
 test("runner cancellation removes pending execution and isolated candidate verification preserves Spec health", async () => {
@@ -175,7 +223,7 @@ test("runner cancellation removes pending execution and isolated candidate verif
     const job = await pending();
     const issued = await issueRunnerToken("Candidate", "candidate");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
     const lease = (await runnersRepository.claim(token, 60_000))!;
     assert.equal(lease.id, job.id);
     await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
@@ -227,7 +275,7 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
     const next = await startSpecBatch(project.id, [spec.id], "Abandoned leases");
     const issued = await issueRunnerToken("Deadline", "deadline");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
     for (let attempt = 0; attempt < 3; attempt++) {
         const lease = (await runnersRepository.claim(token, 60_000))!;
         assert.equal(lease.batchId, next.id);
@@ -324,7 +372,7 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     assert.equal(queueMetrics(queue.queues).groups.find((entry) => entry.group === "broken")!.queued, 1);
     const issued = await issueRunnerToken("Healthy runner", "broken");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
     const lease = await claimRunnerWork(token, new AbortController().signal, token.id);
     assert.equal(lease!.batchId, batch.id);
     await releaseRunnerWork(lease!.id, token.id, lease!.leaseId!, "Verification finished");
@@ -351,7 +399,7 @@ test("runner execution gets its full budget after waiting and stale completion r
     await db.update(runnerJobs).set({ createdAt: new Date(Date.now() - job.payload.timeoutMs - 61_000).toISOString(), queueExpiresAt: new Date(Date.now() + 200).toISOString() }).where(eq(runnerJobs.id, job.id));
     const issued = await issueRunnerToken("Recovery runner", "stale");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
     let lease = (await runnersRepository.claim(token, 60_000))!;
     assert.equal(lease.id, job.id, "queued time must not consume execution time");
     assert.ok(runnerJobDeadline(lease) >= Date.now() + lease.payload.timeoutMs + RUNNER_EXECUTION_GRACE_MS - 1000);
@@ -431,7 +479,7 @@ test("runner completion keeps heartbeats available and preserves deployment stat
     const batch = await startSpecBatch(project.id, [spec.id], "Before publish");
     const issued = await issueRunnerToken("Completion", "completion");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
     const lease = (await runnersRepository.claim(token, 60_000))!;
     const files = await writer.readProjectSpecFiles(project.id);
     await writer.publishSpecsInRepo(project.id, environment.id, [{ path: spec.path, baseRevision: files.specs[0].revision,
@@ -541,7 +589,7 @@ test("an offline runner retry leaves other projects' failure processing availabl
     assert.equal((await runsRepository.listRuns(offline.spec.id)).length, 2);
     const issued = await issueRunnerToken("Monitor", "monitor");
     const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+    await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
     const lease = (await runnersRepository.claim(token, 60_000))!;
     await completeRunnerWork(lease.id, token.id, { leaseId: lease.leaseId!, durationMs: 100, processFailure: null,
         results: [{ runId: lease.payload.specs[0].runId, status: "passed", durationMs: 100, failReason: null, failedStep: null, artifacts: [] }] });

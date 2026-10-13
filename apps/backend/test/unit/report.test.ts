@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { describe, test } from "node:test";
 import { createSecretScrubber } from "../../src/core/credentials/scrub";
 import { isStepScreenshot, readEvidenceManifest, writeRunEvidence } from "@specbook/runtime/evidence";
 import { executableSource } from "@specbook/runtime/playwright";
 import { parsePlaywrightReport, stripAnsi } from "@specbook/runtime/report";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
-import { prepareReportSection } from "@specbook/runtime/html-report";
+import { prepareReportSection, renderHtmlReport } from "@specbook/runtime/html-report";
+import { decodeReplay, encodeReplay, MAX_REPLAY_BYTES, MAX_REPLAY_RAW_BYTES, REPLAY_FILE, REPLAY_LIMIT_NOTE, type ReplayEvent } from "@specbook/runtime/replay";
 import { tempDir, VALID_SPEC } from "../helpers/storage";
 
 function report(suites: unknown[], errors: unknown[] = []): string {
@@ -89,6 +91,78 @@ describe("parsePlaywrightReport", () => {
 });
 
 describe("run evidence", () => {
+    test("stores a scrubbed compressed replay and rejects recordings beyond its limits", async () => {
+        const work = tempDir();
+        const output = tempDir();
+        const secret = "private-replay-password";
+        const events: ReplayEvent[] = [
+            { type: 4, timestamp: 1, data: { width: 1280, height: 720, href: "https://example.com" } },
+            { type: 2, timestamp: 2, data: { node: { type: 0, childNodes: [{ type: 3, textContent: secret }] } } },
+        ];
+        const data = await encodeReplay(events);
+        assert.ok(data);
+        const file = path.join(work, "replay.json");
+        await fs.writeFile(file, JSON.stringify(events));
+        const manifest = await writeRunEvidence(output, "passed", { failedStep: null, attachments: [{ name: "specbook-replay", path: file, contentType: "application/json" }] }, [], createSecretScrubber([secret]));
+        assert.equal(manifest.replay?.file, REPLAY_FILE);
+        const stored = await fs.readFile(path.join(output, REPLAY_FILE));
+        assert.equal(manifest.replay?.bytes, stored.length);
+        const replay = await decodeReplay(stored);
+        assert.ok(replay);
+        assert.ok(!JSON.stringify(replay).includes(secret));
+        assert.match(JSON.stringify(replay), /••••/);
+        assert.deepEqual(await readEvidenceManifest(output), manifest);
+        for (const invalid of [Buffer.from("not gzip"), gzipSync("{}"), gzipSync("[]"), Buffer.alloc(MAX_REPLAY_BYTES + 1), gzipSync(Buffer.alloc(MAX_REPLAY_RAW_BYTES + 1))]) {
+            assert.equal(await decodeReplay(invalid), null);
+        }
+        await fs.writeFile(file, "[]");
+        const rejected = await writeRunEvidence(output, "passed", { failedStep: null, attachments: [{ name: "specbook-replay", path: file, contentType: "application/json" }] }, []);
+        assert.equal(rejected.replay, undefined);
+        assert.equal(await fs.stat(path.join(output, REPLAY_FILE)).catch(() => null), null);
+        const noteFile = path.join(work, "replay-note.txt");
+        await fs.writeFile(noteFile, REPLAY_LIMIT_NOTE);
+        const omitted = await writeRunEvidence(output, "passed", { failedStep: null, attachments: [{ name: "specbook-replay-unavailable", path: noteFile, contentType: "text/plain" }] }, []);
+        assert.equal(omitted.replayUnavailable, REPLAY_LIMIT_NOTE);
+    });
+
+    test("embeds one offline player for multiple recordings and keeps old reports free of replay UI", async () => {
+        const directory = tempDir();
+        await fs.mkdir(path.join(directory, "evidence"));
+        const events: ReplayEvent[] = [
+            { type: 4, timestamp: 1, data: { width: 1280, height: 720, href: "https://example.com" } },
+            { type: 2, timestamp: 2, data: { node: { type: 0, childNodes: [
+                { type: 2, tagName: "img", attributes: { src: "https://example.com/image.png", onload: "alert(1)", style: "background:url(https://example.com/bg.png)" } },
+                { type: 2, tagName: "img", attributes: { src: "data:image/png;base64,cG5n" } },
+                { type: 3, textContent: '@import "https://example.com/font.css"; body{background:url(https://example.com/bg.png)}' },
+            ] } } },
+            { type: 5, timestamp: 3, data: { tag: "specbook-step", payload: { phase: "start", number: 1, title: "Open", kind: "step", outcome: "running" } } },
+        ];
+        const compressed = await encodeReplay(events);
+        assert.ok(compressed);
+        await fs.writeFile(path.join(directory, REPLAY_FILE), compressed);
+        await fs.writeFile(path.join(directory, "evidence.json"), JSON.stringify({ steps: [], video: null, failedStep: null, replay: { file: REPLAY_FILE, bytes: compressed.length } }));
+        const section = await prepareReportSection({ directory, item: { runId: "a", title: "A", status: "passed", durationMs: 1, failReason: null }, humanSpec: { preconditions: [], steps: ["Open"], expectedResult: "Ready", postconditions: [] } });
+        assert.ok(section.replay);
+        const offline = JSON.parse(gunzipSync(Buffer.from(section.replay, "base64")).toString());
+        const nodes = offline[1].data.node.childNodes;
+        assert.equal(nodes[0].attributes.src, undefined);
+        assert.equal(nodes[0].attributes.onload, undefined);
+        assert.equal(nodes[0].attributes.style, 'background:url("data:,")');
+        assert.equal(nodes[1].attributes.src, "data:image/png;base64,cG5n");
+        assert.ok(!nodes[2].textContent.includes("https:"));
+        const data = { startedAt: "2026-10-12T00:00:00Z", durationMs: 2, qualityGate: { passed: true, failures: 0 }, sections: [section, { ...section, item: { ...section.item, runId: "b" } }] };
+        const html = await renderHtmlReport(data);
+        assert.equal((html.match(/class="replay-data"/g) ?? []).length, 2);
+        assert.equal((html.match(/const instances = new WeakMap/g) ?? []).length, 1);
+        assert.match(html, /data-replay-step="1"/);
+        assert.match(html, /connect-src 'none'/);
+        const historical = await renderHtmlReport({ ...data, sections: [{ ...section, replay: null }] });
+        assert.ok(!historical.includes('class="replay"'));
+        assert.ok(!historical.includes("const instances = new WeakMap"));
+        const capped = await renderHtmlReport({ ...data, sections: [{ ...section, replay: null, replayUnavailable: REPLAY_LIMIT_NOTE }] });
+        assert.match(capped, /Replay omitted because it exceeded/);
+    });
+
     test("reports historical execution order by title and normalizes failed step titles", async () => {
         const directory = tempDir();
         await fs.mkdir(path.join(directory, "evidence"));

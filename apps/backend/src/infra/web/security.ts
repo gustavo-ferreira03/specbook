@@ -1,5 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { RUNNER_REQUEST_LIMIT_BYTES } from "@specbook/runtime/runner-protocol";
+import { createHash } from "node:crypto";
 import { logger } from "../logger";
 import { buildHostAllowlist, frontendProxyOrigin, isAllowedHost, type HostAllowlist } from "../../../../../shared/http-origin";
 export { buildHostAllowlist, frontendProxyOrigin, isAllowedHost };
@@ -17,6 +19,14 @@ export function isAllowedWebsocketOrigin(headers: Headers, allowlist: HostAllowl
 export const REQUEST_HEADER = "X-Specbook-Request";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const DEFAULT_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
+
+export function htmlReportHeaders(html: string): Record<string, string> {
+    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
+        .filter((match) => !/\btype\s*=\s*["'](?:application\/octet-stream|application\/json)["']/i.test(match[1]))
+        .map((match) => `'sha256-${createHash("sha256").update(match[2]).digest("base64")}'`);
+    return { "Content-Type": "text/html; charset=utf-8", "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": `default-src 'none'; connect-src 'none'; script-src ${scripts.join(" ") || "'none'"}; img-src data: blob:; media-src data:; font-src data:; style-src 'unsafe-inline'; frame-src about: blob:; sandbox allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox` };
+}
 
 function isGitHttpPath(pathname: string): boolean {
     return pathname.startsWith("/git/");
@@ -50,7 +60,7 @@ export function jsonBodyLimit(maxSize = DEFAULT_BODY_LIMIT_BYTES): MiddlewareHan
         maxSize,
         onError: (c) => c.json({ error: "Request body too large" }, 413),
     });
-    const runnerLimiter = bodyLimit({ maxSize: 90 * 1024 * 1024, onError: (c) => c.json({ error: "Runner artifacts exceed the upload limit" }, 413) });
+    const runnerLimiter = bodyLimit({ maxSize: RUNNER_REQUEST_LIMIT_BYTES, onError: (c) => c.json({ error: "Runner artifacts exceed the upload limit" }, 413) });
     return async (c, next) => isGitHttpPath(c.req.path) ? next()
         : /^\/runner\/jobs\/[^/]+\/complete$/.test(c.req.path) ? runnerLimiter(c, next) : limiter(c, next);
 }

@@ -14,13 +14,13 @@ import { isInside } from "@specbook/runtime/safe-fs";
 import { batchReport, runReport } from "../../../core/ci/report";
 import { resolveRunEnvironment } from "../../../core/environments";
 import { runnerQueueSnapshot, visibleRuns } from "../../../core/private-runner/visibility";
+import { htmlReportHeaders } from "../security";
 
-const REPORT_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox" };
-
-function reportHeaders(c: Context, name: string): Record<string, string> {
-    if (c.req.query("download") === undefined) return REPORT_HEADERS;
+function reportHeaders(c: Context, name: string, html: string): Record<string, string> {
+    const headers = htmlReportHeaders(html);
+    if (c.req.query("download") === undefined) return headers;
     const file = `specbook-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "report"}.html`;
-    return { ...REPORT_HEADERS, "Content-Disposition": `attachment; filename="${file}"` };
+    return { ...headers, "Content-Disposition": `attachment; filename="${file}"` };
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -34,6 +34,7 @@ const CONTENT_TYPES: Record<string, string> = {
     ".jpeg": "image/jpeg",
     ".webm": "video/webm",
     ".zip": "application/zip",
+    ".gz": "application/gzip",
     ".ttf": "font/ttf",
     ".webmanifest": "application/manifest+json",
     ".md": "text/plain; charset=utf-8",
@@ -121,14 +122,16 @@ export function createRunsRouter(): Hono {
     router.get("/run-batches/:id/report", access("viewer"), async (c) => {
         const batch = await getRunBatch(c.req.param("id"));
         if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
-        return c.body(await batchReport(batch), 200, reportHeaders(c, `${batch.label}-${batch.id.slice(0, 8)}`));
+        const html = await batchReport(batch);
+        return c.body(html, 200, reportHeaders(c, `${batch.label}-${batch.id.slice(0, 8)}`, html));
     });
 
     router.get("/runs/:id/report", access("viewer"), async (c) => {
         const run = await runsRepository.getRun(c.req.param("id"));
         const spec = run ? await specsRepository.getSpec(run.specId) : null;
         if (!run || !spec) throw new HTTPException(404, { message: "Run not found" });
-        return c.body(await runReport(run, spec), 200, reportHeaders(c, `${spec.title}-${run.id.slice(0, 8)}`));
+        const html = await runReport(run, spec);
+        return c.body(html, 200, reportHeaders(c, `${spec.title}-${run.id.slice(0, 8)}`, html));
     });
 
     router.get("/specs/:id/runs", access("viewer"), zValidator("query", runListSchema), async (c) => {

@@ -8,10 +8,11 @@ import { httpTarget, resolveTarget } from "@specbook/runtime/network/targets";
 import { runPlaywrightSuite, type SuiteSpec } from "@specbook/runtime/playwright";
 import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
+import { decodeReplay, encodeReplay, REPLAY_FILE } from "@specbook/runtime/replay";
 import {
     runnerArtifactPathSchema, runnerClaimResponseSchema, runnerCompleteRequestSchema,
     runnerHeartbeatResponseSchema, type RunnerClaim, type RunnerCompletion,
-    RUNNER_PROTOCOL_VERSION,
+    RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES, RUNNER_PROTOCOL_VERSION, RUNNER_REQUEST_LIMIT_BYTES,
 } from "@specbook/runtime/runner-protocol";
 import { CLI_VERSION as RUNNER_CLI_VERSION } from "./version";
 import { resolveRunnerSecrets, scrub } from "./credentials";
@@ -40,17 +41,38 @@ async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 }
 
 async function artifacts(directory: string, scrubText: (text: string) => string): Promise<RunnerCompletion["results"][number]["artifacts"]> {
+    const root = await fs.realpath(directory);
+    const evidenceDirectory = path.join(directory, "evidence");
+    const evidenceRoot = await fs.realpath(evidenceDirectory).catch(() => null);
+    if (evidenceRoot !== null && evidenceRoot !== path.join(root, "evidence")) throw new CodedError("infrastructure", "Invalid runner evidence directory");
     const files = ["spec.ts", "spec.yml", "evidence.json"];
-    for (const file of await fs.readdir(path.join(directory, "evidence")).catch(() => [] as string[])) files.push(`evidence/${file}`);
+    for (const file of await fs.readdir(evidenceDirectory).catch(() => [] as string[])) files.push(`evidence/${file}`);
     const result: RunnerCompletion["results"][number]["artifacts"] = [];
+    let replayBytes: number | null = null;
+    let replayUnavailable: string | undefined;
     for (const file of files) {
         if (!runnerArtifactPathSchema.safeParse(file).success) continue;
         const full = path.join(directory, file);
         const stat = await fs.lstat(full).catch(() => null);
         if (!stat?.isFile() || stat.isSymbolicLink()) continue;
         if (stat.size > 32 * 1024 * 1024) throw new CodedError("infrastructure", "Runner evidence file exceeds 32 MB");
-        const data = await fs.readFile(full);
+        let data: Buffer = await fs.readFile(full);
+        if (file === REPLAY_FILE) {
+            const events = await decodeReplay(data);
+            const safe = events ? await encodeReplay(events, scrubText) : null;
+            if (!safe) { replayUnavailable = "Replay was omitted because it exceeded recording limits or was invalid."; continue; }
+            data = safe;
+            replayBytes = data.length;
+        }
         result.push({ path: file, content: /\.(ts|yml|json)$/.test(file) ? Buffer.from(scrubText(data.toString("utf8"))).toString("base64") : data.toString("base64") });
+    }
+    if (replayBytes !== null || replayUnavailable) {
+        const manifest = result.find((artifact) => artifact.path === "evidence.json");
+        if (manifest) {
+            const evidence = JSON.parse(Buffer.from(manifest.content, "base64").toString("utf8"));
+            manifest.content = Buffer.from(JSON.stringify({ ...evidence, replay: replayBytes === null ? null : { file: REPLAY_FILE, bytes: replayBytes },
+                ...(replayUnavailable ? { replayUnavailable } : {}) })).toString("base64");
+        }
     }
     return result;
 }
@@ -65,6 +87,23 @@ function withoutVideo(completion: RunnerCompletion): RunnerCompletion {
                 return { ...artifact, content: Buffer.from(JSON.stringify({ ...evidence, video: null })).toString("base64") };
             } catch { return artifact; }
         }) })) };
+}
+
+function withoutReplay(completion: RunnerCompletion): RunnerCompletion {
+    return { ...completion, results: completion.results.map((result) => ({ ...result, artifacts: result.artifacts
+        .filter((artifact) => artifact.path !== REPLAY_FILE)
+        .map((artifact) => {
+            if (artifact.path !== "evidence.json") return artifact;
+            const evidence = JSON.parse(Buffer.from(artifact.content, "base64").toString("utf8"));
+            if (!evidence.replay) return artifact;
+            return { ...artifact, content: Buffer.from(JSON.stringify({ ...evidence, replay: null,
+                replayUnavailable: "Replay was omitted to fit the runner upload limit." })).toString("base64") };
+        }) })) };
+}
+
+function exceedsUploadLimit(completion: RunnerCompletion): boolean {
+    const bytes = completion.results.reduce((total, result) => total + result.artifacts.reduce((size, artifact) => size + Buffer.byteLength(artifact.content, "base64"), 0), 0);
+    return bytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES || Buffer.byteLength(JSON.stringify(completion)) > RUNNER_REQUEST_LIMIT_BYTES;
 }
 
 async function execute(lease: Lease, signal: AbortSignal, allowedOrigins: string[], secretsCommand?: string): Promise<RunnerCompletion> {
@@ -84,9 +123,10 @@ async function execute(lease: Lease, signal: AbortSignal, allowedOrigins: string
             await fs.mkdir(outputDir, { mode: 0o700 });
             const analyzed = analyzeSpecSource(spec.files["spec.ts"]);
             if (!analyzed.ok) throw new CodedError("invalid_spec", `Spec "${spec.title}" is invalid: ${analyzed.error}`);
-            const titlesError = stepTitlesError(analyzed.analysis.steps, parseSpecYaml(spec.files["spec.yml"]).humanSpec);
+            const humanSpec = parseSpecYaml(spec.files["spec.yml"]).humanSpec;
+            const titlesError = stepTitlesError(analyzed.analysis.steps, humanSpec);
             if (titlesError) throw new CodedError("invalid_spec", `Spec "${spec.title}" is invalid: ${titlesError}`);
-            selected.push({ key: spec.runId, source: spec.files["spec.ts"], analysis: analyzed.analysis, outputDir });
+            selected.push({ key: spec.runId, source: spec.files["spec.ts"], analysis: analyzed.analysis, humanSpec, outputDir });
         }
         const refs = selected.flatMap((spec) => spec.analysis.secretRefs);
         const resolved = await resolveRunnerSecrets(refs, lease.work.baseUrl, { command: secretsCommand, signal, allowedOrigins, jobOrigins: lease.work.networkPolicy.origins });
@@ -242,6 +282,9 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
             await emit({ event: "claimed", jobId: lease.jobId, batchId: lease.work.batchId, specs: lease.work.specs.length });
             let completion = await execute(lease, jobSignal, allowedOrigins, options.secretsCommand);
             let retriedWithoutVideo = false;
+            let retriedWithoutReplay = false;
+            if (exceedsUploadLimit(completion)) { completion = withoutVideo(completion); retriedWithoutVideo = true; }
+            if (exceedsUploadLimit(completion)) { completion = withoutReplay(completion); retriedWithoutReplay = true; }
             while (!jobSignal.aborted) {
                 try {
                     const response = await send(`/runner/jobs/${lease.jobId}/complete`, completion, jobSignal);
@@ -258,6 +301,12 @@ export async function runRunner(options: RunnerOptions, emit: (event: RunnerEven
                         completion = withoutVideo(completion);
                         retriedWithoutVideo = true;
                         await emit({ event: "retrying", reason: "Runner evidence exceeds the server upload limit; retrying once without video", retryInMs: 0 });
+                        continue;
+                    }
+                    if (error instanceof RemoteError && error.status === 413 && !retriedWithoutReplay) {
+                        completion = withoutReplay(completion);
+                        retriedWithoutReplay = true;
+                        await emit({ event: "retrying", reason: "Runner evidence exceeds the server upload limit; retrying without replay", retryInMs: 0 });
                         continue;
                     }
                     if (error instanceof RemoteError && error.status >= 400 && error.status < 500 && ![401, 403].includes(error.status)) {

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { Hono } from "hono";
 
 process.env.LOG_LEVEL ??= "silent";
-const { buildHostAllowlist, csrfGuard, frontendProxyOrigin, hostGuard, isAllowedHost, isAllowedWebsocketOrigin, jsonBodyLimit, REQUEST_HEADER } = await import(
+const { buildHostAllowlist, csrfGuard, frontendProxyOrigin, hostGuard, htmlReportHeaders, isAllowedHost, isAllowedWebsocketOrigin, jsonBodyLimit, REQUEST_HEADER } = await import(
     "../../src/infra/web/security"
 );
 
@@ -74,6 +74,68 @@ describe("same-origin frontend proxy", () => {
 });
 
 describe("security middleware", () => {
+    test("runner uploads accept large base64 artifacts and reject invalid characters and padding", async () => {
+        const { randomUUID } = await import("node:crypto");
+        const { runnerCompleteRequestSchema } = await import("@specbook/runtime/runner-protocol");
+        const completion = (content: string) => ({ leaseId: randomUUID(), durationMs: 1, processFailure: null,
+            results: [{ runId: randomUUID(), status: "passed", durationMs: 1, failReason: null, failedStep: null,
+                artifacts: [{ path: "evidence/replay.json.gz", content }] }] });
+        const large = Buffer.alloc(8 * 1024 * 1024 + 1, 123).toString("base64");
+        assert.equal(runnerCompleteRequestSchema.safeParse(completion(large)).success, true);
+        for (const content of ["", "AAAA", "AA==", "AAA="]) assert.equal(runnerCompleteRequestSchema.safeParse(completion(content)).success, true);
+        for (const content of ["A", "AAAA=", "A===", "AA=A", "A A=", "AAA\n", `${large.slice(0, -4)}AA-=`]) {
+            assert.equal(runnerCompleteRequestSchema.safeParse(completion(content)).success, false);
+        }
+    });
+
+    test("replay reports permit their inline scripts while retaining isolated, offline frames", async () => {
+        const { createHash } = await import("node:crypto");
+        const script = "window.replayReady = true;";
+        const headers = htmlReportHeaders(`<script>${script}</script><script type="application/octet-stream">events</script>`);
+        const policy = headers["Content-Security-Policy"];
+        assert.ok(policy.includes(`script-src 'sha256-${createHash("sha256").update(script).digest("base64")}'`));
+        assert.ok(!policy.includes(createHash("sha256").update("events").digest("base64")));
+        assert.match(policy, /default-src 'none'/);
+        assert.match(policy, /frame-src about: blob:/);
+        assert.match(policy, /sandbox allow-scripts/);
+        assert.match(policy, /sandbox allow-scripts allow-same-origin/);
+        assert.match(policy, /connect-src 'none'/);
+        assert.match(htmlReportHeaders("<p>No replay</p>")["Content-Security-Policy"], /script-src 'none'/);
+    });
+
+    test("HTTP replay reports can read their sandboxed frame while scripts and network requests stay blocked", { timeout: 15_000 }, async (context) => {
+        const { chromium } = await import("@playwright/test");
+        const browser = await chromium.launch({ headless: true }).catch(() => null);
+        if (!browser) { context.skip("Chromium unavailable"); return; }
+        try {
+            const page = await browser.newPage();
+            const html = `<body><script>
+                const frame = document.createElement('iframe');
+                frame.setAttribute('sandbox', 'allow-same-origin');
+                document.body.appendChild(frame);
+                window.replayFrameReadable = !!frame.contentDocument;
+                const script = frame.contentDocument.createElement('script');
+                script.textContent = 'window.untrustedReplayExecuted = true';
+                frame.contentDocument.body.appendChild(script);
+                fetch('https://outside.invalid/').catch(() => window.networkBlocked = true);
+            </script>`;
+            const requests: string[] = [];
+            page.on("request", (request) => requests.push(request.url()));
+            await page.route("**/*", (route) => route.fulfill({ status: 200, headers: htmlReportHeaders(html),
+                body: html + "<script>window.untrustedOuterExecuted = true</script>" }));
+            await page.goto("http://127.0.0.1:4894/report");
+            await page.waitForFunction(() => (window as unknown as { networkBlocked?: boolean }).networkBlocked);
+            const result = await page.evaluate(() => {
+                const globals = window as unknown as { replayFrameReadable?: boolean; untrustedOuterExecuted?: boolean };
+                const frame = document.querySelector("iframe")!;
+                return { frameReadable: globals.replayFrameReadable, outerScript: globals.untrustedOuterExecuted === true,
+                    replayScript: (frame.contentWindow as unknown as { untrustedReplayExecuted?: boolean }).untrustedReplayExecuted === true };
+            });
+            assert.deepEqual(result, { frameReadable: true, outerScript: false, replayScript: false });
+            assert.deepEqual(requests, ["http://127.0.0.1:4894/report"]);
+        } finally { await browser.close(); }
+    });
+
     test("host guard rejects unknown hosts except for /health and Git HTTP", async () => {
         const app = appWith();
         assert.equal((await app.request(request("/projects"))).status, 200);

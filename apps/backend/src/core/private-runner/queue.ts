@@ -2,13 +2,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { HTTPException } from "hono/http-exception";
-import { runnerPayloadSchema, type RunnerCompletion, type RunnerPayload } from "@specbook/runtime/runner-protocol";
+import { RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES, runnerArtifactPathSchema, runnerPayloadSchema, type RunnerCompletion, type RunnerPayload } from "@specbook/runtime/runner-protocol";
+import { decodeReplay, encodeReplay, MAX_REPLAY_BYTES, REPLAY_FILE } from "@specbook/runtime/replay";
 import { MAX_RUNNER_ATTEMPTS, RUNNER_EXECUTION_GRACE_MS, runnerJobDeadline, runnerQueueTimeoutMs, runnersRepository, type RunnerJob, type RunnerToken } from "../../infra/repositories/runners";
 import { runsDir } from "../paths";
 import { createKeyedLock } from "../operations/keyed-lock";
 import { logger } from "../../infra/logger";
 import { issuePrefixedToken } from "../accounts/tokens";
 import { publicRunner } from "./tokens";
+import { projectSecretScrubber } from "../credentials/scrub";
 
 const withQueueLock = createKeyedLock().run;
 const jobLocks = createKeyedLock();
@@ -141,21 +143,57 @@ export async function completeRunnerWork(jobId: string, runnerId: string, comple
         if (!job) return;
         const staging = path.join(runsDir, `.runner-upload-${job.id}-${completion.leaseId}`);
         let bytes = 0;
+        let storedBytes = 0;
         try {
+            const scrub = await projectSecretScrubber(job.projectId);
+            const safeCompletion = { ...completion, processFailure: completion.processFailure === null ? null : scrub(completion.processFailure),
+                results: completion.results.map((result) => ({ ...result, failReason: result.failReason === null ? null : scrub(result.failReason),
+                    failedStep: result.failedStep === null ? null : scrub(result.failedStep) })) };
             await fs.rm(staging, { recursive: true, force: true });
+            await fs.mkdir(staging, { mode: 0o700 });
+            const root = await fs.realpath(runsDir);
+            if (await fs.realpath(staging) !== path.join(root, path.basename(staging))) throw new HTTPException(400, { message: "Invalid runner artifact directory" });
             for (const result of completion.results) {
                 const paths = new Set<string>();
+                let replayBytes: number | null = null;
+                let replayUnavailable: string | undefined;
                 for (const artifact of result.artifacts) {
+                    if (!runnerArtifactPathSchema.safeParse(artifact.path).success) throw new HTTPException(400, { message: "Invalid runner artifact path" });
                     if (paths.has(artifact.path)) throw new HTTPException(400, { message: "Artifact paths must be unique for each run" });
                     paths.add(artifact.path);
                     // The server keeps the immutable Spec snapshot prepared before dispatch.
                     if (artifact.path === "spec.ts" || artifact.path === "spec.yml") continue;
-                    const content = Buffer.from(artifact.content, "base64");
+                    let content: Buffer = Buffer.from(artifact.content, "base64");
                     bytes += content.length;
-                    if (bytes > 64 * 1024 * 1024) throw new HTTPException(413, { message: "Runner artifacts exceed the upload limit" });
+                    if (bytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES || content.length > 32 * 1024 * 1024) throw new HTTPException(413, { message: "Runner artifacts exceed the upload limit" });
+                    if (artifact.path === REPLAY_FILE) {
+                        if (content.length > MAX_REPLAY_BYTES) throw new HTTPException(413, { message: "Runner replay exceeds the compressed limit" });
+                        const events = await decodeReplay(content);
+                        if (!events) throw new HTTPException(400, { message: "Invalid runner replay recording" });
+                        const safe = await encodeReplay(events, scrub);
+                        if (!safe) { replayUnavailable = "Replay was omitted because it exceeded recording limits after secret masking."; continue; }
+                        content = safe;
+                        replayBytes = content.length;
+                    } else if (artifact.path === "evidence.json") content = Buffer.from(scrub(content.toString("utf8")));
+                    storedBytes += content.length;
+                    if (storedBytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES || content.length > 32 * 1024 * 1024) throw new HTTPException(413, { message: "Runner artifacts exceed the upload limit" });
                     const file = path.join(staging, result.runId, artifact.path);
-                    await fs.mkdir(path.dirname(file), { recursive: true });
-                    await fs.writeFile(file, content);
+                    await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+                    await fs.writeFile(file, content, { mode: 0o600, flag: "wx" });
+                }
+                if (replayBytes !== null || replayUnavailable) {
+                    const manifestFile = path.join(staging, result.runId, "evidence.json");
+                    const text = await fs.readFile(manifestFile, "utf8").catch(() => null);
+                    let manifest: Record<string, unknown>;
+                    try { manifest = JSON.parse(text ?? "null"); } catch { throw new HTTPException(400, { message: "Invalid runner replay evidence manifest" }); }
+                    if (!manifest || Array.isArray(manifest) || typeof manifest !== "object") throw new HTTPException(400, { message: "Invalid runner replay evidence manifest" });
+                    manifest.replay = replayBytes === null ? null : { file: REPLAY_FILE, bytes: replayBytes };
+                    if (replayUnavailable) manifest.replayUnavailable = replayUnavailable;
+                    else delete manifest.replayUnavailable;
+                    const updated = JSON.stringify(manifest);
+                    storedBytes += Buffer.byteLength(updated) - Buffer.byteLength(text!);
+                    if (storedBytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES || Buffer.byteLength(updated) > 32 * 1024 * 1024) throw new HTTPException(413, { message: "Runner artifacts exceed the upload limit" });
+                    await fs.writeFile(manifestFile, updated, { mode: 0o600 });
                 }
             }
             for (const result of completion.results) {
@@ -167,13 +205,15 @@ export async function completeRunnerWork(jobId: string, runnerId: string, comple
                 await fs.rm(path.join(target, "evidence.json"), { force: true });
                 for (const artifact of result.artifacts) {
                     if (artifact.path === "spec.ts" || artifact.path === "spec.yml") continue;
+                    const source = path.join(staging, result.runId, artifact.path);
+                    if (artifact.path === REPLAY_FILE && !await fs.lstat(source).catch(() => null)) continue;
                     const destination = path.join(target, artifact.path);
                     await fs.mkdir(path.dirname(destination), { recursive: true });
-                    await fs.rename(path.join(staging, result.runId, artifact.path), destination);
+                    await fs.rename(source, destination);
                 }
             }
             const { finishRunnerBatch } = await import("../runner/batch");
-            await finishRunnerBatch(job.batchId, completion);
+            await finishRunnerBatch(job.batchId, safeCompletion);
             await runnersRepository.complete(job.id);
         } catch (error) {
             await withQueueLock("queue", () => runnersRepository.restoreLease(job.id, completion.leaseId));

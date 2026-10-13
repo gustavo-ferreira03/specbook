@@ -1,8 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { executionPlan, type ExecutionStepKind, type HumanSpec } from "./types.ts";
 import { readEvidenceManifest } from "./evidence.ts";
 import { analyzeSpecSource, sameStepTitle } from "./validate.ts";
+import { readReplay } from "./replay.ts";
+import { REPORT_REPLAY_SCRIPT } from "./report-replay.ts";
 
 const MAX_IMAGE_BYTES = 5_000_000;
 const MAX_VIDEO_BYTES = 8_000_000;
@@ -43,6 +46,8 @@ export interface ReportSection {
     // number is the step() position in spec.ts; ordinal numbers only the Spec's steps.
     steps: { number: number; ordinal: number | null; kind: ExecutionStepKind; label: string; state: StepState; image: string | null }[];
     video: string | null;
+    replay?: string | null;
+    replayUnavailable?: string;
 }
 
 function escape(value: string): string {
@@ -64,6 +69,34 @@ async function embed(directory: string, file: string, type: string | undefined, 
 }
 
 const image = (directory: string, file: string) => embed(directory, file, IMAGE_TYPES[path.extname(file).toLowerCase()], MAX_IMAGE_BYTES);
+
+function offlineReplay(value: unknown): unknown {
+    if (typeof value === "string") return value.replace(/@import\s+(?:url\([^)]*\)|["'][^"']*["'])[^;]*;?/gi, "")
+        .replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi, (_match, _quote, url: string) => /^(?:data:|#)/i.test(url.trim()) ? `url("${url.trim().replace(/"/g, "%22")}")` : 'url("data:,")');
+    if (Array.isArray(value)) return value.map(offlineReplay);
+    if (!value || typeof value !== "object") return value;
+    const entry = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(entry)) {
+        if (key === "attributes" && item && typeof item === "object") {
+            const attributes: Record<string, unknown> = {};
+            for (const [name, attribute] of Object.entries(item)) {
+                if (["src", "poster", "background", "xlink:href", "srcset", "srcdoc", "action", "formaction"].includes(name)) {
+                    if (name !== "srcdoc" && name !== "srcset" && typeof attribute === "string" && /^data:(?:image|font|audio|video)\//i.test(attribute)) attributes[name] = attribute;
+                } else if (name === "href") {
+                    if (typeof attribute === "string" && attribute.startsWith("#")) attributes[name] = attribute;
+                } else if (!name.toLowerCase().startsWith("on") && name !== "http-equiv") attributes[name] = offlineReplay(attribute);
+            }
+            result[key] = attributes;
+        } else result[key] = offlineReplay(item);
+    }
+    return result;
+}
+
+async function replayData(directory: string): Promise<string | null> {
+    const events = await readReplay(directory);
+    return events ? gzipSync(JSON.stringify(offlineReplay(events))).toString("base64") : null;
+}
 
 function toneOf(item: Item): Tone {
     if (item.pending) return "running";
@@ -100,10 +133,13 @@ export async function prepareReportSection(options: {
         return { number, ordinal: matching?.ordinal ?? (matching ? null : number), kind: matching?.kind ?? "step", label, state, image: directory && shot ? await image(directory, shot.file) : null };
     }));
     return { item, tone: toneOf(item), feature: options.feature || "Other Specs", path: options.path ?? null, expectedResult: human?.expectedResult ?? "", steps,
-        video: directory && manifest.video ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES) : null };
+        video: directory && manifest.video ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES) : null,
+        replay: directory && manifest.replay ? await replayData(directory) : null,
+        ...(manifest.replayUnavailable ? { replayUnavailable: manifest.replayUnavailable } : {}) };
 }
 
-const publicAsset = (file: string) => fs.readFile(new URL(`./assets/${file}`, import.meta.url), "utf8").catch(() => "");
+const publicAsset = (file: string) => fs.readFile(new URL(`./assets/${file}`, import.meta.url), "utf8")
+    .catch(() => fs.readFile(new URL(`../dist/assets/${file}`, import.meta.url), "utf8").catch(() => ""));
 
 async function favicon(): Promise<string> {
     const svg = await publicAsset("specbook-icon.svg");
@@ -143,11 +179,11 @@ function stateLabel(item: Item, tone: Tone): string {
     return { known: "Known bug", flaky: "Passed on retry", waiting: "Waiting for deploy", running: "Running", passed: "Passed" }[tone] ?? "";
 }
 
-function renderSteps(steps: ReportSection["steps"]): string {
-    return `<ol class="steps">${steps.map((step) => `<li class="${step.state}">${step.ordinal === null ? '<span class="dot"></span>' : `<span class="num">${step.ordinal}</span>`}<span class="label">${escape(step.label)}</span><span class="mark">${step.state === "passed" ? CHECK : step.state === "failed" ? CROSS : ""}</span></li>`).join("")}</ol>`;
+function renderSteps(steps: ReportSection["steps"], replay: boolean): string {
+    return `<ol class="steps">${steps.map((step) => `<li class="${step.state}">${step.ordinal === null ? '<span class="dot"></span>' : `<span class="num">${step.ordinal}</span>`}${replay && step.state !== "skipped" ? `<button type="button" class="label step-seek" data-replay-step="${step.number}" aria-label="Replay: ${escape(step.label)}">${escape(step.label)}</button>` : `<span class="label">${escape(step.label)}</span>`}<span class="mark">${step.state === "passed" ? CHECK : step.state === "failed" ? CROSS : ""}</span></li>`).join("")}</ol>`;
 }
 
-function renderSection({ item, tone, path: file, expectedResult, steps, video }: ReportSection, open = false, showPath = false): string {
+function renderSection({ item, tone, path: file, expectedResult, steps, video, replay, replayUnavailable }: ReportSection, open = false, showPath = false): string {
     const failing = tone === "failed" || tone === "known" || tone === "waiting";
     const shots = steps.filter((step) => step.image);
     const preconditions = steps.filter((step) => step.kind === "precondition");
@@ -163,16 +199,18 @@ function renderSection({ item, tone, path: file, expectedResult, steps, video }:
   <span class="time">${escape(duration(item.durationMs))}</span>
 </summary>
 <div class="body">
-  ${preconditions.length ? `<h3>Preconditions</h3>${renderSteps(preconditions)}` : ""}
-  ${actions.length ? `<h3>Steps</h3>${renderSteps(actions)}` : ""}
-  ${expectedResult ? `<div class="expected ${proof?.state ?? ""}"><h3>Expected result</h3><p>${proof ? `<span class="mark">${proof.state === "passed" ? CHECK : proof.state === "failed" ? CROSS : ""}</span>` : ""}${escape(expectedResult)}</p>${proof?.image ? `<a class="proof" href="#${escape(shotId(proof))}"><img src="${proof.image}" alt="Expected result: ${escape(expectedResult)}"></a>` : ""}</div>` : ""}
-  ${postconditions.length ? `<h3>Postconditions</h3>${renderSteps(postconditions)}` : ""}
+  ${preconditions.length ? `<h3>Preconditions</h3>${renderSteps(preconditions, Boolean(replay))}` : ""}
+  ${actions.length ? `<h3>Steps</h3>${renderSteps(actions, Boolean(replay))}` : ""}
+  ${expectedResult ? `<div class="expected ${proof?.state ?? ""}"><h3>Expected result</h3><p>${proof ? `<span class="mark">${proof.state === "passed" ? CHECK : proof.state === "failed" ? CROSS : ""}</span>` : ""}${replay && proof && proof.state !== "skipped" ? `<button type="button" class="step-seek" data-replay-step="${proof.number}" aria-label="Replay expected result">${escape(expectedResult)}</button>` : escape(expectedResult)}</p>${proof?.image && !replay ? `<a class="proof" href="#${escape(shotId(proof))}"><img src="${proof.image}" alt="Expected result: ${escape(expectedResult)}"></a>` : ""}</div>` : ""}
+  ${postconditions.length ? `<h3>Postconditions</h3>${renderSteps(postconditions, Boolean(replay))}` : ""}
   ${item.failReason && failing ? `<div class="failure"><h3>What failed</h3><pre>${escape(item.failReason)}</pre></div>` : ""}
+  ${replay ? `<div class="visuals"><section class="replay" aria-label="Session replay"><h3>Replay</h3><p class="replay-status">Loading replay…</p><div class="replay-player"></div><div class="replay-steps" role="group" aria-label="Seek to a Spec step"></div><script class="replay-data" type="application/octet-stream">${replay}</script></section><section class="screenshot-section">` : ""}
   ${shots.length ? `<h3>Screenshots</h3><div class="shots">${shots.map((step) => {
       const id = shotId(step);
       const name = step.kind === "expected" ? "Expected result" : step.kind === "precondition" ? "Precondition" : step.kind === "postcondition" ? "Postcondition" : `Step ${step.ordinal}`;
-      return `<figure id="${escape(id)}"${step.kind === "expected" ? ' class="is-proof"' : ""}><a class="zoom" href="#${escape(id)}"><img src="${step.image}" alt="${name}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>${name}</b> ${escape(step.label)}</figcaption></figure>`;
+      return `<figure id="${escape(id)}"${step.kind === "expected" ? ' class="is-proof"' : ""}><a class="zoom" href="#${escape(id)}"${replay ? ` data-replay-step="${step.number}" aria-label="Replay ${escape(name)}: ${escape(step.label)}"` : ""}><img src="${step.image}" alt="${name}: ${escape(step.label)}"></a><a class="close" href="#run-${escape(item.runId)}" aria-label="Close"></a><figcaption><b>${name}</b> ${escape(step.label)}</figcaption></figure>`;
   }).join("")}</div>` : ""}
+  ${replay ? "</section></div>" : replayUnavailable ? `<p class="replay-note">${escape(replayUnavailable)}</p>` : ""}
   ${video ? `<h3>Recording</h3><video class="recording" controls preload="metadata" src="${video}"></video>` : ""}
 </div>
 </details>`;
@@ -274,6 +312,25 @@ figure:target figcaption{color:#e6e6e6;position:relative;z-index:1}
 figure:target figcaption b{color:#fff}
 figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
 .recording{width:100%;max-width:720px;border:1px solid var(--strong);border-radius:8px;display:block;background:#000}
+.step-seek{font:inherit;text-align:left;line-height:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;border-radius:3px}
+.step-seek:hover{text-decoration:underline;text-underline-offset:3px}.step-seek:focus-visible,.replay-steps button:focus-visible,.zoom:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
+.step-seek.is-current{font-weight:600}.zoom.is-current img{border:2px solid var(--primary)}
+.visuals{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:18px;align-items:start}
+.replay,.screenshot-section{min-width:0}.screenshot-section .shots{grid-template-columns:1fr;max-height:540px;overflow:auto;padding:2px}
+.replay-player{width:100%;min-height:180px}.replay-status,.replay-note{font-size:12px;color:var(--muted)}
+.replay .rr-player{float:none;border:1px solid var(--strong);border-radius:8px;box-shadow:none;overflow:hidden;font-family:inherit}
+.replay .rr-controller{font-family:inherit;background:var(--surface)}.replay .rr-player .rr-timeline{width:100%;padding:0 10px}
+.replay .rr-player .rr-timeline__time{font-size:12px;width:62px;color:var(--muted);font-variant-numeric:tabular-nums}
+.replay .rr-progress__handler{background:var(--primary)}.replay .rr-progress__step{background:var(--strong)}
+.replay .rr-player .rr-controller__btns{font-size:12px;gap:2px}.replay .rr-player .rr-controller__btns button{width:28px;height:28px;font:inherit}
+.replay .rr-player .rr-controller__btns button.active{background:var(--primary)}.replay .rr-player .rr-controller__btns button:hover{background:var(--soft);color:var(--ink)}
+.replay .rr-controller__btns button:focus-visible,.replay .rr-progress:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.replay .switch label::before{background:var(--strong)}.replay .switch input:checked+label::before{background:var(--primary)}
+.replay .rr-player .switch .label{flex:none;padding:0;margin:0 6px}
+.replay-steps{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.replay-steps button{font:inherit;font-size:12px;line-height:1.5;padding:3px 7px;border:1px solid var(--strong);border-radius:5px;background:var(--surface);color:var(--muted);cursor:pointer}
+.replay-steps button:hover{background:var(--soft);color:var(--ink)}.replay-steps button.is-current{border-color:var(--primary);color:var(--ink)}
+@media(max-width:760px){.visuals{grid-template-columns:1fr}.screenshot-section .shots{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));max-height:none}.wrap{padding-left:16px;padding-right:16px}.body{padding-left:12px;padding-right:12px}}
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;
 
@@ -299,6 +356,11 @@ export interface HtmlReportData {
 export async function renderHtmlReport(data: HtmlReportData, options: { single?: boolean } = {}): Promise<string> {
     const batch = data;
     const sections = data.sections;
+    const hasReplay = sections.some((section) => section.replay);
+    const playerScript = hasReplay ? await publicAsset("rrweb-player.js") : "";
+    const playerColors: Record<string, string> = { "#4950f680": "var(--strong)", "#4950f600": "transparent", "#4950f6": "var(--primary)", "#e0e1fe": "var(--strong)", "#11103e": "var(--muted)", "#fcfff4": "var(--surface)" };
+    const playerStyle = hasReplay ? (await publicAsset("rrweb-player.css")).replace(/#(?:4950f680|4950f600|4950f6|e0e1fe|11103e|fcfff4)\b/gi, (color) => playerColors[color.toLowerCase()]) : "";
+    const inlineScript = (script: string) => script.replace(/<\/script/gi, "<\\/script");
     const results = sections.map((section) => section.item);
     const byFeature = new Map<string, ReportSection[]>();
     for (const entry of sections) byFeature.set(entry.feature, [...(byFeature.get(entry.feature) ?? []), entry]);
@@ -328,8 +390,8 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
     ${TONES.filter(({ tone }) => !(["running", "waiting"].includes(tone)) || tally(tone) > 0).map(({ tone, label }) => filter(tone, label, tally(tone), false)).join("\n    ")}
   </div>`;
     return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escape([...new Set([heading, project, "Specbook"].filter(Boolean))].join(" · "))}</title>${await favicon()}<style>${await fonts()}${STYLE}</style></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; frame-src 'self' about:; connect-src 'none'">
+<title>${escape([...new Set([heading, project, "Specbook"].filter(Boolean))].join(" · "))}</title>${await favicon()}<style>${await fonts()}${playerStyle}${STYLE}</style></head>
 <body>
 <header><div class="wrap top">
   <div class="brand">${await logo()}specbook</div>
@@ -342,5 +404,6 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
   ${groups.map((group) => renderFeature(group.name, group.entries, Boolean(options.single))).join("\n")}
 </main>
 <footer class="wrap">Generated by Specbook.</footer>
+${hasReplay ? `<script>${inlineScript(playerScript)}</script><script>${inlineScript(REPORT_REPLAY_SCRIPT)}</script>` : ""}
 </body></html>`;
 }

@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 import { Hono } from "hono";
+import { RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
 import { HUMAN_SPEC, useTempStorage, VALID_SPEC } from "../helpers/storage";
 
 const storage = useTempStorage();
@@ -96,7 +97,6 @@ describe("CI access and quality gates", () => {
         const { WebSocket } = await import("ws");
         const { createApp } = await import("../../src/infra/web/app");
         const { attachTunnelWebSockets, publicTunnels } = await import("../../src/core/tunnel/registry");
-        const { RUNNER_PROTOCOL_VERSION } = await import("@specbook/runtime/runner-protocol");
         const project = await projectsRepository.createProject("Tunnel lifecycle", "https://private.example.com");
         const input = environmentSchema.parse({ name: "Private", baseUrl: project.baseUrl, executor: "tunnel", runnerGroup: "private" });
         const environment = await environmentsRepository.create(project.id, input);
@@ -130,7 +130,7 @@ describe("CI access and quality gates", () => {
             assert.equal(connected.websocket.readyState, WebSocket.OPEN);
             assert.equal(publicTunnels().find((entry) => entry.environmentId === environment.id)?.environmentName, "Renamed private");
             const headers = { authorization: `Bearer ${dedicated.token}`, "content-type": "application/json" };
-            const response = await fetch(`http://127.0.0.1:${port}/runner/claim`, { method: "POST", headers, body: JSON.stringify({ instanceId: crypto.randomUUID(), version: "0.1.0", protocolVersion: 1, concurrency: 1 }) });
+            const response = await fetch(`http://127.0.0.1:${port}/runner/claim`, { method: "POST", headers, body: JSON.stringify({ instanceId: crypto.randomUUID(), version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 }) });
             assert.equal(response.status, 403, "tunnel tokens cannot claim runner execution");
             await response.body?.cancel();
         } finally {
@@ -191,7 +191,7 @@ describe("CI access and quality gates", () => {
         assert.equal((await visibleRuns([run]))[0].queue?.queued, 1);
         const issued = await issueRunnerToken("Visibility", "visibility");
         const runner = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-        await runnersRepository.reportInstance(runner.id, runner.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        await runnersRepository.reportInstance(runner.id, runner.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
         const lease = (await runnersRepository.claim(runner, 60_000))!;
         assert.equal((await visibleRuns([run]))[0].queue, null);
         await releaseRunnerWork(lease.id, runner.id, lease.leaseId!);
@@ -238,9 +238,11 @@ describe("CI access and quality gates", () => {
         assert.equal((await runnerApp.request("/runners", { method: "POST", headers: { Authorization: `Bearer ${personal}`, "content-type": "application/json" }, body: JSON.stringify({ name: "Forbidden" }) })).status, 403);
         assert.equal((await runnerApp.request("/runner/claim", { method: "POST", headers: { Authorization: `Bearer ${personal}`, "content-type": "application/json" }, body: JSON.stringify({ version: "test" }) })).status, 401);
         const runnerHeaders = { Authorization: `Bearer ${issued.token}`, "content-type": "application/json" };
-        const incompatible = await runnerApp.request("/runner/claim", { method: "POST", headers: runnerHeaders, body: JSON.stringify({ instanceId: crypto.randomUUID(), version: "0.1.0", protocolVersion: 999, concurrency: 1 }) });
-        assert.equal(incompatible.status, 426);
-        assert.match(await incompatible.text(), /Upgrade the CLI/);
+        for (const protocolVersion of [RUNNER_PROTOCOL_VERSION - 1, 999]) {
+            const incompatible = await runnerApp.request("/runner/claim", { method: "POST", headers: runnerHeaders, body: JSON.stringify({ instanceId: crypto.randomUUID(), version: "0.1.0", protocolVersion, concurrency: 1 }) });
+            assert.equal(incompatible.status, 426);
+            assert.match(await incompatible.text(), /Upgrade the CLI/);
+        }
         const missingVersion = await runnerApp.request("/runner/claim", { method: "POST", headers: runnerHeaders, body: JSON.stringify({ version: "0.1.0", concurrency: 1 }) });
         assert.equal(missingVersion.status, 426);
         assert.equal((await runnerApp.request("/runner/metrics", { headers: runnerHeaders })).status, 200);
@@ -272,12 +274,12 @@ describe("CI access and quality gates", () => {
         const outside = await issueRunnerToken("Outside", "other");
         const officeRow = (await authenticateRunnerToken(`Bearer ${office.token}`))!;
         const outsideRow = (await authenticateRunnerToken(`Bearer ${outside.token}`))!;
-        await runnersRepository.reportInstance(officeRow.id, officeRow.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
-        await runnersRepository.reportInstance(outsideRow.id, outsideRow.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        await runnersRepository.reportInstance(officeRow.id, officeRow.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
+        await runnersRepository.reportInstance(outsideRow.id, outsideRow.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
         const otherProject = await projectsRepository.createProject("Restricted project", "https://example.com");
         const restricted = await issueRunnerToken("Restricted", "office", [otherProject.id]);
         const restrictedRow = (await authenticateRunnerToken(`Bearer ${restricted.token}`))!;
-        await runnersRepository.reportInstance(restrictedRow.id, restrictedRow.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        await runnersRepository.reportInstance(restrictedRow.id, restrictedRow.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
         assert.equal(await runnersRepository.claim(restrictedRow, 60_000), null, "tokens cannot claim work in another project");
         await revokeRunnerToken(restrictedRow.id);
         assert.equal(await runnersRepository.claim(outsideRow, 60_000), null);
@@ -285,8 +287,8 @@ describe("CI access and quality gates", () => {
         await enqueueRunnerBatch(secondBatch, project.id, "office", { ...payload, batchId: secondBatch });
         const firstInstance = crypto.randomUUID();
         const secondInstance = crypto.randomUUID();
-        await runnersRepository.reportInstance(officeRow.id, firstInstance, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
-        await runnersRepository.reportInstance(officeRow.id, secondInstance, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        await runnersRepository.reportInstance(officeRow.id, firstInstance, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
+        await runnersRepository.reportInstance(officeRow.id, secondInstance, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
         const firstJob = (await runnersRepository.claim(officeRow, 60_000, firstInstance))!;
         const secondJob = (await runnersRepository.claim(officeRow, 60_000, secondInstance))!;
         assert.ok(firstJob && secondJob, "replicas sharing one token have independent capacity");
@@ -298,7 +300,7 @@ describe("CI access and quality gates", () => {
         await runnersRepository.disconnect(officeRow.id, firstInstance);
         await runnersRepository.disconnect(officeRow.id, secondInstance);
         assert.equal(await runnersRepository.claim(officeRow, 60_000, firstInstance), null, "late polls cannot lease work after disconnect");
-        await assert.rejects(() => runnersRepository.reportInstance(officeRow.id, firstInstance, { version: "0.1.0", protocolVersion: 1, concurrency: 1 }), /disconnected/);
+        await assert.rejects(() => runnersRepository.reportInstance(officeRow.id, firstInstance, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 }), /disconnected/);
         const { claimRunnerWork } = await import("../../src/core/private-runner/queue");
         await assert.rejects(() => claimRunnerWork(officeRow, new AbortController().signal, firstInstance), /disconnected/);
         await runnersRepository.cancelBatch(secondBatch);
@@ -363,7 +365,7 @@ describe("CI access and quality gates", () => {
             specs: [{ runId: run.id, specId: spec.id, title: spec.title, files: { "spec.ts": VALID_SPEC, "spec.yml": markdown } }] });
         const issued = await issueRunnerToken("Promotion runner", "promotion");
         const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
-        await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: 1, concurrency: 1 });
+        await runnersRepository.reportInstance(token.id, token.id, { version: "0.1.0", protocolVersion: RUNNER_PROTOCOL_VERSION, concurrency: 1 });
         const lease = (await runnersRepository.claim(token, 60_000))!;
         const completion = { leaseId: lease.leaseId!, durationMs: 200, processFailure: null,
             results: [{ runId: run.id, status: "passed" as const, durationMs: 200, failReason: null, failedStep: null, artifacts: [
