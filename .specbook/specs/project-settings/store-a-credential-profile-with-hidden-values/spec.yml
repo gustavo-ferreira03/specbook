@@ -1,0 +1,13 @@
+title: Store a credential profile with hidden values
+description: A saved credential profile shows its username and field names, never the secret values.
+preconditions:
+- Signed in as the Specbook administrator
+steps:
+- Open Project settings
+- Start a new credential profile
+- Name it “self-test-shopper”
+- Enter the username “shopper@example.com”
+- Enter a password
+- Create the profile
+expectedResult: The saved profile hides its password
+postconditions: []

@@ -1,0 +1,12 @@
+title: Editing a Spec records a version
+description: Saving a change to a Spec commits it, and its history keeps the previous version.
+preconditions:
+- Signed in as the Specbook administrator
+- A Spec “Versioned home check” exists in a new feature
+steps:
+- Rename the step to “Open the storefront”
+- Save the Spec
+- Open the Spec's versions
+- Select the oldest version
+expectedResult: The oldest version still has the step “Open the application”
+postconditions: []

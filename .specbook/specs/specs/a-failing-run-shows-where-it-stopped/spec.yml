@@ -1,0 +1,12 @@
+title: A failing run shows where it stopped
+description: A Spec whose assertion no longer holds fails, is retried once, and the history shows where it stopped.
+preconditions:
+- Signed in as the Specbook administrator
+- A Spec “Broken home check” exists in a new feature
+steps:
+- Open the automation source
+- Replace the assertion with text the app never shows
+- Save the Spec
+- Run the Spec
+expectedResult: The automatic retry also failed at “Open the application”
+postconditions: []

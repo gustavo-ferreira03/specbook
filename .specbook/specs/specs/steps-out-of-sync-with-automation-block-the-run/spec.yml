@@ -1,0 +1,10 @@
+title: Steps out of sync with automation block the run
+description: Changing a step without updating its automation makes the Spec invalid instead of running a stale test.
+preconditions:
+- Signed in as the Specbook administrator
+- A Spec “Unsynced home check” exists in a new feature
+steps:
+- Rename the step to “Open the storefront”
+- Save the Spec
+expectedResult: The Spec says it can't run
+postconditions: []

@@ -1,0 +1,11 @@
+title: Create and revoke a personal access token
+description: A personal access token for the CLI is listed until it is revoked.
+preconditions:
+- Signed in as the Specbook administrator
+steps:
+- Open the access tokens settings
+- Create the token “Self-test laptop”
+- Confirm the token was saved
+- Revoke “Self-test laptop”
+expectedResult: The user has no access tokens
+postconditions: []

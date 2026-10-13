@@ -1,0 +1,9 @@
+title: Pause the agent for the project
+description: Pausing stops all automatic work until the user resumes it.
+preconditions:
+- Signed in as the Specbook administrator
+steps:
+- Open the project Home
+- Pause the project
+expectedResult: Home says nothing runs until the project is resumed
+postconditions: []

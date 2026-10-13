@@ -1,0 +1,11 @@
+title: Create a Spec by hand and run it
+description: A feature and a Spec created without the agent are immediately runnable.
+preconditions:
+- Signed in as the Specbook administrator
+steps:
+- Open the Specs list
+- Create the feature “Self-test checks”
+- Create the Spec “Manual home check” in that feature
+- Run the new Spec
+expectedResult: The last run of “Manual home check” passed
+postconditions: []

@@ -1,0 +1,10 @@
+title: Add an environment to run Specs against
+description: A new environment becomes a destination for Spec runs.
+preconditions:
+- Signed in as the Specbook administrator
+steps:
+- Open Project settings
+- Add the environment “Self-test staging”
+- Open the Specs list
+expectedResult: “Self-test staging” is offered as a run environment
+postconditions: []

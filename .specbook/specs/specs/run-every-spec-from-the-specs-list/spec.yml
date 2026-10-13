@@ -1,0 +1,9 @@
+title: Run every Spec from the Specs list
+description: Running all Specs at once reports the outcome of the whole batch.
+preconditions:
+- Signed in as the Specbook administrator
+steps:
+- Open the Specs list
+- Run all Specs
+expectedResult: The batch completes with every Spec passed
+postconditions: []

@@ -1,0 +1,11 @@
+title: Create and revoke a CI token
+description: A project CI token is shown once and stops existing after it is revoked.
+preconditions:
+- Signed in as the Specbook administrator
+steps:
+- Open the Automation settings
+- Create a CI token
+- Confirm the token was saved
+- Revoke the CI token
+expectedResult: The project has no CI token
+postconditions: []

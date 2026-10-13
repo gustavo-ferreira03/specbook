@@ -44,7 +44,10 @@ await waitFor(`${target}/login`);
 await api("POST", "/setup/admin", { name: "Specbook CI", email: "ci@specbook.local", password: crypto.randomBytes(24).toString("base64url") });
 const { project } = await api("POST", "/projects", { name: "Specbook", baseUrl: target });
 await api("POST", `/projects/${project.id}/credentials`, {
-    name: "dogfood-admin", allowedOrigins: [target], identifier: fixtureAdmin.email, fields: [{ key: "password", value: fixtureAdmin.password }],
+    name: "dogfood-admin", allowedOrigins: [target], fields: [
+        { key: "username", value: fixtureAdmin.email, sensitive: false },
+        { key: "password", value: fixtureAdmin.password, sensitive: true },
+    ],
 });
 
 const { token: gitToken, remote } = await api("POST", `/projects/${project.id}/git/remote/token`);
