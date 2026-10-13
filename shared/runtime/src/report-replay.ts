@@ -43,23 +43,27 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
         const first = events[0].timestamp;
         const markers = new Map();
         const tags = {};
+        // One marker per step, at its start and colored by its outcome; end markers would overlap the next step's start.
+        const outcomes = new Map(events.filter((event) => event.type === 5 && event.data.tag === 'specbook-step' && event.data.payload.phase === 'end').map((event) => [event.data.payload.number, event.data.payload.outcome]));
         let ordinal = 0;
         for (const event of events) {
-          if (event.type !== 5 || event.data.tag !== 'specbook-step') continue;
+          if (event.type !== 5 || event.data.tag !== 'specbook-step' || event.data.payload.phase !== 'start') continue;
           const step = event.data.payload;
-          if (step.phase === 'start' && step.kind === 'step') ordinal += 1;
+          if (step.kind === 'step') ordinal += 1;
           const name = stepName(step, ordinal);
-          event.data.tag = name + ': ' + step.title + (step.phase === 'end' ? ' (' + step.outcome + ')' : '');
-          tags[event.data.tag] = step.outcome === 'failed' ? '#bd5149' : step.phase === 'end' ? '#1f7a4d' : '#6b6b6b';
-          if (step.phase === 'start') markers.set(step.number, { offset: Math.max(0, event.timestamp - first), name, title: step.title });
+          const outcome = outcomes.get(step.number);
+          event.data.tag = name + ': ' + step.title + (outcome ? ' (' + outcome + ')' : '');
+          tags[event.data.tag] = outcome === 'failed' || outcome === 'error' ? '#bd5149' : outcome === 'passed' ? '#1f7a4d' : '#8f8f8f';
+          markers.set(step.number, { offset: Math.max(0, event.timestamp - first), name, title: step.title });
         }
+        const playerEvents = events.filter((event) => !(event.type === 5 && event.data.tag === 'specbook-step'));
         starts.set(section, markers);
         const target = replay.querySelector('.replay-player');
         const width = Math.max(280, Math.floor(target.getBoundingClientRect().width));
         const viewport = events.find((event) => event.type === 4)?.data || { width: 1280, height: 720 };
         const height = Math.max(180, Math.round(width * Math.min(1, viewport.height / viewport.width)));
         const Player = window.rrwebPlayer.default;
-        const player = new Player({ target, props: { events, width, height, autoPlay: false, skipInactive: true, speedOption: [1, 2, 4, 8], tags, inactiveColor: '#ebebeb', showWarning: false, showDebug: false, UNSAFE_replayCanvas: false } });
+        const player = new Player({ target, props: { events: playerEvents, width, height, autoPlay: false, skipInactive: true, speedOption: [1, 2, 4, 8], tags, inactiveColor: '#ebebeb', showWarning: false, showDebug: false, UNSAFE_replayCanvas: false } });
         const progress = target.querySelector('.rr-progress');
         const total = player.getMetaData().totalTime;
         const waitMs = Number(replay.dataset.waitMs);
@@ -133,6 +137,33 @@ export const REPORT_REPLAY_SCRIPT = String.raw`
           player.goto(pending, resume);
         };
         progress.addEventListener('pointerup', release);
+        // Step markers carry native title tooltips; show the app's tooltip instead.
+        const tip = document.createElement('div');
+        tip.className = 'replay-tip';
+        tip.setAttribute('role', 'tooltip');
+        tip.hidden = true;
+        replay.append(tip);
+        progress.addEventListener('pointerover', (event) => {
+          const marker = event.target.closest('.rr-progress > [title], .rr-progress > [data-tip]');
+          if (!marker) return;
+          if (marker.title) { marker.dataset.tip = marker.title; marker.removeAttribute('title'); }
+          const text = marker.dataset.tip || '';
+          const split = text.indexOf(': ');
+          const outcome = / \((passed|failed|error|skipped)\)$/.exec(text);
+          tip.replaceChildren();
+          const name = document.createElement('b');
+          name.textContent = split > 0 ? text.slice(0, split) : text;
+          tip.append(name);
+          if (split > 0) tip.append(' ' + text.slice(split + 2, outcome ? outcome.index : undefined));
+          if (outcome) { const state = document.createElement('span'); state.className = 'replay-tip-' + outcome[1]; state.textContent = outcome[1][0].toUpperCase() + outcome[1].slice(1); tip.append(state); }
+          tip.hidden = false;
+          const box = marker.getBoundingClientRect();
+          const area = replay.getBoundingClientRect();
+          const left = Math.max(tip.offsetWidth / 2, Math.min(area.width - tip.offsetWidth / 2, box.left + box.width / 2 - area.left));
+          tip.style.left = left + 'px';
+          tip.style.top = (box.top - area.top - tip.offsetHeight - 8) + 'px';
+        });
+        progress.addEventListener('pointerout', (event) => { if (event.target.closest('.rr-progress > [data-tip]')) tip.hidden = true; });
         progress.addEventListener('pointercancel', release);
         const showFirstFrame = () => { if (!moved && player.getReplayer().getCurrentTime() < firstOffset) player.goto(firstOffset, false); };
         showFirstFrame();

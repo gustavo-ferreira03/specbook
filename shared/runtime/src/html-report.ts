@@ -51,6 +51,28 @@ export interface ReportSection {
     replayUnavailable?: string;
 }
 
+// Zoom with a class instead of the :target anchor, so closing doesn't scroll the page; the anchors remain the no-script fallback.
+const ZOOM_SCRIPT = `(() => {
+  let open = null;
+  let top = 0;
+  const close = () => {
+    if (!open) return;
+    open.classList.remove("is-zoomed");
+    open = null;
+    window.scrollTo({ top, behavior: "instant" });
+  };
+  document.addEventListener("click", (event) => {
+    if (open && event.target.closest("figure.is-zoomed .close, figure.is-zoomed .zoom")) { event.preventDefault(); close(); return; }
+    const zoom = event.target.closest("figure .zoom");
+    if (!zoom || open) return;
+    event.preventDefault();
+    top = window.scrollY;
+    open = zoom.closest("figure");
+    open.classList.add("is-zoomed");
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+})();`;
+
 function escape(value: string): string {
     return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 }
@@ -320,12 +342,12 @@ figcaption{font-size:12px;color:var(--muted);margin-top:6px}
 .zoom img,.proof img{transition:border-color .12s ease}
 .zoom:hover img,.proof:hover img{border-color:var(--muted)}
 .close{display:none}
-figure:target{position:fixed;inset:0;z-index:10;margin:0;padding:24px;background:rgb(20 20 20/.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
-figure:target .zoom{cursor:default;position:relative;z-index:1}
-figure:target img{width:auto;max-width:min(1400px,100%);max-height:calc(100vh - 80px);border-color:#444}
-figure:target figcaption{color:#e6e6e6;position:relative;z-index:1}
-figure:target figcaption b{color:#fff}
-figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
+figure:target,figure.is-zoomed{position:fixed;inset:0;z-index:10;margin:0;padding:24px;background:rgb(20 20 20/.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+figure:target .zoom,figure.is-zoomed .zoom{cursor:default;position:relative;z-index:1}
+figure:target img,figure.is-zoomed img{width:auto;max-width:min(1400px,100%);max-height:calc(100vh - 80px);border-color:#444}
+figure:target figcaption,figure.is-zoomed figcaption{color:#e6e6e6;position:relative;z-index:1}
+figure:target figcaption b,figure.is-zoomed figcaption b{color:#fff}
+figure:target .close,figure.is-zoomed .close{display:block;position:absolute;inset:0;cursor:pointer}
 .recording{width:100%;max-width:720px;border:1px solid var(--strong);border-radius:8px;display:block;background:#000}
 .step-seek{font:inherit;text-align:left;line-height:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;border-radius:3px}
 .step-seek:hover{text-decoration:underline;text-underline-offset:3px}.step-seek:focus-visible,.zoom:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
@@ -337,6 +359,7 @@ figure:target .close{display:block;position:absolute;inset:0;cursor:pointer}
 .replay .rr-controller{font-family:inherit;background:var(--surface)}.replay .rr-player .rr-timeline{width:100%;padding:0 10px}
 .replay .rr-player .rr-timeline__time{font-size:12px;width:62px;color:var(--muted);font-variant-numeric:tabular-nums}
 .replay .rr-progress{touch-action:none;cursor:pointer}.replay .rr-progress__handler{background:var(--primary);cursor:grab}.replay .rr-progress.is-dragging,.replay .rr-progress.is-dragging .rr-progress__handler{cursor:grabbing}.replay .rr-progress__step{background:var(--strong)}
+.replay{position:relative}.replay-tip{position:absolute;z-index:5;transform:translateX(-50%);max-width:280px;padding:4px 8px;border-radius:6px;background:var(--primary);color:#fff;font-size:12px;font-weight:500;line-height:1.5;box-shadow:3px 3px 0 var(--strong);pointer-events:none;white-space:normal}.replay-tip b{font-weight:700}.replay-tip span{display:block;font-size:11px;opacity:.8}.replay-tip .replay-tip-failed{color:#ffb3ad;opacity:1}.replay-tip::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);border:5px solid transparent;border-top-color:var(--primary)}
 .replay-wait{position:absolute;top:-4px;bottom:-4px;background:var(--danger-soft);border-inline:1px solid var(--danger);pointer-events:none}.replay .rr-progress__handler{z-index:1}
 .replay .rr-player .rr-controller__btns{font-size:12px;gap:2px}.replay .rr-player .rr-controller__btns button{width:28px;height:28px;font:inherit}
 .replay .rr-player .rr-controller__btns button.active{background:var(--primary)}.replay .rr-player .rr-controller__btns button:hover{background:var(--soft);color:var(--ink)}
@@ -417,6 +440,7 @@ export async function renderHtmlReport(data: HtmlReportData, options: { single?:
   ${groups.map((group) => renderFeature(group.name, group.entries, Boolean(options.single))).join("\n")}
 </main>
 <footer class="wrap">Generated by Specbook.</footer>
+<script>${inlineScript(ZOOM_SCRIPT)}</script>
 ${hasReplay ? `<script id="specbook-replay-library" type="application/octet-stream">${playerScript}</script><script>${inlineScript(REPORT_REPLAY_SCRIPT)}</script>` : ""}
 </body></html>`;
 }
