@@ -186,7 +186,7 @@ async function fonts(): Promise<string> {
         const font = await fs.readFile(new URL(`./assets/${file}`, import.meta.url)).catch(() => null);
         return font ? `@font-face{font-family:"${family}";font-weight:${weight};font-display:swap;src:url(data:font/woff2;base64,${font.toString("base64")}) format("woff2")}` : "";
     };
-    return (await face("Recursive", "recursive-latin.woff2", "300 1000")) + (await face("Geist", "geist-bold-latin.woff2", "700"));
+    return (await face("Recursive", "recursive-latin.woff2", "400 700")) + (await face("Geist", "geist-bold-latin.woff2", "700"));
 }
 
 async function logo(): Promise<string> {
