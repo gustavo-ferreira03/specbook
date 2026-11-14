@@ -26,9 +26,10 @@ export const snapshotClickTarget = function snapshotClickTarget(
   snapshot: string,
   target: unknown
 ): string {
+  // After a navigation the browser prefixes references with the frame sequence ("f1e39").
   const ref =
     typeof target === "string"
-      ? /^(?:aria-ref=)?(?<capture1>[a-z]+\d+)$/u.exec(target)?.[1]
+      ? /^(?:aria-ref=)?(?<capture1>(?:[a-z]+\d+)+)$/u.exec(target)?.[1]
       : undefined;
   if (!ref) {
     throw new Error(
