@@ -88,12 +88,21 @@ import { createDomainTools } from "./tools";
 import type { ChatToolStepRecord } from "./types";
 
 const createResourceLoader = async function createResourceLoader(
-  promptText: string
+  promptText: string,
+  onProviderRequest: (payload: unknown) => void
 ): Promise<DefaultResourceLoader> {
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
     noExtensions: true,
+    // Read-only observer: returning nothing leaves the provider request unchanged.
+    extensionFactories: [
+      (pi) => {
+        pi.on("before_provider_request", (event) => {
+          onProviderRequest(event.payload);
+        });
+      },
+    ],
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
@@ -453,7 +462,8 @@ const runReservedChatTurn = async function runReservedChatTurn(
         (turnPolicy?.prompt ?? "") +
         (runnerEnvironment
           ? "\nThis environment executes on a private-network runner. Live browser exploration is unavailable. Use saved Specs, results and evidence. Run Specs through the runner; never claim to have reproduced behavior in a live browser. Credentials are configured locally on the runner with specbook credentials, never in the server vault."
-          : "")
+          : ""),
+      (payload) => metrics.providerRequest(payload)
     );
     if (consumeAbortRequest(id)) {
       metrics.fail("aborted", "aborted_before_start");
@@ -472,6 +482,11 @@ const runReservedChatTurn = async function runReservedChatTurn(
       resourceLoader,
       sessionManager,
       settingsManager: await agentSettings(),
+    });
+    metrics.setModel(model, {
+      thinkingLevel: session.thinkingLevel,
+      sendScreenshotsToModel: (await getSecuritySettings())
+        .sendScreenshotsToModel,
     });
     const active: ActiveChatSession = {
       session,

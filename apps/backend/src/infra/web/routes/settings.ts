@@ -16,6 +16,7 @@ import {
   oauthFailureMessage,
 } from "../../../core/jobs/presentation-errors";
 import { pauseAgentJobs, resumeAgentJobs } from "../../../core/jobs/worker";
+import { ModelCallRecorder } from "../../../core/llm/call-log";
 import {
   configuredModel,
   llmCredentials,
@@ -319,8 +320,10 @@ export const createSettingsRouter = function createSettingsRouter(): Hono {
         400
       );
     }
+    const call = new ModelCallRecorder("connection_test");
     try {
       const runtime = await modelRuntimePromise;
+      call.sending(selected.model, { maxTokens: 16, timeoutMs: 30_000 });
       const response = await runtime.completeSimple(
         selected.model,
         {
@@ -328,19 +331,41 @@ export const createSettingsRouter = function createSettingsRouter(): Hono {
             { role: "user", content: "Reply with OK.", timestamp: Date.now() },
           ],
         },
-        { maxTokens: 16, signal: AbortSignal.timeout(30_000) }
+        {
+          maxTokens: 16,
+          signal: AbortSignal.timeout(30_000),
+          onPayload: call.onPayload,
+        }
       );
       if (
         response.stopReason === "error" ||
         response.stopReason === "aborted"
       ) {
+        await call.finish("provider_error", {
+          reason: (response.errorMessage || "Connection timed out").slice(
+            0,
+            500
+          ),
+          stopReason: response.stopReason,
+          usage: response.usage,
+        });
         throw new Error(response.errorMessage || "Connection timed out");
       }
+      await call.finish("completed", {
+        stopReason: response.stopReason,
+        usage: response.usage,
+      });
       return c.json({
         ok: true,
         message: "Connection successful. Your model is ready.",
       });
     } catch (error) {
+      await call.finish("provider_error", {
+        reason: (error instanceof Error ? error.message : String(error)).slice(
+          0,
+          500
+        ),
+      });
       const failure = providerFailure(error);
       return c.json(
         {

@@ -4,6 +4,14 @@ import path from "node:path";
 
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 
+import {
+  describeModel,
+  reportedUsage,
+  summarizePayload,
+  type ModelDescription,
+  type PayloadSummary,
+  type ReportedUsage,
+} from "../llm/call-log";
 import { withFileQueue } from "../operations/file-queue";
 import { storageRoot } from "../paths";
 
@@ -48,7 +56,45 @@ export class TurnMetricsRecorder {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
       runSpec: [],
       validatorRejections: [],
+      usageReported: {
+        assistantMessages: 0,
+        withUsage: 0,
+        withoutUsage: 0,
+        fields: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reasoning: 0,
+          totalTokens: 0,
+          costTotal: 0,
+        },
+      },
+      modelCalls: [],
+      modelInfo: null,
+      thinkingLevel: null,
+      sendScreenshotsToModel: null,
+      providerRequests: 0,
+      firstProviderRequest: null,
     };
+  }
+
+  setModel(
+    model: unknown,
+    settings: {
+      thinkingLevel?: string | null;
+      sendScreenshotsToModel?: boolean | null;
+    } = {}
+  ): void {
+    this.record.modelInfo = describeModel(model);
+    this.record.thinkingLevel = settings.thinkingLevel ?? null;
+    this.record.sendScreenshotsToModel =
+      settings.sendScreenshotsToModel ?? null;
+  }
+
+  providerRequest(payload: unknown): void {
+    this.record.providerRequests += 1;
+    this.record.firstProviderRequest ??= summarizePayload(payload);
   }
 
   seedFromSession(sessionManager: SessionManager | null): void {
@@ -109,9 +155,36 @@ export class TurnMetricsRecorder {
     usage?: UsageLike;
     provider?: string;
     model?: string;
+    stopReason?: string;
   }): void {
     this.record.assistantMessages += 1;
-    const { usage } = message;
+    const usage = message.usage;
+    const seen = reportedUsage(usage);
+    const { usageReported } = this.record;
+    usageReported.assistantMessages += 1;
+    if (seen) usageReported.withUsage += 1;
+    else usageReported.withoutUsage += 1;
+    if (seen) {
+      for (const field of [
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite",
+        "reasoning",
+        "totalTokens",
+      ] as const) {
+        if (seen[field] !== null) usageReported.fields[field] += 1;
+      }
+      if (seen.cost && seen.cost.total !== null)
+        usageReported.fields.costTotal += 1;
+    }
+    this.record.modelCalls.push({
+      endedAt: new Date().toISOString(),
+      provider: message.provider ?? null,
+      model: message.model ?? null,
+      stopReason: message.stopReason ?? null,
+      usage: seen,
+    });
     if (!usage) {
       return;
     }
@@ -288,6 +361,38 @@ export interface ChatTurnMetrics {
   };
   runSpec: RunSpecOutcome[];
   validatorRejections: ValidatorRejection[];
+  // The totals above add a missing usage field as zero. The fields below keep what the provider
+  // adapter actually reported, so "not reported" stays distinguishable from zero.
+  usageReported: UsageReported;
+  modelCalls: ModelCallUsage[];
+  modelInfo: ModelDescription | null;
+  thinkingLevel: string | null;
+  sendScreenshotsToModel: boolean | null;
+  providerRequests: number;
+  firstProviderRequest: PayloadSummary | null;
+}
+
+export interface UsageReported {
+  assistantMessages: number;
+  withUsage: number;
+  withoutUsage: number;
+  fields: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoning: number;
+    totalTokens: number;
+    costTotal: number;
+  };
+}
+
+export interface ModelCallUsage {
+  endedAt: string;
+  provider: string | null;
+  model: string | null;
+  stopReason: string | null;
+  usage: ReportedUsage | null;
 }
 
 interface UsageLike {

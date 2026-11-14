@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import { logger } from "../../infra/logger";
 import { getSecuritySettings } from "../chat/safety-settings";
+import { ModelCallRecorder } from "../llm/call-log";
 import { configuredModel, modelRuntimePromise } from "../llm/runtime";
 
 export const reviewedScreenshots = function reviewedScreenshots(
@@ -68,6 +69,9 @@ export const reviewNextStep = function reviewNextStep(
   return `The test is wrong, not the app. ${INSPECT_INSTRUCTION}`;
 };
 
+const REVIEW_MAX_TOKENS = 400;
+const REVIEW_TIMEOUT_MS = 60_000;
+
 export const reviewRunEvidence = async function reviewRunEvidence(
   directory: string,
   outcome: {
@@ -77,15 +81,30 @@ export const reviewRunEvidence = async function reviewRunEvidence(
   }
 ): Promise<EvidenceReview | null> {
   const cache = path.join(directory, "review.json");
+  const call = new ModelCallRecorder("evidence_review", {
+    runId: path.basename(directory),
+    runStatus: outcome.status,
+  });
   const cached = verdictSchema.safeParse(
     JSON.parse(await fs.readFile(cache, "utf-8").catch(() => "null"))
   );
   if (cached.success) {
+    await call.finish("cached", {
+      reason: "review.json already holds a verdict; no model call",
+      context: { verdict: cached.data.verdict },
+    });
     return cached.data;
   }
+  let requested = false;
+  let response:
+    | Awaited<ReturnType<Awaited<typeof modelRuntimePromise>["completeSimple"]>>
+    | undefined;
   try {
     const selected = await configuredModel();
     if (!selected.ready || !selected.model) {
+      await call.finish("skipped", {
+        reason: "no model is configured and authenticated",
+      });
       return null;
     }
     const specYaml = await fs.readFile(
@@ -119,12 +138,10 @@ export const reviewRunEvidence = async function reviewRunEvidence(
           .join("\n\n"),
       },
     ];
-    if (
-      await (async () => {
-        const awaitedValue3749 = await getSecuritySettings();
-        return awaitedValue3749.sendScreenshotsToModel;
-      })()
-    ) {
+    const sendScreenshots = (await getSecuritySettings())
+      .sendScreenshotsToModel;
+    let images = 0;
+    if (sendScreenshots) {
       for (const step of shown) {
         if (!isStepScreenshot(step.file)) {
           continue;
@@ -144,16 +161,30 @@ export const reviewRunEvidence = async function reviewRunEvidence(
             mimeType: stepScreenshotContentType(step.file),
           }
         );
+        images += 1;
       }
     }
     const runtime = await modelRuntimePromise;
-    const response = await runtime.completeSimple(
+    call.sending(selected.model, {
+      maxTokens: REVIEW_MAX_TOKENS,
+      timeoutMs: REVIEW_TIMEOUT_MS,
+      sendScreenshotsToModel: sendScreenshots,
+      imagesAttached: images,
+      textCharacters: content[0].type === "text" ? content[0].text.length : 0,
+      systemPromptCharacters: SYSTEM_PROMPT.length,
+    });
+    requested = true;
+    response = await runtime.completeSimple(
       selected.model,
       {
         systemPrompt: SYSTEM_PROMPT,
         messages: [{ role: "user", content, timestamp: Date.now() }],
       },
-      { maxTokens: 400, signal: AbortSignal.timeout(60_000) }
+      {
+        maxTokens: REVIEW_MAX_TOKENS,
+        signal: AbortSignal.timeout(REVIEW_TIMEOUT_MS),
+        onPayload: call.onPayload,
+      }
     );
     const text = response.content
       .map((part) => (part.type === "text" ? part.text : ""))
@@ -162,12 +193,30 @@ export const reviewRunEvidence = async function reviewRunEvidence(
       JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1))
     );
     await fs.writeFile(cache, JSON.stringify(review));
+    await call.finish("completed", {
+      stopReason: response.stopReason,
+      usage: response.usage,
+      context: { verdict: review.verdict },
+    });
     return review;
   } catch (error) {
-    logger.warn("evidence review failed", {
-      directory,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    const reason = error instanceof Error ? error.message : String(error);
+    // A response that arrived but could not be used still consumed tokens; a request that threw reports none.
+    await call.finish(
+      response
+        ? response.stopReason === "error" || response.stopReason === "aborted"
+          ? "provider_error"
+          : "invalid_response"
+        : requested
+          ? "provider_error"
+          : "failed",
+      {
+        reason: (response?.errorMessage ?? reason).slice(0, 500),
+        stopReason: response?.stopReason ?? null,
+        usage: response?.usage,
+      }
+    );
+    logger.warn("evidence review failed", { directory, error: reason });
     return null;
   }
 };
