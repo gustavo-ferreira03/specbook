@@ -789,6 +789,110 @@ describe("executeSpec (real browser)", { skip: available ? false : "Chromium for
         }
     });
 
+    test("signs in through an identity provider on another origin trusted by the environment and the credential", { timeout: 120_000 }, async () => {
+        const delayMs = Number(process.env.SPECBOOK_TEST_SIGN_IN_DELAY_MS ?? 0);
+        const listen = async (handler: (request: http.IncomingMessage, response: http.ServerResponse) => void) => {
+            const server = http.createServer((request, response) => void setTimeout(() => handler(request, response), delayMs));
+            await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+            return { server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+        };
+        const submitted: string[] = [];
+        const provider = await listen((request, response) => {
+            if (request.method === "POST") {
+                let body = "";
+                request.on("data", (chunk) => { body += chunk; });
+                request.on("end", () => { submitted.push(body); response.writeHead(302, { location: `${application.origin}/callback` }).end(); });
+                return;
+            }
+            response.writeHead(200, { "content-type": "text/html" }).end('<h1>Single sign-on</h1><form method="post" action="/realms/demo/auth"><label>Username <input name="username"></label><label>Password <input name="password" type="password"></label><button>Sign in</button></form>');
+        });
+        const application = await listen((request, response) => {
+            if (request.url === "/callback") return void response.writeHead(302, { location: "/", "set-cookie": "session=1; Path=/; HttpOnly" }).end();
+            if (!request.headers.cookie?.includes("session=1")) return void response.writeHead(302, { location: `${provider.origin}/realms/demo/auth` }).end();
+            response.writeHead(200, { "content-type": "text/html" }).end("<h1>Dashboard</h1>");
+        });
+        try {
+            const project = await projectsRepository.createProject("Single sign-on", application.origin);
+            const production = (await environmentsRepository.list(project.id))[0]!;
+            await repoGit.ensureProjectRepo(project.id, { create: true });
+            await createProfile(project.id, { name: "member", allowedOrigins: [provider.origin], fields: [{ key: "username", value: "maria", sensitive: false }, { key: "password", value: "sso-secret-value" }] });
+            const feature = await writer.createFeatureInRepo(project.id, null, "Sign in", "");
+            const steps = ["Open the application", "Sign in", "See the dashboard"];
+            const { spec } = await writer.createSpecInRepo({
+                projectId: project.id, featureId: feature.id, title: "Single sign-on", description: "",
+                humanSpec: { preconditions: [], steps, expectedResult: "", postconditions: [] },
+                testSource: `import { test, expect } from "specbook";
+test("Single sign-on", async ({ page, step, secret }) => {
+    await step("Open the application", async () => {
+        await page.goto("/");
+    });
+    await step("Sign in", async () => {
+        await page.getByLabel("Username").fill(secret("member", "username"));
+        await page.getByLabel("Password").fill(secret("member", "password"));
+        await page.getByRole("button", { name: "Sign in" }).click();
+    });
+    await step("See the dashboard", async () => {
+        await expect(page.getByRole("heading")).toHaveText("Dashboard");
+    });
+});
+`,
+            });
+            assert.equal(spec.status, "unverified", spec.invalidReason ?? "");
+            const blocked = await executeSpec(spec.id);
+            assert.equal(blocked.status, "failed");
+            assert.equal(blocked.failedStep, "Open the application");
+            assert.match(blocked.failReason ?? "", /BLOCKED_BY_CLIENT|blockedbyclient/i);
+            await environmentsRepository.update(production, { ...production, allowedOrigins: [provider.origin] });
+            const run = await executeSpec(spec.id);
+            assert.equal(run.status, "passed", `${run.failedStep}: ${run.failReason} (blocked run: ${blocked.failedStep}: ${blocked.failReason})`);
+            assert.deepEqual(submitted, ["username=maria&password=sso-secret-value"]);
+        } finally {
+            for (const { server } of [application, provider]) { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
+        }
+    });
+
+    test("tells a slow page from an unreachable app, and a longer wait in the Spec or the environment gets past it", { timeout: 240_000 }, async () => {
+        const slow = http.createServer((request, response) => {
+            if (request.url === "/slow.css") return void setTimeout(() => response.writeHead(200, { "content-type": "text/css" }).end(""), 40_000);
+            response.writeHead(200, { "content-type": "text/html" }).end('<h1>Reports</h1><img src="/slow.css" alt="">');
+        });
+        await new Promise<void>((resolve) => slow.listen(0, "127.0.0.1", resolve));
+        try {
+            const project = await projectsRepository.createProject("Slow page", `http://127.0.0.1:${(slow.address() as AddressInfo).port}`);
+            await repoGit.ensureProjectRepo(project.id, { create: true });
+            const feature = await writer.createFeatureInRepo(project.id, null, "Reports", "");
+            const source = (goto: string, assertion: string) => `import { test, expect } from "specbook";
+test("Open reports", async ({ page, step }) => {
+    await step("Open reports", async () => {
+        await page.goto(${goto});
+        await expect(page.getByRole("heading", { name: "Reports" })).toBeVisible(${assertion});
+    });
+});
+`;
+            const { spec } = await writer.createSpecInRepo({
+                projectId: project.id, featureId: feature.id, title: "Open reports", description: "",
+                humanSpec: { preconditions: [], steps: ["Open reports"], expectedResult: "", postconditions: [] }, testSource: source('"/"', ""),
+            });
+            assert.equal(spec.status, "unverified", spec.invalidReason ?? "");
+            const timedOut = await executeSpec(spec.id);
+            assert.equal(timedOut.status, "failed");
+            assert.match(timedOut.failReason ?? "", /Timeout 30000ms exceeded/);
+            assert.match(timedOut.failReason ?? "", /it is slow, not unreachable/);
+            assert.notEqual(timedOut.errorCode, "environment", "a slow page is not reported as an unreachable app");
+            const production = (await environmentsRepository.list(project.id))[0]!;
+            await environmentsRepository.update(production, { ...production, timeoutScale: 2 });
+            const waitedLonger = await executeSpec(spec.id);
+            assert.equal(waitedLonger.status, "passed", `the unchanged Spec passes when the environment waits longer: ${waitedLonger.failReason}`);
+            await environmentsRepository.update(production, { ...production, timeoutScale: 1 });
+            const { spec: repaired } = await writer.updateSpecInRepo(spec, { testSource: source('"/", { waitUntil: "domcontentloaded", timeout: 60000 }', "{ timeout: 30000 }") });
+            assert.equal(repaired.status, "unverified", repaired.invalidReason ?? "");
+            const run = await executeSpec(spec.id);
+            assert.equal(run.status, "passed", run.failReason ?? "");
+        } finally {
+            slow.closeAllConnections(); await new Promise<void>((resolve) => slow.close(() => resolve()));
+        }
+    });
+
     test("stores the run with sourceHash, evidence and report links, and scrubs secrets", { timeout: 120_000 }, async () => {
         const project = await projectsRepository.createProject("Loja", baseUrl);
         await repoGit.ensureProjectRepo(project.id, { create: true });

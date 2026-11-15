@@ -5,6 +5,7 @@ import { environmentsRepository } from "../infra/repositories/environments";
 import { httpUrlSchema } from "./ci/schemas";
 import { NetworkTargetError } from "@specbook/runtime/network/targets";
 import { createKeyedLock } from "./operations/keyed-lock";
+import { timeoutScaleSchema } from "@specbook/runtime/timeouts";
 
 export const withProjectEnvironmentLock = createKeyedLock().run;
 type EnvironmentDestination = Pick<RunEnvironment, "baseUrl" | "allowedOrigins" | "executor" | "runnerGroup">;
@@ -25,6 +26,7 @@ export const environmentSchema = z.object({
     credentialOverrides: z.record(z.string(), z.string().uuid()).default({}),
     executor: z.enum(["server", "runner", "tunnel"]).default("server"),
     runnerGroup: z.string().trim().max(80).nullable().default(null).transform((value) => value || null),
+    timeoutScale: timeoutScaleSchema.default(1),
 }).strict().superRefine((input, context) => {
     if (input.executor === "runner" && Object.keys(input.credentialOverrides).length) {
         context.addIssue({ code: "custom", path: ["credentialOverrides"], message: "Runner environments use credentials saved on the runner. Remove server credential overrides." });
@@ -51,5 +53,5 @@ export async function resolveRunEnvironment(projectId: string, name = "Productio
     if (!row) throw new NetworkTargetError(`Environment "${name}" was not found in this project`);
     const origins = [new URL(row.baseUrl).origin, ...row.allowedOrigins];
     if (baseUrl && !origins.includes(new URL(baseUrl).origin)) throw new NetworkTargetError(`Add this origin to ${row.name} in Settings → Environments before using it for a preview run`);
-    return { configuredBaseUrl: row.baseUrl, id: row.id, name: row.name, baseUrl: baseUrl ?? row.baseUrl, allowedOrigins: [...new Set(origins)], credentialOverrides: row.executor === "runner" ? {} : row.credentialOverrides, executor: row.executor, runnerGroup: row.runnerGroup };
+    return { configuredBaseUrl: row.baseUrl, id: row.id, name: row.name, baseUrl: baseUrl ?? row.baseUrl, allowedOrigins: [...new Set(origins)], credentialOverrides: row.executor === "runner" ? {} : row.credentialOverrides, executor: row.executor, runnerGroup: row.runnerGroup, timeoutScale: row.timeoutScale };
 }
