@@ -1933,10 +1933,10 @@ describe("encrypted credentials and operations", () => {
         const environment = { ...process.env, SPECBOOK_STORAGE_DIR: path.join(directory, "storage"), SPECBOOK_ENCRYPTION_KEY: "", SPECBOOK_ENCRYPTION_KEY_FILE: "" };
         const setup = `
             const {runMigrations}=await import('./src/infra/db/migrate.ts'); await runMigrations();
-            const {projectsRepository}=await import('./src/infra/repositories/projects.ts'); const p=await projectsRepository.createProject('Old credentials','https://example.com');
             const {db}=await import('./src/infra/db/client.ts'); const {sql}=await import('drizzle-orm'); const {encryptSecret}=await import('./src/core/credentials/crypto.ts');
+            await db.run(sql\`INSERT INTO projects (id,name,base_url,created_at) VALUES ('legacy-project','Old credentials','https://example.com','2026-10-13')\`);
             const fields=JSON.stringify([{key:'password',value:encryptSecret('legacy-password')}]);
-            await db.run(sql\`INSERT INTO credential_profiles (id,project_id,name,allowed_origins,fields,identifier,created_at,updated_at) VALUES ('legacy',\${p.id},'legacy','[]',\${fields},'legacy-user','2026-10-13','2026-10-13')\`);
+            await db.run(sql\`INSERT INTO credential_profiles (id,project_id,name,allowed_origins,fields,identifier,created_at,updated_at) VALUES ('legacy','legacy-project','legacy','[]',\${fields},'legacy-user','2026-10-13','2026-10-13')\`);
         `;
         const exec = promisify(execFile);
         await exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", setup], { cwd: backendRoot, env: { ...environment, SPECBOOK_MIGRATIONS_DIR: migrations } });
