@@ -90,6 +90,10 @@ interface BatchSecrets {
 }
 
 const MAX_BATCH_TIMEOUT_MS = 30 * 60 * 1000;
+
+function batchTimeout(specs: number, environment?: RunEnvironment): number {
+    return Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(1, specs) * RUN_TIMEOUT_MS * (environment?.timeoutScale ?? 1));
+}
 const activeBatches = new Map<string, Promise<void>>();
 const MAX_CACHED_BATCHES = 300;
 const batchIndex = new Map<string, Map<string, { startedAt: string; ci: boolean }>>();
@@ -259,7 +263,7 @@ async function executeBatch(
             delete batch.waitingForTunnelAt;
             await writeBatch(batch);
         }
-        const timeout = Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(RUN_TIMEOUT_MS, prepared.length * RUN_TIMEOUT_MS));
+        const timeout = batchTimeout(prepared.length, batch.environment);
         const outcome = await withRunSlot(async () => {
             started = Date.now();
             return runPlaywrightSuite({
@@ -270,6 +274,7 @@ async function executeBatch(
                 specs: prepared.map((entry) => ({ key: entry.run.id, source: entry.testSource, analysis: entry.analysis,
                     humanSpec: parseSpecYaml(entry.markdown).humanSpec, outputDir: path.join(runsDir, entry.run.id) })),
                 timeoutMs: timeout,
+                timeoutScale: batch.environment?.timeoutScale,
                 secretEnv: secrets.env,
                 secretOrigins: secrets.origins,
                 scrub: secrets.scrub,
@@ -485,7 +490,8 @@ async function dispatchRunnerBatch(batch: RunBatch, prepared: PreparedSpec[], ti
             projectId: batch.projectId,
             baseUrl: batch.baseUrl!,
             networkPolicy: await runNetworkPolicy(batch.projectId, batch.baseUrl!, batch.environment),
-            timeoutMs: timeoutMs ?? Math.min(MAX_BATCH_TIMEOUT_MS, Math.max(RUN_TIMEOUT_MS, prepared.length * RUN_TIMEOUT_MS)),
+            timeoutMs: timeoutMs ?? batchTimeout(prepared.length, batch.environment),
+            ...(batch.environment?.timeoutScale && batch.environment.timeoutScale > 1 ? { timeoutScale: batch.environment.timeoutScale } : {}),
             specs: prepared.map((entry) => ({ runId: entry.run.id, specId: entry.run.specId, title: entry.item.title, files: { "spec.ts": entry.testSource, "spec.yml": entry.markdown } })),
         });
     } catch (error) {

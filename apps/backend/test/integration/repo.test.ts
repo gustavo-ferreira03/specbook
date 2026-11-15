@@ -393,6 +393,53 @@ describe("chat browser lifetime", { skip: process.env.SPECBOOK_TEST_VNC !== "1" 
             await api("DELETE", `/projects/${projectId}`);
         }
     });
+
+    test("follows a sign-in redirect to an origin the environment trusts, and to no other", { timeout: 90_000 }, async () => {
+        const { createServer } = await import("node:http");
+        const { createChat } = await import("../../src/core/chat/session-store");
+        const { chatNavigationOrigins } = await import("../../src/core/chat/discovery-policy");
+        const { getOrCreateChatBrowser, closeChatBrowser } = await import("../../src/core/browser/sessions");
+        const { getActiveTabUrl, readBrowserSnapshot } = await import("../../src/core/browser/mcp");
+        const { resolveRunEnvironment } = await import("../../src/core/environments");
+        const { environmentsRepository } = await import("../../src/infra/repositories/environments");
+        const listen = async (handler: Parameters<typeof createServer>[1]) => {
+            const server = createServer(handler);
+            await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+            return { server, origin: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
+        };
+        const provider = await listen((_request, response) => {
+            response.writeHead(200, { "Content-Type": "text/html" }).end("<h1>Identity provider sign in</h1>");
+        });
+        const application = await listen((_request, response) => {
+            response.writeHead(302, { Location: `${provider.origin}/realms/demo/auth` }).end();
+        });
+        const projectId = await createProject("Chat browser sign-in redirect");
+        const chat = await createChat(projectId);
+        try {
+            const startUrl = `${application.origin}/`;
+            const production = (await environmentsRepository.list(projectId))[0]!;
+            const untrusted = chatNavigationOrigins(startUrl, await resolveRunEnvironment(projectId), []);
+            assert.ok(!untrusted.includes(provider.origin));
+            const blocked = await getOrCreateChatBrowser(chat.id, untrusted);
+            await blocked.mcp.ensureBrowser();
+            await blocked.mcp.navigate(startUrl).catch(() => undefined);
+            assert.doesNotMatch(await readBrowserSnapshot(blocked.mcp), /Identity provider sign in/);
+
+            await environmentsRepository.update(production, { ...production, allowedOrigins: [provider.origin] });
+            const trusted = chatNavigationOrigins(startUrl, await resolveRunEnvironment(projectId), []);
+            assert.ok(trusted.includes(provider.origin));
+            const browser = await getOrCreateChatBrowser(chat.id, trusted);
+            await browser.mcp.ensureBrowser();
+            await browser.mcp.navigate(startUrl);
+            assert.equal(new URL((await getActiveTabUrl(browser.mcp))!).origin, provider.origin);
+            assert.match(await readBrowserSnapshot(browser.mcp), /Identity provider sign in/);
+        } finally {
+            await closeChatBrowser(chat.id);
+            await api("DELETE", `/projects/${projectId}`);
+            application.server.close();
+            provider.server.close();
+        }
+    });
 });
 
 describe("first-run setup", () => {
@@ -1886,10 +1933,10 @@ describe("encrypted credentials and operations", () => {
         const environment = { ...process.env, SPECBOOK_STORAGE_DIR: path.join(directory, "storage"), SPECBOOK_ENCRYPTION_KEY: "", SPECBOOK_ENCRYPTION_KEY_FILE: "" };
         const setup = `
             const {runMigrations}=await import('./src/infra/db/migrate.ts'); await runMigrations();
-            const {projectsRepository}=await import('./src/infra/repositories/projects.ts'); const p=await projectsRepository.createProject('Old credentials','https://example.com');
             const {db}=await import('./src/infra/db/client.ts'); const {sql}=await import('drizzle-orm'); const {encryptSecret}=await import('./src/core/credentials/crypto.ts');
+            await db.run(sql\`INSERT INTO projects (id,name,base_url,created_at) VALUES ('legacy-project','Old credentials','https://example.com','2026-10-13')\`);
             const fields=JSON.stringify([{key:'password',value:encryptSecret('legacy-password')}]);
-            await db.run(sql\`INSERT INTO credential_profiles (id,project_id,name,allowed_origins,fields,identifier,created_at,updated_at) VALUES ('legacy',\${p.id},'legacy','[]',\${fields},'legacy-user','2026-10-13','2026-10-13')\`);
+            await db.run(sql\`INSERT INTO credential_profiles (id,project_id,name,allowed_origins,fields,identifier,created_at,updated_at) VALUES ('legacy','legacy-project','legacy','[]',\${fields},'legacy-user','2026-10-13','2026-10-13')\`);
         `;
         const exec = promisify(execFile);
         await exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", setup], { cwd: backendRoot, env: { ...environment, SPECBOOK_MIGRATIONS_DIR: migrations } });

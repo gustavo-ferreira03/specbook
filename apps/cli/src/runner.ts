@@ -143,7 +143,7 @@ async function execute(lease: Lease, signal: AbortSignal, allowedOrigins: string
         await ensureChromium(signal);
         signal.throwIfAborted();
         const outcome = await runPlaywrightSuite({
-            directory, baseUrl: lease.work.baseUrl, specs: selected, timeoutMs: lease.work.timeoutMs,
+            directory, baseUrl: lease.work.baseUrl, specs: selected, timeoutMs: lease.work.timeoutMs, timeoutScale: lease.work.timeoutScale,
             networkPolicy: lease.work.networkPolicy, signal, ...resolved, scrub: safeText,
         });
         processFailure = outcome.processFailure;

@@ -177,6 +177,25 @@ function assertSelector(selector: unknown): void {
     if (selector.includes("internal:")) throw new Error('Selectors may not use Playwright "internal:" engines');
 }
 
+export const SLOW_PAGE_NOTE = "The app answered, but the page was still loading when the time ran out: it is slow, not unreachable.";
+
+// A navigation that fails is an environment problem, unless the app answered and only the wait for
+// the page to finish loading ran out. That one is a slow page, which a longer wait in the Spec fixes.
+async function navigate(page: RawPage, run: () => Promise<unknown>): Promise<void> {
+    let answered = false;
+    const onResponse = () => { answered = true; };
+    page.on?.("response", onResponse);
+    try { await run(); }
+    catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        if (answered && cause instanceof Error && cause.name === "TimeoutError") {
+            cause.message = `${message}\n${SLOW_PAGE_NOTE}`;
+            throw cause;
+        }
+        throw new CodedError("environment", message, { cause });
+    } finally { page.off?.("response", onResponse); }
+}
+
 export function isSafeRelativePath(value: unknown): value is string {
     return typeof value === "string" && /^\/(?!\/)[^\\\u0000-\u001f]*$/.test(value);
 }
@@ -297,13 +316,11 @@ export function createGuard(options: GuardOptions) {
             }
             const url = new URL(`${baseOrigin}${basePath}${target}`);
             if (url.origin !== baseOrigin) throw new Error("page.goto() must stay on the project origin.");
-            try { await page.goto(url.href, sanitize(gotoOptions)); }
-            catch (cause) { throw new CodedError("environment", cause instanceof Error ? cause.message : String(cause), { cause }); }
+            await navigate(page, () => page.goto(url.href, sanitize(gotoOptions)));
         };
         for (const name of ["reload", "goBack", "goForward"] as const) {
             methods[name] = async (navigationOptions?: unknown) => {
-                try { await page[name](sanitize(navigationOptions)); }
-                catch (cause) { throw new CodedError("environment", cause instanceof Error ? cause.message : String(cause), { cause }); }
+                await navigate(page, () => page[name](sanitize(navigationOptions)));
             };
         }
         methods.waitForURL = async (url: unknown, waitOptions?: unknown) => {

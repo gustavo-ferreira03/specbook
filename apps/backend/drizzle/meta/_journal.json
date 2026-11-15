@@ -309,6 +309,13 @@
       "when": 1791896076650,
       "tag": "0043_credential_field_sensitivity",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1794785500564,
+      "tag": "0044_environment_timeout_scale",
+      "breakpoints": true
     }
   ]
 }

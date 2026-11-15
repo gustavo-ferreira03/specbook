@@ -1,0 +1,1 @@
+ALTER TABLE `environments` ADD `timeout_scale` integer DEFAULT 1 NOT NULL;

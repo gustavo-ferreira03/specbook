@@ -12,6 +12,7 @@ export interface RunEnvironment {
     credentialOverrides: Record<string, string>;
     executor?: "server" | "runner" | "tunnel";
     runnerGroup?: string | null;
+    timeoutScale?: number;
 }
 
 export interface LlmSettings {
@@ -50,6 +51,7 @@ export const environments = sqliteTable("environments", {
     credentialOverrides: text("credential_overrides", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
     executor: text("executor").$type<"server" | "runner" | "tunnel">().notNull().default("server"),
     runnerGroup: text("runner_group"),
+    timeoutScale: integer("timeout_scale").notNull().default(1),
 }, (table) => [uniqueIndex("environments_project_name_idx").on(table.projectId, table.name)]);
 
 export const runnerTokens = sqliteTable("runner_tokens", {

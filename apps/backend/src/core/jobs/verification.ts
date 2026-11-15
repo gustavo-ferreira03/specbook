@@ -82,7 +82,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         if (!current || current.status !== "running" || await isAgentPaused(job.projectId)) throw new Error("Job is no longer running");
         const remaining = current.limits.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
         if (remaining < 1000) throw new Error("The investigation has not reached a confirmed result");
-        return Math.min(120_000, remaining);
+        return Math.min(120_000 * (environment.timeoutScale ?? 1), remaining);
     };
     const timeoutMs = await check();
     if (environment.executor === "tunnel") await waitForTunnel(environment, job.projectId, [], signal);
@@ -94,7 +94,7 @@ export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSi
         const proxy = environment.executor === "tunnel" ? await createEnvironmentTunnelProxy(environment) : undefined;
         try { return await runPlaywrightSuite({ networkPolicy: await runNetworkPolicy(job.projectId, baseUrl, environment), proxyServer: proxy?.server, directory, baseUrl,
             specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, humanSpec, outputDir: directory }],
-            timeoutMs, secretEnv, secretOrigins, scrub, signal }); }
+            timeoutMs, timeoutScale: environment.timeoutScale, secretEnv, secretOrigins, scrub, signal }); }
         finally { await proxy?.close(); }
     }, signal);
     const result = outcome.results.get(id);

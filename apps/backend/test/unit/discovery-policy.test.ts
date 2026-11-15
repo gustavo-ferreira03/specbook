@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BrowserMcp } from "../../src/core/browser/mcp";
-import { createDiscoveryBrowserPolicy, createOriginBrowserPolicy, DISCOVERY_BROWSER_TOOLS, snapshotClickTarget } from "../../src/core/chat/discovery-policy";
+import { chatNavigationOrigins, createDiscoveryBrowserPolicy, createOriginBrowserPolicy, DISCOVERY_BROWSER_TOOLS, snapshotClickTarget } from "../../src/core/chat/discovery-policy";
 import type { ProjectContextRevisionRow } from "../../src/infra/repositories/project-contexts";
 
 const START_URL = "https://app.example.com/start";
@@ -34,6 +34,21 @@ function policyFor(urls: string[] = [START_URL], snapshot?: string) {
     const fake = fakeMcp(urls, snapshot);
     return { policy: createDiscoveryBrowserPolicy(revision, fake.mcp), ...fake };
 }
+
+describe("chat navigation origins", () => {
+    const profiles = [{ allowedOrigins: ["https://login.example.com"] }, { allowedOrigins: [] }];
+
+    test("a server chat browser may reach the origins its environment trusts", () => {
+        const environment = { executor: "server" as const, allowedOrigins: ["https://app.example.com", "https://sso.example.com"] };
+        assert.deepEqual(chatNavigationOrigins(START_URL, environment, profiles), ["https://app.example.com", "https://sso.example.com", "https://login.example.com"]);
+        assert.deepEqual(chatNavigationOrigins(START_URL, undefined, []), ["https://app.example.com"]);
+    });
+
+    test("a tunnel chat browser stays on the origins of its environment", () => {
+        const environment = { executor: "tunnel" as const, allowedOrigins: ["https://internal.example.com"] };
+        assert.deepEqual(chatNavigationOrigins(START_URL, environment, profiles), ["https://internal.example.com"]);
+    });
+});
 
 describe("discovery browser policy", () => {
     test("exposes only read-mostly tools", () => {

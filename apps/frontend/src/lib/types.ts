@@ -17,6 +17,7 @@ export interface ProjectEnvironment {
     credentialOverrides: Record<string, string>;
     executor: "server" | "runner" | "tunnel";
     runnerGroup: string | null;
+    timeoutScale: number;
 }
 
 export interface RunnerQueueEntry {

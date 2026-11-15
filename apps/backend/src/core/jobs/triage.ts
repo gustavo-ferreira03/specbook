@@ -76,7 +76,7 @@ export function createTriageTools(job: Job, abort: () => void) {
         }),
         defineTool({
             name: "triage_failure", label: "triage_failure",
-            description: "Record the cause, reproduction and evidence. Only test_drift allows a verified spec.ts fix. application_bug files an Inbox bug report; environment asks a question for credential problems and otherwise retries.",
+            description: "Record the cause, reproduction and evidence. Only test_drift allows a verified spec.ts fix. application_bug files an Inbox bug report; environment asks a question for credential problems and otherwise retries. A timeout on a page that was still loading is test_drift: the fix is a longer wait in spec.ts.",
             parameters: Type.Unsafe<z.infer<typeof triageSchema>>(triageSchema.toJSONSchema()),
             async execute(_id, input) {
                 const triage = triageSchema.parse(input);

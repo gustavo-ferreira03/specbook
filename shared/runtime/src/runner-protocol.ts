@@ -2,6 +2,7 @@ import { z } from "zod";
 import { errorCodeSchema } from "./errors.ts";
 import { httpTarget } from "./network/targets.ts";
 import { MAX_REPLAY_BYTES } from "./replay.ts";
+import { timeoutScaleSchema } from "./timeouts.ts";
 
 export const RUNNER_PROTOCOL_VERSION = 3;
 export const RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES = 64 * 1024 * 1024;
@@ -23,6 +24,8 @@ export const runnerPayloadSchema = z.object({
     baseUrl,
     networkPolicy: z.object({ origins: z.array(origin).min(1).max(100), allowPrivate: z.boolean() }).strict(),
     timeoutMs: z.number().int().min(1000).max(30 * 60 * 1000),
+    // Sent only above 1, so runners that predate it still accept every job from a standard environment.
+    timeoutScale: timeoutScaleSchema.optional(),
     specs: z.array(z.object({
         runId: id,
         specId: id,

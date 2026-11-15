@@ -15,13 +15,10 @@ import { RUNTIME_ENV, type SecretOriginPolicy, type SpecbookRuntime } from "./sp
 import type { SpecAnalysis } from "./validate.ts";
 import { isInside } from "./safe-fs.ts";
 import { writeRunEvidence } from "./evidence.ts";
+import { specTimeouts } from "./timeouts.ts";
 
 const require = createRequire(import.meta.url);
 
-const TEST_TIMEOUT_MS = 100_000;
-const EXPECT_TIMEOUT_MS = 5_000;
-const ACTION_TIMEOUT_MS = 15_000;
-const NAVIGATION_TIMEOUT_MS = 30_000;
 export const SPEC_VIEWPORT = { width: 1280, height: 720 };
 
 export interface SuiteSpec {
@@ -53,6 +50,7 @@ export interface SuiteOptions {
     baseUrl: string;
     specs: SuiteSpec[];
     timeoutMs: number;
+    timeoutScale?: number;
     secretEnv: Record<string, string>;
     secretOrigins: SecretOriginPolicy;
     scrub: (text: string) => string;
@@ -89,6 +87,7 @@ function playwrightConfig(options: SuiteOptions, proxyServer?: string): Record<s
         secret.length ? { name: "specbook-secrets", testMatch: secret, use: { trace: "off", video: "off" } } : null,
     ].filter(Boolean);
     const reporter: unknown[] = [["line"], ["json", { outputFile: "results.json" }]];
+    const timeouts = specTimeouts(options.timeoutScale);
     return {
         testDir: "tests",
         outputDir: "test-results",
@@ -98,8 +97,8 @@ function playwrightConfig(options: SuiteOptions, proxyServer?: string): Record<s
         repeatEach: 1,
         forbidOnly: true,
         maxFailures: 0,
-        timeout: TEST_TIMEOUT_MS,
-        expect: { timeout: EXPECT_TIMEOUT_MS },
+        timeout: timeouts.test,
+        expect: { timeout: timeouts.expect },
         preserveOutput: "always",
         updateSnapshots: "none",
         captureGitInfo: { commit: false, diff: false },
@@ -112,8 +111,8 @@ function playwrightConfig(options: SuiteOptions, proxyServer?: string): Record<s
             video: { mode: "retain-on-failure", size: SPEC_VIEWPORT },
             screenshot: "off",
             trace: "off",
-            actionTimeout: ACTION_TIMEOUT_MS,
-            navigationTimeout: NAVIGATION_TIMEOUT_MS,
+            actionTimeout: timeouts.action,
+            navigationTimeout: timeouts.navigation,
             acceptDownloads: false,
             launchOptions: { args: ["--disable-dev-shm-usage", ...(proxyServer ? ["--proxy-bypass-list=<-loopback>", "--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [])] },
             ...(proxyServer ? { proxy: { server: proxyServer }, serviceWorkers: "block" } : {}),
