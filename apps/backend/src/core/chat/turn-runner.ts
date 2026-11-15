@@ -43,7 +43,7 @@ import { createCredentialTools } from "./credential-tools";
 import { confirmDiscoveredContext } from "./discovery";
 import { createExplorationTools } from "./exploration-tools";
 import { createBackgroundTaskTool } from "../steward/tools";
-import { createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy, createOriginBrowserPolicy } from "./discovery-policy";
+import { chatNavigationOrigins, createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy, createOriginBrowserPolicy } from "./discovery-policy";
 import { TurnMetricsRecorder, type TurnTrigger } from "./metrics";
 import { buildSystemPrompt } from "./prompts";
 import {
@@ -249,17 +249,7 @@ async function runReservedChatTurn(
         if (!runnerEnvironment) try {
             const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
             const profiles = await credentialsRepository.listProfiles(row.projectId);
-            const origins =
-                environment?.executor === "tunnel"
-                    ? environment.allowedOrigins
-                    : [
-                          ...new Set([
-                              new URL(startUrl).origin,
-                              ...(environment?.allowedOrigins ?? []),
-                              ...(turnPolicy?.environment?.allowedOrigins ?? []),
-                              ...profiles.flatMap((profile) => profile.allowedOrigins),
-                          ]),
-                      ];           
+            const origins = chatNavigationOrigins(startUrl, environment, profiles);
             chatBrowser = await getOrCreateChatBrowser(id, origins, environment);
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision

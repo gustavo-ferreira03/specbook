@@ -1,6 +1,7 @@
 import { CodedError } from "@specbook/runtime/errors";
 import { getActiveTabUrl, readBrowserSnapshot, type BrowserMcp, type BrowserToolPolicy } from "../browser/mcp";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
+import type { RunEnvironment } from "../../infra/db/schema";
 import { consumeVaultSubmit } from "./credential-tools";
 
 export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([
@@ -49,6 +50,17 @@ export function snapshotClickTarget(snapshot: string, target: unknown): string {
     }
     if (!labels.length) throw new Error("Click rejected: this element has no accessible name to verify. Ask the human how to proceed.");
     return labels.join("; ");
+}
+
+// A tunnel only reaches the origins its environment lists. Any other chat browser may also follow a
+// sign-in to the origins trusted by the environment or bound to a saved credential, such as an identity provider.
+export function chatNavigationOrigins(
+    startUrl: string,
+    environment: Pick<RunEnvironment, "executor" | "allowedOrigins"> | undefined,
+    profiles: { allowedOrigins: string[] }[],
+): string[] {
+    if (environment?.executor === "tunnel") return environment.allowedOrigins;
+    return [...new Set([new URL(startUrl).origin, ...(environment?.allowedOrigins ?? []), ...profiles.flatMap((profile) => profile.allowedOrigins)])];
 }
 
 export function createOriginBrowserPolicy(startUrl: string, mcp: BrowserMcp, allowedOrigins: string[] = [], scope = "project"): BrowserToolPolicy {
