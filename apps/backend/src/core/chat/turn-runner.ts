@@ -249,7 +249,17 @@ async function runReservedChatTurn(
         if (!runnerEnvironment) try {
             const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
             const profiles = await credentialsRepository.listProfiles(row.projectId);
-            const origins = environment?.executor === "tunnel" ? environment.allowedOrigins : [...new Set([new URL(startUrl).origin, ...(turnPolicy?.environment?.allowedOrigins ?? []), ...profiles.flatMap((profile) => profile.allowedOrigins)])];
+            const origins =
+                environment?.executor === "tunnel"
+                    ? environment.allowedOrigins
+                    : [
+                          ...new Set([
+                              new URL(startUrl).origin,
+                              ...(environment?.allowedOrigins ?? []),
+                              ...(turnPolicy?.environment?.allowedOrigins ?? []),
+                              ...profiles.flatMap((profile) => profile.allowedOrigins),
+                          ]),
+                      ];           
             chatBrowser = await getOrCreateChatBrowser(id, origins, environment);
             const browser = chatBrowser;
             const basePolicy: BrowserToolPolicy = discoveryRevision
