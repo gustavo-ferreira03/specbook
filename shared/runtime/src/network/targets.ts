@@ -43,11 +43,11 @@ export function isPrivateAddress(address: string): boolean {
     const [first, second = "0"] = address.toLowerCase().split(":");
     const prefix = parseInt(first!, 16);
     return (
-      !(prefix >= 0x2000 && prefix <= 0x3fff) ||
-      (prefix === 0x2001 && parseInt(second, 16) < 0x200) ||
-      (prefix === 0x2001 && parseInt(second, 16) === 0xdb8) ||
-      prefix === 0x2002 ||
-      prefix === 0x3fff
+      !(prefix >= 0x20_00 && prefix <= 0x3f_ff) ||
+      (prefix === 0x20_01 && parseInt(second, 16) < 0x2_00) ||
+      (prefix === 0x20_01 && parseInt(second, 16) === 0xd_b8) ||
+      prefix === 0x20_02 ||
+      prefix === 0x3f_ff
     );
   }
   return true;

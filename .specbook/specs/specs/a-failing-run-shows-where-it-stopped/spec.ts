@@ -84,7 +84,7 @@ test("A failing run shows where it stopped", async ({
         .getByRole("region", { name: "Run status" })
         .getByRole("paragraph")
         .getByText("Last run failed")
-    ).toBeVisible({ timeout: 30000 });
+    ).toBeVisible({ timeout: 30_000 });
   });
   await step(
     "The automatic retry also failed at \u201COpen the application\u201D",
@@ -94,11 +94,11 @@ test("A failing run shows where it stopped", async ({
         .getByRole("listitem")
         .first();
       await expect(newest.getByText("Automatic retry.")).toBeVisible({
-        timeout: 60000,
+        timeout: 60_000,
       });
       await expect(
         newest.getByText("Failed at step: Open the application")
-      ).toBeVisible({ timeout: 60000 });
+      ).toBeVisible({ timeout: 60_000 });
     }
   );
 });

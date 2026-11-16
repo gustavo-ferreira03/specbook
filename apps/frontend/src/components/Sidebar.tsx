@@ -261,7 +261,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
   }, []);
 
   useVisiblePolling(() => void refreshNavigation(), 60_000);
-  useVisiblePolling(() => void checkRuntime(), 30000);
+  useVisiblePolling(() => void checkRuntime(), 30_000);
 
   useEffect(
     () =>

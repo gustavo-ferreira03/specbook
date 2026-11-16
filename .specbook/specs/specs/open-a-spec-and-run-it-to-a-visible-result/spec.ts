@@ -38,7 +38,7 @@ test("Open a Spec and run it to a visible result", async ({
         .getByRole("region", { name: "Run status" })
         .getByRole("paragraph")
         .getByText("Last run passed")
-    ).toBeVisible({ timeout: 30000 });
+    ).toBeVisible({ timeout: 30_000 });
   });
   await step("The newest run in the history passed just now", async () => {
     const newest = page

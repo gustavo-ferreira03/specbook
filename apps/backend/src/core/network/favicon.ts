@@ -68,7 +68,7 @@ async function fetchLimited(
         {
           method: "GET",
           agent: false,
-          signal: AbortSignal.timeout(8_000),
+          signal: AbortSignal.timeout(8000),
           headers: { Accept: accept, "User-Agent": "Specbook" },
           lookup: (_hostname, options, callback) =>
             options.all

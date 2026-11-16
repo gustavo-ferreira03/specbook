@@ -79,6 +79,6 @@ test("Create a Spec by hand and run it", async ({
         .getByRole("region", { name: "Run status" })
         .getByRole("paragraph")
         .getByText("Last run passed")
-    ).toBeVisible({ timeout: 30000 });
+    ).toBeVisible({ timeout: 30_000 });
   });
 });

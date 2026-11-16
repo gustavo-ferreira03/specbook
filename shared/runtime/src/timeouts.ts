@@ -13,6 +13,6 @@ export function specTimeouts(scale = 1) {
     test: 100_000 * scale,
     navigation: 30_000 * scale,
     action: 15_000 * scale,
-    expect: 5_000 * scale,
+    expect: 5000 * scale,
   };
 }

@@ -194,7 +194,7 @@ export async function collectProjectSignals(
         baseUrl: project.baseUrl,
         fingerprint: old?.fingerprint ?? null,
         nextCheckAt:
-          at + Math.min(3600_000, 300_000 * 2 ** Math.min(failures - 1, 4)),
+          at + Math.min(3_600_000, 300_000 * 2 ** Math.min(failures - 1, 4)),
         failures,
         generation,
       };

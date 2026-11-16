@@ -3776,7 +3776,7 @@ describe("autonomous pause and decisions", () => {
       assert.equal(migrated.tokens_used, 120_000);
       assert.deepEqual(JSON.parse(String(migrated.limits)), {
         maxActions: 587,
-        wallTimeMs: 4250_000,
+        wallTimeMs: 4_250_000,
       });
       assert.ok(migrated.retry_at);
       assert.ok(migrated.stop_reason);
@@ -4700,7 +4700,7 @@ describe("autonomous pause and decisions", () => {
             status!,
             "2026-10-06T00:00:00.000Z",
             "2026-10-01T00:00:00.000Z",
-            12345,
+            12_345,
           ],
         });
         if (key) {
@@ -4824,7 +4824,7 @@ describe("autonomous pause and decisions", () => {
         jobs.find((row) => row.id === "past-planner")?.status,
         "completed"
       );
-      assert.ok(jobs.every((row) => row.tokens_used === 12345));
+      assert.ok(jobs.every((row) => row.tokens_used === 12_345));
       assert.equal(
         (
           await client.execute(

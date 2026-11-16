@@ -244,7 +244,7 @@ function portNumber(
   label: string
 ): number {
   const number = value === undefined ? fallback : Number(value);
-  if (!Number.isInteger(number) || number < 1 || number > 65535) {
+  if (!Number.isInteger(number) || number < 1 || number > 65_535) {
     throw new Error(
       `Use ${label === "API" ? "an" : "a"} ${label} port between 1 and 65535`
     );

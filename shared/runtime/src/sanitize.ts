@@ -25,5 +25,5 @@ export function sanitizeTechnicalDetails(text: string): string {
     .join("\n")
     .replaceAll(/\n{3,}/g, "\n\n")
     .trim()
-    .slice(0, 16000);
+    .slice(0, 16_000);
 }

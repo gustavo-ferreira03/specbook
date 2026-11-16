@@ -314,7 +314,7 @@ export function createAccountsRouter(): Hono {
           ...input,
           tokenHash: tokenHash(token),
           createdBy: user.id,
-          expiresAt: new Date(Date.now() + 7 * 86400_000).toISOString(),
+          expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
         });
       });
       return c.json(

@@ -32,7 +32,7 @@ export async function withTurnTimeout<T>(
       await Promise.race([
         aborting,
         new Promise<void>((resolve) => {
-          grace = setTimeout(resolve, 5_000);
+          grace = setTimeout(resolve, 5000);
         }),
       ]);
       clearTimeout(grace);

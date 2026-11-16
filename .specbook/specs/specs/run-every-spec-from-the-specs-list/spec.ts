@@ -25,7 +25,7 @@ test("Run every Spec from the Specs list", async ({ page, step, secret }) => {
   await step("The batch completes with every Spec passed", async () => {
     const batch = page.getByRole("dialog", { name: "Run all Specs" });
     await expect(batch.getByText("Run completed", { exact: true })).toBeVisible(
-      { timeout: 60000 }
+      { timeout: 60_000 }
     );
     await expect(
       batch.getByText(/^\d+ passed across \d+ Specs?\.$/)

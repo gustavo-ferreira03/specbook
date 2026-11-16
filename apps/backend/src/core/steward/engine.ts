@@ -663,7 +663,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
       row.intent.kind !== "run_specs" &&
       previous.some(
         (other) =>
-          Date.now() - Date.parse(other.updatedAt) < 6 * 3600_000 &&
+          Date.now() - Date.parse(other.updatedAt) < 6 * 3_600_000 &&
           !driftWithoutFix(other, projectJobs, inbox)
       ))
   ) {
@@ -752,7 +752,7 @@ async function dispatchIntent(row: Intent): Promise<void> {
     row.projectId,
     {
       kind,
-      goal: goal.slice(0, 12000),
+      goal: goal.slice(0, 12_000),
       trigger:
         row.source === "user"
           ? "manual"

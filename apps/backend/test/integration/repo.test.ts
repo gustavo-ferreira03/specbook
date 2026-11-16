@@ -1049,7 +1049,7 @@ describe("first-run setup", () => {
         sessionId: string,
         ready: (result: OAuthResult) => boolean
       ): Promise<OAuthResult> {
-        const deadline = Date.now() + 3_000;
+        const deadline = Date.now() + 3000;
         while (Date.now() < deadline) {
           const response = await setup.request(
             `/settings/llm/providers/openai/oauth/poll?sessionId=${sessionId}`

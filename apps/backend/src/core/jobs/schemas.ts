@@ -26,7 +26,7 @@ export const createJobSchema = z
       .string()
       .trim()
       .min(1)
-      .max(12000)
+      .max(12_000)
       .default(
         "Review this project's Specs and propose useful improvements. Ask when blocked."
       ),
@@ -92,7 +92,7 @@ export const reportSchema = z.object({
   errorCode: errorCodeSchema.optional(),
   kind: z.enum(["question", "bug_report", "note"]),
   title: z.string().trim().min(1).max(200),
-  body: z.string().trim().min(1).max(30000),
+  body: z.string().trim().min(1).max(30_000),
 });
 export const reviewSchema = z.object({
   action: z.enum([
@@ -103,7 +103,7 @@ export const reviewSchema = z.object({
     "report_bug",
     "ignore",
   ]),
-  answer: z.string().trim().min(1).max(12000).optional(),
+  answer: z.string().trim().min(1).max(12_000).optional(),
 });
 export type JobLimits = z.infer<typeof jobLimitsSchema>;
 export type JobStatus =

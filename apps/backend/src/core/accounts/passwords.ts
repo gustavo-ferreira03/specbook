@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-const OPTIONS = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+const OPTIONS = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 let active = 0;
 
 async function derive(password: string, salt: Buffer): Promise<Buffer> {

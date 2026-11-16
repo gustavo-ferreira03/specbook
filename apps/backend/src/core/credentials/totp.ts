@@ -60,6 +60,6 @@ export function generateTotp(seed: string, now = Date.now()): string {
   counter.writeBigUInt64BE(BigInt(Math.floor(now / 1000 / period)));
   const hmac = crypto.createHmac(algorithm, secret).update(counter).digest();
   const offset = hmac[hmac.length - 1] & 0x0f;
-  const binary = (hmac.readUInt32BE(offset) & 0x7fffffff) % 10 ** digits;
+  const binary = (hmac.readUInt32BE(offset) & 0x7f_ff_ff_ff) % 10 ** digits;
   return binary.toString().padStart(digits, "0");
 }
