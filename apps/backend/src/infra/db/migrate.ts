@@ -7,7 +7,7 @@ import { migrate } from "drizzle-orm/libsql/migrator";
 import { migrateCredentialFields } from "../../core/credentials/migration";
 import { db, initializeDatabase } from "./client";
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const moduleDir = import.meta.dirname;
 
 function migrationsFolder(): string {
   const candidates = [

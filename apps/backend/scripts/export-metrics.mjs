@@ -4,10 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const backendRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  ".."
-);
+const backendRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
 const runsMode = args.includes("--runs");
 const agentMode = args.includes("--agent");

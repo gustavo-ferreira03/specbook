@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { configHome, scrub } from "./credentials";
 import { normalizeServerUrl, redactTokens } from "./remote";
 
-const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const moduleDirectory = import.meta.dirname;
 const packageDirectory = path.resolve(moduleDirectory, "..");
 const MAX_UI_DOWNLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_UI_EXTRACTED_BYTES = 1024 * 1024 * 1024;

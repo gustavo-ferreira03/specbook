@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const moduleDir = import.meta.dirname;
 
 function findBackendRoot(start: string): string {
   let current = start;

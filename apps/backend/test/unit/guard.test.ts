@@ -562,10 +562,7 @@ describe("function constructor hardening", () => {
             const results = attempts.map((attempt) => { try { attempt(); return "ran"; } catch (error) { return error.message; } });
             console.log(JSON.stringify(results));
         `;
-    const cwd = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../.."
-    );
+    const cwd = path.resolve(import.meta.dirname, "../..");
     const result = spawnSync(
       process.execPath,
       ["--import", "tsx", "--input-type=module", "-e", script],
