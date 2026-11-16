@@ -401,14 +401,7 @@ export function RunnersSettings() {
             </Button>
           </SettingsBlock>
         ) : queues ? (
-          !queues.length ? (
-            <SettingsBlock>
-              <p className="text-body text-ink-muted">
-                No environments use runners or tunnels yet. Choose Runner or
-                Server through a tunnel in your project's environment settings.
-              </p>
-            </SettingsBlock>
-          ) : (
+          queues.length ? (
             <ul aria-label="Runner queues">
               {queues.map((queue) => (
                 <li
@@ -453,6 +446,13 @@ export function RunnersSettings() {
                 </li>
               ))}
             </ul>
+          ) : (
+            <SettingsBlock>
+              <p className="text-body text-ink-muted">
+                No environments use runners or tunnels yet. Choose Runner or
+                Server through a tunnel in your project's environment settings.
+              </p>
+            </SettingsBlock>
           )
         ) : (
           <SettingsBlock>
@@ -710,14 +710,7 @@ export function RunnersSettings() {
           </SettingsBlock>
         )}
         {runners ? (
-          !runners.length ? (
-            <SettingsBlock>
-              <p className="text-body text-ink-muted">
-                Create a runner or tunnel token, then start its CLI command
-                inside the private network.
-              </p>
-            </SettingsBlock>
-          ) : (
+          runners.length ? (
             <ul aria-label="Runner tokens">
               {runners.map((runner) => (
                 <li
@@ -813,6 +806,13 @@ export function RunnersSettings() {
                 </li>
               ))}
             </ul>
+          ) : (
+            <SettingsBlock>
+              <p className="text-body text-ink-muted">
+                Create a runner or tunnel token, then start its CLI command
+                inside the private network.
+              </p>
+            </SettingsBlock>
           )
         ) : (
           <SettingsBlock>

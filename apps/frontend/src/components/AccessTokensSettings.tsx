@@ -270,13 +270,7 @@ export function AccessTokensSettings() {
           </SettingsBlock>
         )}
         {tokens ? (
-          !tokens.length ? (
-            <SettingsBlock>
-              <p className="text-body text-ink-muted">
-                No access tokens yet. Create one to log in from the CLI.
-              </p>
-            </SettingsBlock>
-          ) : (
+          tokens.length ? (
             <ul aria-label="Your access tokens">
               {tokens.map((token) => (
                 <li
@@ -330,6 +324,12 @@ export function AccessTokensSettings() {
                 </li>
               ))}
             </ul>
+          ) : (
+            <SettingsBlock>
+              <p className="text-body text-ink-muted">
+                No access tokens yet. Create one to log in from the CLI.
+              </p>
+            </SettingsBlock>
           )
         ) : (
           <SettingsBlock>

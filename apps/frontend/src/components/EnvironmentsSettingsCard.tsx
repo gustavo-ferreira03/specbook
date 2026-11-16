@@ -281,7 +281,7 @@ export function EnvironmentsSettingsCard({ projectId }: { projectId: string }) {
                 setDraft({
                   ...draft,
                   executor: value,
-                  runnerGroup: value !== "server" ? draft.runnerGroup : null,
+                  runnerGroup: value === "server" ? null : draft.runnerGroup,
                   credentialOverrides:
                     value === "runner" ? {} : draft.credentialOverrides,
                 })

@@ -337,11 +337,11 @@ export async function resolveRunnerSecrets(
     }
     const declaredOrigins =
       environment === undefined
-        ? provider !== undefined
-          ? supplied!.origins.length
+        ? provider === undefined
+          ? (profile?.origins ?? [])
+          : supplied!.origins.length
             ? supplied!.origins
             : environmentProfileOrigins(ref.profile)
-          : (profile?.origins ?? [])
         : environmentProfileOrigins(ref.profile);
     const origins = declaredOrigins.filter((origin) =>
       sourceOrigins.includes(origin)

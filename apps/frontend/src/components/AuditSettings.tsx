@@ -87,11 +87,7 @@ export function AuditSettings() {
           <Skeleton className="h-40 w-full" />
         </SettingsBlock>
       ) : data ? (
-        !data.events.length ? (
-          <SettingsBlock>
-            <p className="text-body text-ink-muted">No actions recorded yet.</p>
-          </SettingsBlock>
-        ) : (
+        data.events.length ? (
           <ul>
             {data.events.map((event) => (
               <li
@@ -122,6 +118,10 @@ export function AuditSettings() {
               </li>
             ))}
           </ul>
+        ) : (
+          <SettingsBlock>
+            <p className="text-body text-ink-muted">No actions recorded yet.</p>
+          </SettingsBlock>
         )
       ) : null}
       {data?.nextBefore && (
