@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { EventEmitter } from "node:events";
+import type { EventEmitter } from "node:events";
 import { Duplex } from "node:stream";
 
 import { tunnelFrameSchema } from "../tunnel-protocol.ts";

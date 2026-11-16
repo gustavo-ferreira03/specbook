@@ -10,7 +10,7 @@ import { resolveRunEnvironment } from "../environments";
 import { startSpecBatch } from "../runner/batch";
 import { ResourceBusyError } from "../specs/lifecycle";
 import { knownBugSpecIds } from "./results";
-import { ciRunSchema } from "./schemas";
+import type { ciRunSchema } from "./schemas";
 import { projectRunPolicy } from "./targets";
 
 export class CiRequestError extends Error {
