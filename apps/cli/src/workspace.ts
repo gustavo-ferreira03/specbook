@@ -87,7 +87,8 @@ export async function workspaceDirectory(cwd = process.cwd()): Promise<string> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
-        "There is no .specbook workspace here. Run specbook init --base-url <app-url> in your project directory first."
+        "There is no .specbook workspace here. Run specbook init --base-url <app-url> in your project directory first.",
+        { cause: error }
       );
     }
     throw error;

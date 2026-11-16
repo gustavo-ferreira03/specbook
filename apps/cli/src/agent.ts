@@ -86,7 +86,8 @@ async function copyAuthentication(
     }
     if (!apiKeyPresent) {
       throw new Error(
-        "The selected agent needs a file-backed login or its API key environment variable to run an isolated session"
+        "The selected agent needs a file-backed login or its API key environment variable to run an isolated session",
+        { cause: error }
       );
     }
   }

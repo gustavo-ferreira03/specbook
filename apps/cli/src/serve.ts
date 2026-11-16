@@ -73,7 +73,7 @@ async function response(url: string, signal?: AbortSignal): Promise<Response> {
     if (signal?.aborted) {
       throw signal.reason;
     }
-    throw new Error("The UI release could not be downloaded");
+    throw new Error("The UI release could not be downloaded", { cause: error });
   }
   if (!fetched.ok) {
     await fetched.body?.cancel();
@@ -233,7 +233,8 @@ export async function resolveUi(
     const reason =
       error instanceof Error ? error.message : "UI download failed";
     throw new Error(
-      `${reason}. Download specbook-ui-${currentVersion}.tar.gz and its .sha256 from the v${currentVersion} release, verify and extract it, then run specbook serve --ui <directory>. The Docker image includes the UI.`
+      `${reason}. Download specbook-ui-${currentVersion}.tar.gz and its .sha256 from the v${currentVersion} release, verify and extract it, then run specbook serve --ui <directory>. The Docker image includes the UI.`,
+      { cause: error }
     );
   }
 }

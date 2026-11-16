@@ -149,7 +149,8 @@ export async function browse(
     }
     if (action !== "open") {
       throw new Error(
-        "No exploration session is open. Run specbook browse open first."
+        "No exploration session is open. Run specbook browse open first.",
+        { cause: error }
       );
     }
   }

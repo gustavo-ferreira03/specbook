@@ -609,7 +609,7 @@ async function verifiedRuns(workspace: string, paths: string[]) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         continue;
       }
-      throw new Error("A local run record could not be read");
+      throw new Error("A local run record could not be read", { cause: error });
     }
     for (const result of run.results ?? []) {
       if (paths.includes(result.path) && !latest.has(result.path))

@@ -279,7 +279,7 @@ export function createExplorationTools(options: ExplorationToolOptions) {
             )
           );
           signal?.throwIfAborted();
-          throw new Error(message);
+          throw new Error(message, { cause: error });
         }
       },
     }),

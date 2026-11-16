@@ -506,7 +506,7 @@ export const test = base.extend<{
         });
         try {
           if (!real) {
-            throw new Error("This step has no browser page");
+            throw new Error("This step has no browser page", { cause: error });
           }
           const snapshot = await real
             .locator("body")
