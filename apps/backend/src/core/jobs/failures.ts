@@ -37,7 +37,7 @@ async function failureContent(
     return null;
   }
   const markdown = await fs
-    .readFile(path.join(runsDir, run.id, "spec.yml"), "utf8")
+    .readFile(path.join(runsDir, run.id, "spec.yml"), "utf-8")
     .catch(() => null);
   if (markdown === null || markdownHashOf(markdown) !== spec.markdownHash) {
     return null;

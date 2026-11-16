@@ -81,7 +81,7 @@ export function encryptWithKey(value: string, key: Buffer): string {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const ciphertext = Buffer.concat([
-    cipher.update(value, "utf8"),
+    cipher.update(value, "utf-8"),
     cipher.final(),
   ]);
   return `v1:${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${ciphertext.toString("base64")}`;
@@ -107,7 +107,7 @@ export function decryptWithKey(stored: string, key: Buffer): string {
   return Buffer.concat([
     decipher.update(Buffer.from(ciphertext, "base64")),
     decipher.final(),
-  ]).toString("utf8");
+  ]).toString("utf-8");
 }
 
 export function encryptSecret(value: string): string {

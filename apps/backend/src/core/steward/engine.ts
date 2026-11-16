@@ -78,7 +78,7 @@ async function intentFingerprint(
       );
     }
     const yaml = await fs
-      .readFile(path.join(runsDir, run.id, "spec.yml"), "utf8")
+      .readFile(path.join(runsDir, run.id, "spec.yml"), "utf-8")
       .catch(() => null);
     const evidence = await readEvidenceManifest(path.join(runsDir, run.id));
     const failureKind = runFailureKind(run);

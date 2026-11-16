@@ -522,20 +522,20 @@ export async function confirmedResults(workspace: string, state: AgentState) {
     try {
       const source = await fs.readFile(
         await safeWorkspacePath(workspace, `${result.path}/spec.ts`),
-        "utf8"
+        "utf-8"
       );
       const tested = await fs.readFile(
         path.join(result.evidencePath, "spec.ts"),
-        "utf8"
+        "utf-8"
       );
       const contract = parseSpecYaml(
         await fs.readFile(
           await safeWorkspacePath(workspace, `${result.path}/spec.yml`),
-          "utf8"
+          "utf-8"
         )
       );
       const testedContract = parseSpecYaml(
-        await fs.readFile(path.join(result.evidencePath, "spec.yml"), "utf8")
+        await fs.readFile(path.join(result.evidencePath, "spec.yml"), "utf-8")
       );
       if (
         source !== tested ||

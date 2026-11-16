@@ -66,7 +66,7 @@ export async function readRepoFile(
     constants.O_RDONLY | constants.O_NOFOLLOW
   );
   try {
-    return await handle.readFile("utf8");
+    return await handle.readFile("utf-8");
   } finally {
     await handle.close();
   }
@@ -101,7 +101,7 @@ export async function writeRepoFile(
     0o644
   );
   try {
-    await handle.writeFile(content, "utf8");
+    await handle.writeFile(content, "utf-8");
   } finally {
     await handle.close();
   }

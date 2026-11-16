@@ -222,7 +222,7 @@ async function writeBatch(batch: RunBatch): Promise<void> {
   await fs.mkdir(directory, { recursive: true });
   const target = path.join(directory, "batch.json");
   const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-  await fs.writeFile(temporary, JSON.stringify(batch), "utf8");
+  await fs.writeFile(temporary, JSON.stringify(batch), "utf-8");
   await fs.rename(temporary, target);
   indexBatch(batch);
 }
@@ -230,7 +230,7 @@ async function writeBatch(batch: RunBatch): Promise<void> {
 export async function getRunBatch(id: string): Promise<RunBatch | null> {
   try {
     const batch = JSON.parse(
-      await fs.readFile(path.join(batchDirectory(id), "batch.json"), "utf8")
+      await fs.readFile(path.join(batchDirectory(id), "batch.json"), "utf-8")
     ) as RunBatch;
     indexBatch(batch);
     return batch;
@@ -286,7 +286,7 @@ async function finishPreparedSpec(
       await fs.writeFile(
         path.join(runDir, "batch.json"),
         JSON.stringify({ batchId }),
-        "utf8"
+        "utf-8"
       );
     }
     if (
@@ -295,7 +295,7 @@ async function finishPreparedSpec(
       await fs.writeFile(
         path.join(runDir, "evidence.json"),
         JSON.stringify({ steps: [], video: null, failedStep: null }),
-        "utf8"
+        "utf-8"
       );
     }
   } catch (error) {
@@ -373,8 +373,8 @@ async function snapshotPreparedSpecs(prepared: PreparedSpec[]): Promise<void> {
     const directory = path.join(runsDir, entry.run.id);
     await fs.mkdir(directory, { recursive: true });
     await Promise.all([
-      fs.writeFile(path.join(directory, "spec.ts"), entry.testSource, "utf8"),
-      fs.writeFile(path.join(directory, "spec.yml"), entry.markdown, "utf8"),
+      fs.writeFile(path.join(directory, "spec.ts"), entry.testSource, "utf-8"),
+      fs.writeFile(path.join(directory, "spec.yml"), entry.markdown, "utf-8"),
     ]);
   }
 }
@@ -610,11 +610,11 @@ async function prepareSpecBatch(
         const [markdown, testSource] = await Promise.all([
           fs.readFile(
             path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)),
-            "utf8"
+            "utf-8"
           ),
           fs.readFile(
             path.join(repoGit.getRepoDir(projectId), specTestFile(spec.path)),
-            "utf8"
+            "utf-8"
           ),
         ]);
         const sourceHash = sourceHashOf(testSource);
@@ -805,12 +805,16 @@ async function dispatchRunnerBatch(
       const directory = path.join(runsDir, entry.run.id);
       await fs.mkdir(directory, { recursive: true });
       await Promise.all([
-        fs.writeFile(path.join(directory, "spec.ts"), entry.testSource, "utf8"),
-        fs.writeFile(path.join(directory, "spec.yml"), entry.markdown, "utf8"),
+        fs.writeFile(
+          path.join(directory, "spec.ts"),
+          entry.testSource,
+          "utf-8"
+        ),
+        fs.writeFile(path.join(directory, "spec.yml"), entry.markdown, "utf-8"),
         fs.writeFile(
           path.join(directory, "batch.json"),
           JSON.stringify({ batchId: batch.id }),
-          "utf8"
+          "utf-8"
         ),
       ]);
     }
@@ -884,8 +888,8 @@ export async function finishRunnerBatch(
     }
     const directory = path.join(runsDir, run.id);
     const [markdown, testSource] = await Promise.all([
-      fs.readFile(path.join(directory, "spec.yml"), "utf8"),
-      fs.readFile(path.join(directory, "spec.ts"), "utf8"),
+      fs.readFile(path.join(directory, "spec.yml"), "utf-8"),
+      fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
     ]);
     const prepared: PreparedSpec = {
       run,
@@ -1336,7 +1340,7 @@ export async function startSpecBatch(
 
 export async function pendingTunnelBatchRunIds(): Promise<string[]> {
   const entries = await fs
-    .readdir(runBatchesDir, { withFileTypes: true, encoding: "utf8" })
+    .readdir(runBatchesDir, { withFileTypes: true, encoding: "utf-8" })
     .catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") {
         return [];
@@ -1375,8 +1379,8 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
         }
         const directory = path.join(runsDir, item.runId);
         const [testSource, markdown] = await Promise.all([
-          fs.readFile(path.join(directory, "spec.ts"), "utf8"),
-          fs.readFile(path.join(directory, "spec.yml"), "utf8"),
+          fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
+          fs.readFile(path.join(directory, "spec.yml"), "utf-8"),
         ]);
         if (
           sourceHashOf(testSource) !== item.sourceHash ||
@@ -1481,7 +1485,7 @@ export async function markInterruptedBatches(): Promise<void> {
   try {
     entries = await fs.readdir(runBatchesDir, {
       withFileTypes: true,
-      encoding: "utf8",
+      encoding: "utf-8",
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {

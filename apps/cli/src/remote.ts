@@ -129,7 +129,7 @@ async function readServers(): Promise<Server[]> {
     }
     let data: unknown;
     try {
-      data = JSON.parse(await fs.readFile(file, "utf8"));
+      data = JSON.parse(await fs.readFile(file, "utf-8"));
     } catch {
       throw new Error("Servers file contains invalid JSON");
     }
@@ -412,7 +412,7 @@ async function readState(
       JSON.parse(
         await fs.readFile(
           await safeWorkspacePath(workspace, "remote.json"),
-          "utf8"
+          "utf-8"
         )
       )
     );
@@ -462,7 +462,7 @@ async function localFiles(workspace: string, relative: string) {
     try {
       return await fs.readFile(
         await safeWorkspacePath(workspace, `${relative}/${name}`),
-        "utf8"
+        "utf-8"
       );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -518,7 +518,7 @@ export async function pull(workspace: string) {
     const featurePath = `${feature.path}/feature.yml`;
     const file = await safeWorkspacePath(workspace, featurePath, true);
     const previous = await fs
-      .readFile(file, "utf8")
+      .readFile(file, "utf-8")
       .catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") {
           return null;
@@ -602,7 +602,7 @@ async function verifiedRuns(workspace: string, paths: string[]) {
       run = JSON.parse(
         await fs.readFile(
           await safeWorkspacePath(workspace, `runs/${id}/run.json`),
-          "utf8"
+          "utf-8"
         )
       );
     } catch (error) {
@@ -661,7 +661,7 @@ export async function publish(
     const featurePath = path.posix.dirname(spec.path);
     const source = await fs.readFile(
       await safeWorkspacePath(workspace, `${featurePath}/feature.yml`),
-      "utf8"
+      "utf-8"
     );
     const text = JSON.stringify({ files, source });
     if ((await containsSecret(text)) || (await scrubTokens(text)) !== text) {

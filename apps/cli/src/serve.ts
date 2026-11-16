@@ -45,7 +45,7 @@ export type ServeEvent =
 
 async function version(): Promise<string> {
   const manifest = JSON.parse(
-    await fs.readFile(path.join(packageDirectory, "package.json"), "utf8")
+    await fs.readFile(path.join(packageDirectory, "package.json"), "utf-8")
   ) as { version?: unknown };
   if (
     typeof manifest.version !== "string" ||
@@ -163,7 +163,7 @@ async function downloadUi(
       );
     }
     const manifest = JSON.parse(
-      await fs.readFile(path.join(extracted, "package.json"), "utf8")
+      await fs.readFile(path.join(extracted, "package.json"), "utf-8")
     ) as { name?: unknown; version?: unknown };
     if (
       !(await uiEntry(extracted)) ||

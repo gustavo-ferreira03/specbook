@@ -569,7 +569,7 @@ describe("function constructor hardening", () => {
     const result = spawnSync(
       process.execPath,
       ["--import", "tsx", "--input-type=module", "-e", script],
-      { cwd, encoding: "utf8" }
+      { cwd, encoding: "utf-8" }
     );
     assert.equal(result.status, 0, result.stderr);
     const lines = result.stdout.trim().split("\n");

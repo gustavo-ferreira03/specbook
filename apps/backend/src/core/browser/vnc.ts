@@ -414,7 +414,7 @@ function parseRfbVersion(raw: Buffer): { major: number; minor: number } {
 
 async function readReason(queue: ByteQueue): Promise<string> {
   const length = (await queue.read(4)).readUInt32BE(0);
-  return (await queue.read(Math.min(length, 4096))).toString("utf8");
+  return (await queue.read(Math.min(length, 4096))).toString("utf-8");
 }
 
 function reverseBits(byte: number): number {

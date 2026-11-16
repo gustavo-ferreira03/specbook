@@ -221,7 +221,7 @@ class RepoBare {
   ): Promise<void> {
     const hooksDir = path.join(this.getBareRepoDir(projectId), "hooks");
     const hookPath = path.join(hooksDir, name);
-    const current = await fs.readFile(hookPath, "utf8").catch(() => null);
+    const current = await fs.readFile(hookPath, "utf-8").catch(() => null);
     const mode = await fs
       .stat(hookPath)
       .then((stat) => stat.mode & 0o777)
@@ -232,7 +232,7 @@ class RepoBare {
     await fs.mkdir(hooksDir, { recursive: true });
     const tmpPath = `${hookPath}.${process.pid}.${Date.now()}.tmp`;
     try {
-      await fs.writeFile(tmpPath, content, { encoding: "utf8", mode: 0o755 });
+      await fs.writeFile(tmpPath, content, { encoding: "utf-8", mode: 0o755 });
       await fs.chmod(tmpPath, 0o755);
       await fs.rename(tmpPath, hookPath);
     } catch (error) {

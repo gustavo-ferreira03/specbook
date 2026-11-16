@@ -144,7 +144,7 @@ async function artifacts(
     result.push({
       path: file,
       content: /\.(ts|yml|json)$/.test(file)
-        ? Buffer.from(scrubText(data.toString("utf8"))).toString("base64")
+        ? Buffer.from(scrubText(data.toString("utf-8"))).toString("base64")
         : data.toString("base64"),
     });
   }
@@ -154,7 +154,7 @@ async function artifacts(
     );
     if (manifest) {
       const evidence = JSON.parse(
-        Buffer.from(manifest.content, "base64").toString("utf8")
+        Buffer.from(manifest.content, "base64").toString("utf-8")
       );
       manifest.content = Buffer.from(
         JSON.stringify({
@@ -184,7 +184,7 @@ function withoutVideo(completion: RunnerCompletion): RunnerCompletion {
           }
           try {
             const evidence = JSON.parse(
-              Buffer.from(artifact.content, "base64").toString("utf8")
+              Buffer.from(artifact.content, "base64").toString("utf-8")
             );
             return {
               ...artifact,
@@ -212,7 +212,7 @@ function withoutReplay(completion: RunnerCompletion): RunnerCompletion {
             return artifact;
           }
           const evidence = JSON.parse(
-            Buffer.from(artifact.content, "base64").toString("utf8")
+            Buffer.from(artifact.content, "base64").toString("utf-8")
           );
           if (!evidence.replay) {
             return artifact;

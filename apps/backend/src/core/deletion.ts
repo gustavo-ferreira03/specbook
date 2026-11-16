@@ -89,7 +89,7 @@ async function removeRunDirectories(runIds: string[]): Promise<void> {
       const link = JSON.parse(
         await fs.readFile(
           path.join(entityDirectory(runsDir, runId), "batch.json"),
-          "utf8"
+          "utf-8"
         )
       ) as { batchId?: unknown };
       if (typeof link.batchId === "string") {

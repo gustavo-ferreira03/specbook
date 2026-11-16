@@ -99,7 +99,7 @@ export async function reviewRunEvidence(
 ): Promise<EvidenceReview | null> {
   const cache = path.join(directory, "review.json");
   const cached = verdictSchema.safeParse(
-    JSON.parse(await fs.readFile(cache, "utf8").catch(() => "null"))
+    JSON.parse(await fs.readFile(cache, "utf-8").catch(() => "null"))
   );
   if (cached.success) {
     return cached.data;
@@ -111,10 +111,10 @@ export async function reviewRunEvidence(
     }
     const specYaml = await fs.readFile(
       path.join(directory, "spec.yml"),
-      "utf8"
+      "utf-8"
     );
     const specSource = await fs
-      .readFile(path.join(directory, "spec.ts"), "utf8")
+      .readFile(path.join(directory, "spec.ts"), "utf-8")
       .catch(() => "");
     const manifest = await readEvidenceManifest(directory);
     const failedStep = outcome.failedStep ?? manifest.failedStep;

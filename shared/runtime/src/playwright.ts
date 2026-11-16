@@ -181,23 +181,23 @@ async function writeWorkDir(
     fs.writeFile(
       path.join(workDir, "package.json"),
       JSON.stringify({ private: true, type: "module" }),
-      "utf8"
+      "utf-8"
     ),
     fs.writeFile(
       path.join(workDir, "tsconfig.json"),
       JSON.stringify({ compilerOptions: {} }),
-      "utf8"
+      "utf-8"
     ),
     fs.writeFile(
       path.join(workDir, "playwright.config.mjs"),
       `export default ${JSON.stringify(playwrightConfig(options, proxyServer), null, 2)};\n`,
-      "utf8"
+      "utf-8"
     ),
     ...options.specs.map((spec) =>
       fs.writeFile(
         path.join(workDir, "tests", `${spec.key}.spec.ts`),
         executableSource(spec.source, spec.analysis, modulePath),
-        "utf8"
+        "utf-8"
       )
     ),
   ]);
@@ -256,12 +256,12 @@ export async function runPlaywrightSuite(
     );
     const output = stripAnsi(processResult.output).trim();
     const rawReport = await fs
-      .readFile(path.join(workDir, "results.json"), "utf8")
+      .readFile(path.join(workDir, "results.json"), "utf-8")
       .catch(() => null);
     const report =
       rawReport === null ? null : scrubJsonText(rawReport, options.scrub);
     if (report !== null) {
-      await fs.writeFile(path.join(directory, "results.json"), report, "utf8");
+      await fs.writeFile(path.join(directory, "results.json"), report, "utf-8");
     }
 
     if (processResult.timedOut) {

@@ -310,7 +310,7 @@ test("runner dispatch keeps credential lookup local and survives backend recover
   ]);
   assert.equal((await runsRepository.getRun(body.run.id))!.status, "passed");
   assert.equal(
-    await fs.readFile(sentinel, "utf8"),
+    await fs.readFile(sentinel, "utf-8"),
     secretValue,
     "uploads replace evidence symlinks without touching their targets"
   );
@@ -329,7 +329,7 @@ test("runner dispatch keeps credential lookup local and survives backend recover
   );
   assert.ok(JSON.stringify(savedReplay).includes('"textContent":"•••• ••••"'));
   const manifest = JSON.parse(
-    await fs.readFile(path.join(directory, "evidence.json"), "utf8")
+    await fs.readFile(path.join(directory, "evidence.json"), "utf-8")
   );
   assert.equal(manifest.replay.file, REPLAY_FILE);
   assert.equal(
@@ -501,7 +501,7 @@ test("runner cancellation removes pending execution and isolated candidate verif
   assert.equal((await specsRepository.getSpec(spec.id))!.status, "unverified");
   assert.equal((await runsRepository.listRuns(spec.id)).length, 1);
   assert.equal(
-    await fs.readFile(path.join(directory, "spec.ts"), "utf8"),
+    await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
     VALID_SPEC
   );
   const { startContextDiscovery } =
@@ -2342,7 +2342,7 @@ test("Store", async ({ page, step, secret }) => {
         )) {
           assert.ok(
             !(
-              await fs.readFile(path.join(runsDir, run.id, file), "utf8")
+              await fs.readFile(path.join(runsDir, run.id, file), "utf-8")
             ).includes("s3cret-value"),
             file
           );
@@ -2656,7 +2656,7 @@ describe(
         testSource: VALID_SPEC,
       });
       const directory = path.join(repoGit.getRepoDir(project.id), spec.path);
-      const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf8");
+      const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf-8");
       const { runsRepository } =
         await import("../../src/infra/repositories/runs");
       const originalRun = await runsRepository.createRun({
@@ -2721,17 +2721,17 @@ describe(
         "unverified"
       );
       assert.equal(
-        await fs.readFile(path.join(directory, "spec.ts"), "utf8"),
+        await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
         VALID_SPEC
       );
       await writer.createFeatureInRepo(project.id, null, "Unrelated", "");
       await applyProposal((await jobsRepository.item(proposal.id))!);
       assert.equal(
-        await fs.readFile(path.join(directory, "spec.yml"), "utf8"),
+        await fs.readFile(path.join(directory, "spec.yml"), "utf-8"),
         yaml
       );
       assert.equal(
-        await fs.readFile(path.join(directory, "spec.ts"), "utf8"),
+        await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
         VALID_SPEC.replace('page.goto("/")', 'page.goto("/home")')
       );
     });
@@ -3764,7 +3764,7 @@ describe("autonomous pause and decisions", () => {
       );
       const migration = await fs.readFile(
         new URL("../../drizzle/0016_colossal_warpath.sql", import.meta.url),
-        "utf8"
+        "utf-8"
       );
       for (const statement of migration.split("--> statement-breakpoint")) {
         await client.execute(statement.trim());
@@ -4543,7 +4543,7 @@ describe("autonomous pause and decisions", () => {
       ),
     });
     const directory = path.join(repoGit.getRepoDir(project.id), spec.path);
-    const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf8");
+    const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf-8");
     const head = await repoGit.getHeadSha(project.id);
     const endpoint = `/projects/${project.id}/inbox/${item.id}/review`;
     assert.equal(
@@ -4573,11 +4573,11 @@ describe("autonomous pause and decisions", () => {
     assert.equal(reports[0]?.payload.specId, spec.id);
     assert.deepEqual(await jobsRepository.inbox(other.id), []);
     assert.equal(
-      await fs.readFile(path.join(directory, "spec.ts"), "utf8"),
+      await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
       VALID_SPEC
     );
     assert.equal(
-      await fs.readFile(path.join(directory, "spec.yml"), "utf8"),
+      await fs.readFile(path.join(directory, "spec.yml"), "utf-8"),
       yaml
     );
     assert.equal(await repoGit.getHeadSha(project.id), head);
@@ -4746,7 +4746,7 @@ describe("autonomous pause and decisions", () => {
       );
       const migration = await fs.readFile(
         new URL("../../drizzle/0017_rapid_sunspot.sql", import.meta.url),
-        "utf8"
+        "utf-8"
       );
       for (const statement of migration.split("--> statement-breakpoint")) {
         await client.execute(statement.trim());

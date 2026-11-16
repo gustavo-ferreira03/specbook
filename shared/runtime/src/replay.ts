@@ -42,7 +42,7 @@ export async function decodeReplay(
     const raw = await decompress(data, {
       maxOutputLength: MAX_REPLAY_RAW_BYTES,
     });
-    return restoreReplayEvents(JSON.parse(raw.toString("utf8")));
+    return restoreReplayEvents(JSON.parse(raw.toString("utf-8")));
   } catch {
     return null;
   }
@@ -116,6 +116,6 @@ export function readRecorderSource(): Promise<string> {
         path.dirname(createRequire(import.meta.url).resolve("rrweb")),
         "rrweb.umd.min.cjs"
       );
-    return fs.readFile(file, "utf8");
+    return fs.readFile(file, "utf-8");
   })());
 }

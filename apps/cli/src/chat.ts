@@ -94,7 +94,7 @@ async function redactBrainHistory(
       workspace,
       path.relative(workspace, path.join(entry.parentPath, entry.name))
     );
-    const original = await fs.readFile(file, "utf8");
+    const original = await fs.readFile(file, "utf-8");
     const lines = [];
     for (const line of original.split("\n")) {
       const safe = await scrub(line);
@@ -183,7 +183,7 @@ async function readConversation(
     }
     throw error;
   });
-  return conversationSchema.parse(JSON.parse(await fs.readFile(file, "utf8")));
+  return conversationSchema.parse(JSON.parse(await fs.readFile(file, "utf-8")));
 }
 
 function processIdentity(pid: number): string | undefined {
@@ -191,7 +191,7 @@ function processIdentity(pid: number): string | undefined {
     return undefined;
   }
   try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
     const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
     return fields[0] === "Z" ? undefined : fields[19];
   } catch {
@@ -241,7 +241,7 @@ async function withStateLock<T>(
         await fs
           .readFile(
             await safeWorkspacePath(workspace, chatPath(id, "state.lock")),
-            "utf8"
+            "utf-8"
           )
           .catch(() => "")
       );
@@ -784,7 +784,7 @@ async function completedReply(
           workspace,
           chatPath(state.id, "brain/outcome.json")
         ),
-        "utf8"
+        "utf-8"
       )
     )
   );

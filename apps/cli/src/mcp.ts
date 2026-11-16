@@ -49,7 +49,7 @@ export const emptyAgentState = (): AgentState => ({
 
 export async function readAgentState(session: string): Promise<AgentState> {
   return JSON.parse(
-    await fs.readFile(path.join(session, "state.json"), "utf8")
+    await fs.readFile(path.join(session, "state.json"), "utf-8")
   ) as AgentState;
 }
 
@@ -87,7 +87,7 @@ export async function createLocalMcpServer(
   let selection: z.infer<typeof proposalSchema>[] | undefined;
   try {
     const turn = turnContextSchema.parse(
-      JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf8"))
+      JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf-8"))
     );
     turnId = turn.id;
     selection = turn.selected;
@@ -100,7 +100,7 @@ export async function createLocalMcpServer(
   let listedCredentials = false;
   try {
     outcomeSchema.parse(
-      JSON.parse(await fs.readFile(path.join(session, "outcome.json"), "utf8"))
+      JSON.parse(await fs.readFile(path.join(session, "outcome.json"), "utf-8"))
     );
     completed = true;
   } catch (error) {
@@ -138,7 +138,7 @@ export async function createLocalMcpServer(
       return;
     }
     const current = turnContextSchema.parse(
-      JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf8"))
+      JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf-8"))
     );
     if (current.id !== turnId) {
       throw new Error(
@@ -261,7 +261,7 @@ export async function createLocalMcpServer(
             ...parseFeatureYaml(
               await fs.readFile(
                 await safeWorkspacePath(workspace, relative),
-                "utf8"
+                "utf-8"
               )
             ),
           });
@@ -280,7 +280,7 @@ export async function createLocalMcpServer(
             ...parseSpecYaml(
               await fs.readFile(
                 await safeWorkspacePath(workspace, `${relative}/spec.yml`),
-                "utf8"
+                "utf-8"
               )
             ),
           });
@@ -302,7 +302,7 @@ export async function createLocalMcpServer(
       path: relative,
       content: await fs.readFile(
         await safeWorkspacePath(workspace, relative),
-        "utf8"
+        "utf-8"
       ),
     })
   );
@@ -342,7 +342,7 @@ export async function createLocalMcpServer(
         0o644
       );
       try {
-        await handle.writeFile(content, "utf8");
+        await handle.writeFile(content, "utf-8");
       } finally {
         await handle.close();
       }

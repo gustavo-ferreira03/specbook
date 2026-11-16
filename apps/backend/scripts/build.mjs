@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { build } from "esbuild";
 
 const { version } = JSON.parse(
-  await fs.readFile(new URL("../../cli/package.json", import.meta.url), "utf8")
+  await fs.readFile(new URL("../../cli/package.json", import.meta.url), "utf-8")
 );
 await build({
   entryPoints: ["src/index.ts", "src/operations-cli.ts"],

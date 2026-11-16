@@ -404,7 +404,7 @@ describe("project, feature and spec through the writer", () => {
     assert.equal(spec.status, "unverified");
     const root = repoGit.getRepoDir(projectId);
     assert.equal(
-      await fs.readFile(path.join(root, spec.path, "spec.ts"), "utf8"),
+      await fs.readFile(path.join(root, spec.path, "spec.ts"), "utf-8"),
       VALID_SPEC
     );
     assert.equal(commitSha, await repoGit.getHeadSha(projectId));
@@ -457,7 +457,7 @@ describe("project, feature and spec through the writer", () => {
     assert.equal(spec.status, "unverified");
     const source = await fs.readFile(
       path.join(repoGit.getRepoDir(projectId), spec.path, "spec.ts"),
-      "utf8"
+      "utf-8"
     );
     assert.match(source, /^import \{ test, expect \} from "specbook";/);
   });
@@ -1492,7 +1492,7 @@ describe("autonomous job proposals", () => {
     assert.equal(
       await fs.readFile(
         path.join(repoGit.getRepoDir(projectId), feature.path, "feature.yml"),
-        "utf8"
+        "utf-8"
       ),
       featureFiles[0]?.after
     );
@@ -1512,7 +1512,7 @@ describe("autonomous job proposals", () => {
       assert.equal(
         await fs.readFile(
           path.join(repoGit.getRepoDir(projectId), spec.path, file.path),
-          "utf8"
+          "utf-8"
         ),
         file.after
       );
@@ -1522,7 +1522,7 @@ describe("autonomous job proposals", () => {
       spec.path,
       "spec.yml"
     );
-    const original = `# Human contract\n${await fs.readFile(yamlFile, "utf8")}`;
+    const original = `# Human contract\n${await fs.readFile(yamlFile, "utf-8")}`;
     await fs.writeFile(yamlFile, original);
     await repoGit.commitAll(projectId, "test: annotate contract");
     await reindexProject(projectId);
@@ -1557,7 +1557,7 @@ describe("autonomous job proposals", () => {
       }
     );
     assert.equal(approved.status, 200);
-    assert.equal(await fs.readFile(yamlFile, "utf8"), changed[0]?.after);
+    assert.equal(await fs.readFile(yamlFile, "utf-8"), changed[0]?.after);
     assert.deepEqual(
       await preview(behavior.id),
       changed,
@@ -1584,7 +1584,7 @@ describe("autonomous job proposals", () => {
       spec.path,
       "spec.yml"
     );
-    const original = `# Contract owned by the human\n${await fs.readFile(yamlFile, "utf8")}`;
+    const original = `# Contract owned by the human\n${await fs.readFile(yamlFile, "utf-8")}`;
     await fs.writeFile(yamlFile, original);
     await repoGit.commitAll(projectId, "test: add comment");
     await reindexProject(projectId);
@@ -1602,7 +1602,7 @@ describe("autonomous job proposals", () => {
       testSource: source,
     });
     assert.equal(await repoGit.getHeadSha(projectId), head);
-    assert.equal(await fs.readFile(yamlFile, "utf8"), original);
+    assert.equal(await fs.readFile(yamlFile, "utf-8"), original);
     assert.equal(
       (
         await proposeMutation(job, "update_spec", {
@@ -1614,7 +1614,7 @@ describe("autonomous job proposals", () => {
     );
     const commit = await applyProposal(proposal);
     assert.notEqual(commit, head);
-    assert.equal(await fs.readFile(yamlFile, "utf8"), original);
+    assert.equal(await fs.readFile(yamlFile, "utf-8"), original);
     assert.equal(await applyProposal(proposal), commit);
     assert.equal(await repoGit.getHeadSha(projectId), commit);
     const stale = await proposeMutation(job, "update_spec", {
@@ -1767,7 +1767,7 @@ describe("autonomous job proposals", () => {
               JSON.parse(
                 await fs.readFile(
                   path.join(workDir, input.arguments.filename!),
-                  "utf8"
+                  "utf-8"
                 )
               ),
               { cookies: [], origins: [] }
@@ -2346,7 +2346,7 @@ describe("project steward", () => {
     const { spec } = await createSpec(projectId, feature.id, "Store");
     const yaml = await fs.readFile(
       path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"),
-      "utf8"
+      "utf-8"
     );
     const snapshot = async (status: "failed" | "passed") => {
       const run = await runsRepository.createRun({
@@ -2441,7 +2441,7 @@ describe("project steward", () => {
         path.join(runsDir, run.id, "spec.yml"),
         await fs.readFile(
           path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"),
-          "utf8"
+          "utf-8"
         )
       );
       await runsRepository.finishRun(run.id, "failed", 1, "Expected: Store");
@@ -2527,7 +2527,7 @@ describe("project steward", () => {
         path.join(runsDir, run.id, "spec.yml"),
         await fs.readFile(
           path.join(repoGit.getRepoDir(projectId), spec.path, "spec.yml"),
-          "utf8"
+          "utf-8"
         )
       );
       await runsRepository.finishRun(
@@ -4101,7 +4101,7 @@ test("agent evaluation records outcomes and decisions without prompts or credent
     decision: "approve",
     actor: "agent",
   });
-  const records = (await fs.readFile(jobMetricsPath, "utf8"))
+  const records = (await fs.readFile(jobMetricsPath, "utf-8"))
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line))
@@ -4127,7 +4127,7 @@ test("agent evaluation records outcomes and decisions without prompts or credent
   const csv = execFileSync(
     process.execPath,
     ["scripts/export-metrics.mjs", jobMetricsPath, "--agent"],
-    { encoding: "utf8" }
+    { encoding: "utf-8" }
   );
   assert.match(csv, /classification,tokensUsed,actionsUsed,elapsedMs/);
   assert.match(csv, new RegExp(`${item.id},,reject,human`));
@@ -4213,7 +4213,7 @@ describe("repository recovery", () => {
     const { spec } = await createSpec(projectId, feature.id, "Sign in");
     const root = repoGit.getRepoDir(projectId);
     const target = path.join(root, spec.path, "spec.yml");
-    const before = await fs.readFile(target, "utf8");
+    const before = await fs.readFile(target, "utf-8");
     const after = before.replace("title: Sign in", "title: Reviewed sign in");
     await fs.writeFile(target, after);
     await fs.writeFile(path.join(root, "notes.md"), "Keep these notes.\n");
@@ -4258,7 +4258,7 @@ describe("repository recovery", () => {
     assert.equal((await save(fresh.fingerprint)).status, 200);
     assert.notEqual(await repoGit.getHeadSha(projectId), head);
     assert.equal(
-      await fs.readFile(target, "utf8"),
+      await fs.readFile(target, "utf-8"),
       after,
       "explicit review preserves the exact behavior edit"
     );
@@ -4307,7 +4307,7 @@ describe("repository recovery", () => {
       /files are being updated/
     );
     assert.equal(
-      await fs.readFile(path.join(root, ".git", "index.lock"), "utf8"),
+      await fs.readFile(path.join(root, ".git", "index.lock"), "utf-8"),
       "active operation"
     );
   });
@@ -4455,7 +4455,7 @@ describe("encrypted credentials and operations", () => {
         recursive: true,
       });
       const journalPath = path.join(migrations, "meta", "_journal.json");
-      const journal = JSON.parse(await fs.readFile(journalPath, "utf8"));
+      const journal = JSON.parse(await fs.readFile(journalPath, "utf-8"));
       journal.entries = journal.entries.filter(
         (entry: { idx: number }) => entry.idx < 43
       );
@@ -4566,8 +4566,8 @@ describe("encrypted credentials and operations", () => {
       );
       assert.ok(existsSync(path.join(restored, "specbook.db")));
       assert.equal(
-        await fs.readFile(path.join(restored, "pi-auth.json"), "utf8"),
-        await fs.readFile(path.join(original, "pi-auth.json"), "utf8")
+        await fs.readFile(path.join(restored, "pi-auth.json"), "utf-8"),
+        await fs.readFile(path.join(original, "pi-auth.json"), "utf-8")
       );
       assert.deepEqual(
         await fs.readdir(path.join(restored, "repos")),
@@ -4704,7 +4704,7 @@ describe("encrypted credentials and operations", () => {
       "last run survives regardless of age"
     );
     assert.equal(
-      (await fs.readFile(metrics, "utf8")).trim().split("\n").length,
+      (await fs.readFile(metrics, "utf-8")).trim().split("\n").length,
       1
     );
     assert.ok(result.removedMetrics >= 1);

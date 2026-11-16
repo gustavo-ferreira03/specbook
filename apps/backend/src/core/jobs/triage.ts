@@ -140,7 +140,7 @@ export function createTriageTools(job: Job, abort: () => void) {
           ? reviewedScreenshots(
               evidence,
               await fs
-                .readFile(path.join(directory, "spec.yml"), "utf8")
+                .readFile(path.join(directory, "spec.yml"), "utf-8")
                 .catch(() => null)
             )
           : []) {

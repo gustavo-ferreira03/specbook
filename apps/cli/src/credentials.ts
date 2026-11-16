@@ -123,7 +123,7 @@ async function readStore(): Promise<Store> {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(await fs.readFile(file, "utf8"));
+      parsed = JSON.parse(await fs.readFile(file, "utf-8"));
     } catch {
       throw new Error("Credentials file contains invalid JSON");
     }

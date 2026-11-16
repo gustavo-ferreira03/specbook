@@ -820,16 +820,18 @@ describe("run evidence", () => {
       failedStep: "Log in",
     });
     assert.deepEqual(
-      JSON.parse(await fs.readFile(path.join(output, "evidence.json"), "utf8")),
+      JSON.parse(
+        await fs.readFile(path.join(output, "evidence.json"), "utf-8")
+      ),
       manifest
     );
     assert.deepEqual(await readEvidenceManifest(output), manifest);
     assert.equal(
-      await fs.readFile(path.join(output, "evidence", "step-02.png"), "utf8"),
+      await fs.readFile(path.join(output, "evidence", "step-02.png"), "utf-8"),
       "png2"
     );
     assert.equal(
-      await fs.readFile(path.join(output, "evidence", "step-01.webp"), "utf8"),
+      await fs.readFile(path.join(output, "evidence", "step-01.webp"), "utf-8"),
       "webp1"
     );
 
@@ -911,9 +913,9 @@ describe("run evidence", () => {
     assert.equal(manifest.errorContext?.length, 32_000);
     assert.ok(manifest.errorContext?.startsWith('- heading "••••"'));
     assert.ok(
-      !(await fs.readFile(path.join(output, "evidence.json"), "utf8")).includes(
-        secret
-      )
+      !(
+        await fs.readFile(path.join(output, "evidence.json"), "utf-8")
+      ).includes(secret)
     );
 
     const passed = await writeRunEvidence(

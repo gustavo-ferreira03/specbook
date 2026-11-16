@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const frontend = fileURLToPath(new URL("..", import.meta.url));
 const root = path.resolve(frontend, "../..");
 const manifest = JSON.parse(
-  await fs.readFile(path.join(root, "apps/cli/package.json"), "utf8")
+  await fs.readFile(path.join(root, "apps/cli/package.json"), "utf-8")
 );
 const output = path.resolve(process.argv[2] ?? path.join(root, "dist/release"));
 const build = path.join(frontend, process.env.NEXT_DIST_DIR ?? ".next");
@@ -42,7 +42,7 @@ try {
         }
         const source = path.join(dependencies, packageName);
         const dependency = JSON.parse(
-          await fs.readFile(path.join(source, "package.json"), "utf8")
+          await fs.readFile(path.join(source, "package.json"), "utf-8")
         );
         const previous = packages.get(packageName);
         if (previous && previous !== dependency.version) {

@@ -538,7 +538,7 @@ export function createAccountsRouter(): Hono {
           .strict()
           .parse(
             JSON.parse(
-              Buffer.from(c.req.query("before")!, "base64url").toString("utf8")
+              Buffer.from(c.req.query("before")!, "base64url").toString("utf-8")
             )
           );
       } catch {

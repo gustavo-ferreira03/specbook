@@ -73,7 +73,7 @@ export async function scanPage(
   };
   await mcp.ensureBrowser(signal);
   await checkOrigin();
-  axeSource ??= fs.readFile(require.resolve("axe-core/axe.min.js"), "utf8");
+  axeSource ??= fs.readFile(require.resolve("axe-core/axe.min.js"), "utf-8");
   const code = `async () => {
         const origin = ${JSON.stringify(origin)};
         if (location.origin !== origin) throw new Error("Page left the project origin");

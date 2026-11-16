@@ -1089,14 +1089,14 @@ describe("CI access and quality gates", () => {
     assert.equal(
       await fs.readFile(
         path.join(runDirectory, "evidence/step-01.webp"),
-        "utf8"
+        "utf-8"
       ),
       "webp screenshot"
     );
     assert.equal(
       await fs.readFile(
         path.join(runDirectory, "evidence/step-02.png"),
-        "utf8"
+        "utf-8"
       ),
       "png screenshot"
     );
@@ -1906,15 +1906,15 @@ describe("CI access and quality gates", () => {
         seen.every((authorization) => authorization === "Bearer test-ci-token")
       );
       assert.match(
-        await fs.readFile(path.join(directory, "junit.xml"), "utf8"),
+        await fs.readFile(path.join(directory, "junit.xml"), "utf-8"),
         /failures="0"/
       );
       assert.match(
-        await fs.readFile(path.join(directory, "report.html"), "utf8"),
+        await fs.readFile(path.join(directory, "report.html"), "utf-8"),
         /Specbook report/
       );
       assert.match(
-        await fs.readFile(path.join(directory, "summary.md"), "utf8"),
+        await fs.readFile(path.join(directory, "summary.md"), "utf-8"),
         /passed/
       );
       failTrigger = true;
@@ -2234,7 +2234,7 @@ describe("CI access and quality gates", () => {
       }
       const summary = await fs.readFile(
         path.join(directory, "summary.md"),
-        "utf8"
+        "utf-8"
       );
       assert.match(summary, /Specbook: passed/);
       assert.ok(

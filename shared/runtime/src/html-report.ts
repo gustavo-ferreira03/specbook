@@ -174,7 +174,7 @@ export async function prepareReportSection(options: {
   const planned = human ? executionPlan(human) : [];
   const source = directory
     ? await fs
-        .readFile(path.join(directory, "spec.ts"), "utf8")
+        .readFile(path.join(directory, "spec.ts"), "utf-8")
         .catch(() => null)
     : null;
   const analysis = source ? analyzeSpecSource(source) : null;
@@ -247,10 +247,10 @@ export async function prepareReportSection(options: {
 
 const publicAsset = (file: string) =>
   fs
-    .readFile(new URL(`./assets/${file}`, import.meta.url), "utf8")
+    .readFile(new URL(`./assets/${file}`, import.meta.url), "utf-8")
     .catch(() =>
       fs
-        .readFile(new URL(`../dist/assets/${file}`, import.meta.url), "utf8")
+        .readFile(new URL(`../dist/assets/${file}`, import.meta.url), "utf-8")
         .catch(() => "")
     );
 

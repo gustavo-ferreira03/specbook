@@ -29,7 +29,7 @@ export async function generateReport(
   const run = JSON.parse(
     await fs.readFile(
       await safeWorkspacePath(workspace, `runs/${id}/run.json`),
-      "utf8"
+      "utf-8"
     )
   ) as LocalRun;
   const sections = [];
@@ -39,7 +39,7 @@ export async function generateReport(
     const human = parseSpecYaml(
       await fs.readFile(
         await safeWorkspacePath(workspace, `${relative}/spec.yml`),
-        "utf8"
+        "utf-8"
       )
     );
     for (const entry of await fs.readdir(evidenceDirectory, {

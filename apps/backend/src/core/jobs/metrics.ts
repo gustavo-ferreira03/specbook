@@ -53,7 +53,7 @@ export async function recordAgentMetric(
       await fs.appendFile(
         jobMetricsPath,
         `${JSON.stringify(record)}\n`,
-        "utf8"
+        "utf-8"
       );
     })
   );

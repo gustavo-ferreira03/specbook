@@ -110,7 +110,7 @@ async function removeVideos(
 async function pruneMetrics(file: string, cutoff: number): Promise<number> {
   return withFileQueue(file, async () => {
     const text = await fs
-      .readFile(file, "utf8")
+      .readFile(file, "utf-8")
       .catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") {
           return "";

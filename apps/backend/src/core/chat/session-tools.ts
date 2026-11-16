@@ -106,7 +106,7 @@ export function createSessionTools(options: SessionToolOptions) {
               `browser tool failed: ${await renderMcpResult(saved as { content?: unknown }, options.workDir)}`
             );
           }
-          const raw = await fs.readFile(filePath, "utf8");
+          const raw = await fs.readFile(filePath, "utf-8");
           signal?.throwIfAborted();
           await chatSessionsRepository.upsert({
             id: crypto.randomUUID(),
@@ -168,7 +168,7 @@ export function createSessionTools(options: SessionToolOptions) {
         const filePath = path.join(options.workDir, filename);
         try {
           signal?.throwIfAborted();
-          await fs.writeFile(filePath, decryptSecret(saved.state), "utf8");
+          await fs.writeFile(filePath, decryptSecret(saved.state), "utf-8");
           const restored = await options.mcp.client.callTool(
             {
               name: "browser_set_storage_state",

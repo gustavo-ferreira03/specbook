@@ -4,6 +4,6 @@ declare const SPECBOOK_CLI_VERSION: string;
 export const CLI_VERSION: string =
   typeof SPECBOOK_CLI_VERSION === "undefined"
     ? JSON.parse(
-        readFileSync(new URL("../package.json", import.meta.url), "utf8")
+        readFileSync(new URL("../package.json", import.meta.url), "utf-8")
       ).version
     : SPECBOOK_CLI_VERSION;

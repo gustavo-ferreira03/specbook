@@ -32,7 +32,7 @@ export async function htmlReport(
       const directory = await realRunDirectory(item.runId);
       const humanSpec = directory
         ? await fs
-            .readFile(path.join(directory, "spec.yml"), "utf8")
+            .readFile(path.join(directory, "spec.yml"), "utf-8")
             .then((source) => parseSpecYaml(source).humanSpec)
             .catch(() => null)
         : null;

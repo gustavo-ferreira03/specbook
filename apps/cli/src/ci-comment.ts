@@ -71,7 +71,7 @@ export async function ciCommentContext(
     let pullRequest: unknown = process.env.SPECBOOK_PR_NUMBER;
     if (!pullRequest && process.env.GITHUB_EVENT_PATH) {
       const event = JSON.parse(
-        await fs.readFile(process.env.GITHUB_EVENT_PATH, "utf8")
+        await fs.readFile(process.env.GITHUB_EVENT_PATH, "utf-8")
       ) as { pull_request?: { number?: number } };
       pullRequest = event.pull_request?.number;
     }
@@ -163,10 +163,10 @@ export async function publishCiComment(
   }
   const marker = `<!-- specbook:${crypto.createHash("sha256").update(`${api}/${project}`).digest("hex")} -->`;
   let body = `${marker}\n${scrubCi(summary)}`;
-  if (Buffer.byteLength(body, "utf8") > 60_000) {
+  if (Buffer.byteLength(body, "utf-8") > 60_000) {
     body = `${Buffer.from(body)
       .subarray(0, 55_000)
-      .toString("utf8")
+      .toString("utf-8")
       .replace(
         /\uFFFD$/,
         ""

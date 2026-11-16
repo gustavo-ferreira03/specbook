@@ -98,7 +98,7 @@ export async function readApiDocumentation(
             resolve({
               url: url.href,
               contentType,
-              text: Buffer.concat(chunks).toString("utf8"),
+              text: Buffer.concat(chunks).toString("utf-8"),
             })
           );
         }

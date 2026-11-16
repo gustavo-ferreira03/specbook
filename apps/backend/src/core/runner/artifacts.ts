@@ -77,7 +77,7 @@ export async function readRunEvidence(runId: string) {
   const humanSpec =
     directory && available.has("spec.yml")
       ? await fs
-          .readFile(path.join(directory, "spec.yml"), "utf8")
+          .readFile(path.join(directory, "spec.yml"), "utf-8")
           .then((source) => parseSpecYaml(source).humanSpec)
           .catch(() => null)
       : null;
@@ -88,7 +88,7 @@ export async function readRunEvidence(runId: string) {
   const source =
     directory && available.has("spec.ts")
       ? await fs
-          .readFile(path.join(directory, "spec.ts"), "utf8")
+          .readFile(path.join(directory, "spec.ts"), "utf-8")
           .catch(() => null)
       : null;
   const analysis = source ? analyzeSpecSource(source) : null;

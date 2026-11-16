@@ -178,7 +178,7 @@ try {
       true
     );
     const source = (
-      await fs.readFile(path.join(workspace, selectedPath, "spec.ts"), "utf8")
+      await fs.readFile(path.join(workspace, selectedPath, "spec.ts"), "utf-8")
     ).replace(`// ${sentinel}`, "");
     for (let index = 0; index < 2; index++) {
       assert.equal(
@@ -192,7 +192,7 @@ try {
       );
     }
     const saved = JSON.parse(
-      await fs.readFile(path.join(session, "state.json"), "utf8")
+      await fs.readFile(path.join(session, "state.json"), "utf-8")
     );
     assert.deepEqual(saved.writes, [`${selectedPath}/spec.ts`]);
     assert.deepEqual(saved.writeEvents, [
@@ -212,7 +212,7 @@ try {
       undefined
     );
     const outcome = JSON.parse(
-      await fs.readFile(path.join(session, "outcome.json"), "utf8")
+      await fs.readFile(path.join(session, "outcome.json"), "utf-8")
     );
     assert.equal(outcome.status, "waiting_for_selection");
     assert.deepEqual(
@@ -337,7 +337,10 @@ try {
     assert.match(resultText(stale), /turn was replaced/);
     assert.equal(
       (
-        await fs.readFile(path.join(workspace, selectedPath, "spec.ts"), "utf8")
+        await fs.readFile(
+          path.join(workspace, selectedPath, "spec.ts"),
+          "utf-8"
+        )
       ).includes("stale turn"),
       false
     );
@@ -406,7 +409,7 @@ try {
         undefined
       );
       const outcome = JSON.parse(
-        await fs.readFile(path.join(outcomeSession, "outcome.json"), "utf8")
+        await fs.readFile(path.join(outcomeSession, "outcome.json"), "utf-8")
       );
       assert.equal(outcome.status, expectedStatus);
       if (tool === "request_credentials") {

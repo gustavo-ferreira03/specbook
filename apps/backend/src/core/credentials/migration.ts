@@ -87,7 +87,7 @@ export async function migrateCredentialFields(): Promise<void> {
 
 async function readOptional(file: string): Promise<string | null> {
   try {
-    return await fs.readFile(file, "utf8");
+    return await fs.readFile(file, "utf-8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;

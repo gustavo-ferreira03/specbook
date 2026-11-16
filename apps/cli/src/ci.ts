@@ -218,7 +218,7 @@ export async function runCi(options: CiOptions) {
       )
     );
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, text, "utf8");
+    await fs.writeFile(file, text, "utf-8");
     if (format === "markdown") {
       summaryText = text;
     }

@@ -290,7 +290,7 @@ function appendMetricsLine(line: string): Promise<void> {
   const write = writeQueue.then(() =>
     withFileQueue(chatTurnMetricsPath, async () => {
       await fs.mkdir(metricsDir, { recursive: true });
-      await fs.appendFile(chatTurnMetricsPath, `${line}\n`, "utf8");
+      await fs.appendFile(chatTurnMetricsPath, `${line}\n`, "utf-8");
     })
   );
   writeQueue = write.catch(() => undefined);

@@ -384,7 +384,7 @@ export async function completeRunnerWork(
             try {
               content = Buffer.from(
                 JSON.stringify(
-                  scrubJson(JSON.parse(content.toString("utf8")), scrub)
+                  scrubJson(JSON.parse(content.toString("utf-8")), scrub)
                 )
               );
             } catch {
@@ -413,7 +413,7 @@ export async function completeRunnerWork(
             "evidence.json"
           );
           const text = await fs
-            .readFile(manifestFile, "utf8")
+            .readFile(manifestFile, "utf-8")
             .catch(() => null);
           let manifest: Record<string, unknown>;
           try {

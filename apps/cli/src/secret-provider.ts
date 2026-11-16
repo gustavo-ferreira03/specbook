@@ -88,7 +88,7 @@ export async function providerProfile(
   if (signal?.aborted) {
     abort();
   }
-  child.stdout.setEncoding("utf8");
+  child.stdout.setEncoding("utf-8");
   child.stdout.on("data", (chunk: string) => {
     if (tooLarge) {
       return;

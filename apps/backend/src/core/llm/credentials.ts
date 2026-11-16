@@ -33,7 +33,7 @@ export class FileCredentialStore implements CredentialStore {
   private async readData(): Promise<CredentialData> {
     try {
       return JSON.parse(
-        decryptSecret(await readFile(this.filePath, "utf8"))
+        decryptSecret(await readFile(this.filePath, "utf-8"))
       ) as CredentialData;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {

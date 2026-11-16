@@ -101,7 +101,7 @@ function parseBasicAuth(
   if (!scheme || scheme.toLowerCase() !== "basic" || !value) {
     return null;
   }
-  const decoded = Buffer.from(value, "base64").toString("utf8");
+  const decoded = Buffer.from(value, "base64").toString("utf-8");
   const separator = decoded.indexOf(":");
   if (separator < 0) {
     return null;
@@ -132,7 +132,7 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
   let status = 200;
   for (const line of buffer
     .subarray(0, index)
-    .toString("utf8")
+    .toString("utf-8")
     .split(/\r?\n/)) {
     const colon = line.indexOf(":");
     if (colon < 0) {
@@ -244,7 +244,7 @@ function spawnBackend(request: BackendRequest) {
   child.once("close", () => clearTimeout(timer));
 
   let stderr = "";
-  child.stderr.setEncoding("utf8");
+  child.stderr.setEncoding("utf-8");
   child.stderr.on("data", (chunk: string) => {
     stderr = (stderr + chunk).slice(-4096);
   });

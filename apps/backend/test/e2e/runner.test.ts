@@ -730,7 +730,7 @@ describe(
           }
         );
         const pass = JSON.parse(
-          await fs.readFile(path.join(passDir, "evidence.json"), "utf8")
+          await fs.readFile(path.join(passDir, "evidence.json"), "utf-8")
         );
         assert.deepEqual(
           pass.steps.map((step: { label: string }) => step.label),
@@ -829,7 +829,7 @@ describe(
           /Refusing to type a secret: the current page origin is not allowed/
         );
         const guardEvidence = JSON.parse(
-          await fs.readFile(path.join(guardDir, "evidence.json"), "utf8")
+          await fs.readFile(path.join(guardDir, "evidence.json"), "utf-8")
         );
         assert.equal(
           guardEvidence.failedStep,
@@ -856,7 +856,7 @@ describe(
         );
         const results = await fs.readFile(
           path.join(directory, "batch", "results.json"),
-          "utf8"
+          "utf-8"
         );
         assert.ok(!results.includes(SECRET));
       }
@@ -883,7 +883,7 @@ describe(
         assert.match(result?.failReason ?? "", /toHaveText/);
         assert.doesNotMatch(result?.failReason ?? "", /\u001b\[/);
         const evidence = JSON.parse(
-          await fs.readFile(path.join(directory, "evidence.json"), "utf8")
+          await fs.readFile(path.join(directory, "evidence.json"), "utf-8")
         );
         assert.equal(evidence.steps.length, 2);
         assert.equal(evidence.video, "evidence/execution.webm");
@@ -923,7 +923,7 @@ describe(
         assert.equal(outcome.results.get("diagnostics")?.status, "failed");
         const text = await fs.readFile(
           path.join(directory, "evidence.json"),
-          "utf8"
+          "utf-8"
         );
         assert.ok(!text.includes(SECRET));
         const evidence = JSON.parse(text);
@@ -986,7 +986,7 @@ describe(
         const passingEvidence = JSON.parse(
           await fs.readFile(
             path.join(passingDirectory, "evidence.json"),
-            "utf8"
+            "utf-8"
           )
         );
         assert.ok(
@@ -1090,7 +1090,7 @@ test("API echo", async ({ request, step, secret }) => {
       assert.ok(!externalRequests.includes("/api/secret-target"));
       const text = await fs.readFile(
         path.join(passDir, "evidence.json"),
-        "utf8"
+        "utf-8"
       );
       assert.ok(!text.includes(SECRET));
       const evidence = JSON.parse(text);
@@ -1112,7 +1112,7 @@ test("API echo", async ({ request, step, secret }) => {
       );
       const results = await fs.readFile(
         path.join(directory, "batch", "results.json"),
-        "utf8"
+        "utf-8"
       );
       assert.ok(!results.includes(SECRET));
     }

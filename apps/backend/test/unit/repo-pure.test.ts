@@ -193,7 +193,7 @@ describe("safe-fs", () => {
       UnsafeRepoPathError
     );
     assert.equal(
-      await fs.readFile(path.join(outside, "secret.txt"), "utf8"),
+      await fs.readFile(path.join(outside, "secret.txt"), "utf-8"),
       "top secret"
     );
   });

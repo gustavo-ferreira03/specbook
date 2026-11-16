@@ -116,7 +116,7 @@ export async function readEvidenceManifest(
 ): Promise<EvidenceManifest> {
   try {
     return evidenceManifestSchema.parse(
-      JSON.parse(await fs.readFile(path.join(runDir, "evidence.json"), "utf8"))
+      JSON.parse(await fs.readFile(path.join(runDir, "evidence.json"), "utf-8"))
     );
   } catch {
     return { steps: [], video: null, failedStep: null };
@@ -132,7 +132,7 @@ async function readText(
     if (!stat.isFile() || stat.size > maxBytes) {
       return null;
     }
-    return await fs.readFile(source, "utf8");
+    return await fs.readFile(source, "utf-8");
   } catch {
     return null;
   }
@@ -306,7 +306,7 @@ export async function writeRunEvidence(
   await fs.writeFile(
     path.join(outputDir, "evidence.json"),
     JSON.stringify(manifest),
-    "utf8"
+    "utf-8"
   );
   return manifest;
 }

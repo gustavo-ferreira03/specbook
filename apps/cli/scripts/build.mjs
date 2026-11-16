@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 
 import { build } from "esbuild";
 const manifest = JSON.parse(
-  await fs.readFile(new URL("../package.json", import.meta.url), "utf8")
+  await fs.readFile(new URL("../package.json", import.meta.url), "utf-8")
 );
 const uiChecksum = process.env.SPECBOOK_UI_RELEASE_SHA256 ?? "";
 if (uiChecksum && !/^[a-f0-9]{64}$/.test(uiChecksum)) {

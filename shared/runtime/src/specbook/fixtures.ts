@@ -434,14 +434,14 @@ export const test = base.extend<{
       await stopReplay(page, replay);
       if (replay.unavailable) {
         const file = testInfo.outputPath("specbook-replay-unavailable.txt");
-        await fs.writeFile(file, replay.unavailable, "utf8");
+        await fs.writeFile(file, replay.unavailable, "utf-8");
         await testInfo.attach(REPLAY_UNAVAILABLE_ATTACHMENT, {
           path: file,
           contentType: "text/plain",
         });
       } else {
         const file = testInfo.outputPath("specbook-replay.json");
-        await fs.writeFile(file, replay.serialized(), "utf8");
+        await fs.writeFile(file, replay.serialized(), "utf-8");
         await testInfo.attach(REPLAY_ATTACHMENT, {
           path: file,
           contentType: "application/json",
@@ -458,7 +458,7 @@ export const test = base.extend<{
       page.off("response", onResponse);
       if (diagnostics.length > 0) {
         const file = testInfo.outputPath("specbook-diagnostics.json");
-        await fs.writeFile(file, JSON.stringify(diagnostics), "utf8");
+        await fs.writeFile(file, JSON.stringify(diagnostics), "utf-8");
         await testInfo.attach("specbook-diagnostics", {
           path: file,
           contentType: "application/json",
@@ -512,7 +512,7 @@ export const test = base.extend<{
             .locator("body")
             .ariaSnapshot({ timeout: 2000 });
           const file = testInfo.outputPath("specbook-error-context.txt");
-          await fs.writeFile(file, snapshot.slice(0, 32_000), "utf8");
+          await fs.writeFile(file, snapshot.slice(0, 32_000), "utf-8");
           await testInfo.attach("specbook-error-context", {
             path: file,
             contentType: "text/plain",
@@ -526,7 +526,7 @@ export const test = base.extend<{
           const file = testInfo.outputPath(
             `${API_STEP_ATTACHMENT_PREFIX}${number}.json`
           );
-          await fs.writeFile(file, JSON.stringify(requests), "utf8");
+          await fs.writeFile(file, JSON.stringify(requests), "utf-8");
           await testInfo.attach(`${API_STEP_ATTACHMENT_PREFIX}${number}`, {
             path: file,
             contentType: "application/json",

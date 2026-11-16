@@ -172,7 +172,7 @@ async function validateStorage(root: string): Promise<void> {
       }
     }
     const auth = await fs
-      .readFile(path.join(root, "pi-auth.json"), "utf8")
+      .readFile(path.join(root, "pi-auth.json"), "utf-8")
       .catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") {
           return null;
@@ -318,7 +318,7 @@ export async function restoreStorage(archivePath: string): Promise<void> {
       { maxBuffer: 4 * 1024 * 1024 }
     );
     const manifest = manifestSchema.parse(
-      JSON.parse(await fs.readFile(path.join(staging, manifestName), "utf8"))
+      JSON.parse(await fs.readFile(path.join(staging, manifestName), "utf-8"))
     );
     const files = (await listFiles(staging)).filter(
       (file) => file !== manifestName

@@ -90,7 +90,7 @@ export async function launchBrowserMcp(opts: {
       },
       session: { restore_on_startup: 5, startup_urls: [] },
     }),
-    "utf8"
+    "utf-8"
   );
   const initPage = path.join(opts.workDir, "navigation-policy.ts");
   if (opts.navigationOrigins) {
@@ -109,7 +109,7 @@ export async function launchBrowserMcp(opts: {
             await session.send("Fetch.enable", { patterns: [{ resourceType: "Document", requestStage: "Request" }] });
             page.on("close", () => void session.detach().catch(() => undefined));
         };`,
-      "utf8"
+      "utf-8"
     );
   }
   const config = {
@@ -146,7 +146,7 @@ export async function launchBrowserMcp(opts: {
     capabilities: ["core", "storage", "vision"],
   };
   const configPath = path.join(opts.workDir, "mcp-config.json");
-  await fs.writeFile(configPath, JSON.stringify(config), "utf8");
+  await fs.writeFile(configPath, JSON.stringify(config), "utf-8");
   const env = minimalChildEnv({
     DISPLAY: opts.display,
     XDG_SESSION_TYPE: "x11",
@@ -232,7 +232,7 @@ function inlineSnapshots(text: string, workDir: string): Promise<string> {
         ) {
           return null;
         }
-        return await fs.readFile(file, "utf8");
+        return await fs.readFile(file, "utf-8");
       } catch {
         return null;
       }

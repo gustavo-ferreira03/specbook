@@ -6,7 +6,7 @@ export const CLI_VERSION: string =
     ? JSON.parse(
         readFileSync(
           new URL("../../../cli/package.json", import.meta.url),
-          "utf8"
+          "utf-8"
         )
       ).version
     : SPECBOOK_CLI_VERSION;

@@ -170,7 +170,7 @@ async function discover(baseUrl: string): Promise<Favicon | null> {
   ).catch(() => null);
   const candidates =
     page?.contentType === "text/html"
-      ? iconCandidates(page.body.toString("utf8"), page.url)
+      ? iconCandidates(page.body.toString("utf-8"), page.url)
       : [new URL("/favicon.ico", project.origin)];
   for (const candidate of candidates) {
     const icon = await fetchLimited(
@@ -201,7 +201,7 @@ export async function projectFavicon(
 ): Promise<Favicon | null> {
   const file = path.join(faviconsDir, projectId);
   const meta = await fs
-    .readFile(`${file}.json`, "utf8")
+    .readFile(`${file}.json`, "utf-8")
     .then(
       (text) =>
         JSON.parse(text) as {

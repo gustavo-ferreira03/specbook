@@ -100,7 +100,7 @@ export async function loadConfig(workspace: string): Promise<LocalConfig> {
     parse(
       await fs.readFile(
         await safeWorkspacePath(workspace, "config.yml"),
-        "utf8"
+        "utf-8"
       )
     )
   );
@@ -357,12 +357,12 @@ export async function readSpec(
 ): Promise<LocalSpec> {
   const yamlSource = await fs.readFile(
     await safeWorkspacePath(workspace, `${relative}/spec.yml`),
-    "utf8"
+    "utf-8"
   );
   const yaml = parseSpecYaml(yamlSource);
   const source = await fs.readFile(
     await safeWorkspacePath(workspace, `${relative}/spec.ts`),
-    "utf8"
+    "utf-8"
   );
   const analyzed = analyzeSpecSource(source);
   if (!analyzed.ok) {
@@ -381,7 +381,7 @@ export async function readSpec(
   const feature = parseFeatureYaml(
     await fs.readFile(
       await safeWorkspacePath(workspace, `${featurePath}/feature.yml`),
-      "utf8"
+      "utf-8"
     )
   );
   return {

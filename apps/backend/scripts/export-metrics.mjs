@@ -38,7 +38,7 @@ if (!fs.existsSync(inputPath)) {
 }
 
 const records = [];
-fs.readFileSync(inputPath, "utf8")
+fs.readFileSync(inputPath, "utf-8")
   .split("\n")
   .forEach((line, index) => {
     if (!line.trim()) {
@@ -182,7 +182,7 @@ const csv =
   ].join("\n") + "\n";
 
 if (outPath) {
-  fs.writeFileSync(outPath, csv, "utf8");
+  fs.writeFileSync(outPath, csv, "utf-8");
 } else {
   process.stdout.write(csv);
 }
