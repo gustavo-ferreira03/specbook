@@ -66,9 +66,9 @@ function playwrightCli(): string {
 
 export function specbookModulePath(): string {
   const candidates = [
-    new URL("./specbook-fixtures.mjs", import.meta.url),
-    new URL("./specbook/fixtures.ts", import.meta.url),
-    new URL("./specbook/fixtures.js", import.meta.url),
+    new URL("specbook-fixtures.mjs", import.meta.url),
+    new URL("specbook/fixtures.ts", import.meta.url),
+    new URL("specbook/fixtures.js", import.meta.url),
   ].map((url) => fileURLToPath(url));
   const found = candidates.find((candidate) => existsSync(candidate));
   if (!found) {

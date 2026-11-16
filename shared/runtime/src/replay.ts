@@ -106,7 +106,7 @@ let recorderSource: Promise<string> | undefined;
 export function readRecorderSource(): Promise<string> {
   return (recorderSource ??= (async () => {
     const candidates = [
-      new URL("./assets/rrweb-recorder.js", import.meta.url),
+      new URL("assets/rrweb-recorder.js", import.meta.url),
       new URL("../dist/assets/rrweb-recorder.js", import.meta.url),
     ];
     const bundled = candidates.find((file) => existsSync(file));
