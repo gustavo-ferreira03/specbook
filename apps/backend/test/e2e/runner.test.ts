@@ -581,8 +581,8 @@ describe(
                 };
                 const differences: Record<string, number> = {};
                 for (const [name, [ax, ay, bx, by]] of Object.entries(pairs)) {
-                  const a = context.getImageData(ax, ay, 140, 30).data,
-                    b = context.getImageData(bx, by, 140, 30).data;
+                  const a = context.getImageData(ax, ay, 140, 30).data;
+                  const b = context.getImageData(bx, by, 140, 30).data;
                   let total = 0;
                   for (let index = 0; index < a.length; index++) {
                     total += Math.abs(a[index] - b[index]);

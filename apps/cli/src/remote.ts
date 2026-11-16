@@ -471,8 +471,8 @@ async function localFiles(workspace: string, relative: string) {
       throw error;
     }
   };
-  const source = await read("spec.ts"),
-    yaml = await read("spec.yml");
+  const source = await read("spec.ts");
+  const yaml = await read("spec.yml");
   return source === null || yaml === null
     ? null
     : { "spec.ts": source, "spec.yml": yaml };
@@ -512,8 +512,8 @@ export async function pull(workspace: string) {
     await safeWorkspacePath(workspace, `${spec.path}/spec.yml`, true);
   }
   const state = await readState(workspace, remote);
-  const pulled: { path: string; revision: string }[] = [],
-    conflicts: { path: string; reason: string }[] = [];
+  const pulled: { path: string; revision: string }[] = [];
+  const conflicts: { path: string; reason: string }[] = [];
   for (const feature of snapshot.features) {
     const featurePath = `${feature.path}/feature.yml`;
     const file = await safeWorkspacePath(workspace, featurePath, true);
@@ -540,8 +540,8 @@ export async function pull(workspace: string) {
   }
   for (const spec of snapshot.specs) {
     specPath(spec.path);
-    const local = await localFiles(workspace, spec.path),
-      previous = state.specs[spec.path];
+    const local = await localFiles(workspace, spec.path);
+    const previous = state.specs[spec.path];
     const anyFile = await fs
       .lstat(await safeWorkspacePath(workspace, spec.path, true))
       .catch((error: NodeJS.ErrnoException) => {
