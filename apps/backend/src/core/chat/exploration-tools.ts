@@ -161,7 +161,7 @@ export async function scanPage(
     networkResult.status === "fulfilled"
       ? resultText(networkResult.value)
           .split("\n")
-          .filter((line) => /=> \[(?:[45]\d\d|FAILED)\]/.test(line))
+          .filter((line) => /[=]> \[(?:[45]\d\d|FAILED)\]/.test(line))
           .slice(0, 30)
           .map((line) => line.slice(0, 500))
       : ["Network diagnostics unavailable"];
