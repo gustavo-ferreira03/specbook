@@ -159,8 +159,8 @@ export function createReplayImageRecorder(
       const computed = image.ownerDocument.defaultView?.getComputedStyle(image);
       if (
         !computed ||
-        !parseFloat(computed.width) ||
-        !parseFloat(computed.height)
+        !Number.parseFloat(computed.width) ||
+        !Number.parseFloat(computed.height)
       ) {
         return;
       }

@@ -38,17 +38,17 @@ export function isPrivateAddress(address: string): boolean {
       const [high, low] = canonical
         .slice(7)
         .split(":")
-        .map((value) => parseInt(value, 16));
+        .map((value) => Number.parseInt(value, 16));
       return isPrivateAddress(
         `${high! >> 8}.${high! & 255}.${low! >> 8}.${low! & 255}`
       );
     }
     const [first, second = "0"] = address.toLowerCase().split(":");
-    const prefix = parseInt(first!, 16);
+    const prefix = Number.parseInt(first!, 16);
     return (
       !(prefix >= 0x20_00 && prefix <= 0x3f_ff) ||
-      (prefix === 0x20_01 && parseInt(second, 16) < 0x2_00) ||
-      (prefix === 0x20_01 && parseInt(second, 16) === 0xd_b8) ||
+      (prefix === 0x20_01 && Number.parseInt(second, 16) < 0x2_00) ||
+      (prefix === 0x20_01 && Number.parseInt(second, 16) === 0xd_b8) ||
       prefix === 0x20_02 ||
       prefix === 0x3f_ff
     );
