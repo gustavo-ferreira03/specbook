@@ -92,13 +92,7 @@ export default function JoinPage() {
         </Link>
       }
     >
-      {!invitation ? (
-        error ? (
-          <InlineFeedback feedback={{ type: "error", text: error }} />
-        ) : (
-          <Skeleton className="h-44 w-full" />
-        )
-      ) : (
+      {invitation ? (
         <form onSubmit={accept} className="space-y-4">
           <div className="border-line rounded-lg border px-3.5 py-3">
             <p className="text-body text-ink">
@@ -147,6 +141,10 @@ export default function JoinPage() {
             {busy ? "Creating account…" : "Accept invitation"}
           </Button>
         </form>
+      ) : error ? (
+        <InlineFeedback feedback={{ type: "error", text: error }} />
+      ) : (
+        <Skeleton className="h-44 w-full" />
       )}
     </AuthShell>
   );

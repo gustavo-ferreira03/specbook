@@ -269,7 +269,69 @@ export function AccessTokensSettings() {
             </div>
           </SettingsBlock>
         )}
-        {!tokens ? (
+        {tokens ? (
+          !tokens.length ? (
+            <SettingsBlock>
+              <p className="text-body text-ink-muted">
+                No access tokens yet. Create one to log in from the CLI.
+              </p>
+            </SettingsBlock>
+          ) : (
+            <ul aria-label="Your access tokens">
+              {tokens.map((token) => (
+                <li
+                  key={token.id}
+                  className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 last:border-b-0 sm:px-5"
+                >
+                  <div className="min-w-0">
+                    <p className="text-body text-ink flex items-center gap-2 font-medium break-words">
+                      <KeyRound
+                        size={14}
+                        className="text-ink-subtle shrink-0"
+                        aria-hidden="true"
+                      />
+                      {token.name}
+                    </p>
+                    <p className="text-meta text-ink-muted mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                      <RelativeTime value={token.createdAt} prefix="Created" />
+                      {token.lastUsedAt ? (
+                        <RelativeTime
+                          value={token.lastUsedAt}
+                          prefix="Last used"
+                        />
+                      ) : (
+                        <span>Never used</span>
+                      )}
+                      {token.expiresAt ? (
+                        <time dateTime={token.expiresAt}>
+                          Expires{" "}
+                          {new Date(token.expiresAt).toLocaleDateString()}
+                        </time>
+                      ) : (
+                        <span>No expiry</span>
+                      )}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="destructive-soft"
+                    size="sm"
+                    disabled={busy}
+                    aria-label={`Revoke token ${token.name}`}
+                    onClick={(event) => {
+                      triggerRef.current = event.currentTarget;
+                      setRevokeError("");
+                      setRevoke(token);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    Revoke token
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
           <SettingsBlock>
             {feedback?.type === "error" ? (
               <Button
@@ -292,65 +354,6 @@ export function AccessTokensSettings() {
               </div>
             )}
           </SettingsBlock>
-        ) : !tokens.length ? (
-          <SettingsBlock>
-            <p className="text-body text-ink-muted">
-              No access tokens yet. Create one to log in from the CLI.
-            </p>
-          </SettingsBlock>
-        ) : (
-          <ul aria-label="Your access tokens">
-            {tokens.map((token) => (
-              <li
-                key={token.id}
-                className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 last:border-b-0 sm:px-5"
-              >
-                <div className="min-w-0">
-                  <p className="text-body text-ink flex items-center gap-2 font-medium break-words">
-                    <KeyRound
-                      size={14}
-                      className="text-ink-subtle shrink-0"
-                      aria-hidden="true"
-                    />
-                    {token.name}
-                  </p>
-                  <p className="text-meta text-ink-muted mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                    <RelativeTime value={token.createdAt} prefix="Created" />
-                    {token.lastUsedAt ? (
-                      <RelativeTime
-                        value={token.lastUsedAt}
-                        prefix="Last used"
-                      />
-                    ) : (
-                      <span>Never used</span>
-                    )}
-                    {token.expiresAt ? (
-                      <time dateTime={token.expiresAt}>
-                        Expires {new Date(token.expiresAt).toLocaleDateString()}
-                      </time>
-                    ) : (
-                      <span>No expiry</span>
-                    )}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="destructive-soft"
-                  size="sm"
-                  disabled={busy}
-                  aria-label={`Revoke token ${token.name}`}
-                  onClick={(event) => {
-                    triggerRef.current = event.currentTarget;
-                    setRevokeError("");
-                    setRevoke(token);
-                  }}
-                >
-                  <Trash2 size={14} />
-                  Revoke token
-                </Button>
-              </li>
-            ))}
-          </ul>
         )}
       </SettingsSection>
       <ConfirmDeleteDialog

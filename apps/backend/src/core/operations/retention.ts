@@ -217,17 +217,17 @@ async function clean(
         return;
       }
       const directory = path.join(runsDir, run.id);
-      if (!kept.has(run.id)) {
+      if (kept.has(run.id)) {
+        result.removedVideos += await removeVideos(
+          directory,
+          now - settings.videoDays * DAY_MS
+        );
+      } else {
         await db
           .delete(runs)
           .where(and(eq(runs.id, run.id), eq(runs.status, run.status)));
         await fs.rm(directory, { recursive: true, force: true });
         result.removedRuns++;
-      } else {
-        result.removedVideos += await removeVideos(
-          directory,
-          now - settings.videoDays * DAY_MS
-        );
       }
     });
   }

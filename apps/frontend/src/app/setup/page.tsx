@@ -185,17 +185,7 @@ export default function SetupPage() {
               </Button>
             }
           />
-        ) : !status ? (
-          <div
-            role="status"
-            aria-label="Loading setup"
-            aria-busy="true"
-            className="space-y-5"
-          >
-            <Skeleton className="h-5 w-60" />
-            <Skeleton className="h-48 w-full" />
-          </div>
-        ) : (
+        ) : status ? (
           <>
             <ol
               aria-label="Setup progress"
@@ -388,6 +378,16 @@ export default function SetupPage() {
               </>
             )}
           </>
+        ) : (
+          <div
+            role="status"
+            aria-label="Loading setup"
+            aria-busy="true"
+            className="space-y-5"
+          >
+            <Skeleton className="h-5 w-60" />
+            <Skeleton className="h-48 w-full" />
+          </div>
         )}
       </PageContainer>
     </main>

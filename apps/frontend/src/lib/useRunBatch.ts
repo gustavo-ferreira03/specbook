@@ -205,14 +205,14 @@ export function useRunBatch(
         if (isAbortError(caught)) {
           return;
         }
-        if (!started) {
+        if (started) {
+          markUnknown();
+          setError(errorMessage(caught));
+        } else {
           setItems((current) =>
             current.map((item) => ({ ...item, status: "skipped" }))
           );
           setError(`The run could not start: ${errorMessage(caught)}`);
-        } else {
-          markUnknown();
-          setError(errorMessage(caught));
         }
       } finally {
         if (controllerRef.current === controller) {

@@ -793,18 +793,7 @@ export default function HomePage({
               </Button>
             }
           />
-        ) : !data ? (
-          <div
-            className="space-y-6"
-            role="status"
-            aria-busy="true"
-            aria-label="Loading Home"
-          >
-            {[0, 1, 2].map((row) => (
-              <Skeleton key={row} className="h-11 w-full" />
-            ))}
-          </div>
-        ) : (
+        ) : data ? (
           <>
             {feedback && <InlineFeedback feedback={feedback} />}
             {data.needsYou.length > 0 && (
@@ -837,6 +826,17 @@ export default function HomePage({
               />
             )}
           </>
+        ) : (
+          <div
+            className="space-y-6"
+            role="status"
+            aria-busy="true"
+            aria-label="Loading Home"
+          >
+            {[0, 1, 2].map((row) => (
+              <Skeleton key={row} className="h-11 w-full" />
+            ))}
+          </div>
         )}
       </PageContainer>
       <Sheet

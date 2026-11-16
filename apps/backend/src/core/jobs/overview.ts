@@ -134,11 +134,11 @@ export async function projectOverview(projectId: string) {
     if (run.retryOf && !retries.has(run.retryOf)) retries.set(run.retryOf, run);
   }
   const retryFor = async (run: Run) =>
-    !needsRetry(run)
-      ? null
-      : allRuns.has(run.id)
+    needsRetry(run)
+      ? allRuns.has(run.id)
         ? (retries.get(run.id) ?? null)
-        : runsRepository.retryFor(run.id);
+        : runsRepository.retryFor(run.id)
+      : null;
   const currentRuns = new Map(
     await Promise.all(
       specs.map(async (spec) => {

@@ -136,13 +136,13 @@ export function publicProfile(
     allowedOrigins: row.allowedOrigins,
     createdAt: row.createdAt,
     fields: row.fields.map((field) =>
-      field.sensitive !== false
-        ? { key: field.key, sensitive: true, hasValue: field.value !== "" }
-        : {
+      field.sensitive === false
+        ? {
             key: field.key,
             sensitive: false,
             value: decryptSecret(field.value),
           }
+        : { key: field.key, sensitive: true, hasValue: field.value !== "" }
     ),
   };
 }
@@ -275,13 +275,13 @@ export async function resolveSecretEnv(
   const publicRefs: string[] = [];
   for (const ref of refs) {
     const field = byEnvName.get(ref);
-    if (!field) {
-      missing.push(ref);
-    } else {
+    if (field) {
       env[ref] = field.value;
       if (!field.sensitive) {
         publicRefs.push(ref);
       }
+    } else {
+      missing.push(ref);
     }
   }
   return { env, missing, publicRefs };

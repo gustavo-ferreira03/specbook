@@ -166,7 +166,7 @@ export const jobsRepository = {
     ) {
       await recordAgentMetric(
         job,
-        patch.classification !== undefined ? "classified" : "status_changed"
+        patch.classification === undefined ? "status_changed" : "classified"
       );
     }
     if (job) {

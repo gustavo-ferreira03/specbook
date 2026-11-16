@@ -83,9 +83,9 @@ export async function prepareTriageGoal(projectId: string, runId?: string) {
     );
   }
   const { run, spec } = current;
-  const draft = !(await runsRepository.hasPassed(spec.id))
-    ? "\nThis Spec has never passed, so its spec.ts is an unproven draft: a wrong locator, attribute or assumption about the app is test drift. Call it an app bug only after confirming the app contradicts spec.yml and the draft's own action order did not cause the result (for example, an element left selected or focused by a previous step receiving the next input). Also fix assertions on things the app never exposes, without changing what spec.yml expects."
-    : "";
+  const draft = (await runsRepository.hasPassed(spec.id))
+    ? ""
+    : "\nThis Spec has never passed, so its spec.ts is an unproven draft: a wrong locator, attribute or assumption about the app is test drift. Call it an app bug only after confirming the app contradicts spec.yml and the draft's own action order did not cause the result (for example, an element left selected or focused by a previous step receiving the next input). Also fix assertions on things the app never exposes, without changing what spec.yml expects.";
   const investigation =
     run.environment?.executor === "runner"
       ? "Read get_failure_evidence and get_spec, then classify with triage_failure using the saved evidence. Live browser exploration is unavailable in runner environments; describe only observed evidence and use runner reruns for verification. Missing credentials must be restored locally on the runner with specbook credentials, never in the server vault."

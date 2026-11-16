@@ -137,9 +137,7 @@ export function ChatSpecPreview({
               Try again
             </Button>
           </Alert>
-        ) : !detail ? (
-          <Skeleton className="h-40" role="status" aria-label="Loading Spec" />
-        ) : (
+        ) : detail ? (
           <div className="space-y-5">
             {detail.spec.description && (
               <p className="text-body text-ink-muted break-words whitespace-pre-wrap">
@@ -288,6 +286,8 @@ export function ChatSpecPreview({
               </section>
             )}
           </div>
+        ) : (
+          <Skeleton className="h-40" role="status" aria-label="Loading Spec" />
         )}
       </DialogContent>
     </Dialog>

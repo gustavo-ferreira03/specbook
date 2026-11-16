@@ -128,25 +128,7 @@ export function RetentionSettings() {
       title="Storage retention"
       description="Keep recent evidence and remove older data automatically. Pending decisions and active investigations keep the runs they need."
     >
-      {!data ? (
-        <SettingsBlock>
-          {feedback ? (
-            <>
-              <InlineFeedback feedback={feedback} />
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-3"
-                onClick={() => void load()}
-              >
-                Try again
-              </Button>
-            </>
-          ) : (
-            <Skeleton className="h-40 w-full" />
-          )}
-        </SettingsBlock>
-      ) : (
+      {data ? (
         <form onSubmit={save}>
           {FIELDS.map(({ key, label, description }) => (
             <SettingsRow
@@ -205,6 +187,24 @@ export function RetentionSettings() {
             </Button>
           </SettingsFooter>
         </form>
+      ) : (
+        <SettingsBlock>
+          {feedback ? (
+            <>
+              <InlineFeedback feedback={feedback} />
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3"
+                onClick={() => void load()}
+              >
+                Try again
+              </Button>
+            </>
+          ) : (
+            <Skeleton className="h-40 w-full" />
+          )}
+        </SettingsBlock>
       )}
     </SettingsSection>
   );

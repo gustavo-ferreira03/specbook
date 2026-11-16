@@ -179,13 +179,13 @@ export function FileDiff({ file }: { file: ProposalFile }) {
                         aria-hidden="true"
                         className="text-ink-subtle pr-2 text-right select-none"
                       >
-                        {line.kind !== "added" ? line.before : ""}
+                        {line.kind === "added" ? "" : line.before}
                       </span>
                       <span
                         aria-hidden="true"
                         className="text-ink-subtle pr-2 text-right select-none"
                       >
-                        {line.kind !== "removed" ? line.after : ""}
+                        {line.kind === "removed" ? "" : line.after}
                       </span>
                       <span className="text-center select-none">
                         {line.kind === "added"

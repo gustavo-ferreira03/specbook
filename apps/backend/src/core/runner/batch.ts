@@ -190,16 +190,16 @@ async function ensureBatchIndex(
     let metadata = indexedProject
       ? batchIndex.get(indexedProject)?.get(entry.name)
       : undefined;
-    if (!metadata) {
+    if (metadata) {
+      indexedBatchIds.delete(entry.name);
+      indexedBatchIds.set(entry.name, indexedProject!);
+    } else {
       const batch = await getRunBatch(entry.name);
       if (!batch) {
         continue;
       }
       indexedProject = batch.projectId;
       metadata = { startedAt: batch.startedAt, ci: Boolean(batch.ci) };
-    } else {
-      indexedBatchIds.delete(entry.name);
-      indexedBatchIds.set(entry.name, indexedProject!);
     }
     if (indexedProject === projectId) {
       project.set(entry.name, metadata);

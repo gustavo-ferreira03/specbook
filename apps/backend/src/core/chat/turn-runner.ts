@@ -131,7 +131,7 @@ export async function startBranchedChatTurn(
     throw error;
   }
   const trigger: TurnTrigger =
-    options.editedText !== undefined ? "edit" : "retry";
+    options.editedText === undefined ? "retry" : "edit";
   void runReservedChatTurn(
     id,
     branch.text,
@@ -436,9 +436,9 @@ async function runReservedChatTurn(
       ? [
           ...browserTools,
           ...createContextTools(discoveryRevision.id, row.projectId, id),
-          ...(!runnerEnvironment
-            ? [createApiDocumentationTool(row.projectId, environment)]
-            : []),
+          ...(runnerEnvironment
+            ? []
+            : [createApiDocumentationTool(row.projectId, environment)]),
           ...credentialTools,
           ...sessionTools,
           ...explorationTools,
@@ -453,12 +453,12 @@ async function runReservedChatTurn(
           }),
           createSpecBatchTool(row.projectId, id),
           createChatResultsTool(row.projectId, id),
-          ...(!runnerEnvironment
-            ? [createApiDocumentationTool(row.projectId, environment)]
-            : []),
-          ...(!turnPolicy
-            ? [createBackgroundTaskTool(row.projectId, `chat:${id}`, id)]
-            : []),
+          ...(runnerEnvironment
+            ? []
+            : [createApiDocumentationTool(row.projectId, environment)]),
+          ...(turnPolicy
+            ? []
+            : [createBackgroundTaskTool(row.projectId, `chat:${id}`, id)]),
           ...credentialTools,
           ...sessionTools,
           ...explorationTools,
@@ -711,10 +711,10 @@ async function runReservedChatTurn(
       aborted ? "aborted" : "error",
       aborted ? "user_abort" : "turn_failed"
     );
-    if (!aborted) {
-      await fail(errorCodeOf(error) ?? "infrastructure", String(error));
-    } else {
+    if (aborted) {
       outcome = { status: "aborted", errorCode: "cancelled" };
+    } else {
+      await fail(errorCodeOf(error) ?? "infrastructure", String(error));
     }
     if (!aborted) {
       logger.error("chat turn failed", { chatId: id, error });

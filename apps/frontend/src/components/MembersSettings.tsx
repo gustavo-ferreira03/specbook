@@ -182,17 +182,7 @@ export function MembersSettings() {
         )}
       </SettingsSection>
       <SettingsSection id="members-heading" title="Members">
-        {!data ? (
-          <SettingsBlock>
-            {feedback?.type === "error" ? (
-              <Button variant="outline" onClick={() => void load()}>
-                Try again
-              </Button>
-            ) : (
-              <Skeleton className="h-24 w-full" />
-            )}
-          </SettingsBlock>
-        ) : (
+        {data ? (
           <ul>
             {data.members.map((member) => (
               <li
@@ -237,6 +227,16 @@ export function MembersSettings() {
               </li>
             ))}
           </ul>
+        ) : (
+          <SettingsBlock>
+            {feedback?.type === "error" ? (
+              <Button variant="outline" onClick={() => void load()}>
+                Try again
+              </Button>
+            ) : (
+              <Skeleton className="h-24 w-full" />
+            )}
+          </SettingsBlock>
         )}
       </SettingsSection>
       {Boolean(data?.invitations.length) && (

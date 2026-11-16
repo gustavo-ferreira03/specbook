@@ -86,42 +86,44 @@ export function AuditSettings() {
         <SettingsBlock>
           <Skeleton className="h-40 w-full" />
         </SettingsBlock>
-      ) : !data ? null : !data.events.length ? (
-        <SettingsBlock>
-          <p className="text-body text-ink-muted">No actions recorded yet.</p>
-        </SettingsBlock>
-      ) : (
-        <ul>
-          {data.events.map((event) => (
-            <li
-              key={event.id}
-              className="border-line border-b px-4 py-4 last:border-0 sm:px-5"
-            >
-              <div className="flex flex-wrap justify-between gap-2">
-                <p className="text-body text-ink font-medium">
-                  {event.action.replaceAll(/[._]/g, " ")}
+      ) : data ? (
+        !data.events.length ? (
+          <SettingsBlock>
+            <p className="text-body text-ink-muted">No actions recorded yet.</p>
+          </SettingsBlock>
+        ) : (
+          <ul>
+            {data.events.map((event) => (
+              <li
+                key={event.id}
+                className="border-line border-b px-4 py-4 last:border-0 sm:px-5"
+              >
+                <div className="flex flex-wrap justify-between gap-2">
+                  <p className="text-body text-ink font-medium">
+                    {event.action.replaceAll(/[._]/g, " ")}
+                  </p>
+                  <time
+                    className="text-meta text-ink-subtle"
+                    dateTime={event.createdAt}
+                  >
+                    {formatDateTime(event.createdAt, { seconds: true })}
+                  </time>
+                </div>
+                <p className="text-body text-ink-muted mt-1">
+                  {event.actorName ??
+                    (event.actorKind === "user"
+                      ? "Former member"
+                      : event.actorKind === "agent"
+                        ? "Specbook agent"
+                        : event.actorKind === "ci"
+                          ? "CI integration"
+                          : "Specbook server")}
                 </p>
-                <time
-                  className="text-meta text-ink-subtle"
-                  dateTime={event.createdAt}
-                >
-                  {formatDateTime(event.createdAt, { seconds: true })}
-                </time>
-              </div>
-              <p className="text-body text-ink-muted mt-1">
-                {event.actorName ??
-                  (event.actorKind === "user"
-                    ? "Former member"
-                    : event.actorKind === "agent"
-                      ? "Specbook agent"
-                      : event.actorKind === "ci"
-                        ? "CI integration"
-                        : "Specbook server")}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
       {data?.nextBefore && (
         <SettingsBlock>
           <Button variant="outline" onClick={() => void more()} disabled={busy}>

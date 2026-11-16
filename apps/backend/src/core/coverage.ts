@@ -201,21 +201,21 @@ export async function projectCoverage(projectId: string) {
       const uncoveredRoutes = routes.filter(
         (route) => !valid.some((spec) => testsRoute(spec, route))
       );
-      const coverage: CoverageStatus = !matched.length
-        ? "uncovered"
-        : valid.length && !uncoveredRoutes.length
+      const coverage: CoverageStatus = matched.length
+        ? valid.length && !uncoveredRoutes.length
           ? "covered"
-          : "partial";
+          : "partial"
+        : "uncovered";
       const reason =
         coverage === "uncovered"
           ? "No Specs yet"
-          : !valid.length
-            ? "Specs need repairing"
-            : coverage === "partial"
+          : valid.length
+            ? coverage === "partial"
               ? `${uncoveredRoutes.length} known route${uncoveredRoutes.length === 1 ? "" : "s"} without a Spec`
               : routes.length
                 ? "Specs reach every known route"
-                : "Specs exist";
+                : "Specs exist"
+            : "Specs need repairing";
       return {
         name,
         routes,

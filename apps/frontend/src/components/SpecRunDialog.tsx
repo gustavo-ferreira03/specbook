@@ -111,24 +111,26 @@ function BatchDiagnostics({ runId }: { runId: string }) {
               <RefreshCw size={13} /> Try again
             </Button>
           </Alert>
-        ) : !evidence ? (
+        ) : evidence ? (
+          evidence.diagnostics?.length ||
+          evidence.errorContext ||
+          evidence.apiSteps?.length ? (
+            <div className="space-y-3">
+              <ApiRunEvidence evidence={evidence} />
+              <RunDiagnostics evidence={evidence} />
+            </div>
+          ) : (
+            <p className="text-meta text-ink-subtle">
+              No console or network failures were recorded.
+            </p>
+          )
+        ) : (
           <Skeleton
             className="h-14 w-full"
             aria-busy="true"
             aria-label="Loading diagnostics"
             role="status"
           />
-        ) : evidence.diagnostics?.length ||
-          evidence.errorContext ||
-          evidence.apiSteps?.length ? (
-          <div className="space-y-3">
-            <ApiRunEvidence evidence={evidence} />
-            <RunDiagnostics evidence={evidence} />
-          </div>
-        ) : (
-          <p className="text-meta text-ink-subtle">
-            No console or network failures were recorded.
-          </p>
         )}
       </CollapsibleContent>
     </Collapsible>

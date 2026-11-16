@@ -205,9 +205,9 @@ export const accountsRepository = {
       .update(users)
       .set({
         ...(patch.role ? { role: patch.role } : {}),
-        ...(patch.disabled !== undefined
-          ? { disabledAt: patch.disabled ? now() : null }
-          : {}),
+        ...(patch.disabled === undefined
+          ? {}
+          : { disabledAt: patch.disabled ? now() : null }),
         updatedAt: now(),
       })
       .where(

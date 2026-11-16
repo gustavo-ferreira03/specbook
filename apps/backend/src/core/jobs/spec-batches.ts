@@ -567,9 +567,8 @@ export async function presentSpecBatch(item: InboxItem) {
               other.status === "pending"
           )
         : null;
-      const state = !candidate.selected
-        ? "proposed"
-        : run && run.status !== "running"
+      const state = candidate.selected
+        ? run && run.status !== "running"
           ? run.status === "passed"
             ? "passed"
             : "failed"
@@ -580,7 +579,8 @@ export async function presentSpecBatch(item: InboxItem) {
               : ["completed", "cancelled"].includes(job?.status ?? "") ||
                   (job?.status === "stalled" && !job.retryAt)
                 ? "stopped"
-                : "queued";
+                : "queued"
+        : "proposed";
       const error = run?.failReason ?? candidate.error ?? job?.stopReason;
       return {
         ...candidate,

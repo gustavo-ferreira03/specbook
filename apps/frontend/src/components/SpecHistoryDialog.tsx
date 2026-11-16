@@ -141,39 +141,44 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
                 <Skeleton className="h-11" />
                 <Skeleton className="h-11" />
               </div>
-            ) : !entries ? null : entries.length === 0 ? (
-              <p className="text-control text-ink-subtle p-4">
-                No changes recorded yet.
-              </p>
-            ) : (
-              <ul className="space-y-0.5 p-2" aria-label="Commits">
-                {entries.map((entry) => (
-                  <li key={entry.sha}>
-                    <button
-                      type="button"
-                      onClick={() => setSelected(entry)}
-                      aria-pressed={selected?.sha === entry.sha}
-                      className={`hover:bg-surface-hover focus-visible:ring-ring w-full rounded-md px-2.5 py-2 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset ${selected?.sha === entry.sha ? "bg-surface-selected hover:bg-surface-selected" : ""}`}
-                    >
-                      <span className="text-control text-ink block truncate font-medium">
-                        {entry.message}
-                      </span>
-                      <span className="text-meta text-ink-subtle mt-0.5 flex items-center gap-1.5">
-                        <span className="tabular">
-                          {formatDateTime(entry.date)}
+            ) : entries ? (
+              entries.length === 0 ? (
+                <p className="text-control text-ink-subtle p-4">
+                  No changes recorded yet.
+                </p>
+              ) : (
+                <ul className="space-y-0.5 p-2" aria-label="Commits">
+                  {entries.map((entry) => (
+                    <li key={entry.sha}>
+                      <button
+                        type="button"
+                        onClick={() => setSelected(entry)}
+                        aria-pressed={selected?.sha === entry.sha}
+                        className={`hover:bg-surface-hover focus-visible:ring-ring w-full rounded-md px-2.5 py-2 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset ${selected?.sha === entry.sha ? "bg-surface-selected hover:bg-surface-selected" : ""}`}
+                      >
+                        <span className="text-control text-ink block truncate font-medium">
+                          {entry.message}
                         </span>
-                        <span aria-hidden="true" className="text-ink-disabled">
-                          ·
+                        <span className="text-meta text-ink-subtle mt-0.5 flex items-center gap-1.5">
+                          <span className="tabular">
+                            {formatDateTime(entry.date)}
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            className="text-ink-disabled"
+                          >
+                            ·
+                          </span>
+                          <span className="font-mono">
+                            {entry.sha.slice(0, 7)}
+                          </span>
                         </span>
-                        <span className="font-mono">
-                          {entry.sha.slice(0, 7)}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : null}
           </ScrollArea>
           <ScrollArea className="min-h-0">
             {!selected && entries?.length !== 0 && (

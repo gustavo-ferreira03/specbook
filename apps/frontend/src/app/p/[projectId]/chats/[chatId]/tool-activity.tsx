@@ -264,7 +264,11 @@ export function TurnActivity({
               </span>
               {running ? (
                 <span className="sr-only">in progress</span>
-              ) : step.endedAt !== null ? (
+              ) : step.endedAt === null ? (
+                <span className="text-meta text-ink-subtle shrink-0">
+                  Stopped
+                </span>
+              ) : (
                 <span className="text-meta text-ink-subtle tabular shrink-0">
                   {formatDuration(
                     Math.max(
@@ -272,10 +276,6 @@ export function TurnActivity({
                       (step.endedAt ?? step.startedAt) - step.startedAt
                     )
                   )}
-                </span>
-              ) : (
-                <span className="text-meta text-ink-subtle shrink-0">
-                  Stopped
                 </span>
               )}
             </li>

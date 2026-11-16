@@ -141,7 +141,7 @@ function SpecRow({
 }) {
   const { canEdit } = useAuth();
   const duration =
-    run?.durationMs != null ? formatDuration(run.durationMs) : null;
+    run?.durationMs == null ? null : formatDuration(run.durationMs);
   const status = useDisplayStatus(spec);
   return (
     <li className="group/row border-line hover:bg-surface-soft relative flex items-center gap-3 border-b px-4 py-2.5 transition-colors duration-150 sm:gap-4">

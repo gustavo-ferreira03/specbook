@@ -236,11 +236,11 @@ export function Sidebar({ projectId }: { projectId: string }) {
       ]);
       if (!signal.aborted) {
         setRuntime(
-          !health.ok
-            ? "offline"
-            : !llm.ready && llm.provider && llm.model
+          health.ok
+            ? !llm.ready && llm.provider && llm.model
               ? "setup"
               : "online"
+            : "offline"
         );
       }
     } catch (error) {
@@ -447,9 +447,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
     );
   }
 
-  const rowActionsClass = !canEdit
-    ? "hidden"
-    : "flex shrink-0 items-center gap-0.5 pr-1 [@media(hover:hover)]:invisible [@media(hover:hover)]:absolute [@media(hover:hover)]:inset-y-0 [@media(hover:hover)]:right-0 [@media(hover:hover)]:bg-linear-to-l [@media(hover:hover)]:from-(--row-bg) [@media(hover:hover)]:from-65% [@media(hover:hover)]:to-transparent [@media(hover:hover)]:pl-7 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-focus-within:visible";
+  const rowActionsClass = canEdit
+    ? "flex shrink-0 items-center gap-0.5 pr-1 [@media(hover:hover)]:invisible [@media(hover:hover)]:absolute [@media(hover:hover)]:inset-y-0 [@media(hover:hover)]:right-0 [@media(hover:hover)]:bg-linear-to-l [@media(hover:hover)]:from-(--row-bg) [@media(hover:hover)]:from-65% [@media(hover:hover)]:to-transparent [@media(hover:hover)]:pl-7 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-focus-within:visible"
+    : "hidden";
   const rowClass = (selected: boolean) =>
     `group relative flex min-h-10 w-full min-w-0 items-center rounded-md [--row-bg:var(--color-sidebar)] md:min-h-8 ${
       selected

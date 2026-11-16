@@ -76,13 +76,13 @@ export async function ciResult(
     results.filter((item) => item.failsGate).length +
     (infrastructureError ? 1 : 0);
   const passed = complete && failures === 0 && !infrastructureError;
-  const status = !complete
-    ? "running"
-    : passed
+  const status = complete
+    ? passed
       ? "passed"
       : batch.status === "error"
         ? "error"
-        : "failed";
+        : "failed"
+    : "running";
   return {
     batch,
     status,

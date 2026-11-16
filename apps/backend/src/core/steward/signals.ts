@@ -187,7 +187,18 @@ export async function collectProjectSignals(
   ) {
     const old = previous.deployment;
     const next = await deploymentFingerprint(project.baseUrl).catch(() => null);
-    if (next !== null) {
+    if (next === null) {
+      const failures = (old?.failures ?? 0) + 1;
+      const generation = (old?.generation ?? 0) + (failures === 1 ? 1 : 0);
+      observation.deployment = {
+        baseUrl: project.baseUrl,
+        fingerprint: old?.fingerprint ?? null,
+        nextCheckAt:
+          at + Math.min(3600_000, 300_000 * 2 ** Math.min(failures - 1, 4)),
+        failures,
+        generation,
+      };
+    } else {
       const changed =
         old !== undefined &&
         old.fingerprint !== null &&
@@ -209,17 +220,6 @@ export async function collectProjectSignals(
           { baseUrl: project.baseUrl, fingerprint: next, generation }
         );
       }
-    } else {
-      const failures = (old?.failures ?? 0) + 1;
-      const generation = (old?.generation ?? 0) + (failures === 1 ? 1 : 0);
-      observation.deployment = {
-        baseUrl: project.baseUrl,
-        fingerprint: old?.fingerprint ?? null,
-        nextCheckAt:
-          at + Math.min(3600_000, 300_000 * 2 ** Math.min(failures - 1, 4)),
-        failures,
-        generation,
-      };
     }
   }
   return observation;

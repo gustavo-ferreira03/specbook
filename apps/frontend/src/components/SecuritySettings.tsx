@@ -64,25 +64,7 @@ export function SecuritySettings() {
   }
   return (
     <SettingsSection id="agent-safety-heading" title="Agent safety">
-      {!settings ? (
-        <SettingsBlock>
-          {feedback ? (
-            <>
-              <InlineFeedback feedback={feedback} />
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-3"
-                onClick={() => void load()}
-              >
-                Try again
-              </Button>
-            </>
-          ) : (
-            <Skeleton className="h-32 w-full" />
-          )}
-        </SettingsBlock>
-      ) : (
+      {settings ? (
         <form onSubmit={save}>
           <SettingsRow
             label="Screenshots sent to model"
@@ -114,6 +96,24 @@ export function SecuritySettings() {
             </Button>
           </SettingsFooter>
         </form>
+      ) : (
+        <SettingsBlock>
+          {feedback ? (
+            <>
+              <InlineFeedback feedback={feedback} />
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3"
+                onClick={() => void load()}
+              >
+                Try again
+              </Button>
+            </>
+          ) : (
+            <Skeleton className="h-32 w-full" />
+          )}
+        </SettingsBlock>
       )}
     </SettingsSection>
   );

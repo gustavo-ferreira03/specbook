@@ -202,9 +202,8 @@ export async function prepareReportSection(options: {
     executed.map(async ({ number, title }, index) => {
       const shot = shots.get(number);
       const label = shot?.label.trim() || title;
-      const state: StepState = !failed
-        ? "passed"
-        : failedIndex >= 0
+      const state: StepState = failed
+        ? failedIndex >= 0
           ? index < failedIndex
             ? "passed"
             : index === failedIndex
@@ -212,7 +211,8 @@ export async function prepareReportSection(options: {
               : "skipped"
           : shot
             ? "passed"
-            : "skipped";
+            : "skipped"
+        : "passed";
       const matching =
         executed.length === planned.length
           ? planned[index]
@@ -592,9 +592,9 @@ export async function renderHtmlReport(
       ? `<span>Environment <b>${escape(batch.environment.name)}</b></span>`
       : "",
     `<span>${escape(new Date(batch.startedAt).toUTCString())}</span>`,
-    elapsed != null
-      ? `<span class="mono">${escape(duration(elapsed))}</span>`
-      : "",
+    elapsed == null
+      ? ""
+      : `<span class="mono">${escape(duration(elapsed))}</span>`,
     ci?.commitSha
       ? `<span class="mono">${escape(ci.commitSha.slice(0, 7))}</span>`
       : "",

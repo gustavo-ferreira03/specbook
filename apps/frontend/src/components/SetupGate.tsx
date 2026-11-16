@@ -35,13 +35,13 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
         ) {
           setAllowed(false);
           router.replace("/setup");
-        } else if (!user) {
+        } else if (user) {
+          setAllowed(true);
+        } else {
           setAllowed(false);
           router.replace(
             `/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`
           );
-        } else {
-          setAllowed(true);
         }
       })
       .catch((reason) => {

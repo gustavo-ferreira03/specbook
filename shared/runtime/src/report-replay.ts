@@ -74,10 +74,10 @@ for (const section of document.querySelectorAll<HTMLDetailsElement>(
     const controls = section.open
       ? await load(section)
       : await instances.get(section);
-    if (!section.open) {
-      controls?.pause();
-    } else {
+    if (section.open) {
       controls?.resize();
+    } else {
+      controls?.pause();
     }
   });
   if (section.open) {

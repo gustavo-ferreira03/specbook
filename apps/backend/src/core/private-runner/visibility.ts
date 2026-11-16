@@ -135,11 +135,11 @@ export async function runnerQueueSnapshot() {
       ? Math.max(0, Date.now() - Date.parse(entry.oldestQueuedAt))
       : 0;
     if (entry.queued) {
-      entry.reason = !online.length
-        ? `No runner online${entry.group ? ` in group ${entry.group}` : ""}.`
-        : entry.busyRunners === online.length
+      entry.reason = online.length
+        ? entry.busyRunners === online.length
           ? "All runners busy."
-          : "Waiting for a runner to claim work.";
+          : "Waiting for a runner to claim work."
+        : `No runner online${entry.group ? ` in group ${entry.group}` : ""}.`;
       const retry = jobs.find(
         (job) =>
           job.status === "queued" &&

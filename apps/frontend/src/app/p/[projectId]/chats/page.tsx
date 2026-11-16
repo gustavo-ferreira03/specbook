@@ -87,7 +87,71 @@ export default function ChatsHome({
             }
           />
         </div>
-      ) : !chats ? (
+      ) : chats ? (
+        chats.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center">
+            <EmptyState
+              icon={MessageSquareText}
+              title="No chats yet"
+              description="Describe a behavior while the agent operates a live browser, and save the result as a Spec."
+              action={
+                canEdit && (
+                  <Button asChild>
+                    <Link href={newChatHref}>
+                      <MessageSquareText size={14} /> New chat
+                    </Link>
+                  </Button>
+                )
+              }
+            />
+          </div>
+        ) : (
+          <PageContainer width="chat">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="tabular text-meta text-ink-muted">
+                {chats.length}{" "}
+                {chats.length === 1 ? "conversation" : "conversations"}
+              </p>
+              {newChatButton}
+            </div>
+            <ul
+              className="sheet divide-line bg-surface divide-y overflow-hidden rounded-xl"
+              aria-label="Chats"
+            >
+              {chats.map((chat) => (
+                <li key={chat.id}>
+                  <Link
+                    href={`/p/${projectId}/chats/${chat.id}`}
+                    className="group hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:ring-ring flex items-center gap-3 px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                  >
+                    <span
+                      className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-full border"
+                      aria-hidden="true"
+                    >
+                      <MessageSquareText size={14} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="text-body text-ink block truncate font-medium">
+                        {chat.title}
+                      </span>
+                      <RelativeTime
+                        value={chat.createdAt}
+                        prefix="Started"
+                        className="text-meta text-ink-subtle block"
+                      />
+                    </span>
+                    <ChevronRight
+                      size={15}
+                      className="text-ink-disabled group-hover:text-ink-muted shrink-0 transition-colors"
+                      aria-hidden="true"
+                    />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </PageContainer>
+        )
+      ) : (
         <PageContainer width="chat">
           <div
             className="space-y-2"
@@ -99,68 +163,6 @@ export default function ChatsHome({
               <Skeleton key={row} className="h-[60px] w-full rounded-lg" />
             ))}
           </div>
-        </PageContainer>
-      ) : chats.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState
-            icon={MessageSquareText}
-            title="No chats yet"
-            description="Describe a behavior while the agent operates a live browser, and save the result as a Spec."
-            action={
-              canEdit && (
-                <Button asChild>
-                  <Link href={newChatHref}>
-                    <MessageSquareText size={14} /> New chat
-                  </Link>
-                </Button>
-              )
-            }
-          />
-        </div>
-      ) : (
-        <PageContainer width="chat">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="tabular text-meta text-ink-muted">
-              {chats.length}{" "}
-              {chats.length === 1 ? "conversation" : "conversations"}
-            </p>
-            {newChatButton}
-          </div>
-          <ul
-            className="sheet divide-line bg-surface divide-y overflow-hidden rounded-xl"
-            aria-label="Chats"
-          >
-            {chats.map((chat) => (
-              <li key={chat.id}>
-                <Link
-                  href={`/p/${projectId}/chats/${chat.id}`}
-                  className="group hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:ring-ring flex items-center gap-3 px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
-                >
-                  <span
-                    className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-full border"
-                    aria-hidden="true"
-                  >
-                    <MessageSquareText size={14} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="text-body text-ink block truncate font-medium">
-                      {chat.title}
-                    </span>
-                    <RelativeTime
-                      value={chat.createdAt}
-                      prefix="Started"
-                      className="text-meta text-ink-subtle block"
-                    />
-                  </span>
-                  <ChevronRight
-                    size={15}
-                    className="text-ink-disabled group-hover:text-ink-muted shrink-0 transition-colors"
-                    aria-hidden="true"
-                  />
-                </Link>
-              </li>
-            ))}
-          </ul>
         </PageContainer>
       )}
     </div>

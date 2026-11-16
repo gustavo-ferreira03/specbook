@@ -92,10 +92,10 @@ export function nextCronAt(cron: string, after = new Date()): string {
       next.setUTCHours(0, 0, 0, 0);
     } else if (!hour.values.has(next.getUTCHours())) {
       next.setUTCHours(next.getUTCHours() + 1, 0, 0, 0);
-    } else if (!minute.values.has(next.getUTCMinutes())) {
-      next.setUTCMinutes(next.getUTCMinutes() + 1, 0, 0);
-    } else {
+    } else if (minute.values.has(next.getUTCMinutes())) {
       return next.toISOString();
+    } else {
+      next.setUTCMinutes(next.getUTCMinutes() + 1, 0, 0);
     }
   }
   throw new Error("Cron has no matching date in the next eight years");

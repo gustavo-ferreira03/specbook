@@ -331,7 +331,7 @@ export async function runServe(
   );
   const apiPort = portNumber(
     process.env.PORT,
-    options.port !== undefined ? port - 1 : 4000,
+    options.port === undefined ? 4000 : port - 1,
     "API"
   );
   if (port === apiPort) {

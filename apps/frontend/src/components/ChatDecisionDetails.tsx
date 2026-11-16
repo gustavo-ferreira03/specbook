@@ -413,34 +413,36 @@ function Screenshots({ item }: { item: PresentedInboxItem }) {
                   ? "What happened"
                   : "What Specbook checked"}
             </figcaption>
-            {!shot ? (
+            {shot ? (
+              unavailable.includes(shot.url) ? (
+                <p className="border-line bg-surface-soft text-body text-ink-muted rounded-lg border p-4">
+                  This screenshot is unavailable.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  className={cn(
+                    "border-line bg-surface-soft block w-full overflow-hidden rounded-lg border",
+                    focusRing
+                  )}
+                  aria-label={`Enlarge screenshot: ${shot.label}`}
+                  onClick={() => setSelected({ ...shot, url: url(shot.url) })}
+                >
+                  <img
+                    src={url(shot.url)}
+                    alt={shot.label}
+                    loading="lazy"
+                    onError={() =>
+                      setUnavailable((current) => [...current, shot.url])
+                    }
+                    className="max-h-64 w-full object-contain"
+                  />
+                </button>
+              )
+            ) : (
               <p className="border-line bg-surface-soft text-body text-ink-muted rounded-lg border p-4">
                 No screenshot was captured for the earlier run.
               </p>
-            ) : unavailable.includes(shot.url) ? (
-              <p className="border-line bg-surface-soft text-body text-ink-muted rounded-lg border p-4">
-                This screenshot is unavailable.
-              </p>
-            ) : (
-              <button
-                type="button"
-                className={cn(
-                  "border-line bg-surface-soft block w-full overflow-hidden rounded-lg border",
-                  focusRing
-                )}
-                aria-label={`Enlarge screenshot: ${shot.label}`}
-                onClick={() => setSelected({ ...shot, url: url(shot.url) })}
-              >
-                <img
-                  src={url(shot.url)}
-                  alt={shot.label}
-                  loading="lazy"
-                  onError={() =>
-                    setUnavailable((current) => [...current, shot.url])
-                  }
-                  className="max-h-64 w-full object-contain"
-                />
-              </button>
             )}
             {shot && (
               <p className="text-meta text-ink-subtle mt-1.5">{shot.label}</p>

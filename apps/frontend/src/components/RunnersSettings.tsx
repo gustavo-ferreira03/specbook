@@ -400,7 +400,61 @@ export function RunnersSettings() {
               Refresh queue
             </Button>
           </SettingsBlock>
-        ) : !queues ? (
+        ) : queues ? (
+          !queues.length ? (
+            <SettingsBlock>
+              <p className="text-body text-ink-muted">
+                No environments use runners or tunnels yet. Choose Runner or
+                Server through a tunnel in your project's environment settings.
+              </p>
+            </SettingsBlock>
+          ) : (
+            <ul aria-label="Runner queues">
+              {queues.map((queue) => (
+                <li
+                  key={queue.environmentId}
+                  className="border-line border-b px-4 py-4 last:border-b-0 sm:px-5"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-body text-ink font-medium break-words">
+                        <Link
+                          href={`/p/${queue.projectId}/settings`}
+                          className="focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                        >
+                          {queue.projectName}
+                        </Link>{" "}
+                        · {queue.environmentName}
+                      </p>
+                      <p className="text-meta text-ink-muted mt-1 flex items-center gap-1.5">
+                        {queue.executor === "tunnel" && (
+                          <Network size={13} aria-hidden="true" />
+                        )}
+                        {queue.executor === "tunnel"
+                          ? "Server through a tunnel · "
+                          : ""}
+                        {queue.group ? `Group: ${queue.group}` : "Ungrouped"}
+                      </p>
+                    </div>
+                    <p className="text-meta text-ink-muted">
+                      <span className="tabular">{queue.onlineRunners}</span>{" "}
+                      online ·{" "}
+                      <span className="tabular">{queue.busyRunners}</span> busy
+                    </p>
+                  </div>
+                  {queue.queued > 0 ? (
+                    <RunnerQueueNotice queue={queue} className="mt-3" />
+                  ) : (
+                    <p className="text-control text-ink-muted mt-3 flex items-center gap-1.5">
+                      <CircleCheck size={14} aria-hidden="true" />
+                      {countLabel(0, "run")} waiting
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
           <SettingsBlock>
             <Skeleton
               className="h-16 w-full"
@@ -409,58 +463,6 @@ export function RunnersSettings() {
               aria-busy="true"
             />
           </SettingsBlock>
-        ) : !queues.length ? (
-          <SettingsBlock>
-            <p className="text-body text-ink-muted">
-              No environments use runners or tunnels yet. Choose Runner or
-              Server through a tunnel in your project's environment settings.
-            </p>
-          </SettingsBlock>
-        ) : (
-          <ul aria-label="Runner queues">
-            {queues.map((queue) => (
-              <li
-                key={queue.environmentId}
-                className="border-line border-b px-4 py-4 last:border-b-0 sm:px-5"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-body text-ink font-medium break-words">
-                      <Link
-                        href={`/p/${queue.projectId}/settings`}
-                        className="focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                      >
-                        {queue.projectName}
-                      </Link>{" "}
-                      · {queue.environmentName}
-                    </p>
-                    <p className="text-meta text-ink-muted mt-1 flex items-center gap-1.5">
-                      {queue.executor === "tunnel" && (
-                        <Network size={13} aria-hidden="true" />
-                      )}
-                      {queue.executor === "tunnel"
-                        ? "Server through a tunnel · "
-                        : ""}
-                      {queue.group ? `Group: ${queue.group}` : "Ungrouped"}
-                    </p>
-                  </div>
-                  <p className="text-meta text-ink-muted">
-                    <span className="tabular">{queue.onlineRunners}</span>{" "}
-                    online ·{" "}
-                    <span className="tabular">{queue.busyRunners}</span> busy
-                  </p>
-                </div>
-                {queue.queued > 0 ? (
-                  <RunnerQueueNotice queue={queue} className="mt-3" />
-                ) : (
-                  <p className="text-control text-ink-muted mt-3 flex items-center gap-1.5">
-                    <CircleCheck size={14} aria-hidden="true" />
-                    {countLabel(0, "run")} waiting
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
         )}
       </SettingsSection>
       <SettingsSection
@@ -707,7 +709,112 @@ export function RunnersSettings() {
             </div>
           </SettingsBlock>
         )}
-        {!runners ? (
+        {runners ? (
+          !runners.length ? (
+            <SettingsBlock>
+              <p className="text-body text-ink-muted">
+                Create a runner or tunnel token, then start its CLI command
+                inside the private network.
+              </p>
+            </SettingsBlock>
+          ) : (
+            <ul aria-label="Runner tokens">
+              {runners.map((runner) => (
+                <li
+                  key={runner.id}
+                  className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 last:border-b-0 sm:px-5"
+                >
+                  <div className="min-w-0">
+                    <p className="text-body text-ink flex items-center gap-2 font-medium break-words">
+                      {runner.purpose === "tunnel" ? (
+                        <Network
+                          size={14}
+                          className="text-ink-subtle shrink-0"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <HardDrive
+                          size={14}
+                          className="text-ink-subtle shrink-0"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {runner.name}
+                    </p>
+                    <p className="text-meta text-ink-muted mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                      <span
+                        className={`inline-flex items-center gap-1.5 ${runner.online ? "text-success" : "text-ink-muted"}`}
+                      >
+                        {runner.online ? (
+                          <CircleCheck size={13} aria-hidden="true" />
+                        ) : (
+                          <CircleMinus size={13} aria-hidden="true" />
+                        )}
+                        {runner.online ? "Online" : "Offline"}
+                      </span>
+                      <span>
+                        {runner.purpose === "tunnel"
+                          ? "Tunnel token"
+                          : "Runner token"}
+                      </span>
+                      <Dot />
+                      <span>
+                        {runner.group ? `Group: ${runner.group}` : "Ungrouped"}
+                      </span>
+                      {runner.lastSeenAt ? (
+                        <RelativeTime
+                          value={runner.lastSeenAt}
+                          prefix="Last seen"
+                        />
+                      ) : (
+                        <span>Never connected</span>
+                      )}
+                      <RelativeTime value={runner.createdAt} prefix="Created" />
+                    </p>
+                    <p className="text-meta text-ink-muted mt-1 break-words">
+                      {runner.projectIds
+                        ? `Projects: ${projectNames(runner.projectIds)}`
+                        : "All projects"}
+                    </p>
+                    <RunnerProcesses runner={runner} />
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy || Boolean(secret)}
+                      aria-label={`Rotate token ${runner.name}`}
+                      onClick={(event) => {
+                        rotateTriggerRef.current = event.currentTarget;
+                        setRotateError("");
+                        setRotate(runner);
+                      }}
+                    >
+                      <RotateCw size={14} />
+                      Rotate token
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive-soft"
+                      size="sm"
+                      disabled={busy}
+                      aria-label={`Revoke token ${runner.name}`}
+                      onClick={(event) => {
+                        triggerRef.current = event.currentTarget;
+                        setRevokeError("");
+                        setRevoke(runner);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      Revoke token
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
           <SettingsBlock>
             {feedback?.type === "error" ? (
               <Button
@@ -726,109 +833,6 @@ export function RunnersSettings() {
               </div>
             )}
           </SettingsBlock>
-        ) : !runners.length ? (
-          <SettingsBlock>
-            <p className="text-body text-ink-muted">
-              Create a runner or tunnel token, then start its CLI command inside
-              the private network.
-            </p>
-          </SettingsBlock>
-        ) : (
-          <ul aria-label="Runner tokens">
-            {runners.map((runner) => (
-              <li
-                key={runner.id}
-                className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 last:border-b-0 sm:px-5"
-              >
-                <div className="min-w-0">
-                  <p className="text-body text-ink flex items-center gap-2 font-medium break-words">
-                    {runner.purpose === "tunnel" ? (
-                      <Network
-                        size={14}
-                        className="text-ink-subtle shrink-0"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <HardDrive
-                        size={14}
-                        className="text-ink-subtle shrink-0"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {runner.name}
-                  </p>
-                  <p className="text-meta text-ink-muted mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                    <span
-                      className={`inline-flex items-center gap-1.5 ${runner.online ? "text-success" : "text-ink-muted"}`}
-                    >
-                      {runner.online ? (
-                        <CircleCheck size={13} aria-hidden="true" />
-                      ) : (
-                        <CircleMinus size={13} aria-hidden="true" />
-                      )}
-                      {runner.online ? "Online" : "Offline"}
-                    </span>
-                    <span>
-                      {runner.purpose === "tunnel"
-                        ? "Tunnel token"
-                        : "Runner token"}
-                    </span>
-                    <Dot />
-                    <span>
-                      {runner.group ? `Group: ${runner.group}` : "Ungrouped"}
-                    </span>
-                    {runner.lastSeenAt ? (
-                      <RelativeTime
-                        value={runner.lastSeenAt}
-                        prefix="Last seen"
-                      />
-                    ) : (
-                      <span>Never connected</span>
-                    )}
-                    <RelativeTime value={runner.createdAt} prefix="Created" />
-                  </p>
-                  <p className="text-meta text-ink-muted mt-1 break-words">
-                    {runner.projectIds
-                      ? `Projects: ${projectNames(runner.projectIds)}`
-                      : "All projects"}
-                  </p>
-                  <RunnerProcesses runner={runner} />
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy || Boolean(secret)}
-                    aria-label={`Rotate token ${runner.name}`}
-                    onClick={(event) => {
-                      rotateTriggerRef.current = event.currentTarget;
-                      setRotateError("");
-                      setRotate(runner);
-                    }}
-                  >
-                    <RotateCw size={14} />
-                    Rotate token
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive-soft"
-                    size="sm"
-                    disabled={busy}
-                    aria-label={`Revoke token ${runner.name}`}
-                    onClick={(event) => {
-                      triggerRef.current = event.currentTarget;
-                      setRevokeError("");
-                      setRevoke(runner);
-                    }}
-                  >
-                    <Trash2 size={14} />
-                    Revoke token
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
         )}
       </SettingsSection>
       <ConfirmDeleteDialog

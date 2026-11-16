@@ -107,9 +107,9 @@ export function EnvironmentsSettingsCard({ projectId }: { projectId: string }) {
             draft.executor === "runner" ? {} : draft.credentialOverrides,
           executor: draft.executor,
           runnerGroup:
-            draft.executor !== "server"
-              ? draft.runnerGroup?.trim() || null
-              : null,
+            draft.executor === "server"
+              ? null
+              : draft.runnerGroup?.trim() || null,
           timeoutScale: draft.timeoutScale,
         }),
       });
@@ -217,7 +217,15 @@ export function EnvironmentsSettingsCard({ projectId }: { projectId: string }) {
           </div>
         </div>
       ))}
-      {editing !== null ? (
+      {editing === null ? (
+        <SettingsFooter
+          feedback={feedback && <InlineFeedback feedback={feedback} />}
+        >
+          <Button variant="outline" onClick={() => edit()}>
+            <Plus size={14} /> Add environment
+          </Button>
+        </SettingsFooter>
+      ) : (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -463,14 +471,6 @@ export function EnvironmentsSettingsCard({ projectId }: { projectId: string }) {
             </Button>
           </SettingsFooter>
         </form>
-      ) : (
-        <SettingsFooter
-          feedback={feedback && <InlineFeedback feedback={feedback} />}
-        >
-          <Button variant="outline" onClick={() => edit()}>
-            <Plus size={14} /> Add environment
-          </Button>
-        </SettingsFooter>
       )}
       <ConfirmDeleteDialog
         open={deleting !== null}

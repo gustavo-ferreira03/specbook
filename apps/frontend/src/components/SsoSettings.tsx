@@ -115,25 +115,7 @@ export function SsoSettings() {
       title="Single sign-on"
       description="Connect an OpenID Connect provider for this instance. Existing accounts must link their provider explicitly."
     >
-      {!settings ? (
-        <SettingsBlock>
-          {feedback ? (
-            <>
-              <InlineFeedback feedback={feedback} />
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-3"
-                onClick={() => void load()}
-              >
-                Try again
-              </Button>
-            </>
-          ) : (
-            <Skeleton className="h-40 w-full" />
-          )}
-        </SettingsBlock>
-      ) : (
+      {settings ? (
         <form onSubmit={save}>
           <SettingsRow label="Single sign-on" htmlFor="sso-enabled">
             <Select
@@ -288,6 +270,24 @@ export function SsoSettings() {
             </Button>
           </SettingsFooter>
         </form>
+      ) : (
+        <SettingsBlock>
+          {feedback ? (
+            <>
+              <InlineFeedback feedback={feedback} />
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3"
+                onClick={() => void load()}
+              >
+                Try again
+              </Button>
+            </>
+          ) : (
+            <Skeleton className="h-40 w-full" />
+          )}
+        </SettingsBlock>
       )}
     </SettingsSection>
   );

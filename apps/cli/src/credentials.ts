@@ -336,13 +336,13 @@ export async function resolveRunnerSecrets(
       );
     }
     const declaredOrigins =
-      environment !== undefined
-        ? environmentProfileOrigins(ref.profile)
-        : provider !== undefined
+      environment === undefined
+        ? provider !== undefined
           ? supplied!.origins.length
             ? supplied!.origins
             : environmentProfileOrigins(ref.profile)
-          : (profile?.origins ?? []);
+          : (profile?.origins ?? [])
+        : environmentProfileOrigins(ref.profile);
     const origins = declaredOrigins.filter((origin) =>
       sourceOrigins.includes(origin)
     );

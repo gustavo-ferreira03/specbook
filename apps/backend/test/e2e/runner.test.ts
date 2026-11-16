@@ -1255,9 +1255,9 @@ describe(
   "browser display ownership",
   {
     skip:
-      process.env.SPECBOOK_TEST_VNC !== "1"
-        ? "Set SPECBOOK_TEST_VNC=1 on a host with Xvfb and x11vnc"
-        : false,
+      process.env.SPECBOOK_TEST_VNC === "1"
+        ? false
+        : "Set SPECBOOK_TEST_VNC=1 on a host with Xvfb and x11vnc",
   },
   () => {
     test(
