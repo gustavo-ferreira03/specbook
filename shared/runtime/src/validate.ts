@@ -12,7 +12,8 @@ import {
   SECRET_NAME_PATTERN,
   secretEnvName,
 } from "./specbook/guard.ts";
-import { executionSteps, type HumanSpec } from "./types.ts";
+import { executionSteps } from "./types.ts";
+import type { HumanSpec } from "./types.ts";
 export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist.ts";
 
 export type SpecSourceValidation = { ok: true } | { ok: false; error: string };

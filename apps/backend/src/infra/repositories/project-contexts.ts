@@ -3,13 +3,10 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 
 import { createKeyedLock } from "../../core/operations/keyed-lock";
-import { db, type DbQuery } from "../db/client";
-import {
-  EMPTY_PROJECT_CONTEXT,
-  projectContextRevisions,
-  type DiscoveryBrief,
-  type ProjectContext,
-} from "../db/schema";
+import { db } from "../db/client";
+import type { DbQuery } from "../db/client";
+import { EMPTY_PROJECT_CONTEXT, projectContextRevisions } from "../db/schema";
+import type { DiscoveryBrief, ProjectContext } from "../db/schema";
 
 export type ProjectContextRevisionRow =
   typeof projectContextRevisions.$inferSelect;

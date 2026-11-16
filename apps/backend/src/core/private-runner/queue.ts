@@ -12,8 +12,10 @@ import {
   RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES,
   runnerArtifactPathSchema,
   runnerPayloadSchema,
-  type RunnerCompletion,
-  type RunnerPayload,
+} from "@specbook/runtime/runner-protocol";
+import type {
+  RunnerCompletion,
+  RunnerPayload,
 } from "@specbook/runtime/runner-protocol";
 import { scrubJson } from "@specbook/runtime/scrub";
 import { HTTPException } from "hono/http-exception";
@@ -25,9 +27,8 @@ import {
   runnerJobDeadline,
   runnerQueueTimeoutMs,
   runnersRepository,
-  type RunnerJob,
-  type RunnerToken,
 } from "../../infra/repositories/runners";
+import type { RunnerJob, RunnerToken } from "../../infra/repositories/runners";
 import { issuePrefixedToken } from "../accounts/tokens";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { createKeyedLock } from "../operations/keyed-lock";

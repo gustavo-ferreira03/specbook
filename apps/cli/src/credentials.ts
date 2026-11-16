@@ -16,7 +16,8 @@ import {
 import type { SecretRef } from "@specbook/runtime/validate";
 import { z } from "zod";
 
-import { providerProfile, type ProviderProfile } from "./secret-provider";
+import { providerProfile } from "./secret-provider";
+import type { ProviderProfile } from "./secret-provider";
 
 export { defaultSensitive } from "@specbook/runtime/credential-fields";
 

@@ -1,7 +1,8 @@
 import type { ErrorCode } from "@specbook/runtime/errors";
 import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 
-import { jobsRepository, type Job } from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { Job } from "../../infra/repositories/jobs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { createProjectScrubber } from "../credentials/scrub";
 import { isAgentPaused } from "./pause";

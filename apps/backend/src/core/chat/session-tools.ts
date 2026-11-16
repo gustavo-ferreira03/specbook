@@ -4,21 +4,15 @@ import path from "node:path";
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import {
-  CodedError,
-  errorCodeOf,
-  type ErrorCode,
-} from "@specbook/runtime/errors";
+import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 import { z } from "zod";
 
 import type { RunEnvironment } from "../../infra/db/schema";
 import { chatSessionsRepository } from "../../infra/repositories/chat-sessions";
 import type { CredentialProfileRow } from "../../infra/repositories/credentials";
-import {
-  getActiveTabUrl,
-  renderMcpResult,
-  type BrowserMcp,
-} from "../browser/mcp";
+import { getActiveTabUrl, renderMcpResult } from "../browser/mcp";
+import type { BrowserMcp } from "../browser/mcp";
 import { decryptSecret, encryptSecret } from "../credentials/crypto";
 import { resolveCredentialProfile } from "../credentials/resolve";
 

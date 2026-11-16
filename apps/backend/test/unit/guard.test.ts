@@ -13,9 +13,11 @@ import {
   isSecret,
   parseRuntime,
   unwrap,
-  type RawPage,
-  type ApiRequestEvidence,
-  type RawRequest,
+} from "@specbook/runtime/specbook/guard";
+import type {
+  RawPage,
+  ApiRequestEvidence,
+  RawRequest,
 } from "@specbook/runtime/specbook/guard";
 
 import { tempDir } from "../helpers/storage";

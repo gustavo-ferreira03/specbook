@@ -39,8 +39,8 @@ import { logger } from "../../logger";
 import {
   accountsRepository,
   withAccountsLock,
-  type User,
 } from "../../repositories/accounts";
+import type { User } from "../../repositories/accounts";
 import {
   access,
   browserSession,

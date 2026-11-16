@@ -1,14 +1,16 @@
 import { errorCodeOf, isInfrastructureCode } from "@specbook/runtime/errors";
 
 import { logger } from "../../infra/logger";
-import { jobsRepository, type Job } from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { withActor } from "../accounts/audit";
 import { closeChatBrowser } from "../browser/sessions";
 import { abortChatTurn } from "../chat/chat-registry";
 import { discoverPendingProjectContexts } from "../chat/discovery";
 import { getChatMessages } from "../chat/session-store";
-import { runChatTurn, type TurnOutcome } from "../chat/turn-runner";
+import { runChatTurn } from "../chat/turn-runner";
+import type { TurnOutcome } from "../chat/turn-runner";
 import { createProjectScrubber } from "../credentials/scrub";
 import {
   INSPECT_INSTRUCTION,

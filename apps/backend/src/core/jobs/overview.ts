@@ -1,17 +1,15 @@
 import type { RunEnvironment } from "../../infra/db/schema";
-import { runsRepository, type Run } from "../../infra/repositories/runs";
+import { runsRepository } from "../../infra/repositories/runs";
+import type { Run } from "../../infra/repositories/runs";
 import { schedulesRepository } from "../../infra/repositories/schedules";
 import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
 import { runnerQueueSnapshot } from "../private-runner/visibility";
-import { listRunBatches, type RunBatchTrigger } from "../runner/batch";
+import { listRunBatches } from "../runner/batch";
+import type { RunBatchTrigger } from "../runner/batch";
 import { runTriggerForIntent } from "../steward/signals";
 import { matchesCurrentSpec } from "./current-run";
-import {
-  loadProjectState,
-  projectPresentation,
-  type ActivityStory,
-  type PresentedItem,
-} from "./presentation";
+import { loadProjectState, projectPresentation } from "./presentation";
+import type { ActivityStory, PresentedItem } from "./presentation";
 import { finishedAt, oldestFirst } from "./shared";
 
 export type SpecHealthStatus =

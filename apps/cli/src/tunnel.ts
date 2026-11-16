@@ -6,8 +6,8 @@ import { RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
 import {
   tunnelConfigSchema,
   tunnelReadySchema,
-  type TunnelConfig,
 } from "@specbook/runtime/tunnel-protocol";
+import type { TunnelConfig } from "@specbook/runtime/tunnel-protocol";
 import { WebSocket } from "ws";
 
 import { remoteFetch, webSocketProxyAgent } from "./network";

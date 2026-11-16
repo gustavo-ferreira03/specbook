@@ -16,8 +16,8 @@ import {
   Pause,
   Play,
   RefreshCw,
-  type LucideIcon,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
 
@@ -28,10 +28,8 @@ import { PageContainer } from "@/components/PageHeader";
 import { RelativeTime } from "@/components/RelativeTime";
 import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
 import { SectionHeader } from "@/components/SectionHeader";
-import {
-  InlineFeedback,
-  type InlineFeedbackValue,
-} from "@/components/SettingsLayout";
+import { InlineFeedback } from "@/components/SettingsLayout";
+import type { InlineFeedbackValue } from "@/components/SettingsLayout";
 import { SpecGrid } from "@/components/SpecGrid";
 import { StatusDot } from "@/components/StatusDot";
 import { StatusPill } from "@/components/StatusPill";

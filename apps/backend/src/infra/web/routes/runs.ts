@@ -5,7 +5,8 @@ import { zValidator } from "@hono/zod-validator";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import { readOfflineReplay } from "@specbook/runtime/replay-data";
 import { isInside } from "@specbook/runtime/safe-fs";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
+import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 

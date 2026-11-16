@@ -1,7 +1,8 @@
 import type { Agent as HttpAgent } from "node:http";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { ProxyAgent, type Dispatcher } from "undici-proxy";
+import { ProxyAgent } from "undici-proxy";
+import type { Dispatcher } from "undici-proxy";
 
 const dispatchers = new Map<string, Dispatcher>();
 const socketAgents = new Map<string, HttpAgent>();

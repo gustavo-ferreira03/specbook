@@ -3,13 +3,10 @@ import path from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
-  type SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import {
-  errorCodeOf,
-  providerErrorCode,
-  type ErrorCode,
-} from "@specbook/runtime/errors";
+import type { SessionManager } from "@earendil-works/pi-coding-agent";
+import { errorCodeOf, providerErrorCode } from "@specbook/runtime/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 
 import { logger } from "../../infra/logger";
 import { chatsRepository } from "../../infra/repositories/chats";
@@ -19,7 +16,8 @@ import { projectContextsRepository } from "../../infra/repositories/project-cont
 import { projectsRepository } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
 import { auditTools } from "../accounts/audit";
-import { bridgeBrowserTools, type BrowserToolPolicy } from "../browser/mcp";
+import { bridgeBrowserTools } from "../browser/mcp";
+import type { BrowserToolPolicy } from "../browser/mcp";
 import {
   beginChatBrowserTool,
   closeChatBrowser,
@@ -49,8 +47,8 @@ import {
   setActiveChatSession,
   takePendingFollowUps,
   tryReserveChatTurn,
-  type ActiveChatSession,
 } from "./chat-registry";
+import type { ActiveChatSession } from "./chat-registry";
 import {
   createContextTools,
   createSpecBatchTool,
@@ -67,7 +65,8 @@ import {
   createOriginBrowserPolicy,
 } from "./discovery-policy";
 import { createExplorationTools } from "./exploration-tools";
-import { TurnMetricsRecorder, type TurnTrigger } from "./metrics";
+import { TurnMetricsRecorder } from "./metrics";
+import type { TurnTrigger } from "./metrics";
 import { buildSystemPrompt } from "./prompts";
 import { agentSettings, getSecuritySettings } from "./safety-settings";
 import {
@@ -80,8 +79,8 @@ import {
   openSession,
   TOOL_STEP_TYPE,
   userMessageCount,
-  type AgentMessage,
 } from "./session-store";
+import type { AgentMessage } from "./session-store";
 import { createSessionTools } from "./session-tools";
 import { createDomainTools } from "./tools";
 import type { ChatToolStepRecord } from "./types";

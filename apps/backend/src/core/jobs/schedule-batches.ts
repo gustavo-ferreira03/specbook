@@ -1,8 +1,6 @@
 import { projectsRepository } from "../../infra/repositories/projects";
-import {
-  schedulesRepository,
-  type ProjectAutomation,
-} from "../../infra/repositories/schedules";
+import { schedulesRepository } from "../../infra/repositories/schedules";
+import type { ProjectAutomation } from "../../infra/repositories/schedules";
 import { projectSecretScrubber } from "../credentials/scrub";
 import type { RunBatch } from "../runner/batch";
 

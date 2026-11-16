@@ -1,8 +1,10 @@
 import http from "node:http";
-import net, { type AddressInfo, type Socket } from "node:net";
+import net from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import type { Duplex } from "node:stream";
 
-import { httpTarget, resolveTarget, type AddressResolver } from "./targets.ts";
+import { httpTarget, resolveTarget } from "./targets.ts";
+import type { AddressResolver } from "./targets.ts";
 
 export type TargetConnector = (target: URL) => Promise<Duplex>;
 

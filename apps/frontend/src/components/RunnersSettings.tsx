@@ -27,8 +27,8 @@ import {
   SettingsFooter,
   SettingsRow,
   SettingsSection,
-  type InlineFeedbackValue,
 } from "@/components/SettingsLayout";
+import type { InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

@@ -14,7 +14,6 @@ import {
   KeyRound,
   Keyboard,
   ListChecks,
-  type LucideIcon,
   MessageSquareWarning,
   MousePointerClick,
   PanelsTopLeft,
@@ -24,6 +23,7 @@ import {
   TextCursorInput,
   Wrench,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import { countLabel, formatDuration } from "@/lib/format";

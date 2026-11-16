@@ -3,10 +3,8 @@
 import { FileCode2, History } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import {
-  HighlightedCode,
-  type EditorLanguage,
-} from "@/components/RawFileEditor";
+import { HighlightedCode } from "@/components/RawFileEditor";
+import type { EditorLanguage } from "@/components/RawFileEditor";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {

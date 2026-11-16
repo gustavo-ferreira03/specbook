@@ -5,8 +5,8 @@ import {
   readEvidenceManifest,
   isStepScreenshot,
   stepScreenshotContentType,
-  type EvidenceManifest,
 } from "@specbook/runtime/evidence";
+import type { EvidenceManifest } from "@specbook/runtime/evidence";
 import { sameStepTitle } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { z } from "zod";

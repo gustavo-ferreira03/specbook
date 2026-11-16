@@ -1,9 +1,7 @@
 import type { DiscoveryBrief, ProjectContext } from "../../infra/db/schema";
 import { logger } from "../../infra/logger";
-import {
-  projectContextsRepository,
-  type ProjectContextRevisionRow,
-} from "../../infra/repositories/project-contexts";
+import { projectContextsRepository } from "../../infra/repositories/project-contexts";
+import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { resolveRunEnvironment } from "../environments";
 import { isAgentPaused } from "../jobs/pause";

@@ -1,25 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { errorCodeOf, type ErrorCode } from "@specbook/runtime/errors";
+import { errorCodeOf } from "@specbook/runtime/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
 
 import { logger } from "../../infra/logger";
 import { chatsRepository } from "../../infra/repositories/chats";
-import {
-  jobsRepository,
-  type InboxItem,
-  type Job,
-} from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { InboxItem, Job } from "../../infra/repositories/jobs";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
-import { specsRepository, type Spec } from "../../infra/repositories/specs";
-import {
-  stewardRepository,
-  type Intent,
-  type ProjectSignal,
-} from "../../infra/repositories/steward";
+import { specsRepository } from "../../infra/repositories/specs";
+import type { Spec } from "../../infra/repositories/specs";
+import { stewardRepository } from "../../infra/repositories/steward";
+import type { Intent, ProjectSignal } from "../../infra/repositories/steward";
 import { createChat } from "../chat/session-store";
 import { createProjectScrubber } from "../credentials/scrub";
 import { canRunAgentJob, isAgentPaused } from "../jobs/pause";
@@ -40,7 +36,8 @@ import { markdownHashOf } from "../repo/writer";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { areSpecsLocked } from "../specs/lifecycle";
 import { applyVerifiedRepairs } from "./approval";
-import { stewardIntentSchema, type StewardIntent } from "./schemas";
+import { stewardIntentSchema } from "./schemas";
+import type { StewardIntent } from "./schemas";
 import {
   collectProjectSignals,
   fingerprint,

@@ -48,8 +48,8 @@ import {
   SpecTableSkeleton,
   orderFeatures,
   lastRunsOf,
-  type SpecGroup,
 } from "./_components/spec-table";
+import type { SpecGroup } from "./_components/spec-table";
 
 type StatusFilter = "all" | SpecStatus;
 

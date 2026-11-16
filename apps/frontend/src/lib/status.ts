@@ -6,8 +6,8 @@ import {
   LoaderCircle,
   RotateCcw,
   X,
-  type LucideIcon,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import type { RunStatus, SpecHealth, SpecStatus } from "./types";
 

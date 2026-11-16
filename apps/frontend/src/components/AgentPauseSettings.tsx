@@ -9,8 +9,8 @@ import {
   SettingsFooter,
   SettingsRow,
   SettingsSection,
-  type InlineFeedbackValue,
 } from "@/components/SettingsLayout";
+import type { InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

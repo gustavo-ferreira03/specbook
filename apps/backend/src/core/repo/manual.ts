@@ -2,11 +2,10 @@ import path from "node:path";
 
 import { readOptionalRepoFile, writeRepoFile } from "@specbook/runtime/safe-fs";
 
-import {
-  featuresRepository,
-  type Feature,
-} from "../../infra/repositories/features";
-import { specsRepository, type Spec } from "../../infra/repositories/specs";
+import { featuresRepository } from "../../infra/repositories/features";
+import type { Feature } from "../../infra/repositories/features";
+import { specsRepository } from "../../infra/repositories/specs";
+import type { Spec } from "../../infra/repositories/specs";
 import { withSpecLock } from "../specs/lifecycle";
 import { repoGit } from "./git";
 import { reindexProjectUnlocked } from "./indexer";

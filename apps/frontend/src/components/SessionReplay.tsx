@@ -3,13 +3,8 @@
 import type { ReplayRecording } from "@specbook/runtime/replay-assets";
 import type { ReplayController } from "@specbook/runtime/replay-player";
 import { Play } from "lucide-react";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type RefObject,
-} from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, RefObject } from "react";
 
 import { errorMessage, getRunReplay, isAbortError } from "@/lib/api";
 

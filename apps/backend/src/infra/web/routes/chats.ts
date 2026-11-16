@@ -21,8 +21,8 @@ import {
   startBranchedChatTurn,
   startChatTurn,
   subscribeToChatUpdates,
-  type ChatUpdateEvent,
 } from "../../../core/chat/session";
+import type { ChatUpdateEvent } from "../../../core/chat/session";
 import { deleteChatData, ResourceBusyError } from "../../../core/deletion";
 import { chatsRepository } from "../../repositories/chats";
 import { jobsRepository } from "../../repositories/jobs";

@@ -6,7 +6,8 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { INSPECT_ELEMENT, redactUrls } from "@specbook/runtime/browser";
 import { z } from "zod";
 
-import { getActiveTabUrl, type BrowserMcp } from "../browser/mcp";
+import { getActiveTabUrl } from "../browser/mcp";
+import type { BrowserMcp } from "../browser/mcp";
 import { DESTRUCTIVE_CLICK_PATTERN } from "./discovery-policy";
 
 const scanPageSchema = z.object({}).strict();

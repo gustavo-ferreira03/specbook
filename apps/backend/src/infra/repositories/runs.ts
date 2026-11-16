@@ -4,7 +4,8 @@ import type { ErrorCode } from "@specbook/runtime/errors";
 import { and, desc, eq, inArray, lt, max, or } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { runs, type RunStatus, type RunEnvironment } from "../db/schema";
+import { runs } from "../db/schema";
+import type { RunStatus, RunEnvironment } from "../db/schema";
 
 export type Run = typeof runs.$inferSelect;
 

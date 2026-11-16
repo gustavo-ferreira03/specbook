@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { Duplex } from "node:stream";
 
-import { tunnelFrameSchema, type TunnelFrame } from "../tunnel-protocol.ts";
+import { tunnelFrameSchema } from "../tunnel-protocol.ts";
+import type { TunnelFrame } from "../tunnel-protocol.ts";
 
 interface MessageSocket extends EventEmitter {
   readyState: number;

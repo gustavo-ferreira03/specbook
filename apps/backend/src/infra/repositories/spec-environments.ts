@@ -1,12 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "../db/client";
-import {
-  environments,
-  specEnvironmentStates,
-  type SpecStatus,
-} from "../db/schema";
-import { specsRepository, type Spec } from "./specs";
+import { environments, specEnvironmentStates } from "../db/schema";
+import type { SpecStatus } from "../db/schema";
+import { specsRepository } from "./specs";
+import type { Spec } from "./specs";
 
 class SpecEnvironmentsRepository {
   async list(spec: Spec) {

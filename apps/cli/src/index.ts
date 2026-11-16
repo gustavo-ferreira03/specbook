@@ -7,13 +7,11 @@ import { z } from "zod";
 
 import { browse, startBrowserDaemon } from "./browser";
 import { sendMessage, listConversations, runChatWorker } from "./chat";
-import {
-  chatReplySchema,
-  chatReplyJsonSchema,
-  type ChatReply,
-} from "./chat-model";
+import { chatReplySchema, chatReplyJsonSchema } from "./chat-model";
+import type { ChatReply } from "./chat-model";
 import { checkSpecs } from "./check";
-import { runCi, type CiOptions } from "./ci";
+import { runCi } from "./ci";
+import type { CiOptions } from "./ci";
 import { scrubCi } from "./ci-comment";
 import {
   addProfile,

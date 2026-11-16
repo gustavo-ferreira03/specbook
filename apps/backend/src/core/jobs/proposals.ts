@@ -2,11 +2,8 @@ import { parseSpecYaml } from "@specbook/runtime/yaml";
 import type { z } from "zod";
 
 import { featuresRepository } from "../../infra/repositories/features";
-import {
-  jobsRepository,
-  type InboxItem,
-  type Job,
-} from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { InboxItem, Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
 import { repoGit } from "../repo/git";

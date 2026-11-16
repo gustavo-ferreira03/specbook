@@ -1,7 +1,5 @@
-import {
-  secretEnvName,
-  type SecretOriginPolicy,
-} from "@specbook/runtime/specbook/guard";
+import { secretEnvName } from "@specbook/runtime/specbook/guard";
+import type { SecretOriginPolicy } from "@specbook/runtime/specbook/guard";
 
 import type { RunEnvironment } from "../../infra/db/schema";
 import { credentialsRepository } from "../../infra/repositories/credentials";

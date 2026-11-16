@@ -14,8 +14,10 @@ import {
 import { BareStateError, repoBare } from "../../../core/repo/bare";
 import { repoGit } from "../../../core/repo/git";
 import { reindexProjectUnlocked } from "../../../core/repo/indexer";
-import { projectsRepository, type Project } from "../../repositories/projects";
-import { access, type BearerVerifier } from "../access";
+import { projectsRepository } from "../../repositories/projects";
+import type { Project } from "../../repositories/projects";
+import { access } from "../access";
+import type { BearerVerifier } from "../access";
 import { buildHostAllowlist, frontendProxyOrigin } from "../security";
 
 const GIT_PATH =

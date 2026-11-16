@@ -9,8 +9,8 @@ import {
   buildHostAllowlist,
   frontendProxyOrigin,
   isAllowedHost,
-  type HostAllowlist,
 } from "../../../../../shared/http-origin";
+import type { HostAllowlist } from "../../../../../shared/http-origin";
 import { logger } from "../logger";
 export { buildHostAllowlist, frontendProxyOrigin, isAllowedHost };
 

@@ -2,8 +2,10 @@ import crypto from "node:crypto";
 
 import { and, asc, eq, inArray } from "drizzle-orm";
 
-import { db, runBatch, type DbQuery } from "../db/client";
-import { runs, specs, type SpecStatus } from "../db/schema";
+import { db, runBatch } from "../db/client";
+import type { DbQuery } from "../db/client";
+import { runs, specs } from "../db/schema";
+import type { SpecStatus } from "../db/schema";
 
 export type Spec = typeof specs.$inferSelect;
 export type DeleteSpecResult =

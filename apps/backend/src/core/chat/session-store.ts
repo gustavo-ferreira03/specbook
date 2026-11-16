@@ -4,10 +4,8 @@ import path from "node:path";
 
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
-import {
-  chatsRepository,
-  type ChatMetadata,
-} from "../../infra/repositories/chats";
+import { chatsRepository } from "../../infra/repositories/chats";
+import type { ChatMetadata } from "../../infra/repositories/chats";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import { sessionsDir } from "../paths";
 import { isChatDeleting, publishChatUpdate } from "./chat-registry";

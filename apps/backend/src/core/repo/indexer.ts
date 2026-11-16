@@ -16,23 +16,16 @@ import {
 } from "@specbook/runtime/yaml";
 import { inArray } from "drizzle-orm";
 
-import { db, runBatch, type DbQuery } from "../../infra/db/client";
-import {
-  runs,
-  type HumanSpec,
-  type ProjectContext,
-} from "../../infra/db/schema";
-import {
-  featuresRepository,
-  type Feature,
-} from "../../infra/repositories/features";
+import { db, runBatch } from "../../infra/db/client";
+import type { DbQuery } from "../../infra/db/client";
+import { runs } from "../../infra/db/schema";
+import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
+import { featuresRepository } from "../../infra/repositories/features";
+import type { Feature } from "../../infra/repositories/features";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
-import {
-  specsRepository,
-  type Spec,
-  type SpecPatch,
-} from "../../infra/repositories/specs";
+import { specsRepository } from "../../infra/repositories/specs";
+import type { Spec, SpecPatch } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
 import { repoBare } from "./bare";
 import { repoGit } from "./git";

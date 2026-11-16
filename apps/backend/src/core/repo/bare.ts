@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { simpleGit, type SimpleGit } from "simple-git";
+import { simpleGit } from "simple-git";
+import type { SimpleGit } from "simple-git";
 
 import { projectsRepository } from "../../infra/repositories/projects";
 import { bareReposDir } from "../paths";

@@ -12,10 +12,8 @@ import { z } from "zod";
 import { logger } from "../../infra/logger";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
-import {
-  schedulesRepository,
-  type ProjectAutomation,
-} from "../../infra/repositories/schedules";
+import { schedulesRepository } from "../../infra/repositories/schedules";
+import type { ProjectAutomation } from "../../infra/repositories/schedules";
 import { specsRepository } from "../../infra/repositories/specs";
 import { decryptSecret } from "../credentials/crypto";
 import { projectSecretScrubber } from "../credentials/scrub";

@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
-  type ReactNode,
   memo,
   use,
   useCallback,
@@ -28,7 +27,9 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import type { ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { useAuth } from "@/components/AuthProvider";
@@ -66,7 +67,8 @@ import {
   retryChatMessage,
   sendChatMessage,
 } from "@/lib/api";
-import { type ChatResults, useChatResults } from "@/lib/chatResults";
+import { useChatResults } from "@/lib/chatResults";
+import type { ChatResults } from "@/lib/chatResults";
 import { copyText } from "@/lib/clipboard";
 import { countLabel } from "@/lib/format";
 import { onInvalidate } from "@/lib/invalidation";
@@ -75,7 +77,8 @@ import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 import { cn } from "@/lib/utils";
 
 import { LiveBrowser, originOf, useWideLayout } from "./live-browser";
-import { type ToolStep, TurnActivity, activeToolLabel } from "./tool-activity";
+import { TurnActivity, activeToolLabel } from "./tool-activity";
+import type { ToolStep } from "./tool-activity";
 
 const REMARK_PLUGINS = [remarkGfm];
 

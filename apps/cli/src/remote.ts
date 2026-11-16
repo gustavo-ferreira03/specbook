@@ -7,13 +7,10 @@ import { z } from "zod";
 
 import { configHome, containsSecret } from "./credentials";
 import { remoteFetch, redactProxyCredentials } from "./network";
-import { runLocal, type LocalRun } from "./run";
-import {
-  loadConfig,
-  listSpecs,
-  safeWorkspacePath,
-  type LocalConfig,
-} from "./workspace";
+import { runLocal } from "./run";
+import type { LocalRun } from "./run";
+import { loadConfig, listSpecs, safeWorkspacePath } from "./workspace";
+import type { LocalConfig } from "./workspace";
 
 const serverSchema = z
   .object({ url: z.string().url(), token: z.string().min(1) })

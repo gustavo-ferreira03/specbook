@@ -11,8 +11,8 @@ import {
   extractMcpText,
   getActiveTabUrl,
   renderMcpResult,
-  type BrowserMcp,
 } from "../browser/mcp";
+import type { BrowserMcp } from "../browser/mcp";
 import { decryptSecret } from "../credentials/crypto";
 import {
   classifyOtpControls,
@@ -22,8 +22,8 @@ import {
   parsePageControls,
   selectLoginFills,
   selectOtpFills,
-  type ControlFill,
 } from "../credentials/login-classifier";
+import type { ControlFill } from "../credentials/login-classifier";
 import {
   getProfileByName,
   listPublicProfiles,
@@ -39,8 +39,10 @@ import {
   registerCredentialRequest,
   resolveCredentialRequest,
   waitForCredentialRequest,
-  type CredentialRequestField,
-  type CredentialRequestKind,
+} from "./credential-requests";
+import type {
+  CredentialRequestField,
+  CredentialRequestKind,
 } from "./credential-requests";
 
 // Ported from Hermes Agent tools/browser_vault_tool.py (MIT, Copyright (c) 2025 Nous Research).

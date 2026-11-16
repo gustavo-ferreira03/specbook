@@ -30,19 +30,14 @@ import {
   presentSpecBatch,
   selectSpecBatch,
 } from "../../../core/jobs/spec-batches";
-import {
-  proposalDirectory,
-  type ProposalVerification,
-} from "../../../core/jobs/verification";
+import { proposalDirectory } from "../../../core/jobs/verification";
+import type { ProposalVerification } from "../../../core/jobs/verification";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
 import { enqueueIntent } from "../../../core/steward/engine";
 import { logger } from "../../logger";
 import { chatsRepository } from "../../repositories/chats";
-import {
-  jobsRepository,
-  type InboxItem,
-  type Job,
-} from "../../repositories/jobs";
+import { jobsRepository } from "../../repositories/jobs";
+import type { InboxItem, Job } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
 import { access } from "../access";
 

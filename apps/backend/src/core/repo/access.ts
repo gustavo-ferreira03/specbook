@@ -1,7 +1,5 @@
-import {
-  projectsRepository,
-  type Project,
-} from "../../infra/repositories/projects";
+import { projectsRepository } from "../../infra/repositories/projects";
+import type { Project } from "../../infra/repositories/projects";
 import { issuePrefixedToken, verifyTokenHash } from "../accounts/tokens";
 
 const TOUCH_INTERVAL_MS = 60_000;

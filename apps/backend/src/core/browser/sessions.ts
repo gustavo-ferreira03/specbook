@@ -10,15 +10,16 @@ import {
 } from "../chat/chat-registry";
 import { storageRoot } from "../paths";
 import { createEnvironmentTunnelProxy } from "../tunnel/registry";
-import { launchBrowserMcp, type BrowserMcp } from "./mcp";
+import { launchBrowserMcp } from "./mcp";
+import type { BrowserMcp } from "./mcp";
 import {
   BrowserUnavailableError,
   getVncSession,
   hasVncViewers,
   startVncStack,
   stopVncStack,
-  type VncSession,
 } from "./vnc";
+import type { VncSession } from "./vnc";
 
 const BROWSER_IDLE_MS = 10 * 60 * 1000;
 

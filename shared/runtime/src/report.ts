@@ -1,6 +1,7 @@
 import path from "node:path";
 
-import { errorCodeSchema, type ErrorCode } from "./errors.ts";
+import { errorCodeSchema } from "./errors.ts";
+import type { ErrorCode } from "./errors.ts";
 import { FAILED_STEP_ANNOTATION } from "./specbook/guard.ts";
 
 export interface SpecFileResult {

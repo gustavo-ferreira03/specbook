@@ -3,11 +3,8 @@ import crypto from "node:crypto";
 import { credentialsRepository } from "../../infra/repositories/credentials";
 import type { Project } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
-import {
-  stewardRepository,
-  type Intent,
-  type ProjectSignal,
-} from "../../infra/repositories/steward";
+import { stewardRepository } from "../../infra/repositories/steward";
+import type { Intent, ProjectSignal } from "../../infra/repositories/steward";
 import type { RunBatchTrigger } from "../runner/batch";
 
 export interface ProjectObservation {

@@ -8,10 +8,8 @@ import {
 
 import type { CredentialField } from "../../infra/db/schema";
 import { chatSessionsRepository } from "../../infra/repositories/chat-sessions";
-import {
-  credentialsRepository,
-  type CredentialProfileRow,
-} from "../../infra/repositories/credentials";
+import { credentialsRepository } from "../../infra/repositories/credentials";
+import type { CredentialProfileRow } from "../../infra/repositories/credentials";
 import { decryptSecret, encryptSecret } from "./crypto";
 
 const NAME_PATTERN = SECRET_NAME_PATTERN;

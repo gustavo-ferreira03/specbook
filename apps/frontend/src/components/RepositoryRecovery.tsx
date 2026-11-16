@@ -3,13 +3,14 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { FileDiff, type ProposalFile } from "@/components/FileDiff";
+import { FileDiff } from "@/components/FileDiff";
+import type { ProposalFile } from "@/components/FileDiff";
 import {
   InlineFeedback,
   SettingsBlock,
   SettingsSection,
-  type InlineFeedbackValue,
 } from "@/components/SettingsLayout";
+import type { InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,

@@ -1,7 +1,8 @@
 import { desc, eq } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { chats, type ChatMode } from "../db/schema";
+import { chats } from "../db/schema";
+import type { ChatMode } from "../db/schema";
 
 export type ChatRow = typeof chats.$inferSelect;
 

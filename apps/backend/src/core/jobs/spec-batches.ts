@@ -7,11 +7,8 @@ import type { RunEnvironment } from "../../infra/db/schema";
 import { logger } from "../../infra/logger";
 import { chatsRepository } from "../../infra/repositories/chats";
 import { featuresRepository } from "../../infra/repositories/features";
-import {
-  jobsRepository,
-  type InboxItem,
-  type Job,
-} from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { InboxItem, Job } from "../../infra/repositories/jobs";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
@@ -41,9 +38,8 @@ import {
   specBatchProposalSchema,
   specBatchOf,
   payloadOf,
-  type SpecBatch,
-  type SpecBatchCandidate as Candidate,
 } from "./schemas";
+import type { SpecBatch, SpecBatchCandidate as Candidate } from "./schemas";
 import { finishedAt } from "./shared";
 
 const batchLocks = createKeyedLock();

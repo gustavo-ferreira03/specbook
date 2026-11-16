@@ -1,5 +1,7 @@
-import { packReplayEvents, type ReplayRecording } from "./replay-assets.ts";
-import { readReplay, type ReplayEvent } from "./replay.ts";
+import { packReplayEvents } from "./replay-assets.ts";
+import type { ReplayRecording } from "./replay-assets.ts";
+import { readReplay } from "./replay.ts";
+import type { ReplayEvent } from "./replay.ts";
 
 export function offlineReplay(value: unknown): unknown {
   if (typeof value === "string") {

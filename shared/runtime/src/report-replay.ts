@@ -1,8 +1,5 @@
-import {
-  mountReplay,
-  type ReplayController,
-  type ReplayPlayerOptions,
-} from "./replay-player.ts";
+import { mountReplay } from "./replay-player.ts";
+import type { ReplayController, ReplayPlayerOptions } from "./replay-player.ts";
 
 declare global {
   interface Window {

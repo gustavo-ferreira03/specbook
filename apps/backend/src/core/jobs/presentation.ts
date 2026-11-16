@@ -8,20 +8,18 @@ import {
 import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 
 import { featuresRepository } from "../../infra/repositories/features";
-import {
-  jobsRepository,
-  type InboxItem,
-  type Job,
-} from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { InboxItem, Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { runsRepository } from "../../infra/repositories/runs";
 import { settingsRepository } from "../../infra/repositories/settings";
-import { specsRepository, type Spec } from "../../infra/repositories/specs";
-import {
-  stewardRepository,
-  type Intent,
-  type ProjectSignal,
-  type Steward,
+import { specsRepository } from "../../infra/repositories/specs";
+import type { Spec } from "../../infra/repositories/specs";
+import { stewardRepository } from "../../infra/repositories/steward";
+import type {
+  Intent,
+  ProjectSignal,
+  Steward,
 } from "../../infra/repositories/steward";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { runsDir } from "../paths";

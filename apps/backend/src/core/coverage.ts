@@ -6,12 +6,11 @@ import { readRepoFile } from "@specbook/runtime/safe-fs";
 import { validateSpecSource } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 
-import {
-  featuresRepository,
-  type Feature,
-} from "../infra/repositories/features";
+import { featuresRepository } from "../infra/repositories/features";
+import type { Feature } from "../infra/repositories/features";
 import { projectContextsRepository } from "../infra/repositories/project-contexts";
-import { specsRepository, type Spec } from "../infra/repositories/specs";
+import { specsRepository } from "../infra/repositories/specs";
+import type { Spec } from "../infra/repositories/specs";
 import { repoGit } from "./repo/git";
 import {
   markdownHashOf,

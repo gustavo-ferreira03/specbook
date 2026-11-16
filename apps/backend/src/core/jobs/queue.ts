@@ -1,5 +1,6 @@
 import { chatsRepository } from "../../infra/repositories/chats";
-import { jobsRepository, type Job } from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { Job } from "../../infra/repositories/jobs";
 import { createChat } from "../chat/session-store";
 import { isAgentPaused } from "./pause";
 import { createJobSchema } from "./schemas";

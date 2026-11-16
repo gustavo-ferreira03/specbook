@@ -7,7 +7,8 @@ import {
   runnerHeartbeatSchema,
   runnerReleaseSchema,
 } from "@specbook/runtime/runner-protocol";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
+import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 
 import { recordAudit } from "../../../core/accounts/audit";
@@ -36,10 +37,8 @@ import {
   runnerTokenSchema,
 } from "../../../core/private-runner/tokens";
 import { runnerQueueSnapshot } from "../../../core/private-runner/visibility";
-import {
-  runnersRepository,
-  type RunnerToken,
-} from "../../repositories/runners";
+import { runnersRepository } from "../../repositories/runners";
+import type { RunnerToken } from "../../repositories/runners";
 import { access } from "../access";
 
 declare module "hono" {

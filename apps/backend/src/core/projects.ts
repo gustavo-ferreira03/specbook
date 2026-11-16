@@ -1,9 +1,7 @@
 import fs from "node:fs/promises";
 
-import {
-  projectsRepository,
-  type Project,
-} from "../infra/repositories/projects";
+import { projectsRepository } from "../infra/repositories/projects";
+import type { Project } from "../infra/repositories/projects";
 import { repoBare } from "./repo/bare";
 import { repoGit } from "./repo/git";
 

@@ -9,11 +9,8 @@ import { withRunSlot } from "@specbook/runtime/process";
 import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 
-import {
-  jobsRepository,
-  type InboxItem,
-  type Job,
-} from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { InboxItem, Job } from "../../infra/repositories/jobs";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
 import { runNetworkPolicy } from "../ci/targets";
@@ -24,10 +21,8 @@ import { repoGit } from "../repo/git";
 import { readSpecRawFiles } from "../repo/manual";
 import { sourceHashOf } from "../repo/writer";
 import { verifyRunnerCandidate } from "../runner/batch";
-import {
-  reviewRunEvidence,
-  type EvidenceReview,
-} from "../runner/evidence-review";
+import { reviewRunEvidence } from "../runner/evidence-review";
+import type { EvidenceReview } from "../runner/evidence-review";
 import { resolveSecretOriginPolicy } from "../runner/secrets";
 import {
   createEnvironmentTunnelProxy,

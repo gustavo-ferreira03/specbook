@@ -3,7 +3,8 @@
 import { Monitor } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 
-import { VncViewer, type VncStatus } from "@/components/VncViewer";
+import { VncViewer } from "@/components/VncViewer";
+import type { VncStatus } from "@/components/VncViewer";
 import { cn } from "@/lib/utils";
 
 const WIDE_QUERY = "(min-width: 1280px)";

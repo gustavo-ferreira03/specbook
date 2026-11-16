@@ -5,10 +5,8 @@ import path from "node:path";
 
 import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
 import { httpTarget, resolveTarget } from "@specbook/runtime/network/targets";
-import {
-  runPlaywrightSuite,
-  type SuiteSpec,
-} from "@specbook/runtime/playwright";
+import { runPlaywrightSuite } from "@specbook/runtime/playwright";
+import type { SuiteSpec } from "@specbook/runtime/playwright";
 import {
   decodeReplay,
   encodeReplay,
@@ -19,11 +17,13 @@ import {
   runnerClaimResponseSchema,
   runnerCompleteRequestSchema,
   runnerHeartbeatResponseSchema,
-  type RunnerClaim,
-  type RunnerCompletion,
   RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_REQUEST_LIMIT_BYTES,
+} from "@specbook/runtime/runner-protocol";
+import type {
+  RunnerClaim,
+  RunnerCompletion,
 } from "@specbook/runtime/runner-protocol";
 import { scrubJson } from "@specbook/runtime/scrub";
 import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";

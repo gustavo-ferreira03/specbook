@@ -2,12 +2,8 @@ import { CodedError } from "@specbook/runtime/errors";
 
 import type { RunEnvironment } from "../../infra/db/schema";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
-import {
-  getActiveTabUrl,
-  readBrowserSnapshot,
-  type BrowserMcp,
-  type BrowserToolPolicy,
-} from "../browser/mcp";
+import { getActiveTabUrl, readBrowserSnapshot } from "../browser/mcp";
+import type { BrowserMcp, BrowserToolPolicy } from "../browser/mcp";
 import { consumeVaultSubmit } from "./credential-tools";
 
 export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([

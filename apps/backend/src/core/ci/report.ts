@@ -12,7 +12,8 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import { specsRepository } from "../../infra/repositories/specs";
 import { realRunDirectory } from "../runner/artifacts";
 import type { RunBatch } from "../runner/batch";
-import { ciResult, type CiResult } from "./results";
+import { ciResult } from "./results";
+import type { CiResult } from "./results";
 
 export async function htmlReport(
   result: CiResult,

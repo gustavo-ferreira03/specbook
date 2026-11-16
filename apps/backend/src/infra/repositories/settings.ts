@@ -3,13 +3,14 @@ import crypto from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 
 import type { SecuritySettings } from "../../core/chat/safety-settings";
-import {
-  retentionSettingsSchema,
-  type RetentionCleanup,
-  type RetentionSettings,
+import { retentionSettingsSchema } from "../../core/operations/schemas";
+import type {
+  RetentionCleanup,
+  RetentionSettings,
 } from "../../core/operations/schemas";
 import { db } from "../db/client";
-import { appSettings, type LlmSettings } from "../db/schema";
+import { appSettings } from "../db/schema";
+import type { LlmSettings } from "../db/schema";
 
 const SETTINGS_ID = 1;
 

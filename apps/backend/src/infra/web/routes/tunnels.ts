@@ -1,4 +1,5 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
+import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 
 import { authenticateRunnerToken } from "../../../core/private-runner/tokens";

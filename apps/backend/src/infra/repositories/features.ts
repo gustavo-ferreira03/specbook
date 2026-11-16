@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 
 import { and, asc, eq, inArray } from "drizzle-orm";
 
-import { db, runBatch, type DbQuery } from "../db/client";
+import { db, runBatch } from "../db/client";
+import type { DbQuery } from "../db/client";
 import { features, runs, specs } from "../db/schema";
 
 export type Feature = typeof features.$inferSelect;

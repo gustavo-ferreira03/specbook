@@ -4,7 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 
-import { simpleGit, type SimpleGit } from "simple-git";
+import { simpleGit } from "simple-git";
+import type { SimpleGit } from "simple-git";
 
 import { tempDir, useTempStorage } from "../helpers/storage";
 

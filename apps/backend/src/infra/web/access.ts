@@ -2,7 +2,8 @@ import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 
-import { recordAudit, withActor, type Actor } from "../../core/accounts/audit";
+import { recordAudit, withActor } from "../../core/accounts/audit";
+import type { Actor } from "../../core/accounts/audit";
 import type { UserRole } from "../../core/accounts/schemas";
 import {
   accessTokenFromHeaders,

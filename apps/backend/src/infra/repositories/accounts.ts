@@ -2,11 +2,8 @@ import crypto from "node:crypto";
 
 import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 
-import {
-  DEFAULT_SSO_SETTINGS,
-  type SsoSettings,
-  type UserRole,
-} from "../../core/accounts/schemas";
+import { DEFAULT_SSO_SETTINGS } from "../../core/accounts/schemas";
+import type { SsoSettings, UserRole } from "../../core/accounts/schemas";
 import { createKeyedLock } from "../../core/operations/keyed-lock";
 import { db } from "../db/client";
 import {

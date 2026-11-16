@@ -3,11 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { localNetworkPolicy } from "@specbook/runtime/network/targets";
-import {
-  runPlaywrightSuite,
-  type SuiteSpec,
-  type SuiteSpecResult,
-} from "@specbook/runtime/playwright";
+import { runPlaywrightSuite } from "@specbook/runtime/playwright";
+import type { SuiteSpec, SuiteSpecResult } from "@specbook/runtime/playwright";
 import { serializeSpecYaml } from "@specbook/runtime/yaml";
 
 import { ensureChromium } from "./browsers";

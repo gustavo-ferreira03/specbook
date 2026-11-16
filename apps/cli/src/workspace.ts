@@ -3,11 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import type { HumanSpec } from "@specbook/runtime/types";
-import {
-  analyzeSpecSource,
-  stepTitlesError,
-  type SpecAnalysis,
-} from "@specbook/runtime/validate";
+import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
+import type { SpecAnalysis } from "@specbook/runtime/validate";
 import {
   parseSpecYaml,
   parseFeatureYaml,

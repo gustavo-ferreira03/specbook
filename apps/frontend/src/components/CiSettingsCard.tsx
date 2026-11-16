@@ -37,7 +37,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_URL, api, apiPath, errorMessage, isAbortError } from "@/lib/api";
-import { CI_PROVIDERS, ciSnippet, type CiProvider } from "@/lib/ci-snippets";
+import { CI_PROVIDERS, ciSnippet } from "@/lib/ci-snippets";
+import type { CiProvider } from "@/lib/ci-snippets";
 import { copyText, selectElementText } from "@/lib/clipboard";
 import { countLabel, formatDuration } from "@/lib/format";
 import type { ProjectEnvironment } from "@/lib/types";

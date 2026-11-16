@@ -5,11 +5,8 @@ import { runsRepository } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { createProjectScrubber } from "../credentials/scrub";
 import { enqueueIntent } from "./engine";
-import {
-  stewardIntentSchema,
-  type StewardIntent,
-  type StewardIntentInput,
-} from "./schemas";
+import { stewardIntentSchema } from "./schemas";
+import type { StewardIntent, StewardIntentInput } from "./schemas";
 
 function result(value: string) {
   return {

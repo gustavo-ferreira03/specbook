@@ -5,15 +5,15 @@ import {
   isPrivateAddress,
   NetworkTargetError,
   resolveTarget,
-  type AddressResolver,
-  type RunNetworkPolicy,
+} from "@specbook/runtime/network/targets";
+import type {
+  AddressResolver,
+  RunNetworkPolicy,
 } from "@specbook/runtime/network/targets";
 
 import type { RunEnvironment } from "../../infra/db/schema";
-import {
-  projectsRepository,
-  type Project,
-} from "../../infra/repositories/projects";
+import { projectsRepository } from "../../infra/repositories/projects";
+import type { Project } from "../../infra/repositories/projects";
 import { resolveRunEnvironment } from "../environments";
 
 export type { RunNetworkPolicy } from "@specbook/runtime/network/targets";

@@ -1,9 +1,6 @@
 import { CodedError } from "@specbook/runtime/errors";
-import {
-  analyzeSpecSource,
-  stepTitlesError,
-  type SpecAnalysis,
-} from "@specbook/runtime/validate";
+import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
+import type { SpecAnalysis } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 
 import type { RunEnvironment } from "../../infra/db/schema";

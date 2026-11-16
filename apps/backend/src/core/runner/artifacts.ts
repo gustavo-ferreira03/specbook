@@ -1,10 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import {
-  readEvidenceManifest,
-  type EvidenceManifest,
-} from "@specbook/runtime/evidence";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
+import type { EvidenceManifest } from "@specbook/runtime/evidence";
 import { executionPlan } from "@specbook/runtime/types";
 import { analyzeSpecSource, sameStepTitle } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";

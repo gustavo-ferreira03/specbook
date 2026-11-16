@@ -4,10 +4,8 @@ import { z } from "zod";
 
 import { CLI_VERSION as RUNNER_CLI_VERSION } from "../../infra/cli-version";
 import { projectsRepository } from "../../infra/repositories/projects";
-import {
-  runnersRepository,
-  type RunnerToken,
-} from "../../infra/repositories/runners";
+import { runnersRepository } from "../../infra/repositories/runners";
+import type { RunnerToken } from "../../infra/repositories/runners";
 import { issuePrefixedToken, tokenHash } from "../accounts/tokens";
 
 export const runnerTokenSchema = z

@@ -9,21 +9,16 @@ import { writeRunEvidence } from "./evidence.ts";
 import { createRunProxy } from "./network/proxy.ts";
 import type { RunNetworkPolicy } from "./network/targets.ts";
 import { runNodeCli } from "./process.ts";
-import {
-  parsePlaywrightReport,
-  stripAnsi,
-  type SpecFileResult,
-} from "./report.ts";
+import { parsePlaywrightReport, stripAnsi } from "./report.ts";
+import type { SpecFileResult } from "./report.ts";
 import { isInside } from "./safe-fs.ts";
 import { sanitizeTechnicalDetails } from "./sanitize.ts";
 import { scrubJsonText } from "./scrub.ts";
-import {
-  RUNTIME_ENV,
-  type SecretOriginPolicy,
-  type SpecbookRuntime,
-} from "./specbook/guard.ts";
+import { RUNTIME_ENV } from "./specbook/guard.ts";
+import type { SecretOriginPolicy, SpecbookRuntime } from "./specbook/guard.ts";
 import { specTimeouts } from "./timeouts.ts";
-import { executionPlan, type HumanSpec, type RunStatus } from "./types.ts";
+import { executionPlan } from "./types.ts";
+import type { HumanSpec, RunStatus } from "./types.ts";
 import type { SpecAnalysis } from "./validate.ts";
 
 const require = createRequire(import.meta.url);

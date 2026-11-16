@@ -1,8 +1,6 @@
 import type { RunEnvironment } from "../../infra/db/schema";
-import {
-  credentialsRepository,
-  type CredentialProfileRow,
-} from "../../infra/repositories/credentials";
+import { credentialsRepository } from "../../infra/repositories/credentials";
+import type { CredentialProfileRow } from "../../infra/repositories/credentials";
 import { loginFieldKeys } from "./login-classifier";
 import { getProfileByName } from "./profiles";
 

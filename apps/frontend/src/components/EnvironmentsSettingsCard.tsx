@@ -18,8 +18,8 @@ import {
   SettingsFooter,
   SettingsRow,
   SettingsSection,
-  type InlineFeedbackValue,
 } from "@/components/SettingsLayout";
+import type { InlineFeedbackValue } from "@/components/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {

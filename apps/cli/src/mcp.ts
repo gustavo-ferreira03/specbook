@@ -21,7 +21,8 @@ import {
 } from "./chat-model.js";
 import { checkSpecs } from "./check.js";
 import { containsSecret, listProfiles, scrub } from "./credentials.js";
-import { runLocal, type LocalRun } from "./run.js";
+import { runLocal } from "./run.js";
+import type { LocalRun } from "./run.js";
 import { CLI_VERSION } from "./version.js";
 import {
   loadConfig,

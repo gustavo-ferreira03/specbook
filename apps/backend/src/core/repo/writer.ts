@@ -8,10 +8,8 @@ import {
   readRepoFile,
   writeRepoFile,
 } from "@specbook/runtime/safe-fs";
-import {
-  validateSpecSource,
-  type SpecSourceValidation,
-} from "@specbook/runtime/validate";
+import { validateSpecSource } from "@specbook/runtime/validate";
+import type { SpecSourceValidation } from "@specbook/runtime/validate";
 import {
   parseSpecYaml,
   parseFeatureYaml,
@@ -23,16 +21,13 @@ import {
 import { runBatch } from "../../infra/db/client";
 import type { HumanSpec, ProjectContext } from "../../infra/db/schema";
 import { environmentsRepository } from "../../infra/repositories/environments";
-import {
-  featuresRepository,
-  type Feature,
-} from "../../infra/repositories/features";
-import {
-  projectContextsRepository,
-  type ProjectContextRevisionRow,
-} from "../../infra/repositories/project-contexts";
+import { featuresRepository } from "../../infra/repositories/features";
+import type { Feature } from "../../infra/repositories/features";
+import { projectContextsRepository } from "../../infra/repositories/project-contexts";
+import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { specEnvironmentsRepository } from "../../infra/repositories/spec-environments";
-import { specsRepository, type Spec } from "../../infra/repositories/specs";
+import { specsRepository } from "../../infra/repositories/specs";
+import type { Spec } from "../../infra/repositories/specs";
 import {
   acquireSpecLocks,
   areSpecsLocked,

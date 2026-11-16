@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { logger } from "../../infra/logger";
-import { runsRepository, type Run } from "../../infra/repositories/runs";
+import { runsRepository } from "../../infra/repositories/runs";
+import type { Run } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
 import { markdownHashOf } from "../repo/writer";

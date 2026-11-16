@@ -1,11 +1,8 @@
 import http from "node:http";
 import https from "node:https";
 
-import {
-  httpTarget,
-  resolveTarget,
-  type AddressResolver,
-} from "@specbook/runtime/network/targets";
+import { httpTarget, resolveTarget } from "@specbook/runtime/network/targets";
+import type { AddressResolver } from "@specbook/runtime/network/targets";
 
 export async function postWebhook(
   value: string,

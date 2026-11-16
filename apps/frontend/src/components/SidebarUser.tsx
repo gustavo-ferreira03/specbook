@@ -27,11 +27,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api, errorMessage } from "@/lib/api";
-import {
-  setThemePreference,
-  useThemePreference,
-  type ThemePreference,
-} from "@/lib/theme";
+import { setThemePreference, useThemePreference } from "@/lib/theme";
+import type { ThemePreference } from "@/lib/theme";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);

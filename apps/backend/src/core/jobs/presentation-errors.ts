@@ -1,4 +1,5 @@
-import { isInfrastructureCode, type ErrorCode } from "@specbook/runtime/errors";
+import { isInfrastructureCode } from "@specbook/runtime/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 const INFRASTRUCTURE_FAILURE =
   /\bXvfb\b|\bX server\b|servidor X|display\s*:?\s*\d+|EADDRINUSE|BrowserUnavailableError|browserType\.launch|could(?:n['’]t| not) start (?:its |the )?browser|(?:browser|chromium|navegador).{0,80}(?:failed to (?:start|launch)|could not (?:start|launch)|não iniciou|não foi iniciado)|executable doesn't exist|failed to launch.{0,30}browser|(?:LLM|model|provider).{0,60}(?:not configured|not authenticated|unavailable|rate limit)|No LLM model|No API key|MCP.{0,40}(?:disconnected|connection closed|failed to connect)|(?:OpenAI|Anthropic|Copilot).{0,40}(?:401|429|authentication)/i;
 

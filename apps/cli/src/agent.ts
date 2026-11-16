@@ -1,4 +1,5 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +9,7 @@ import { specWritingRules } from "@specbook/runtime/writing-rules";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 
 import { configHome } from "./credentials.js";
-import { type AgentState } from "./mcp.js";
+import type { AgentState } from "./mcp.js";
 import { safeWorkspacePath } from "./workspace.js";
 
 export type Agent = "claude" | "codex";

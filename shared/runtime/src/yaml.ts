@@ -1,10 +1,7 @@
 import { parse, stringify } from "yaml";
 
-import {
-  EMPTY_PROJECT_CONTEXT,
-  type HumanSpec,
-  type ProjectContext,
-} from "./types.ts";
+import { EMPTY_PROJECT_CONTEXT } from "./types.ts";
+import type { HumanSpec, ProjectContext } from "./types.ts";
 
 export class YamlParseError extends Error {}
 

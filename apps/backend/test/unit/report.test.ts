@@ -24,8 +24,8 @@ import {
   restoreReplayEvents,
   REPLAY_FILE,
   REPLAY_LIMIT_NOTE,
-  type ReplayEvent,
 } from "@specbook/runtime/replay";
+import type { ReplayEvent } from "@specbook/runtime/replay";
 import { parsePlaywrightReport, stripAnsi } from "@specbook/runtime/report";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 

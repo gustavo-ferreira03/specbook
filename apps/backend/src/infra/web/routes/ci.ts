@@ -1,5 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
-import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { Hono } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
@@ -29,7 +30,8 @@ import { fingerprint } from "../../../core/steward/signals";
 import { ciRepository } from "../../repositories/ci";
 import { environmentsRepository } from "../../repositories/environments";
 import { stewardRepository } from "../../repositories/steward";
-import { access, browserSession, type BearerVerifier } from "../access";
+import { access, browserSession } from "../access";
+import type { BearerVerifier } from "../access";
 import { loadProject } from "../load-project";
 import { publicFrontendOrigin } from "../security";
 import { htmlReportHeaders } from "../security";

@@ -9,8 +9,8 @@ import {
   MAX_REPLAY_RAW_BYTES,
   packReplayEvents,
   restoreReplayEvents,
-  type ReplayEvent,
 } from "./replay-assets.ts";
+import type { ReplayEvent } from "./replay-assets.ts";
 
 export {
   MAX_REPLAY_RAW_BYTES,

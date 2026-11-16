@@ -1,14 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import {
-  expect as baseExpect,
-  test as base,
-  type ConsoleMessage,
-  type Page,
-  type Request,
-  type Response,
-} from "@playwright/test";
+import { expect as baseExpect, test as base } from "@playwright/test";
+import type { ConsoleMessage, Page, Request, Response } from "@playwright/test";
 
 import { specErrorCode } from "../errors.ts";
 import type { RunDiagnostic } from "../evidence.ts";
@@ -20,8 +14,8 @@ import {
   REPLAY_LIMIT_NOTE,
   REPLAY_UNAVAILABLE_ATTACHMENT,
   readRecorderSource,
-  type ReplayEvent,
 } from "../replay.ts";
+import type { ReplayEvent } from "../replay.ts";
 import { scrubJson } from "../scrub.ts";
 import type { ExecutionStepKind } from "../types.ts";
 import { withEvidenceTimeout } from "./evidence-timeout.ts";
@@ -36,9 +30,8 @@ import {
   settleStrict,
   STEP_ATTACHMENT_PREFIX,
   unwrap,
-  type RawPage,
-  type ApiRequestEvidence,
 } from "./guard.ts";
+import type { RawPage, ApiRequestEvidence } from "./guard.ts";
 import { createReplayImageRecorder } from "./replay-images.ts";
 import { captureStepScreenshot } from "./screenshot.ts";
 

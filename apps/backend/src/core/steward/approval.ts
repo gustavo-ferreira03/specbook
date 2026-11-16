@@ -5,7 +5,8 @@ import {
   LOCATOR_REFINERS,
 } from "@specbook/runtime/specbook/allowlist";
 
-import { jobsRepository, type InboxItem } from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { InboxItem } from "../../infra/repositories/jobs";
 import { runsRepository } from "../../infra/repositories/runs";
 import { stewardRepository } from "../../infra/repositories/steward";
 import { recordAgentMetric } from "../jobs/metrics";

@@ -4,7 +4,8 @@ import path from "node:path";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db, runBatch, type DbQuery } from "../../infra/db/client";
+import { db, runBatch } from "../../infra/db/client";
+import type { DbQuery } from "../../infra/db/client";
 import { piAuthPath, storageRoot } from "../paths";
 import {
   clearEncryptionKeyCache,

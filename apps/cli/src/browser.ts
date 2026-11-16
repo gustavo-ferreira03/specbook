@@ -11,17 +11,14 @@ import {
   httpTarget,
   localNetworkPolicy,
 } from "@specbook/runtime/network/targets";
-import {
-  chromium,
-  type Browser,
-  type Locator,
-  type Page,
-} from "playwright-core";
+import { chromium } from "playwright-core";
+import type { Browser, Locator, Page } from "playwright-core";
 import { z } from "zod";
 
 import { ensureChromium } from "./browsers.js";
 import { resolveSecret, scrub, secretOrigins } from "./credentials.js";
-import { checkPageLocators, type LocatorCheck } from "./locators.js";
+import { checkPageLocators } from "./locators.js";
+import type { LocatorCheck } from "./locators.js";
 
 const requestSchema = z
   .object({

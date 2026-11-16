@@ -10,7 +10,8 @@ import {
 } from "@specbook/runtime/evidence";
 import { z } from "zod";
 
-import { jobsRepository, type Job } from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { Job } from "../../infra/repositories/jobs";
 import { runsRepository } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { getSecuritySettings } from "../chat/safety-settings";

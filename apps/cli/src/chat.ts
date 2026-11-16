@@ -10,19 +10,18 @@ import {
   executeAgent,
   confirmedResults,
   conversationInstructions,
-  type Agent,
 } from "./agent.js";
+import type { Agent } from "./agent.js";
 import {
   chatIdSchema,
   chatReplySchema,
   conversationSchema,
   outcomeSchema,
-  type ChatReply,
-  type ChatSpec,
-  type Conversation,
 } from "./chat-model.js";
+import type { ChatReply, ChatSpec, Conversation } from "./chat-model.js";
 import { containsSecret, scrub } from "./credentials.js";
-import { emptyAgentState, readAgentState, type AgentState } from "./mcp.js";
+import { emptyAgentState, readAgentState } from "./mcp.js";
+import type { AgentState } from "./mcp.js";
 import {
   detectAgents,
   loadConfig,

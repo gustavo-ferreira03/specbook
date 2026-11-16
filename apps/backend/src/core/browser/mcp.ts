@@ -6,11 +6,8 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import {
-  CodedError,
-  errorCodeOf,
-  type ErrorCode,
-} from "@specbook/runtime/errors";
+import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 import { SPEC_VIEWPORT } from "@specbook/runtime/playwright";
 import { minimalChildEnv } from "@specbook/runtime/process";
 

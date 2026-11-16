@@ -6,10 +6,8 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import {
-  runPlaywrightSuite,
-  type SuiteSpec,
-} from "@specbook/runtime/playwright";
+import { runPlaywrightSuite } from "@specbook/runtime/playwright";
+import type { SuiteSpec } from "@specbook/runtime/playwright";
 import {
   readReplay,
   readRecorderSource,

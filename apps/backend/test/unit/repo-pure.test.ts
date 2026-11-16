@@ -24,10 +24,8 @@ import {
 } from "@specbook/runtime/yaml";
 
 import { humanizeSlug, slugify, uniqueSlug } from "../../src/core/repo/slug";
-import {
-  EMPTY_PROJECT_CONTEXT,
-  type ProjectContext,
-} from "../../src/infra/db/schema";
+import { EMPTY_PROJECT_CONTEXT } from "../../src/infra/db/schema";
+import type { ProjectContext } from "../../src/infra/db/schema";
 import { tempDir } from "../helpers/storage";
 
 describe("slug", () => {

@@ -6,11 +6,8 @@ import { readEvidenceManifest } from "./evidence.ts";
 import { readOfflineReplay } from "./replay-data.ts";
 import { REPLAY_PLAYER_STYLES } from "./replay-player-styles.ts";
 import { assertionWait, stepName } from "./replay-player.ts";
-import {
-  executionPlan,
-  type ExecutionStepKind,
-  type HumanSpec,
-} from "./types.ts";
+import { executionPlan } from "./types.ts";
+import type { ExecutionStepKind, HumanSpec } from "./types.ts";
 import { analyzeSpecSource, sameStepTitle } from "./validate.ts";
 
 const MAX_IMAGE_BYTES = 5_000_000;

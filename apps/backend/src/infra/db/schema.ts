@@ -1,7 +1,7 @@
-import {
-  type HumanSpec,
-  type RunStatus,
-  type ProjectContext,
+import type {
+  HumanSpec,
+  RunStatus,
+  ProjectContext,
 } from "@specbook/runtime/types";
 export {
   EMPTY_PROJECT_CONTEXT,

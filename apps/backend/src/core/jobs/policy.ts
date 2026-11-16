@@ -1,19 +1,15 @@
 import { Type } from "@earendil-works/pi-ai";
-import {
-  defineTool,
-  type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
-import {
-  errorCodeOf,
-  isInfrastructureCode,
-  type ErrorCode,
-} from "@specbook/runtime/errors";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { errorCodeOf, isInfrastructureCode } from "@specbook/runtime/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
 import { z } from "zod";
 
 import type { RunEnvironment } from "../../infra/db/schema";
 import { logger } from "../../infra/logger";
 import { credentialsRepository } from "../../infra/repositories/credentials";
-import { jobsRepository, type Job } from "../../infra/repositories/jobs";
+import { jobsRepository } from "../../infra/repositories/jobs";
+import type { Job } from "../../infra/repositories/jobs";
 import { loadPrompt } from "../chat/prompt-loader";
 import { createProjectScrubber } from "../credentials/scrub";
 import { reviewNextStep } from "../runner/evidence-review";

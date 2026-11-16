@@ -1,6 +1,7 @@
 import type RRWebPlayer from "rrweb-player";
 
-import { restoreReplayEvents, type ReplayEvent } from "./replay-assets.ts";
+import { restoreReplayEvents } from "./replay-assets.ts";
+import type { ReplayEvent } from "./replay-assets.ts";
 import { REPLAY_MASK_ATTRIBUTE } from "./replay-constants.ts";
 
 export interface ReplayStepMarker {

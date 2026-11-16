@@ -4,10 +4,8 @@ import { EventEmitter } from "node:events";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 
-import {
-  accountsRepository,
-  type User,
-} from "../../infra/repositories/accounts";
+import { accountsRepository } from "../../infra/repositories/accounts";
+import type { User } from "../../infra/repositories/accounts";
 import { publicFrontendOrigin } from "../../infra/web/security";
 import { tokenHash } from "./tokens";
 
