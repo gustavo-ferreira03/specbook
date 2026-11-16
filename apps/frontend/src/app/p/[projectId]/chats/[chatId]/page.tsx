@@ -793,7 +793,7 @@ function ChatContent({
         if (index === -1) {
           return current;
         }
-        const next = current.slice();
+        const next = [...current];
         next[index] = { ...next[index], endedAt };
         return next;
       });

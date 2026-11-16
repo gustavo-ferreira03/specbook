@@ -355,7 +355,7 @@ describe(
             document.querySelectorAll("img[id]").forEach((image) => {
               before[image.id] = inspect.box(image);
             });
-            const initialEvents = events.slice();
+            const initialEvents = [...events];
             const source = (
               document.querySelector("#small") as HTMLImageElement
             ).src;
