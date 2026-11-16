@@ -187,7 +187,7 @@ function DiscoveryStartForm({
                 value={safetyNotes}
                 onChange={(event) => setSafetyNotes(event.target.value)}
                 rows={3}
-                placeholder={"Do not submit contact forms"}
+                placeholder="Do not submit contact forms"
               />
               <p className="text-meta text-ink-subtle mt-1.5">
                 One rule per line. The agent follows them during discovery.
