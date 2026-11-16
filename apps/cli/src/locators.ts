@@ -90,19 +90,24 @@ export async function checkPageLocators(
     switch (node.type) {
       case "StringLiteral":
       case "NumericLiteral":
-      case "BooleanLiteral":
+      case "BooleanLiteral": {
         return node.value;
-      case "NullLiteral":
+      }
+      case "NullLiteral": {
         return null;
-      case "RegExpLiteral":
+      }
+      case "RegExpLiteral": {
         return new RegExp(node.pattern, node.flags);
-      case "TemplateLiteral":
+      }
+      case "TemplateLiteral": {
         return node.quasis[0]?.value.cooked;
-      case "UnaryExpression":
+      }
+      case "UnaryExpression": {
         if (node.operator === "-" && node.argument.type === "NumericLiteral") {
           return -node.argument.value;
         }
         break;
+      }
       case "ObjectExpression": {
         const result: Record<string, unknown> = Object.create(null);
         for (const property of node.properties) {
@@ -119,11 +124,12 @@ export async function checkPageLocators(
         }
         return result;
       }
-      case "ArrayExpression":
+      case "ArrayExpression": {
         return node.elements.map((item) =>
           item ? value(item, bindings) : null
         );
-      case "Identifier":
+      }
+      case "Identifier": {
         if (node.name === "page") {
           return page;
         }
@@ -131,6 +137,7 @@ export async function checkPageLocators(
           return value(bindings.get(node.name)!, bindings);
         }
         break;
+      }
       case "CallExpression": {
         if (!isLocatorCall(node)) {
           break;

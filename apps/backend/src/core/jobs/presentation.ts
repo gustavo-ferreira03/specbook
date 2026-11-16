@@ -542,13 +542,14 @@ export async function projectPresentation(
     let title: string;
     let summary: string;
     switch (type) {
-      case "help":
+      case "help": {
         title = `I couldn’t update “${name}” by myself. Look at it together?`;
         summary = plainReason(
           verification?.failReason ?? job?.stopReason ?? item.body,
           verification?.errorCode ?? job?.errorCode ?? payloadOf(item).errorCode
         );
         break;
+      }
       case "update": {
         if (
           params.humanSpec !== undefined ||
@@ -588,12 +589,13 @@ export async function projectPresentation(
         summary = `${updateReason} The expected behavior stays the same.`;
         break;
       }
-      case "new_check":
+      case "new_check": {
         title = `Add a Spec for “${string(params.title) ?? name}”?`;
         summary =
           "This would add a Spec for a behavior that is not yet covered. Review the steps and expected result before saving it.";
         break;
-      case "batch":
+      }
+      case "batch": {
         title = batchTitle(item, batch!);
         summary = batch!.contextReviewRequired
           ? "Confirm the discovery context, then select the Specs you want to create."
@@ -601,12 +603,14 @@ export async function projectPresentation(
             ? "Each selected Spec is saved, validated and run once. Review its first result."
             : "Select the Specs you want. Each one will be created, validated and run once.";
         break;
-      case "feature":
+      }
+      case "feature": {
         title = `Add “${string(params.title) ?? name}” to this project?`;
         summary =
           "This would organize related Specs under a new feature of the project.";
         break;
-      case "bug":
+      }
+      case "bug": {
         title =
           safeTitle?.replace(/[.!?]+$/, "") ??
           `A problem was reported in “${name}”`;
@@ -614,7 +618,8 @@ export async function projectPresentation(
           plainExcerpt(item.body.split(/\n\s*\n/)[0] ?? "") ??
           "The application did not behave as expected. The existing Spec has been left unchanged.";
         break;
-      default:
+      }
+      default: {
         title = credentialRequest
           ? `Can you provide access for “${name}”?`
           : safeTitle && safeTitle.endsWith("?")
@@ -624,6 +629,7 @@ export async function projectPresentation(
           ? "Use Update credentials to add the requested sign-in details, then let Specbook know. Do not put passwords in your reply."
           : (plainExcerpt(item.body) ??
             "Specbook needs your explanation of the expected behavior before it can continue. Discuss the Spec in chat to clarify it.");
+      }
     }
     const browserWork = actions
       .get(item.jobId)

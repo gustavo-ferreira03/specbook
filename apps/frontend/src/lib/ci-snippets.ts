@@ -32,7 +32,7 @@ export function ciSnippet(
       .join("\n");
 
   switch (provider) {
-    case "github":
+    case "github": {
       return `name: Specbook
 on: [workflow_dispatch, pull_request]
 jobs:
@@ -81,7 +81,8 @@ ${yamlEnv(6)}
         run: |
           if [ -n "$REPORT_URL" ]; then printf '**[Open the Specbook report](%s)**\\n\\n' "$REPORT_URL" >> "$GITHUB_STEP_SUMMARY"; fi
           test ! -f specbook-summary.md || cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY"`;
-    case "gitlab":
+    }
+    case "gitlab": {
       return `specbook:
   image: node:26
   resource_group: specbook-$SPECBOOK_PROJECT-$CI_MERGE_REQUEST_IID
@@ -106,7 +107,8 @@ ${yamlEnv(4)}
     paths:
       - specbook-report.html
       - specbook-summary.md`;
-    case "bitbucket":
+    }
+    case "bitbucket": {
       return `image: node:26
 pipelines:
   default:
@@ -130,7 +132,8 @@ ${Object.entries(env)
           - test-results/specbook.xml
           - specbook-report.html
           - specbook-summary.md`;
-    case "circleci":
+    }
+    case "circleci": {
       return `version: 2.1
 jobs:
   specbook:
@@ -158,7 +161,8 @@ workflows:
   verify:
     jobs:
       - specbook`;
-    case "jenkins":
+    }
+    case "jenkins": {
       return `pipeline {
   agent any // Node.js 26 and npm must be available.
   environment {
@@ -190,5 +194,6 @@ ${Object.entries(env)
     }
   }
 }`;
+    }
   }
 }

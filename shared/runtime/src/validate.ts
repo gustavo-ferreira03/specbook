@@ -747,31 +747,41 @@ class Validator {
   private unexpected(node: t.Node): string {
     switch (node.type) {
       case "OptionalMemberExpression":
-      case "OptionalCallExpression":
+      case "OptionalCallExpression": {
         return "Optional chaining (?.) is not allowed.";
-      case "SequenceExpression":
+      }
+      case "SequenceExpression": {
         return "Comma expressions are not allowed.";
-      case "TaggedTemplateExpression":
+      }
+      case "TaggedTemplateExpression": {
         return "Tagged templates are not allowed.";
+      }
       case "ArrowFunctionExpression":
-      case "FunctionExpression":
+      case "FunctionExpression": {
         return "Functions are only allowed as the bodies of test() and step().";
-      case "AssignmentExpression":
+      }
+      case "AssignmentExpression": {
         return "Assignments are not allowed.";
+      }
       case "Import":
-      case "ImportExpression":
+      case "ImportExpression": {
         return "Dynamic import() is not allowed.";
-      case "CallExpression":
+      }
+      case "CallExpression": {
         return "Calling the result of a call is not allowed.";
-      case "NewExpression":
+      }
+      case "NewExpression": {
         return "new is not allowed.";
+      }
       case "TSNonNullExpression":
       case "TSAsExpression":
       case "TSSatisfiesExpression":
-      case "TSTypeAssertion":
+      case "TSTypeAssertion": {
         return "TypeScript type expressions are not allowed.";
-      default:
+      }
+      default: {
         return `${node.type} is not allowed here.`;
+      }
     }
   }
 
@@ -1205,21 +1215,25 @@ class Validator {
     }
     switch (node.type) {
       case "NumericLiteral":
-      case "BooleanLiteral":
+      case "BooleanLiteral": {
         return;
-      case "RegExpLiteral":
+      }
+      case "RegExpLiteral": {
         if (/[^dgimsuy]/.test(node.flags)) {
           fail(node, "Unsupported regular expression flags.");
         }
         return;
-      case "UnaryExpression":
+      }
+      case "UnaryExpression": {
         if (this.isNumber(node)) {
           return;
         }
         break;
-      case "TemplateLiteral":
+      }
+      case "TemplateLiteral": {
         fail(node, "Template literals cannot contain ${...} expressions.");
-      case "CallExpression":
+      }
+      case "CallExpression": {
         if (
           node.callee.type === "Identifier" &&
           node.callee.name === "secret"
@@ -1230,7 +1244,8 @@ class Validator {
           );
         }
         break;
-      case "ArrayExpression":
+      }
+      case "ArrayExpression": {
         if (options.depth > 1) {
           fail(node, "Values are nested too deeply.");
         }
@@ -1241,7 +1256,8 @@ class Validator {
           this.value(element, { locatorKeys: false, depth: options.depth + 1 });
         }
         return;
-      case "ObjectExpression":
+      }
+      case "ObjectExpression": {
         if (options.depth > 1) {
           fail(node, "Values are nested too deeply.");
         }
@@ -1273,8 +1289,10 @@ class Validator {
           });
         }
         return;
-      default:
+      }
+      default: {
         break;
+      }
     }
     fail(
       node,

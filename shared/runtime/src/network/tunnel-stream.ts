@@ -193,16 +193,18 @@ export class TunnelMultiplexer {
     }
     const pending = this.pending.get(frame.id);
     switch (frame.type) {
-      case "opened":
+      case "opened": {
         if (pending) {
           clearTimeout(pending.timer);
           this.pending.delete(frame.id);
           pending.resolve(stream);
         }
         break;
-      case "refused":
+      }
+      case "refused": {
         stream.destroy(new Error("Network target blocked by tunnel"));
         break;
+      }
       case "data": {
         const chunk = Buffer.from(frame.data, "base64");
         const buffered = [...this.streams.values()].reduce(
@@ -220,15 +222,18 @@ export class TunnelMultiplexer {
         }
         break;
       }
-      case "end":
+      case "end": {
         stream.push(null);
         break;
-      case "close":
+      }
+      case "close": {
         stream.destroy();
         break;
-      case "pause":
+      }
+      case "pause": {
         this.remotePaused.add(frame.id);
         break;
+      }
       case "resume": {
         this.remotePaused.delete(frame.id);
         const write = this.blockedWrites.get(frame.id);
