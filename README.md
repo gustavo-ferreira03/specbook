@@ -3,13 +3,9 @@
 
 <h1><img src="apps/frontend/public/specbook-icon.svg" alt="" height="40" align="top" /> specbook</h1>
 
-*A self-hosted QA agent that turns plain-language behavior into Playwright tests you can read.*
+_A self-hosted QA agent that turns plain-language behavior into Playwright tests you can read._
 
-[![CI](https://img.shields.io/github/actions/workflow/status/gustavo-ferreira03/specbook/ci.yml?style=flat-square&label=CI)](https://github.com/gustavo-ferreira03/specbook/actions/workflows/ci.yml)
-[![Docker image](https://img.shields.io/badge/Docker-ghcr.io-2496ed?style=flat-square&logo=docker&logoColor=white)](https://github.com/gustavo-ferreira03/specbook/pkgs/container/specbook)
-![Node version](https://img.shields.io/badge/Node.js-26-3c873a?style=flat-square)
-[![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/gustavo-ferreira03/specbook/ci.yml?style=flat-square&label=CI)](https://github.com/gustavo-ferreira03/specbook/actions/workflows/ci.yml) [![Docker image](https://img.shields.io/badge/Docker-ghcr.io-2496ed?style=flat-square&logo=docker&logoColor=white)](https://github.com/gustavo-ferreira03/specbook/pkgs/container/specbook) ![Node version](https://img.shields.io/badge/Node.js-26-3c873a?style=flat-square) [![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org) [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 [Features](#features) • [Get started](#get-started) • [How it works](#how-it-works) • [CLI](#use-the-cli-with-your-coding-agent) • [CI](#run-checks-from-ci) • [Private networks](#private-networks) • [Configuration](#configuration-and-data) • [Development](#develop-locally)
 
@@ -76,23 +72,28 @@ postconditions: []
 ```ts
 import { test, expect } from "specbook";
 
-test("Cart badge counts added products", async ({ page, step, secret, cleanup }) => {
-    await cleanup(async () => {
-        await page.getByTestId("remove-backpack").click();
-    });
-    await step("Signed in as the shopper", async () => {
-        await page.goto("/");
-        await page.getByLabel("Username").fill(secret("shop", "username"));
-        await page.getByLabel("Password").fill(secret("shop", "password"));
-        await page.getByRole("button", { name: "Login" }).click();
-        await expect(page).toHaveURL(/inventory/);
-    });
-    await step("Add the backpack to the cart", async () => {
-        await page.getByTestId("add-to-cart-backpack").click();
-    });
-    await step("The cart badge shows 1.", async () => {
-        await expect(page.getByTestId("cart-badge")).toHaveText("1");
-    });
+test("Cart badge counts added products", async ({
+  page,
+  step,
+  secret,
+  cleanup,
+}) => {
+  await cleanup(async () => {
+    await page.getByTestId("remove-backpack").click();
+  });
+  await step("Signed in as the shopper", async () => {
+    await page.goto("/");
+    await page.getByLabel("Username").fill(secret("shop", "username"));
+    await page.getByLabel("Password").fill(secret("shop", "password"));
+    await page.getByRole("button", { name: "Login" }).click();
+    await expect(page).toHaveURL(/inventory/);
+  });
+  await step("Add the backpack to the cart", async () => {
+    await page.getByTestId("add-to-cart-backpack").click();
+  });
+  await step("The cart badge shows 1.", async () => {
+    await expect(page.getByTestId("cart-badge")).toHaveText("1");
+  });
 });
 ```
 

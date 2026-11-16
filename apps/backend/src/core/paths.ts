@@ -5,17 +5,18 @@ import { fileURLToPath } from "node:url";
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 function findBackendRoot(start: string): string {
-    let current = start;
-    while (!existsSync(path.join(current, "package.json"))) {
-        const parent = path.dirname(current);
-        if (parent === current) return path.resolve(start, "..", "..");
-        current = parent;
-    }
-    return current;
+  let current = start;
+  while (!existsSync(path.join(current, "package.json"))) {
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(start, "..", "..");
+    current = parent;
+  }
+  return current;
 }
 
 export const backendRoot = findBackendRoot(moduleDir);
-export const storageRoot = process.env.SPECBOOK_STORAGE_DIR ?? path.join(backendRoot, "storage");
+export const storageRoot =
+  process.env.SPECBOOK_STORAGE_DIR ?? path.join(backendRoot, "storage");
 export const runsDir = path.join(storageRoot, "runs");
 export const runBatchesDir = path.join(runsDir, "batches");
 export const reposDir = path.join(storageRoot, "repos");

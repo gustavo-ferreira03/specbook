@@ -1,9 +1,8 @@
 title: Sign in with valid credentials
-description: Signing in with the administrator account opens the Sauce Demo project
-  workspace.
+description: Signing in with the administrator account opens the Sauce Demo project workspace.
 preconditions: []
 steps:
-- Open the Specbook sign-in page
-- Sign in with the administrator email and password
+  - Open the Specbook sign-in page
+  - Sign in with the administrator email and password
 expectedResult: The Sauce Demo dashboard shows how many Specs pass
 postconditions: []

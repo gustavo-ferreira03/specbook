@@ -1,219 +1,342 @@
-import type { ErrorCode } from "./errors.ts";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
-import { scrubJsonText } from "./scrub.ts";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { executionPlan, type HumanSpec, type RunStatus } from "./types.ts";
-import type { RunNetworkPolicy } from "./network/targets.ts";
-import { createRunProxy } from "./network/proxy.ts";
-import { sanitizeTechnicalDetails } from "./sanitize.ts";
-import { runNodeCli } from "./process.ts";
-import { parsePlaywrightReport, stripAnsi, type SpecFileResult } from "./report.ts";
-import { RUNTIME_ENV, type SecretOriginPolicy, type SpecbookRuntime } from "./specbook/guard.ts";
-import type { SpecAnalysis } from "./validate.ts";
-import { isInside } from "./safe-fs.ts";
+
+import type { ErrorCode } from "./errors.ts";
 import { writeRunEvidence } from "./evidence.ts";
+import { createRunProxy } from "./network/proxy.ts";
+import type { RunNetworkPolicy } from "./network/targets.ts";
+import { runNodeCli } from "./process.ts";
+import {
+  parsePlaywrightReport,
+  stripAnsi,
+  type SpecFileResult,
+} from "./report.ts";
+import { isInside } from "./safe-fs.ts";
+import { sanitizeTechnicalDetails } from "./sanitize.ts";
+import { scrubJsonText } from "./scrub.ts";
+import {
+  RUNTIME_ENV,
+  type SecretOriginPolicy,
+  type SpecbookRuntime,
+} from "./specbook/guard.ts";
 import { specTimeouts } from "./timeouts.ts";
+import { executionPlan, type HumanSpec, type RunStatus } from "./types.ts";
+import type { SpecAnalysis } from "./validate.ts";
 
 const require = createRequire(import.meta.url);
 
 export const SPEC_VIEWPORT = { width: 1280, height: 720 };
 
 export interface SuiteSpec {
-    key: string;
-    source: string;
-    analysis: SpecAnalysis;
-    outputDir: string;
-    humanSpec?: HumanSpec;
+  key: string;
+  source: string;
+  analysis: SpecAnalysis;
+  outputDir: string;
+  humanSpec?: HumanSpec;
 }
 
 export interface SuiteSpecResult {
-    status: Exclude<RunStatus, "running">;
-    durationMs: number | null;
-    failReason: string | null;
-    failedStep: string | null;
-    errorCode?: ErrorCode | null;
+  status: Exclude<RunStatus, "running">;
+  durationMs: number | null;
+  failReason: string | null;
+  failedStep: string | null;
+  errorCode?: ErrorCode | null;
 }
 
 export interface SuiteOutcome {
-    results: Map<string, SuiteSpecResult>;
-    processFailure: string | null;
+  results: Map<string, SuiteSpecResult>;
+  processFailure: string | null;
 }
 
 export interface SuiteOptions {
-    networkPolicy?: RunNetworkPolicy;
-    proxyServer?: string;
-    signal?: AbortSignal;
-    directory: string;
-    baseUrl: string;
-    specs: SuiteSpec[];
-    timeoutMs: number;
-    timeoutScale?: number;
-    secretEnv: Record<string, string>;
-    secretOrigins: SecretOriginPolicy;
-    scrub: (text: string) => string;
+  networkPolicy?: RunNetworkPolicy;
+  proxyServer?: string;
+  signal?: AbortSignal;
+  directory: string;
+  baseUrl: string;
+  specs: SuiteSpec[];
+  timeoutMs: number;
+  timeoutScale?: number;
+  secretEnv: Record<string, string>;
+  secretOrigins: SecretOriginPolicy;
+  scrub: (text: string) => string;
 }
 
 function playwrightCli(): string {
-    return require.resolve("@playwright/test/cli");
+  return require.resolve("@playwright/test/cli");
 }
 
 export function specbookModulePath(): string {
-    const candidates = [
-        new URL("./specbook-fixtures.mjs", import.meta.url),
-        new URL("./specbook/fixtures.ts", import.meta.url),
-        new URL("./specbook/fixtures.js", import.meta.url),
-    ].map((url) => fileURLToPath(url));
-    const found = candidates.find((candidate) => existsSync(candidate));
-    if (!found) throw new Error("The specbook test module was not found; build @specbook/runtime");
-    return found;
+  const candidates = [
+    new URL("./specbook-fixtures.mjs", import.meta.url),
+    new URL("./specbook/fixtures.ts", import.meta.url),
+    new URL("./specbook/fixtures.js", import.meta.url),
+  ].map((url) => fileURLToPath(url));
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found)
+    throw new Error(
+      "The specbook test module was not found; build @specbook/runtime"
+    );
+  return found;
 }
 
-export function executableSource(source: string, analysis: SpecAnalysis, modulePath: string): string {
-    const { start, end } = analysis.importSource;
-    return `${source.slice(0, start)}${JSON.stringify(modulePath)}${source.slice(end)}`;
+export function executableSource(
+  source: string,
+  analysis: SpecAnalysis,
+  modulePath: string
+): string {
+  const { start, end } = analysis.importSource;
+  return `${source.slice(0, start)}${JSON.stringify(modulePath)}${source.slice(end)}`;
 }
 
-
-function playwrightConfig(options: SuiteOptions, proxyServer?: string): Record<string, unknown> {
-    const file = (spec: SuiteSpec) => `${spec.key}.spec.ts`;
-    const plain = options.specs.filter((spec) => spec.analysis.secretRefs.length === 0).map(file);
-    const secret = options.specs.filter((spec) => spec.analysis.secretRefs.length > 0).map(file);
-    const hasSecrets = Object.values(options.secretEnv).some(Boolean);
-    const projects = [
-        plain.length ? { name: "specbook", testMatch: plain, use: { trace: hasSecrets ? "off" : "retain-on-failure", ...(hasSecrets ? { video: "off" } : {}) } } : null,
-        secret.length ? { name: "specbook-secrets", testMatch: secret, use: { trace: "off", video: "off" } } : null,
-    ].filter(Boolean);
-    const reporter: unknown[] = [["line"], ["json", { outputFile: "results.json" }]];
-    const timeouts = specTimeouts(options.timeoutScale);
-    return {
-        testDir: "tests",
-        outputDir: "test-results",
-        workers: 1,
-        fullyParallel: false,
-        retries: 0,
-        repeatEach: 1,
-        forbidOnly: true,
-        maxFailures: 0,
-        timeout: timeouts.test,
-        expect: { timeout: timeouts.expect },
-        preserveOutput: "always",
-        updateSnapshots: "none",
-        captureGitInfo: { commit: false, diff: false },
-        reporter,
-        use: {
-            baseURL: options.baseUrl,
-            browserName: "chromium",
-            headless: true,
-            viewport: SPEC_VIEWPORT,
-            video: { mode: "retain-on-failure", size: SPEC_VIEWPORT },
-            screenshot: "off",
-            trace: "off",
-            actionTimeout: timeouts.action,
-            navigationTimeout: timeouts.navigation,
-            acceptDownloads: false,
-            launchOptions: { args: ["--disable-dev-shm-usage", ...(proxyServer ? ["--proxy-bypass-list=<-loopback>", "--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : [])] },
-            ...(proxyServer ? { proxy: { server: proxyServer }, serviceWorkers: "block" } : {}),
-        },
-        projects,
-    };
+function playwrightConfig(
+  options: SuiteOptions,
+  proxyServer?: string
+): Record<string, unknown> {
+  const file = (spec: SuiteSpec) => `${spec.key}.spec.ts`;
+  const plain = options.specs
+    .filter((spec) => spec.analysis.secretRefs.length === 0)
+    .map(file);
+  const secret = options.specs
+    .filter((spec) => spec.analysis.secretRefs.length > 0)
+    .map(file);
+  const hasSecrets = Object.values(options.secretEnv).some(Boolean);
+  const projects = [
+    plain.length
+      ? {
+          name: "specbook",
+          testMatch: plain,
+          use: {
+            trace: hasSecrets ? "off" : "retain-on-failure",
+            ...(hasSecrets ? { video: "off" } : {}),
+          },
+        }
+      : null,
+    secret.length
+      ? {
+          name: "specbook-secrets",
+          testMatch: secret,
+          use: { trace: "off", video: "off" },
+        }
+      : null,
+  ].filter(Boolean);
+  const reporter: unknown[] = [
+    ["line"],
+    ["json", { outputFile: "results.json" }],
+  ];
+  const timeouts = specTimeouts(options.timeoutScale);
+  return {
+    testDir: "tests",
+    outputDir: "test-results",
+    workers: 1,
+    fullyParallel: false,
+    retries: 0,
+    repeatEach: 1,
+    forbidOnly: true,
+    maxFailures: 0,
+    timeout: timeouts.test,
+    expect: { timeout: timeouts.expect },
+    preserveOutput: "always",
+    updateSnapshots: "none",
+    captureGitInfo: { commit: false, diff: false },
+    reporter,
+    use: {
+      baseURL: options.baseUrl,
+      browserName: "chromium",
+      headless: true,
+      viewport: SPEC_VIEWPORT,
+      video: { mode: "retain-on-failure", size: SPEC_VIEWPORT },
+      screenshot: "off",
+      trace: "off",
+      actionTimeout: timeouts.action,
+      navigationTimeout: timeouts.navigation,
+      acceptDownloads: false,
+      launchOptions: {
+        args: [
+          "--disable-dev-shm-usage",
+          ...(proxyServer
+            ? [
+                "--proxy-bypass-list=<-loopback>",
+                "--disable-quic",
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+              ]
+            : []),
+        ],
+      },
+      ...(proxyServer
+        ? { proxy: { server: proxyServer }, serviceWorkers: "block" }
+        : {}),
+    },
+    projects,
+  };
 }
 
-async function writeWorkDir(workDir: string, options: SuiteOptions, proxyServer?: string): Promise<void> {
-    const modulePath = specbookModulePath();
-    await fs.mkdir(path.join(workDir, "tests"), { recursive: true });
-    await Promise.all([
-        fs.writeFile(path.join(workDir, "package.json"), JSON.stringify({ private: true, type: "module" }), "utf8"),
-        fs.writeFile(path.join(workDir, "tsconfig.json"), JSON.stringify({ compilerOptions: {} }), "utf8"),
-        fs.writeFile(
-            path.join(workDir, "playwright.config.mjs"),
-            `export default ${JSON.stringify(playwrightConfig(options, proxyServer), null, 2)};\n`,
-            "utf8",
-        ),
-        ...options.specs.map((spec) =>
-            fs.writeFile(path.join(workDir, "tests", `${spec.key}.spec.ts`), executableSource(spec.source, spec.analysis, modulePath), "utf8"),
-        ),
-    ]);
+async function writeWorkDir(
+  workDir: string,
+  options: SuiteOptions,
+  proxyServer?: string
+): Promise<void> {
+  const modulePath = specbookModulePath();
+  await fs.mkdir(path.join(workDir, "tests"), { recursive: true });
+  await Promise.all([
+    fs.writeFile(
+      path.join(workDir, "package.json"),
+      JSON.stringify({ private: true, type: "module" }),
+      "utf8"
+    ),
+    fs.writeFile(
+      path.join(workDir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: {} }),
+      "utf8"
+    ),
+    fs.writeFile(
+      path.join(workDir, "playwright.config.mjs"),
+      `export default ${JSON.stringify(playwrightConfig(options, proxyServer), null, 2)};\n`,
+      "utf8"
+    ),
+    ...options.specs.map((spec) =>
+      fs.writeFile(
+        path.join(workDir, "tests", `${spec.key}.spec.ts`),
+        executableSource(spec.source, spec.analysis, modulePath),
+        "utf8"
+      )
+    ),
+  ]);
 }
 
 function statusOf(result: SpecFileResult): Exclude<RunStatus, "running"> {
-    return result.status;
+  return result.status;
 }
 
-export async function runPlaywrightSuite(options: SuiteOptions): Promise<SuiteOutcome> {
-    const directory = options.directory;
-    const workDir = path.join(directory, "work");
-    await fs.rm(workDir, { recursive: true, force: true });
-    const policy = options.networkPolicy;
-    const proxy = policy && !options.proxyServer ? await createRunProxy(policy.allowPrivate ? policy.origins : []) : undefined;
-    const runtime: SpecbookRuntime = {
-        baseURL: options.baseUrl, secretOrigins: options.secretOrigins, navigationOrigins: policy?.origins,
-        executionPlans: Object.fromEntries(options.specs.map((spec) => [`${spec.key}.spec.ts`, spec.humanSpec
-            ? executionPlan(spec.humanSpec) : spec.analysis.steps.map((title) => ({ title, kind: "step" as const }))])),
-    };
-    const results = new Map<string, SuiteSpecResult>();
-    let processFailure: string | null = null;
-    try {
-        await writeWorkDir(workDir, options, options.proxyServer ?? proxy?.server);
-        const processResult = await runNodeCli(playwrightCli(), ["test", "--config", "playwright.config.mjs"], {
-            cwd: workDir,
-            timeoutMs: options.timeoutMs,
-            signal: options.signal,
-            env: {
-                ...options.secretEnv,
-                [RUNTIME_ENV]: JSON.stringify(runtime),
-                FORCE_COLOR: "0",
-                NO_COLOR: "1",
-                PLAYWRIGHT_HTML_OPEN: "never",
-            },
-        });
-        const output = stripAnsi(processResult.output).trim();
-        const rawReport = await fs.readFile(path.join(workDir, "results.json"), "utf8").catch(() => null);
-        const report = rawReport === null ? null : scrubJsonText(rawReport, options.scrub);
-        if (report !== null) await fs.writeFile(path.join(directory, "results.json"), report, "utf8");
+export async function runPlaywrightSuite(
+  options: SuiteOptions
+): Promise<SuiteOutcome> {
+  const directory = options.directory;
+  const workDir = path.join(directory, "work");
+  await fs.rm(workDir, { recursive: true, force: true });
+  const policy = options.networkPolicy;
+  const proxy =
+    policy && !options.proxyServer
+      ? await createRunProxy(policy.allowPrivate ? policy.origins : [])
+      : undefined;
+  const runtime: SpecbookRuntime = {
+    baseURL: options.baseUrl,
+    secretOrigins: options.secretOrigins,
+    navigationOrigins: policy?.origins,
+    executionPlans: Object.fromEntries(
+      options.specs.map((spec) => [
+        `${spec.key}.spec.ts`,
+        spec.humanSpec
+          ? executionPlan(spec.humanSpec)
+          : spec.analysis.steps.map((title) => ({
+              title,
+              kind: "step" as const,
+            })),
+      ])
+    ),
+  };
+  const results = new Map<string, SuiteSpecResult>();
+  let processFailure: string | null = null;
+  try {
+    await writeWorkDir(workDir, options, options.proxyServer ?? proxy?.server);
+    const processResult = await runNodeCli(
+      playwrightCli(),
+      ["test", "--config", "playwright.config.mjs"],
+      {
+        cwd: workDir,
+        timeoutMs: options.timeoutMs,
+        signal: options.signal,
+        env: {
+          ...options.secretEnv,
+          [RUNTIME_ENV]: JSON.stringify(runtime),
+          FORCE_COLOR: "0",
+          NO_COLOR: "1",
+          PLAYWRIGHT_HTML_OPEN: "never",
+        },
+      }
+    );
+    const output = stripAnsi(processResult.output).trim();
+    const rawReport = await fs
+      .readFile(path.join(workDir, "results.json"), "utf8")
+      .catch(() => null);
+    const report =
+      rawReport === null ? null : scrubJsonText(rawReport, options.scrub);
+    if (report !== null)
+      await fs.writeFile(path.join(directory, "results.json"), report, "utf8");
 
-        if (processResult.timedOut) processFailure = `Run timed out after ${Math.round(options.timeoutMs / 1000)}s`;
-        else if (report === null) processFailure = output || `Playwright exited with code ${processResult.code} without a report`;
-        else if (processResult.code !== 0 && processResult.code !== 1) {
-            processFailure = output || `Playwright exited with code ${processResult.code}`;
-        }
-
-        let parsed: ReturnType<typeof parsePlaywrightReport> | null = null;
-        if (report !== null) {
-            try {
-                parsed = parsePlaywrightReport(report);
-            } catch (error) {
-                processFailure ??= `Could not read the Playwright report: ${error instanceof Error ? error.message : String(error)}`;
-            }
-        }
-        if (parsed && parsed.errors.length > 0 && !processFailure) {
-            const missing = options.specs.some((spec) => !parsed.files.has(spec.key));
-            if (missing) processFailure = parsed.errors.join("\n\n");
-        }
-        if (processFailure) processFailure = sanitizeTechnicalDetails(options.scrub(processFailure));
-
-        for (const spec of options.specs) {
-            const fileResult = parsed?.files.get(spec.key) ?? null;
-            const safeResult = fileResult
-                ? { ...fileResult, failReason: fileResult.failReason ? sanitizeTechnicalDetails(options.scrub(fileResult.failReason)) : null,
-                    attachments: fileResult.attachments.filter((attachment) => isInside(workDir, path.resolve(workDir, attachment.path), { allowRoot: false, rejectDotPrefix: true })) }
-                : null;
-            const status = safeResult ? statusOf(safeResult) : "error";
-            await fs.mkdir(spec.outputDir, { recursive: true });
-            await writeRunEvidence(spec.outputDir, status, safeResult, spec.analysis.steps, options.scrub);
-            results.set(spec.key, {
-                status,
-                durationMs: safeResult?.durationMs ?? null,
-                failReason: safeResult ? safeResult.failReason : processFailure ?? "Playwright produced no result for this Spec",
-                failedStep: safeResult?.failedStep ?? null,
-                errorCode: status === "passed" ? null : safeResult?.errorCode ?? (processFailure ? "infrastructure" : "failed"),
-            });
-        }
-    } finally {
-        await proxy?.close();
-        await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    if (processResult.timedOut)
+      processFailure = `Run timed out after ${Math.round(options.timeoutMs / 1000)}s`;
+    else if (report === null)
+      processFailure =
+        output ||
+        `Playwright exited with code ${processResult.code} without a report`;
+    else if (processResult.code !== 0 && processResult.code !== 1) {
+      processFailure =
+        output || `Playwright exited with code ${processResult.code}`;
     }
-    return { results, processFailure };
+
+    let parsed: ReturnType<typeof parsePlaywrightReport> | null = null;
+    if (report !== null) {
+      try {
+        parsed = parsePlaywrightReport(report);
+      } catch (error) {
+        processFailure ??= `Could not read the Playwright report: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+    if (parsed && parsed.errors.length > 0 && !processFailure) {
+      const missing = options.specs.some((spec) => !parsed.files.has(spec.key));
+      if (missing) processFailure = parsed.errors.join("\n\n");
+    }
+    if (processFailure)
+      processFailure = sanitizeTechnicalDetails(options.scrub(processFailure));
+
+    for (const spec of options.specs) {
+      const fileResult = parsed?.files.get(spec.key) ?? null;
+      const safeResult = fileResult
+        ? {
+            ...fileResult,
+            failReason: fileResult.failReason
+              ? sanitizeTechnicalDetails(options.scrub(fileResult.failReason))
+              : null,
+            attachments: fileResult.attachments.filter((attachment) =>
+              isInside(workDir, path.resolve(workDir, attachment.path), {
+                allowRoot: false,
+                rejectDotPrefix: true,
+              })
+            ),
+          }
+        : null;
+      const status = safeResult ? statusOf(safeResult) : "error";
+      await fs.mkdir(spec.outputDir, { recursive: true });
+      await writeRunEvidence(
+        spec.outputDir,
+        status,
+        safeResult,
+        spec.analysis.steps,
+        options.scrub
+      );
+      results.set(spec.key, {
+        status,
+        durationMs: safeResult?.durationMs ?? null,
+        failReason: safeResult
+          ? safeResult.failReason
+          : (processFailure ?? "Playwright produced no result for this Spec"),
+        failedStep: safeResult?.failedStep ?? null,
+        errorCode:
+          status === "passed"
+            ? null
+            : (safeResult?.errorCode ??
+              (processFailure ? "infrastructure" : "failed")),
+      });
+    }
+  } finally {
+    await proxy?.close();
+    await fs
+      .rm(workDir, { recursive: true, force: true })
+      .catch(() => undefined);
+  }
+  return { results, processFailure };
 }

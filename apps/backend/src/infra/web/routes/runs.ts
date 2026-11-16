@@ -1,203 +1,331 @@
-import { realRunDirectory, listArtifactFiles, readRunEvidence } from "../../../core/runner/artifacts";
-import { access } from "../access";
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import { zValidator } from "@hono/zod-validator";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
+import { readOfflineReplay } from "@specbook/runtime/replay-data";
+import { isInside } from "@specbook/runtime/safe-fs";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+
+import { batchReport, runReport } from "../../../core/ci/report";
+import { resolveRunEnvironment } from "../../../core/environments";
+import {
+  runnerQueueSnapshot,
+  visibleRuns,
+} from "../../../core/private-runner/visibility";
+import {
+  realRunDirectory,
+  listArtifactFiles,
+  readRunEvidence,
+} from "../../../core/runner/artifacts";
 import { getRunBatch, startSpecBatch } from "../../../core/runner/batch";
 import { executeSpec } from "../../../core/runner/run";
 import { MAX_RUN_LIST_LIMIT, runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
-import { isInside } from "@specbook/runtime/safe-fs";
-import { batchReport, runReport } from "../../../core/ci/report";
-import { resolveRunEnvironment } from "../../../core/environments";
-import { runnerQueueSnapshot, visibleRuns } from "../../../core/private-runner/visibility";
+import { access } from "../access";
 import { htmlReportHeaders } from "../security";
-import { readEvidenceManifest } from "@specbook/runtime/evidence";
-import { readOfflineReplay } from "@specbook/runtime/replay-data";
 
-function reportHeaders(c: Context, name: string, html: string): Record<string, string> {
-    const headers = htmlReportHeaders(html);
-    if (c.req.query("download") === undefined) return headers;
-    const file = `specbook-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "report"}.html`;
-    return { ...headers, "Content-Disposition": `attachment; filename="${file}"` };
+function reportHeaders(
+  c: Context,
+  name: string,
+  html: string
+): Record<string, string> {
+  const headers = htmlReportHeaders(html);
+  if (c.req.query("download") === undefined) return headers;
+  const file = `specbook-${
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "report"
+  }.html`;
+  return {
+    ...headers,
+    "Content-Disposition": `attachment; filename="${file}"`,
+  };
 }
 
 const CONTENT_TYPES: Record<string, string> = {
-    ".html": "text/html; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webm": "video/webm",
-    ".zip": "application/zip",
-    ".gz": "application/gzip",
-    ".ttf": "font/ttf",
-    ".webmanifest": "application/manifest+json",
-    ".md": "text/plain; charset=utf-8",
-    ".txt": "text/plain; charset=utf-8",
-    ".ts": "text/plain; charset=utf-8",
-    ".yml": "text/plain; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webm": "video/webm",
+  ".zip": "application/zip",
+  ".gz": "application/gzip",
+  ".ttf": "font/ttf",
+  ".webmanifest": "application/manifest+json",
+  ".md": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".ts": "text/plain; charset=utf-8",
+  ".yml": "text/plain; charset=utf-8",
 };
 
-
 const runListSchema = z.object({
-    limit: z.coerce.number().int().min(1).max(MAX_RUN_LIST_LIMIT).optional(),
-    before: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_RUN_LIST_LIMIT).optional(),
+  before: z.string().uuid().optional(),
 });
 
 function artifactHeaders(type: string): Record<string, string> {
-    return {
-        "Content-Type": type,
-        "Content-Security-Policy": type.startsWith("text/html") ? "sandbox allow-scripts" : "sandbox",
-        "X-Content-Type-Options": "nosniff",
-    };
+  return {
+    "Content-Type": type,
+    "Content-Security-Policy": type.startsWith("text/html")
+      ? "sandbox allow-scripts"
+      : "sandbox",
+    "X-Content-Type-Options": "nosniff",
+  };
 }
 
 const STORAGE_SHIM = Buffer.from(
-    "<script>(function(){function m(){var d={};return{get length(){return Object.keys(d).length},key:function(i){return Object.keys(d)[i]??null},getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}}}}" +
-        "[\"localStorage\",\"sessionStorage\"].forEach(function(n){try{window[n].length}catch(e){Object.defineProperty(window,n,{value:m(),configurable:true})}})})()</script>",
+  "<script>(function(){function m(){var d={};return{get length(){return Object.keys(d).length},key:function(i){return Object.keys(d)[i]??null},getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}}}}" +
+    '["localStorage","sessionStorage"].forEach(function(n){try{window[n].length}catch(e){Object.defineProperty(window,n,{value:m(),configurable:true})}})})()</script>'
 );
 
 function withStorageShim(data: Buffer, type: string): Buffer {
-    if (!type.startsWith("text/html")) return data;
-    const head = /<head[^>]*>/i.exec(data.toString("latin1"));
-    if (!head) return Buffer.concat([STORAGE_SHIM, data]);
-    const at = head.index + head[0].length;
-    return Buffer.concat([data.subarray(0, at), STORAGE_SHIM, data.subarray(at)]);
+  if (!type.startsWith("text/html")) return data;
+  const head = /<head[^>]*>/i.exec(data.toString("latin1"));
+  if (!head) return Buffer.concat([STORAGE_SHIM, data]);
+  const at = head.index + head[0].length;
+  return Buffer.concat([data.subarray(0, at), STORAGE_SHIM, data.subarray(at)]);
 }
 
 const batchSchema = z.object({
-    environment: z.string().trim().min(1).max(80).optional(),
-    specIds: z.array(z.string().uuid()).min(1),
-    label: z.string().trim().min(1).max(120),
+  environment: z.string().trim().min(1).max(80).optional(),
+  specIds: z.array(z.string().uuid()).min(1),
+  label: z.string().trim().min(1).max(120),
 });
 
 async function requireRun(runId: string): Promise<void> {
-    if (!(await runsRepository.getRun(runId))) throw new HTTPException(404, { message: "Run not found" });
+  if (!(await runsRepository.getRun(runId)))
+    throw new HTTPException(404, { message: "Run not found" });
 }
 
 export function createRunsRouter(): Hono {
-    const router = new Hono();
+  const router = new Hono();
 
-    router.post("/specs/:id/run", access("editor"), async (c) => {
-        try {
-            const spec = await specsRepository.getSpec(c.req.param("id"));
-            if (!spec) throw new Error("Spec not found");
-            const environment = await resolveRunEnvironment(spec.projectId, c.req.query("environment"));
-            if (environment.executor === "runner" || environment.executor === "tunnel") {
-                const batch = await startSpecBatch(spec.projectId, [spec.id], spec.title, { environment });
-                const run = await runsRepository.getRun(batch.specs[0].runId);
-                return c.json({ run: run ? (await visibleRuns([run]))[0] : null, batchId: batch.id }, 202);
-            }
-            const run = await executeSpec(c.req.param("id"), { automate: true, environment: c.req.query("environment") });
-            return c.json({ run });
-        } catch (error) {
-            throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
-        }
-    });
+  router.post("/specs/:id/run", access("editor"), async (c) => {
+    try {
+      const spec = await specsRepository.getSpec(c.req.param("id"));
+      if (!spec) throw new Error("Spec not found");
+      const environment = await resolveRunEnvironment(
+        spec.projectId,
+        c.req.query("environment")
+      );
+      if (
+        environment.executor === "runner" ||
+        environment.executor === "tunnel"
+      ) {
+        const batch = await startSpecBatch(
+          spec.projectId,
+          [spec.id],
+          spec.title,
+          { environment }
+        );
+        const run = await runsRepository.getRun(batch.specs[0].runId);
+        return c.json(
+          {
+            run: run ? (await visibleRuns([run]))[0] : null,
+            batchId: batch.id,
+          },
+          202
+        );
+      }
+      const run = await executeSpec(c.req.param("id"), {
+        automate: true,
+        environment: c.req.query("environment"),
+      });
+      return c.json({ run });
+    } catch (error) {
+      throw new HTTPException(400, {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
 
-    router.post("/projects/:id/run-batches", access("editor"), zValidator("json", batchSchema), async (c) => {
-        try {
-            const { specIds, label, environment } = c.req.valid("json");
-            const batch = await startSpecBatch(c.req.param("id"), specIds, label, { environment });
-            const { batchQueues, runQueues } = await runnerQueueSnapshot();
-            return c.json({ batch: { ...batch, queue: batchQueues.get(batch.id) ?? runQueues.get(batch.specs[0].runId) ?? null, specs: batch.specs.map((item) => ({ ...item, queue: item.status === "running" ? runQueues.get(item.runId) ?? null : null })) } }, 202);
-        } catch (error) {
-            throw new HTTPException(400, { message: error instanceof Error ? error.message : String(error) });
-        }
-    });
-
-    router.get("/run-batches/:id", access("viewer"), async (c) => {
-        const batch = await getRunBatch(c.req.param("id"));
-        if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
+  router.post(
+    "/projects/:id/run-batches",
+    access("editor"),
+    zValidator("json", batchSchema),
+    async (c) => {
+      try {
+        const { specIds, label, environment } = c.req.valid("json");
+        const batch = await startSpecBatch(c.req.param("id"), specIds, label, {
+          environment,
+        });
         const { batchQueues, runQueues } = await runnerQueueSnapshot();
-        const queue = batchQueues.get(batch.id) ?? batch.specs.map((item) => runQueues.get(item.runId)).find(Boolean) ?? null;
-        return c.json({ batch: { ...batch, queue, specs: batch.specs.map((item) => ({ ...item, queue: item.status === "running" ? runQueues.get(item.runId) ?? null : null })) }, reportUrl: `/run-batches/${encodeURIComponent(batch.id)}/report` });
+        return c.json(
+          {
+            batch: {
+              ...batch,
+              queue:
+                batchQueues.get(batch.id) ??
+                runQueues.get(batch.specs[0].runId) ??
+                null,
+              specs: batch.specs.map((item) => ({
+                ...item,
+                queue:
+                  item.status === "running"
+                    ? (runQueues.get(item.runId) ?? null)
+                    : null,
+              })),
+            },
+          },
+          202
+        );
+      } catch (error) {
+        throw new HTTPException(400, {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  );
+
+  router.get("/run-batches/:id", access("viewer"), async (c) => {
+    const batch = await getRunBatch(c.req.param("id"));
+    if (!batch)
+      throw new HTTPException(404, { message: "Run batch not found" });
+    const { batchQueues, runQueues } = await runnerQueueSnapshot();
+    const queue =
+      batchQueues.get(batch.id) ??
+      batch.specs.map((item) => runQueues.get(item.runId)).find(Boolean) ??
+      null;
+    return c.json({
+      batch: {
+        ...batch,
+        queue,
+        specs: batch.specs.map((item) => ({
+          ...item,
+          queue:
+            item.status === "running"
+              ? (runQueues.get(item.runId) ?? null)
+              : null,
+        })),
+      },
+      reportUrl: `/run-batches/${encodeURIComponent(batch.id)}/report`,
     });
+  });
 
-    router.get("/run-batches/:id/report", access("viewer"), async (c) => {
-        const batch = await getRunBatch(c.req.param("id"));
-        if (!batch) throw new HTTPException(404, { message: "Run batch not found" });
-        const html = await batchReport(batch);
-        return c.body(html, 200, reportHeaders(c, `${batch.label}-${batch.id.slice(0, 8)}`, html));
+  router.get("/run-batches/:id/report", access("viewer"), async (c) => {
+    const batch = await getRunBatch(c.req.param("id"));
+    if (!batch)
+      throw new HTTPException(404, { message: "Run batch not found" });
+    const html = await batchReport(batch);
+    return c.body(
+      html,
+      200,
+      reportHeaders(c, `${batch.label}-${batch.id.slice(0, 8)}`, html)
+    );
+  });
+
+  router.get("/runs/:id/report", access("viewer"), async (c) => {
+    const run = await runsRepository.getRun(c.req.param("id"));
+    const spec = run ? await specsRepository.getSpec(run.specId) : null;
+    if (!run || !spec)
+      throw new HTTPException(404, { message: "Run not found" });
+    const html = await runReport(run, spec);
+    return c.body(
+      html,
+      200,
+      reportHeaders(c, `${spec.title}-${run.id.slice(0, 8)}`, html)
+    );
+  });
+
+  router.get(
+    "/specs/:id/runs",
+    access("viewer"),
+    zValidator("query", runListSchema),
+    async (c) => {
+      const spec = await specsRepository.getSpec(c.req.param("id"));
+      if (!spec) throw new HTTPException(404, { message: "Spec not found" });
+      const { limit, before } = c.req.valid("query");
+      return c.json({
+        runs: await visibleRuns(
+          await runsRepository.listRuns(spec.id, { limit, before })
+        ),
+      });
+    }
+  );
+
+  router.get("/runs/:id", access("viewer"), async (c) => {
+    const run = await runsRepository.getRun(c.req.param("id"));
+    if (!run) throw new HTTPException(404, { message: "Run not found" });
+    return c.json({ run: (await visibleRuns([run]))[0] });
+  });
+
+  router.get("/runs/:id/artifacts", access("viewer"), async (c) => {
+    const runId = c.req.param("id");
+    await requireRun(runId);
+    const directory = await realRunDirectory(runId);
+    return c.json({
+      files: directory ? await listArtifactFiles(directory) : [],
     });
+  });
 
-    router.get("/runs/:id/report", access("viewer"), async (c) => {
-        const run = await runsRepository.getRun(c.req.param("id"));
-        const spec = run ? await specsRepository.getSpec(run.specId) : null;
-        if (!run || !spec) throw new HTTPException(404, { message: "Run not found" });
-        const html = await runReport(run, spec);
-        return c.body(html, 200, reportHeaders(c, `${spec.title}-${run.id.slice(0, 8)}`, html));
-    });
+  router.get("/runs/:id/evidence", access("viewer"), async (c) =>
+    c.json(await readRunEvidence(c.req.param("id")))
+  );
 
-    router.get("/specs/:id/runs", access("viewer"), zValidator("query", runListSchema), async (c) => {
-        const spec = await specsRepository.getSpec(c.req.param("id"));
-        if (!spec) throw new HTTPException(404, { message: "Spec not found" });
-        const { limit, before } = c.req.valid("query");
-        return c.json({ runs: await visibleRuns(await runsRepository.listRuns(spec.id, { limit, before })) });
-    });
+  router.get("/runs/:id/replay", access("viewer"), async (c) => {
+    const runId = c.req.param("id");
+    await requireRun(runId);
+    const directory = await realRunDirectory(runId);
+    const manifest = directory ? await readEvidenceManifest(directory) : null;
+    const recording =
+      directory && manifest?.replay ? await readOfflineReplay(directory) : null;
+    if (!recording)
+      throw new HTTPException(404, { message: "Replay not found" });
+    c.header("Cache-Control", "private, no-store");
+    c.header("X-Content-Type-Options", "nosniff");
+    return c.json(recording);
+  });
 
-    router.get("/runs/:id", access("viewer"), async (c) => {
-        const run = await runsRepository.getRun(c.req.param("id"));
-        if (!run) throw new HTTPException(404, { message: "Run not found" });
-        return c.json({ run: (await visibleRuns([run]))[0] });
-    });
+  router.get("/runs/:id/artifacts/:file{.+}", access("viewer"), async (c) => {
+    const runId = c.req.param("id");
+    await requireRun(runId);
+    const directory = await realRunDirectory(runId);
+    if (!directory)
+      throw new HTTPException(404, { message: "Artifact not found" });
+    const file = c.req.param("file");
+    if (!file || file.includes("\0"))
+      throw new HTTPException(400, { message: "Invalid artifact path" });
+    const absolute = path.resolve(directory, file);
+    if (
+      !isInside(directory, absolute, { allowRoot: true }) ||
+      absolute === directory
+    ) {
+      throw new HTTPException(400, { message: "Invalid artifact path" });
+    }
+    let realArtifact: string;
+    try {
+      realArtifact = await fs.realpath(absolute);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new HTTPException(404, { message: "Artifact not found" });
+      }
+      throw error;
+    }
+    if (!isInside(directory, realArtifact, { allowRoot: true }))
+      throw new HTTPException(400, { message: "Invalid artifact path" });
+    const stat = await fs.stat(realArtifact);
+    if (!stat.isFile())
+      throw new HTTPException(404, { message: "Artifact not found" });
+    const data = await fs.readFile(realArtifact);
+    const type =
+      CONTENT_TYPES[path.extname(realArtifact).toLowerCase()] ??
+      "application/octet-stream";
+    return c.body(
+      new Uint8Array(withStorageShim(data, type)),
+      200,
+      artifactHeaders(type)
+    );
+  });
 
-    router.get("/runs/:id/artifacts", access("viewer"), async (c) => {
-        const runId = c.req.param("id");
-        await requireRun(runId);
-        const directory = await realRunDirectory(runId);
-        return c.json({ files: directory ? await listArtifactFiles(directory) : [] });
-    });
-
-    router.get("/runs/:id/evidence", access("viewer"), async (c) => c.json(await readRunEvidence(c.req.param("id"))));
-
-    router.get("/runs/:id/replay", access("viewer"), async (c) => {
-        const runId = c.req.param("id");
-        await requireRun(runId);
-        const directory = await realRunDirectory(runId);
-        const manifest = directory ? await readEvidenceManifest(directory) : null;
-        const recording = directory && manifest?.replay ? await readOfflineReplay(directory) : null;
-        if (!recording) throw new HTTPException(404, { message: "Replay not found" });
-        c.header("Cache-Control", "private, no-store");
-        c.header("X-Content-Type-Options", "nosniff");
-        return c.json(recording);
-    });
-
-    router.get("/runs/:id/artifacts/:file{.+}", access("viewer"), async (c) => {
-        const runId = c.req.param("id");
-        await requireRun(runId);
-        const directory = await realRunDirectory(runId);
-        if (!directory) throw new HTTPException(404, { message: "Artifact not found" });
-        const file = c.req.param("file");
-        if (!file || file.includes("\0")) throw new HTTPException(400, { message: "Invalid artifact path" });
-        const absolute = path.resolve(directory, file);
-        if (!isInside(directory, absolute, { allowRoot: true }) || absolute === directory) {
-            throw new HTTPException(400, { message: "Invalid artifact path" });
-        }
-        let realArtifact: string;
-        try {
-            realArtifact = await fs.realpath(absolute);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-                throw new HTTPException(404, { message: "Artifact not found" });
-            }
-            throw error;
-        }
-        if (!isInside(directory, realArtifact, { allowRoot: true })) throw new HTTPException(400, { message: "Invalid artifact path" });
-        const stat = await fs.stat(realArtifact);
-        if (!stat.isFile()) throw new HTTPException(404, { message: "Artifact not found" });
-        const data = await fs.readFile(realArtifact);
-        const type = CONTENT_TYPES[path.extname(realArtifact).toLowerCase()] ?? "application/octet-stream";
-        return c.body(new Uint8Array(withStorageShim(data, type)), 200, artifactHeaders(type));
-    });
-
-    return router;
+  return router;
 }

@@ -1,19 +1,19 @@
 {
-    "name": "@specbook/workspace",
-    "private": true,
-    "scripts": {
-        "dev": "pnpm -r --parallel dev",
-        "typecheck": "pnpm -r --if-present typecheck",
-        "build": "pnpm -r build",
-        "test": "pnpm -r --if-present test",
-        "check": "pnpm typecheck && pnpm test",
-        "lint": "ultracite check",
-        "fix": "ultracite fix"
-    },
-    "devDependencies": {
-        "oxfmt": "^0.75.0",
-        "oxlint": "^1.93.0",
-        "ultracite": "8.2.1"
-    },
-    "packageManager": "pnpm@10.30.1"
+  "name": "@specbook/workspace",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "build": "pnpm -r build",
+    "test": "pnpm -r --if-present test",
+    "check": "pnpm typecheck && pnpm test",
+    "lint": "ultracite check",
+    "fix": "ultracite fix"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.93.0",
+    "ultracite": "8.2.1"
+  },
+  "packageManager": "pnpm@10.30.1"
 }

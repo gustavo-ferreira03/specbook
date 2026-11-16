@@ -1,169 +1,250 @@
-import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
+import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+
 import { projectContextSchema } from "../../../core/chat/context-tools";
-import { contextProposalProblem, DEFAULT_DISCOVERY_GOAL, startContextDiscovery } from "../../../core/chat/discovery";
+import {
+  contextProposalProblem,
+  DEFAULT_DISCOVERY_GOAL,
+  startContextDiscovery,
+} from "../../../core/chat/discovery";
+import { resolveRunEnvironment } from "../../../core/environments";
 import { configuredModel } from "../../../core/llm/runtime";
-import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
-import { createAreaFeatures, writeContextToRepo } from "../../../core/repo/writer";
+import {
+  createAreaFeatures,
+  writeContextToRepo,
+} from "../../../core/repo/writer";
 import type { DiscoveryBrief } from "../../db/schema";
 import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
-import { resolveRunEnvironment } from "../../../core/environments";
+import { access } from "../access";
 
 const discoveryBriefSchema = z.object({
-    goal: z.string().trim().min(1).max(500).optional(),
-    startUrl: z.string().trim().url().optional(),
-    safetyNotes: z
-        .array(z.string().trim().min(1).max(200))
-        .max(20)
-        .default([]),
+  goal: z.string().trim().min(1).max(500).optional(),
+  startUrl: z.string().trim().url().optional(),
+  safetyNotes: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
 });
 
 const draftPatchSchema = z.object({
-    context: projectContextSchema.optional(),
+  context: projectContextSchema.optional(),
 });
 
 function parseOrigin(url: string): string | null {
-    try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-        return parsed.origin;
-    } catch {
-        return null;
-    }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
 }
 
 export function resolveDiscoveryBrief(
-    baseUrl: string,
-    input: z.infer<typeof discoveryBriefSchema>,
+  baseUrl: string,
+  input: z.infer<typeof discoveryBriefSchema>
 ): DiscoveryBrief {
-    const baseOrigin = parseOrigin(baseUrl);
-    if (!baseOrigin) throw new HTTPException(400, { message: "The project base URL is not a valid HTTP origin" });
-    const startUrl = input.startUrl ?? baseUrl;
-    const startOrigin = parseOrigin(startUrl);
-    if (!startOrigin) throw new HTTPException(400, { message: "The start URL must be a valid HTTP URL" });
-    if (startOrigin !== baseOrigin) {
-        throw new HTTPException(400, { message: "The start URL must share the project base URL origin" });
-    }
-    return {
-        goal: input.goal ?? DEFAULT_DISCOVERY_GOAL,
-        startUrl,
-        safetyNotes: input.safetyNotes,
-    };
+  const baseOrigin = parseOrigin(baseUrl);
+  if (!baseOrigin)
+    throw new HTTPException(400, {
+      message: "The project base URL is not a valid HTTP origin",
+    });
+  const startUrl = input.startUrl ?? baseUrl;
+  const startOrigin = parseOrigin(startUrl);
+  if (!startOrigin)
+    throw new HTTPException(400, {
+      message: "The start URL must be a valid HTTP URL",
+    });
+  if (startOrigin !== baseOrigin) {
+    throw new HTTPException(400, {
+      message: "The start URL must share the project base URL origin",
+    });
+  }
+  return {
+    goal: input.goal ?? DEFAULT_DISCOVERY_GOAL,
+    startUrl,
+    safetyNotes: input.safetyNotes,
+  };
 }
 
 function mapRepoError(error: unknown): never {
-    if (error instanceof UnsafeRepoPathError) {
-        throw new HTTPException(409, { message: error.message });
-    }
-    if (error instanceof Error && /unfinished rebase|uncommitted changes/.test(error.message)) {
-        throw new HTTPException(409, { message: error.message });
-    }
-    throw error;
+  if (error instanceof UnsafeRepoPathError) {
+    throw new HTTPException(409, { message: error.message });
+  }
+  if (
+    error instanceof Error &&
+    /unfinished rebase|uncommitted changes/.test(error.message)
+  ) {
+    throw new HTTPException(409, { message: error.message });
+  }
+  throw error;
 }
 
 export function createProjectContextsRouter(): Hono {
-    const router = new Hono();
+  const router = new Hono();
 
-    router.post(
-        "/projects/:id/context-discoveries", access("editor"),
-        zValidator("json", discoveryBriefSchema),
-        async (c) => {
-            const project = await projectsRepository.getProject(c.req.param("id"));
-            if (!project) throw new HTTPException(404, { message: "Project not found" });
-            if ((await resolveRunEnvironment(project.id)).executor === "runner") {
-                throw new HTTPException(409, { message: "Application exploration is unavailable in runner environments. Write the project context manually and run Specs through the runner." });
-            }
-            if (!(await configuredModel()).ready) {
-                throw new HTTPException(409, { message: "Connect a model in global Settings before exploring this application." });
-            }
-            const brief = resolveDiscoveryBrief(project.baseUrl, c.req.valid("json"));
-            const result = await startContextDiscovery(project.id, brief);
-            if ("activeDraft" in result) {
-                return c.json(
-                    {
-                        error: "This project already has an active context draft",
-                        draft: result.activeDraft,
-                        chatId: result.activeDraft.sourceChatId,
-                    },
-                    409,
-                );
-            }
-            return c.json(result, 201);
-        },
+  router.post(
+    "/projects/:id/context-discoveries",
+    access("editor"),
+    zValidator("json", discoveryBriefSchema),
+    async (c) => {
+      const project = await projectsRepository.getProject(c.req.param("id"));
+      if (!project)
+        throw new HTTPException(404, { message: "Project not found" });
+      if ((await resolveRunEnvironment(project.id)).executor === "runner") {
+        throw new HTTPException(409, {
+          message:
+            "Application exploration is unavailable in runner environments. Write the project context manually and run Specs through the runner.",
+        });
+      }
+      if (!(await configuredModel()).ready) {
+        throw new HTTPException(409, {
+          message:
+            "Connect a model in global Settings before exploring this application.",
+        });
+      }
+      const brief = resolveDiscoveryBrief(project.baseUrl, c.req.valid("json"));
+      const result = await startContextDiscovery(project.id, brief);
+      if ("activeDraft" in result) {
+        return c.json(
+          {
+            error: "This project already has an active context draft",
+            draft: result.activeDraft,
+            chatId: result.activeDraft.sourceChatId,
+          },
+          409
+        );
+      }
+      return c.json(result, 201);
+    }
+  );
+
+  router.get("/projects/:id/context", access("viewer"), async (c) => {
+    const project = await projectsRepository.getProject(c.req.param("id"));
+    if (!project)
+      throw new HTTPException(404, { message: "Project not found" });
+    const [confirmed, draft] = await Promise.all([
+      projectContextsRepository.getLatestConfirmedProjectContext(project.id),
+      projectContextsRepository.getActiveProjectContextDraft(project.id),
+    ]);
+    return c.json({ confirmed, draft });
+  });
+
+  router.get("/project-contexts/:id", access("viewer"), async (c) => {
+    const revision = await projectContextsRepository.getProjectContextRevision(
+      c.req.param("id")
     );
+    if (!revision)
+      throw new HTTPException(404, { message: "Context revision not found" });
+    return c.json({ revision });
+  });
 
-    router.get("/projects/:id/context", access("viewer"), async (c) => {
-        const project = await projectsRepository.getProject(c.req.param("id"));
-        if (!project) throw new HTTPException(404, { message: "Project not found" });
-        const [confirmed, draft] = await Promise.all([
-            projectContextsRepository.getLatestConfirmedProjectContext(project.id),
-            projectContextsRepository.getActiveProjectContextDraft(project.id),
-        ]);
-        return c.json({ confirmed, draft });
-    });
+  router.patch(
+    "/project-contexts/:id",
+    access("editor"),
+    zValidator("json", draftPatchSchema),
+    async (c) => {
+      const revision =
+        await projectContextsRepository.getProjectContextRevision(
+          c.req.param("id")
+        );
+      if (!revision)
+        throw new HTTPException(404, { message: "Context revision not found" });
+      if (revision.status !== "draft") {
+        throw new HTTPException(409, {
+          message: "Only draft context revisions can be edited",
+        });
+      }
+      const patch = c.req.valid("json");
+      let updated = revision;
+      if (patch.context) {
+        updated =
+          (await projectContextsRepository.replaceProjectContextDraft(
+            revision.id,
+            patch.context
+          )) ?? updated;
+      }
+      return c.json({ revision: updated });
+    }
+  );
 
-    router.get("/project-contexts/:id", access("viewer"), async (c) => {
-        const revision = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
-        if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
-        return c.json({ revision });
-    });
-
-    router.patch("/project-contexts/:id", access("editor"), zValidator("json", draftPatchSchema), async (c) => {
-        const revision = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
-        if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
+  router.post("/project-contexts/:id/confirm", access("editor"), async (c) => {
+    const initial = await projectContextsRepository.getProjectContextRevision(
+      c.req.param("id")
+    );
+    if (!initial)
+      throw new HTTPException(404, { message: "Context revision not found" });
+    return projectContextsRepository.withProjectContextDraftLock(
+      initial.projectId,
+      async () => {
+        const revision =
+          await projectContextsRepository.getProjectContextRevision(initial.id);
+        if (!revision)
+          throw new HTTPException(404, {
+            message: "Context revision not found",
+          });
+        if (revision.status === "confirmed") {
+          await writeContextToRepo(revision.projectId, revision.context).catch(
+            mapRepoError
+          );
+          await createAreaFeatures(revision.projectId, revision.context).catch(
+            mapRepoError
+          );
+          return c.json({ revision });
+        }
         if (revision.status !== "draft") {
-            throw new HTTPException(409, { message: "Only draft context revisions can be edited" });
+          throw new HTTPException(409, {
+            message: "Only draft context revisions can be confirmed",
+          });
         }
-        const patch = c.req.valid("json");
-        let updated = revision;
-        if (patch.context) {
-            updated = (await projectContextsRepository.replaceProjectContextDraft(revision.id, patch.context)) ?? updated;
+        const problem = contextProposalProblem(revision.context);
+        if (problem) throw new HTTPException(400, { message: problem });
+        const confirmed = await writeContextToRepo(
+          revision.projectId,
+          revision.context,
+          {
+            confirmRevisionId: revision.id,
+          }
+        ).catch(mapRepoError);
+        await createAreaFeatures(revision.projectId, revision.context).catch(
+          mapRepoError
+        );
+        return c.json({ revision: confirmed ?? revision });
+      }
+    );
+  });
+
+  router.post("/project-contexts/:id/discard", access("editor"), async (c) => {
+    const initial = await projectContextsRepository.getProjectContextRevision(
+      c.req.param("id")
+    );
+    if (!initial)
+      throw new HTTPException(404, { message: "Context revision not found" });
+    return projectContextsRepository.withProjectContextDraftLock(
+      initial.projectId,
+      async () => {
+        const revision =
+          await projectContextsRepository.getProjectContextRevision(initial.id);
+        if (!revision)
+          throw new HTTPException(404, {
+            message: "Context revision not found",
+          });
+        if (revision.status === "discarded") return c.json({ revision });
+        if (revision.status !== "draft") {
+          throw new HTTPException(409, {
+            message: "Confirmed context revisions cannot be discarded",
+          });
         }
-        return c.json({ revision: updated });
-    });
+        const discarded =
+          await projectContextsRepository.discardProjectContextRevision(
+            revision.id
+          );
+        return c.json({ revision: discarded ?? revision });
+      }
+    );
+  });
 
-    router.post("/project-contexts/:id/confirm", access("editor"), async (c) => {
-        const initial = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
-        if (!initial) throw new HTTPException(404, { message: "Context revision not found" });
-        return projectContextsRepository.withProjectContextDraftLock(initial.projectId, async () => {
-            const revision = await projectContextsRepository.getProjectContextRevision(initial.id);
-            if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
-            if (revision.status === "confirmed") {
-                await writeContextToRepo(revision.projectId, revision.context).catch(mapRepoError);
-                await createAreaFeatures(revision.projectId, revision.context).catch(mapRepoError);
-                return c.json({ revision });
-            }
-            if (revision.status !== "draft") {
-                throw new HTTPException(409, { message: "Only draft context revisions can be confirmed" });
-            }
-            const problem = contextProposalProblem(revision.context);
-            if (problem) throw new HTTPException(400, { message: problem });
-            const confirmed = await writeContextToRepo(revision.projectId, revision.context, {
-                confirmRevisionId: revision.id,
-            }).catch(mapRepoError);
-            await createAreaFeatures(revision.projectId, revision.context).catch(mapRepoError);
-            return c.json({ revision: confirmed ?? revision });
-        });
-    });
-
-    router.post("/project-contexts/:id/discard", access("editor"), async (c) => {
-        const initial = await projectContextsRepository.getProjectContextRevision(c.req.param("id"));
-        if (!initial) throw new HTTPException(404, { message: "Context revision not found" });
-        return projectContextsRepository.withProjectContextDraftLock(initial.projectId, async () => {
-            const revision = await projectContextsRepository.getProjectContextRevision(initial.id);
-            if (!revision) throw new HTTPException(404, { message: "Context revision not found" });
-            if (revision.status === "discarded") return c.json({ revision });
-            if (revision.status !== "draft") {
-                throw new HTTPException(409, { message: "Confirmed context revisions cannot be discarded" });
-            }
-            const discarded = await projectContextsRepository.discardProjectContextRevision(revision.id);
-            return c.json({ revision: discarded ?? revision });
-        });
-    });
-
-    return router;
+  return router;
 }

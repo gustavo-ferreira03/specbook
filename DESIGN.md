@@ -99,6 +99,7 @@ Specbook reads like a precise technical document that happens to run. Monochrome
 It rejects the generic shadcn look (tinted gray panels, soft pills, default black button on gray), the terminal look (dark hacker chrome, code in front), and anything colourful or decorative.
 
 **Key Characteristics:**
+
 - Pure neutrals at chroma 0. No warm or cool tint.
 - One content surface. The sidebar shares it and is separated by a hairline, not a gray band.
 - Status is icon plus coloured text, never a filled pill, never colour alone.
@@ -109,6 +110,7 @@ It rejects the generic shadcn look (tinted gray panels, soft pills, default blac
 A strict monochrome with a small status palette.
 
 ### Neutral
+
 - **Ink** (oklch(14.5% 0 0)): text, primary buttons, focus ring, selection.
 - **Ink muted / subtle** (oklch(40%) / oklch(49%)): secondary text and metadata; both pass AA on every surface.
 - **Surface** (white) and **Canvas** (oklch(98.5%)): content and page backdrop. Hover oklch(96.5%), selected oklch(94%).
@@ -116,6 +118,7 @@ A strict monochrome with a small status palette.
 - Dark mode mirrors it: canvas oklch(10%), surface oklch(13%), lines oklch(24%), ink oklch(96.5%), near-white primary.
 
 ### Status
+
 Success green, danger red, warning amber (icons and dots only; warning text stays ink), invalid orange, info blue. Each has a `-soft` tint for rare filled contexts and a `-chart` fill. Status mapping lives in `src/lib/status.ts`.
 
 ## 3. Typography

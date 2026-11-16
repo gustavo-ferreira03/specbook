@@ -1,10 +1,10 @@
 title: Open a Spec and run it to a visible result
 description: Running an existing Spec from its page shows the new passing result.
 preconditions:
-- Signed in as the Specbook administrator
+  - Signed in as the Specbook administrator
 steps:
-- Open “Home page opens” from the Specs list
-- Run the Spec again
+  - Open “Home page opens” from the Specs list
+  - Run the Spec again
 expectedResult: The newest run in the history passed just now
 postconditions:
-- The Spec still shows its step “Open the application”
+  - The Spec still shows its step “Open the application”

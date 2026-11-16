@@ -1,114 +1,231 @@
-import { runNetworkPolicy } from "../ci/targets";
-import { CodedError } from "@specbook/runtime/errors";
-import { payloadOf } from "./schemas";
 import crypto from "node:crypto";
-import { jobBaseUrl, jobEnvironment } from "./environment";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { jobsRepository, type InboxItem, type Job } from "../../infra/repositories/jobs";
-import { projectsRepository } from "../../infra/repositories/projects";
-import { runsDir } from "../paths";
-import { repoGit } from "../repo/git";
-import { specsRepository } from "../../infra/repositories/specs";
-import { readSpecRawFiles } from "../repo/manual";
-import { sourceHashOf } from "../repo/writer";
-import { parseSpecYaml } from "@specbook/runtime/yaml";
-import { resolveSecretEnv } from "../credentials/profiles";
-import { projectSecretScrubber } from "../credentials/scrub";
+
+import { CodedError } from "@specbook/runtime/errors";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import { runPlaywrightSuite } from "@specbook/runtime/playwright";
-import { reviewRunEvidence, type EvidenceReview } from "../runner/evidence-review";
 import { withRunSlot } from "@specbook/runtime/process";
 import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
-import { resolveSecretOriginPolicy } from "../runner/secrets";
-import { fixProposalSchema } from "./schemas";
-import { isAgentPaused } from "./pause";
-import { readEvidenceManifest } from "@specbook/runtime/evidence";
+import { parseSpecYaml } from "@specbook/runtime/yaml";
+
+import {
+  jobsRepository,
+  type InboxItem,
+  type Job,
+} from "../../infra/repositories/jobs";
+import { projectsRepository } from "../../infra/repositories/projects";
+import { specsRepository } from "../../infra/repositories/specs";
+import { runNetworkPolicy } from "../ci/targets";
+import { resolveSecretEnv } from "../credentials/profiles";
+import { projectSecretScrubber } from "../credentials/scrub";
+import { runsDir } from "../paths";
+import { repoGit } from "../repo/git";
+import { readSpecRawFiles } from "../repo/manual";
+import { sourceHashOf } from "../repo/writer";
 import { verifyRunnerCandidate } from "../runner/batch";
-import { createEnvironmentTunnelProxy, waitForTunnel } from "../tunnel/registry";
+import {
+  reviewRunEvidence,
+  type EvidenceReview,
+} from "../runner/evidence-review";
+import { resolveSecretOriginPolicy } from "../runner/secrets";
+import {
+  createEnvironmentTunnelProxy,
+  waitForTunnel,
+} from "../tunnel/registry";
+import { jobBaseUrl, jobEnvironment } from "./environment";
+import { isAgentPaused } from "./pause";
+import { payloadOf } from "./schemas";
+import { fixProposalSchema } from "./schemas";
 
 export interface ProposalVerification {
-    id: string;
-    status: "passed" | "failed" | "error";
-    durationMs: number | null;
-    failReason: string | null;
-    failedStep: string | null;
-    sourceHash: string;
-    baseUrl: string;
-    screenshots: string[];
-    errorCode?: import("@specbook/runtime/errors").ErrorCode | null;
-    review?: EvidenceReview | null;
+  id: string;
+  status: "passed" | "failed" | "error";
+  durationMs: number | null;
+  failReason: string | null;
+  failedStep: string | null;
+  sourceHash: string;
+  baseUrl: string;
+  screenshots: string[];
+  errorCode?: import("@specbook/runtime/errors").ErrorCode | null;
+  review?: EvidenceReview | null;
 }
 
-export function proposalDirectory(item: InboxItem, verificationId: string): string {
-    if (![item.projectId, item.id, verificationId].every((value) => /^[a-f0-9-]{36}$/.test(value))) throw new Error("Invalid proposal artifact id");
-    return path.join(runsDir, "proposals", item.projectId, item.id, verificationId);
+export function proposalDirectory(
+  item: InboxItem,
+  verificationId: string
+): string {
+  if (
+    ![item.projectId, item.id, verificationId].every((value) =>
+      /^[a-f0-9-]{36}$/.test(value)
+    )
+  )
+    throw new Error("Invalid proposal artifact id");
+  return path.join(
+    runsDir,
+    "proposals",
+    item.projectId,
+    item.id,
+    verificationId
+  );
 }
 
-export async function verifyProposal(job: Job, item: InboxItem, signal?: AbortSignal): Promise<ProposalVerification> {
-    if (item.jobId !== job.id || item.status !== "pending") throw new Error("Only this job's pending proposals can be verified");
-    const patch = fixProposalSchema.parse(payloadOf(item).params);
-    const before = payloadOf(item).before ?? {};
-    if (!patch.testSource || !before.yaml) throw new Error("Proposal needs spec.ts and a behavior contract");
-    const analysis = analyzeSpecSource(patch.testSource);
-    if (!analysis.ok) throw new CodedError("invalid_spec", analysis.error);
-    const humanSpec = patch.humanSpec ?? parseSpecYaml(before.yaml).humanSpec;
-    const stepsError = stepTitlesError(analysis.analysis.steps, humanSpec);
-    if (stepsError) throw new CodedError("invalid_spec", stepsError);
-    const project = await projectsRepository.getProject(job.projectId);
-    if (!project) throw new Error("Project not found");
-    const environment = await jobEnvironment(job);
-    const baseUrl = environment.baseUrl;
-    const spec = await specsRepository.getSpec(patch.specId);
-    if (!spec || spec.projectId !== job.projectId) throw new Error("Spec no longer exists");
-    const raw = await repoGit.withRepoLock(job.projectId, () => readSpecRawFiles(spec));
-    const original = payloadOf(item).before!;
-    if (raw.yaml !== original.yaml || raw.testSource !== original.testSource) {
-        throw new Error("Proposal is stale; inspect the current Spec and propose again");
-    }
-    const refs = analysis.analysis.secretRefs.map((ref) => ref.envName);
-    const remote = environment.executor === "runner";
-    const { env: secretEnv, missing } = remote ? { env: {}, missing: [] } : await resolveSecretEnv(job.projectId, refs, environment.credentialOverrides);
-    if (missing.length) throw new CodedError("credentials", `Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`);
-    const secretOrigins = remote ? { defaultOrigins: [], byRef: {} } : await resolveSecretOriginPolicy(job.projectId, refs, environment);
-    const scrub = remote ? (text: string) => text : await projectSecretScrubber(job.projectId);
-    const id = crypto.randomUUID();
-    const directory = proposalDirectory(item, id);
-    await fs.mkdir(directory, { recursive: true });
-    await fs.writeFile(path.join(directory, "spec.ts"), patch.testSource);
-    await fs.writeFile(path.join(directory, "spec.yml"), before.yaml);
-    const check = async () => {
-        signal?.throwIfAborted();
-        const current = await jobsRepository.get(job.id);
-        if (!current || current.status !== "running" || await isAgentPaused(job.projectId)) throw new Error("Job is no longer running");
-        const remaining = current.limits.wallTimeMs - current.elapsedMs - Math.max(0, Date.now() - Date.parse(current.startedAt ?? new Date().toISOString()));
-        if (remaining < 1000) throw new Error("The investigation has not reached a confirmed result");
-        return Math.min(120_000 * (environment.timeoutScale ?? 1), remaining);
-    };
-    const timeoutMs = await check();
-    if (environment.executor === "tunnel") await waitForTunnel(environment, job.projectId, [], signal);
-    const outcome = remote ? await verifyRunnerCandidate({ specId: spec.id, testSource: patch.testSource, markdown: before.yaml, environment, directory, signal, timeoutMs }).then((run) => ({
+export async function verifyProposal(
+  job: Job,
+  item: InboxItem,
+  signal?: AbortSignal
+): Promise<ProposalVerification> {
+  if (item.jobId !== job.id || item.status !== "pending")
+    throw new Error("Only this job's pending proposals can be verified");
+  const patch = fixProposalSchema.parse(payloadOf(item).params);
+  const before = payloadOf(item).before ?? {};
+  if (!patch.testSource || !before.yaml)
+    throw new Error("Proposal needs spec.ts and a behavior contract");
+  const analysis = analyzeSpecSource(patch.testSource);
+  if (!analysis.ok) throw new CodedError("invalid_spec", analysis.error);
+  const humanSpec = patch.humanSpec ?? parseSpecYaml(before.yaml).humanSpec;
+  const stepsError = stepTitlesError(analysis.analysis.steps, humanSpec);
+  if (stepsError) throw new CodedError("invalid_spec", stepsError);
+  const project = await projectsRepository.getProject(job.projectId);
+  if (!project) throw new Error("Project not found");
+  const environment = await jobEnvironment(job);
+  const baseUrl = environment.baseUrl;
+  const spec = await specsRepository.getSpec(patch.specId);
+  if (!spec || spec.projectId !== job.projectId)
+    throw new Error("Spec no longer exists");
+  const raw = await repoGit.withRepoLock(job.projectId, () =>
+    readSpecRawFiles(spec)
+  );
+  const original = payloadOf(item).before!;
+  if (raw.yaml !== original.yaml || raw.testSource !== original.testSource) {
+    throw new Error(
+      "Proposal is stale; inspect the current Spec and propose again"
+    );
+  }
+  const refs = analysis.analysis.secretRefs.map((ref) => ref.envName);
+  const remote = environment.executor === "runner";
+  const { env: secretEnv, missing } = remote
+    ? { env: {}, missing: [] }
+    : await resolveSecretEnv(
+        job.projectId,
+        refs,
+        environment.credentialOverrides
+      );
+  if (missing.length)
+    throw new CodedError(
+      "credentials",
+      `Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`
+    );
+  const secretOrigins = remote
+    ? { defaultOrigins: [], byRef: {} }
+    : await resolveSecretOriginPolicy(job.projectId, refs, environment);
+  const scrub = remote
+    ? (text: string) => text
+    : await projectSecretScrubber(job.projectId);
+  const id = crypto.randomUUID();
+  const directory = proposalDirectory(item, id);
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(path.join(directory, "spec.ts"), patch.testSource);
+  await fs.writeFile(path.join(directory, "spec.yml"), before.yaml);
+  const check = async () => {
+    signal?.throwIfAborted();
+    const current = await jobsRepository.get(job.id);
+    if (
+      !current ||
+      current.status !== "running" ||
+      (await isAgentPaused(job.projectId))
+    )
+      throw new Error("Job is no longer running");
+    const remaining =
+      current.limits.wallTimeMs -
+      current.elapsedMs -
+      Math.max(
+        0,
+        Date.now() - Date.parse(current.startedAt ?? new Date().toISOString())
+      );
+    if (remaining < 1000)
+      throw new Error("The investigation has not reached a confirmed result");
+    return Math.min(120_000 * (environment.timeoutScale ?? 1), remaining);
+  };
+  const timeoutMs = await check();
+  if (environment.executor === "tunnel")
+    await waitForTunnel(environment, job.projectId, [], signal);
+  const outcome = remote
+    ? await verifyRunnerCandidate({
+        specId: spec.id,
+        testSource: patch.testSource,
+        markdown: before.yaml,
+        environment,
+        directory,
+        signal,
+        timeoutMs,
+      }).then((run) => ({
         processFailure: run.status === "error" ? run.failReason : null,
         results: new Map([[id, run]]),
-    })) : await withRunSlot(async () => {
+      }))
+    : await withRunSlot(async () => {
         const timeoutMs = await check();
-        const proxy = environment.executor === "tunnel" ? await createEnvironmentTunnelProxy(environment) : undefined;
-        try { return await runPlaywrightSuite({ networkPolicy: await runNetworkPolicy(job.projectId, baseUrl, environment), proxyServer: proxy?.server, directory, baseUrl,
-            specs: [{ key: id, source: patch.testSource!, analysis: analysis.analysis, humanSpec, outputDir: directory }],
-            timeoutMs, timeoutScale: environment.timeoutScale, secretEnv, secretOrigins, scrub, signal }); }
-        finally { await proxy?.close(); }
-    }, signal);
-    const result = outcome.results.get(id);
-    const manifest = await readEvidenceManifest(directory);
-    const verification: ProposalVerification = {
-        id, status: outcome.processFailure ? "error" : result?.status ?? "error", durationMs: result?.durationMs ?? null,
-        failReason: scrub(outcome.processFailure ?? result?.failReason ?? "") || null, failedStep: result?.failedStep ?? null,
-        errorCode: outcome.processFailure ? "infrastructure" : result?.errorCode ?? null,
-        sourceHash: sourceHashOf(patch.testSource), baseUrl, screenshots: manifest.steps.map((step) => step.file),
-    };
-    verification.review = await reviewRunEvidence(directory, verification);
-    const current = await jobsRepository.item(item.id);
-    if (current?.status !== "pending") throw new Error("Proposal was reviewed during verification");
-    await jobsRepository.updateItem(item.id, { payload: { ...current.payload, verification } });
-    await jobsRepository.log(job.id, "proposal:verified", `${item.id}: ${verification.status}`);
-    return verification;
+        const proxy =
+          environment.executor === "tunnel"
+            ? await createEnvironmentTunnelProxy(environment)
+            : undefined;
+        try {
+          return await runPlaywrightSuite({
+            networkPolicy: await runNetworkPolicy(
+              job.projectId,
+              baseUrl,
+              environment
+            ),
+            proxyServer: proxy?.server,
+            directory,
+            baseUrl,
+            specs: [
+              {
+                key: id,
+                source: patch.testSource!,
+                analysis: analysis.analysis,
+                humanSpec,
+                outputDir: directory,
+              },
+            ],
+            timeoutMs,
+            timeoutScale: environment.timeoutScale,
+            secretEnv,
+            secretOrigins,
+            scrub,
+            signal,
+          });
+        } finally {
+          await proxy?.close();
+        }
+      }, signal);
+  const result = outcome.results.get(id);
+  const manifest = await readEvidenceManifest(directory);
+  const verification: ProposalVerification = {
+    id,
+    status: outcome.processFailure ? "error" : (result?.status ?? "error"),
+    durationMs: result?.durationMs ?? null,
+    failReason:
+      scrub(outcome.processFailure ?? result?.failReason ?? "") || null,
+    failedStep: result?.failedStep ?? null,
+    errorCode: outcome.processFailure
+      ? "infrastructure"
+      : (result?.errorCode ?? null),
+    sourceHash: sourceHashOf(patch.testSource),
+    baseUrl,
+    screenshots: manifest.steps.map((step) => step.file),
+  };
+  verification.review = await reviewRunEvidence(directory, verification);
+  const current = await jobsRepository.item(item.id);
+  if (current?.status !== "pending")
+    throw new Error("Proposal was reviewed during verification");
+  await jobsRepository.updateItem(item.id, {
+    payload: { ...current.payload, verification },
+  });
+  await jobsRepository.log(
+    job.id,
+    "proposal:verified",
+    `${item.id}: ${verification.status}`
+  );
+  return verification;
 }

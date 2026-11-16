@@ -1,13 +1,33 @@
 "use client";
 
-import { useAuth } from "@/components/AuthProvider";
-
+import type { ReplayController } from "@specbook/runtime/replay-player";
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Download,
+  ExternalLink,
+  FileCode2,
+  FileX2,
+  HardDrive,
+  Images,
+  Network,
+  PencilLine,
+  Play,
+  RefreshCw,
+  Target,
+  TriangleAlert,
+  Video,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, ExternalLink, FileCode2, FileX2, HardDrive, Images, Network, PencilLine, Play, RefreshCw, Target, TriangleAlert, Video } from "lucide-react";
-import { EmptyState } from "@/components/EmptyState";
+
+import { useAuth } from "@/components/AuthProvider";
 import { Dot } from "@/components/Dot";
+import { EmptyState } from "@/components/EmptyState";
 import { EnvironmentSelect } from "@/components/EnvironmentSelect";
 import { PageContainer, PageHeader, type Crumb } from "@/components/PageHeader";
 import { RawFileEditor } from "@/components/RawFileEditor";
@@ -23,882 +43,1760 @@ import { ApiRunEvidence } from "@/components/SpecRunDialog";
 import { StatusPill } from "@/components/StatusPill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { API_URL, ApiError, errorMessage, getRunEvidence, getSpec, isAbortError, runSpec, updateSpec, updateSpecFiles } from "@/lib/api";
+import {
+  API_URL,
+  ApiError,
+  errorMessage,
+  getRunEvidence,
+  getSpec,
+  isAbortError,
+  runSpec,
+  updateSpec,
+  updateSpecFiles,
+} from "@/lib/api";
+import {
+  formatDateTime,
+  formatDuration,
+  environmentLabel,
+  evidenceStepLabel,
+} from "@/lib/format";
 import { useDisplayStatus } from "@/lib/projectOverview";
-import { useRunEnvironment } from "@/lib/useRunEnvironment";
-import { formatDateTime, formatDuration, environmentLabel, evidenceStepLabel } from "@/lib/format";
 import { statusMeta } from "@/lib/status";
-import { cn } from "@/lib/utils";
 import type { HumanSpec, Run, RunEvidence, SpecDetail } from "@/lib/types";
-import type { ReplayController } from "@specbook/runtime/replay-player";
+import { useRunEnvironment } from "@/lib/useRunEnvironment";
+import { cn } from "@/lib/utils";
 
 function splitLines(raw: string): string[] {
-    return raw
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 interface LoadedRunEvidence {
-    data: RunEvidence | null;
-    error: string;
+  data: RunEvidence | null;
+  error: string;
 }
 
-function parseSourceLocation(reason: string): { line: number; column: number; message: string } | null {
-    const match = /^Line (\d+), column (\d+): ([\s\S]*)$/.exec(reason);
-    if (!match) return null;
-    return { line: Number(match[1]), column: Number(match[2]), message: match[3] };
+function parseSourceLocation(
+  reason: string
+): { line: number; column: number; message: string } | null {
+  const match = /^Line (\d+), column (\d+): ([\s\S]*)$/.exec(reason);
+  if (!match) return null;
+  return {
+    line: Number(match[1]),
+    column: Number(match[2]),
+    message: match[3],
+  };
 }
 
 type EvidenceSelection = { runId: string; step: RunEvidence["steps"][number] };
 
 function artifactUrl(runId: string, file: string) {
-    const path = file.split("/").map(encodeURIComponent).join("/");
-    return `${API_URL}/runs/${encodeURIComponent(runId)}/artifacts/${path}`;
+  const path = file.split("/").map(encodeURIComponent).join("/");
+  return `${API_URL}/runs/${encodeURIComponent(runId)}/artifacts/${path}`;
 }
 
 const RUN_HISTORY_LIMIT = 20;
 
-async function loadRunEvidence(runId: string, signal?: AbortSignal): Promise<LoadedRunEvidence> {
-    try {
-        const data = await getRunEvidence(runId, signal);
-        return { data, error: "" };
-    } catch (error) {
-        if (isAbortError(error)) throw error;
-        return { data: null, error: errorMessage(error) };
-    }
+async function loadRunEvidence(
+  runId: string,
+  signal?: AbortSignal
+): Promise<LoadedRunEvidence> {
+  try {
+    const data = await getRunEvidence(runId, signal);
+    return { data, error: "" };
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    return { data: null, error: errorMessage(error) };
+  }
 }
 
-function FailureReason({ reason, tone = "danger" }: { reason: string; tone?: "danger" | "invalid" | "neutral" }) {
-    return (
-        <pre className={cn("mt-3 max-h-48 overflow-auto rounded-lg px-3 py-2.5 font-mono text-meta whitespace-pre-wrap break-words", tone === "invalid" ? "bg-invalid-soft text-invalid" : tone === "neutral" ? "bg-neutral-soft text-ink-muted" : "bg-danger-soft text-danger")}>
-            {reason}
-        </pre>
-    );
+function FailureReason({
+  reason,
+  tone = "danger",
+}: {
+  reason: string;
+  tone?: "danger" | "invalid" | "neutral";
+}) {
+  return (
+    <pre
+      className={cn(
+        "text-meta mt-3 max-h-48 overflow-auto rounded-lg px-3 py-2.5 font-mono break-words whitespace-pre-wrap",
+        tone === "invalid"
+          ? "bg-invalid-soft text-invalid"
+          : tone === "neutral"
+            ? "bg-neutral-soft text-ink-muted"
+            : "bg-danger-soft text-danger"
+      )}
+    >
+      {reason}
+    </pre>
+  );
 }
 
 function SourceExcerpt({ source, line }: { source: string; line: number }) {
-    const lines = source.split("\n");
-    if (line < 1 || line > lines.length) return null;
-    const first = Math.max(1, line - 1);
-    const last = Math.min(lines.length, line + 1);
-    const width = String(last).length;
-    return (
-        <pre aria-label={`spec.ts around line ${line}`} className="mt-2 overflow-x-auto rounded-md border border-line bg-code-canvas py-1.5 font-mono text-meta leading-5 text-ink">
-            <span className="block w-max min-w-full">
-            {lines.slice(first - 1, last).map((text, index) => {
-                const number = first + index;
-                const current = number === line;
-                return (
-                    <span key={number} className={cn("block px-2.5", current && "bg-invalid-soft")}>
-                        <span aria-hidden="true" className={cn("mr-3 inline-block text-right tabular select-none", current ? "text-invalid" : "text-ink-subtle")} style={{ width: `${width}ch` }}>{number}</span>
-                        {text || " "}
-                    </span>
-                );
-            })}
+  const lines = source.split("\n");
+  if (line < 1 || line > lines.length) return null;
+  const first = Math.max(1, line - 1);
+  const last = Math.min(lines.length, line + 1);
+  const width = String(last).length;
+  return (
+    <pre
+      aria-label={`spec.ts around line ${line}`}
+      className="border-line bg-code-canvas text-meta text-ink mt-2 overflow-x-auto rounded-md border py-1.5 font-mono leading-5"
+    >
+      <span className="block w-max min-w-full">
+        {lines.slice(first - 1, last).map((text, index) => {
+          const number = first + index;
+          const current = number === line;
+          return (
+            <span
+              key={number}
+              className={cn("block px-2.5", current && "bg-invalid-soft")}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "tabular mr-3 inline-block text-right select-none",
+                  current ? "text-invalid" : "text-ink-subtle"
+                )}
+                style={{ width: `${width}ch` }}
+              >
+                {number}
+              </span>
+              {text || " "}
             </span>
-        </pre>
-    );
+          );
+        })}
+      </span>
+    </pre>
+  );
 }
 
-function InvalidReason({ reason, testSource }: { reason: string; testSource: string | null }) {
-    const location = parseSourceLocation(reason);
-    if (!location) return <FailureReason tone="invalid" reason={reason} />;
-    return (
-        <div className="mt-3 rounded-lg bg-invalid-soft px-3 py-2.5">
-            <p className="font-mono text-meta font-medium text-invalid">spec.ts · line {location.line}, column {location.column}</p>
-            <p className="mt-1 font-mono text-meta whitespace-pre-wrap break-words text-invalid">{location.message}</p>
-            {testSource && <SourceExcerpt source={testSource} line={location.line} />}
-        </div>
-    );
+function InvalidReason({
+  reason,
+  testSource,
+}: {
+  reason: string;
+  testSource: string | null;
+}) {
+  const location = parseSourceLocation(reason);
+  if (!location) return <FailureReason tone="invalid" reason={reason} />;
+  return (
+    <div className="bg-invalid-soft mt-3 rounded-lg px-3 py-2.5">
+      <p className="text-meta text-invalid font-mono font-medium">
+        spec.ts · line {location.line}, column {location.column}
+      </p>
+      <p className="text-meta text-invalid mt-1 font-mono break-words whitespace-pre-wrap">
+        {location.message}
+      </p>
+      {testSource && <SourceExcerpt source={testSource} line={location.line} />}
+    </div>
+  );
 }
 
-const sealColor: Record<string, string> = { passed: "[--slab-color:color-mix(in_oklch,var(--color-success)_50%,transparent)]", failed: "[--slab-color:color-mix(in_oklch,var(--color-danger)_50%,transparent)]", error: "[--slab-color:color-mix(in_oklch,var(--color-danger)_50%,transparent)]", invalid: "[--slab-color:color-mix(in_oklch,var(--color-invalid)_50%,transparent)]" };
-const sealFill: Record<string, string> = { passed: "bg-success", failed: "bg-danger", error: "bg-danger", invalid: "bg-invalid", running: "bg-ink", unverified: "bg-ink-subtle" };
+const sealColor: Record<string, string> = {
+  passed:
+    "[--slab-color:color-mix(in_oklch,var(--color-success)_50%,transparent)]",
+  failed:
+    "[--slab-color:color-mix(in_oklch,var(--color-danger)_50%,transparent)]",
+  error:
+    "[--slab-color:color-mix(in_oklch,var(--color-danger)_50%,transparent)]",
+  invalid:
+    "[--slab-color:color-mix(in_oklch,var(--color-invalid)_50%,transparent)]",
+};
+const sealFill: Record<string, string> = {
+  passed: "bg-success",
+  failed: "bg-danger",
+  error: "bg-danger",
+  invalid: "bg-invalid",
+  running: "bg-ink",
+  unverified: "bg-ink-subtle",
+};
 
 function VerificationBanner({
-    projectId,
-    detail: specDetail,
-    spec,
-    latestRun,
-    latestEvidence,
-    running,
-    environment,
-    actions,
+  projectId,
+  detail: specDetail,
+  spec,
+  latestRun,
+  latestEvidence,
+  running,
+  environment,
+  actions,
 }: {
-    projectId: string;
-    detail: SpecDetail;
-    spec: SpecDetail["spec"];
-    latestRun: Run | undefined;
-    latestEvidence: LoadedRunEvidence | undefined;
-    running: boolean;
-    environment: string;
-    actions?: React.ReactNode;
+  projectId: string;
+  detail: SpecDetail;
+  spec: SpecDetail["spec"];
+  latestRun: Run | undefined;
+  latestEvidence: LoadedRunEvidence | undefined;
+  running: boolean;
+  environment: string;
+  actions?: React.ReactNode;
 }) {
-    const { canEdit } = useAuth();
-    const displayStatus = useDisplayStatus(spec);
-    let status: string;
-    let headline: string;
-    let detail: React.ReactNode = null;
-    let body: React.ReactNode = null;
+  const { canEdit } = useAuth();
+  const displayStatus = useDisplayStatus(spec);
+  let status: string;
+  let headline: string;
+  let detail: React.ReactNode = null;
+  let body: React.ReactNode = null;
 
-    const queued = latestRun?.status === "running" && Boolean(latestRun.queue);
-    if (queued) {
-        status = "queued";
-        headline = "Waiting to run";
-        detail = `${latestRun.environment?.name ?? environment}${latestRun.environment?.runnerGroup ? ` · Group: ${latestRun.environment.runnerGroup}` : ""}`;
-        body = <RunnerQueueNotice queue={latestRun.queue} className="mt-2" />;
-    } else if (running || latestRun?.status === "running") {
-        status = "running";
-        headline = "Verifying now";
-        detail = `Running this Spec against ${environment}. Results appear here when it finishes.`;
-    } else if (displayStatus === "repairing") {
-        status = "repairing";
-        headline = "Specbook is repairing this Spec";
-        detail = "Its executable source is being rewritten to match the steps above. The repair is saved once it passes a run.";
-    } else if (spec.status === "invalid") {
-        status = "invalid";
-        headline = "This Spec can't run";
-        detail = "Its saved steps or executable source need attention. Ask the agent to repair it, then verify the result.";
-        body = (
-            <>
-                <InvalidReason reason={spec.invalidReason ?? "The spec.yml or spec.ts file could not be validated."} testSource={specDetail.content?.testSource ?? null} />
-                {canEdit && <div className="mt-3 flex flex-wrap gap-2">
-                    <Button asChild size="sm" variant="outline">
-                        <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}&intent=repair`}><PencilLine size={13} /> Repair in chat</Link>
-                    </Button>
-                </div>}
-            </>
-        );
-    } else if (spec.status === "awaiting_deploy") {
-        status = "awaiting_deploy";
-        headline = "Waiting for deploy";
-        const targets = specDetail.environmentStates.filter((state) => state.status === "awaiting_deploy" && state.name).map((state) => state.name).join(", ");
-        detail = `This Spec passed locally${targets ? ` and was published to ${targets}` : ""}. Server runs keep their evidence while it waits for the deployment. Its first passing run enables normal acceptance checks.`;
-        if (latestRun?.awaitingDeploy && latestRun.status !== "passed" && latestRun.failReason) body = <FailureReason reason={latestRun.failReason} tone="neutral" />;
-    } else if (!latestRun) {
-        status = "unverified";
-        headline = "Not verified yet";
-        detail = "Run this Spec to verify the behavior against the app.";
-    } else if (spec.status === "unverified") {
-        status = "unverified";
-        headline = "Not verified since the last change";
-        detail = <>Last run {statusMeta(latestRun.status).runLabel.toLowerCase()} <RelativeTime value={latestRun.startedAt} />. Run it again to confirm the current version.</>;
-    } else {
-        status = latestRun.status;
-        const passed = latestRun.status === "passed";
-        headline = passed ? "Last run passed" : latestRun.status === "error" ? "Last run could not complete" : "Last run failed";
-        const steps = latestEvidence?.data?.steps ?? [];
-        const failedStep = passed ? null : latestEvidence?.data?.failedStep ?? null;
-        const lastStep = !passed && !failedStep && steps.length > 0 ? steps[steps.length - 1] : null;
-        detail = (
-            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                <RelativeTime value={latestRun.startedAt} />
-                {environmentLabel(latestRun.environment?.name) && <><Dot /><span title={latestRun.baseUrl ?? undefined}>{latestRun.environment!.name}</span></>}
-                {latestRun.environment?.executor === "runner" && <><Dot /><span className="inline-flex items-center gap-1" title={latestRun.environment.runnerGroup ? `Runner group: ${latestRun.environment.runnerGroup}` : undefined}><HardDrive size={12} aria-hidden="true" />Runner</span></>}
-                {latestRun.environment?.executor === "tunnel" && <><Dot /><span className="inline-flex items-center gap-1" title={`Tunnel group: ${latestRun.environment.runnerGroup}`}><Network size={12} aria-hidden="true" />Tunnel</span></>}
-                {latestRun.durationMs !== null && <><Dot /><span className="tabular">took {formatDuration(latestRun.durationMs)}</span></>}
-                {failedStep && <><Dot /><span>stopped at “{failedStep}”</span></>}
-                {lastStep && <><Dot /><span>last captured step {lastStep.number}: {lastStep.label}</span></>}
-            </span>
-        );
-        if (!passed && latestRun.failReason) body = <FailureReason reason={latestRun.failReason} />;
-    }
-
-    const meta = statusMeta(status);
-    const Icon = queued ? Clock3 : meta.icon;
-    return (
-        <section aria-label="Run status" className={cn("slab flex flex-wrap gap-4 rounded-xl bg-surface p-4 sm:flex-nowrap", body ? "items-start" : "items-center", sealColor[status])}>
-            <RunStateAnnouncement message={`${headline}${queued && latestRun?.queue?.reason ? `. ${latestRun.queue.reason}` : ""}`} />
-            <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-md text-surface", sealFill[status] ?? "bg-ink-subtle")}>
-                <Icon size={19} strokeWidth={2.5} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />
-            </span>
-            <div className="min-w-0 flex-1">
-                <p className="text-section text-ink">{headline}</p>
-                {detail && <div className="mt-0.5 text-control text-ink-muted">{detail}</div>}
-                {body}
-            </div>
-            {actions && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">{actions}</div>}
-        </section>
+  const queued = latestRun?.status === "running" && Boolean(latestRun.queue);
+  if (queued) {
+    status = "queued";
+    headline = "Waiting to run";
+    detail = `${latestRun.environment?.name ?? environment}${latestRun.environment?.runnerGroup ? ` · Group: ${latestRun.environment.runnerGroup}` : ""}`;
+    body = <RunnerQueueNotice queue={latestRun.queue} className="mt-2" />;
+  } else if (running || latestRun?.status === "running") {
+    status = "running";
+    headline = "Verifying now";
+    detail = `Running this Spec against ${environment}. Results appear here when it finishes.`;
+  } else if (displayStatus === "repairing") {
+    status = "repairing";
+    headline = "Specbook is repairing this Spec";
+    detail =
+      "Its executable source is being rewritten to match the steps above. The repair is saved once it passes a run.";
+  } else if (spec.status === "invalid") {
+    status = "invalid";
+    headline = "This Spec can't run";
+    detail =
+      "Its saved steps or executable source need attention. Ask the agent to repair it, then verify the result.";
+    body = (
+      <>
+        <InvalidReason
+          reason={
+            spec.invalidReason ??
+            "The spec.yml or spec.ts file could not be validated."
+          }
+          testSource={specDetail.content?.testSource ?? null}
+        />
+        {canEdit && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link
+                href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}&intent=repair`}
+              >
+                <PencilLine size={13} /> Repair in chat
+              </Link>
+            </Button>
+          </div>
+        )}
+      </>
     );
+  } else if (spec.status === "awaiting_deploy") {
+    status = "awaiting_deploy";
+    headline = "Waiting for deploy";
+    const targets = specDetail.environmentStates
+      .filter((state) => state.status === "awaiting_deploy" && state.name)
+      .map((state) => state.name)
+      .join(", ");
+    detail = `This Spec passed locally${targets ? ` and was published to ${targets}` : ""}. Server runs keep their evidence while it waits for the deployment. Its first passing run enables normal acceptance checks.`;
+    if (
+      latestRun?.awaitingDeploy &&
+      latestRun.status !== "passed" &&
+      latestRun.failReason
+    )
+      body = <FailureReason reason={latestRun.failReason} tone="neutral" />;
+  } else if (!latestRun) {
+    status = "unverified";
+    headline = "Not verified yet";
+    detail = "Run this Spec to verify the behavior against the app.";
+  } else if (spec.status === "unverified") {
+    status = "unverified";
+    headline = "Not verified since the last change";
+    detail = (
+      <>
+        Last run {statusMeta(latestRun.status).runLabel.toLowerCase()}{" "}
+        <RelativeTime value={latestRun.startedAt} />. Run it again to confirm
+        the current version.
+      </>
+    );
+  } else {
+    status = latestRun.status;
+    const passed = latestRun.status === "passed";
+    headline = passed
+      ? "Last run passed"
+      : latestRun.status === "error"
+        ? "Last run could not complete"
+        : "Last run failed";
+    const steps = latestEvidence?.data?.steps ?? [];
+    const failedStep = passed
+      ? null
+      : (latestEvidence?.data?.failedStep ?? null);
+    const lastStep =
+      !passed && !failedStep && steps.length > 0
+        ? steps[steps.length - 1]
+        : null;
+    detail = (
+      <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        <RelativeTime value={latestRun.startedAt} />
+        {environmentLabel(latestRun.environment?.name) && (
+          <>
+            <Dot />
+            <span title={latestRun.baseUrl ?? undefined}>
+              {latestRun.environment!.name}
+            </span>
+          </>
+        )}
+        {latestRun.environment?.executor === "runner" && (
+          <>
+            <Dot />
+            <span
+              className="inline-flex items-center gap-1"
+              title={
+                latestRun.environment.runnerGroup
+                  ? `Runner group: ${latestRun.environment.runnerGroup}`
+                  : undefined
+              }
+            >
+              <HardDrive size={12} aria-hidden="true" />
+              Runner
+            </span>
+          </>
+        )}
+        {latestRun.environment?.executor === "tunnel" && (
+          <>
+            <Dot />
+            <span
+              className="inline-flex items-center gap-1"
+              title={`Tunnel group: ${latestRun.environment.runnerGroup}`}
+            >
+              <Network size={12} aria-hidden="true" />
+              Tunnel
+            </span>
+          </>
+        )}
+        {latestRun.durationMs !== null && (
+          <>
+            <Dot />
+            <span className="tabular">
+              took {formatDuration(latestRun.durationMs)}
+            </span>
+          </>
+        )}
+        {failedStep && (
+          <>
+            <Dot />
+            <span>stopped at “{failedStep}”</span>
+          </>
+        )}
+        {lastStep && (
+          <>
+            <Dot />
+            <span>
+              last captured step {lastStep.number}: {lastStep.label}
+            </span>
+          </>
+        )}
+      </span>
+    );
+    if (!passed && latestRun.failReason)
+      body = <FailureReason reason={latestRun.failReason} />;
+  }
+
+  const meta = statusMeta(status);
+  const Icon = queued ? Clock3 : meta.icon;
+  return (
+    <section
+      aria-label="Run status"
+      className={cn(
+        "slab bg-surface flex flex-wrap gap-4 rounded-xl p-4 sm:flex-nowrap",
+        body ? "items-start" : "items-center",
+        sealColor[status]
+      )}
+    >
+      <RunStateAnnouncement
+        message={`${headline}${queued && latestRun?.queue?.reason ? `. ${latestRun.queue.reason}` : ""}`}
+      />
+      <span
+        className={cn(
+          "text-surface flex size-10 shrink-0 items-center justify-center rounded-md",
+          sealFill[status] ?? "bg-ink-subtle"
+        )}
+      >
+        <Icon
+          size={19}
+          strokeWidth={2.5}
+          aria-hidden="true"
+          className={
+            status === "running"
+              ? "animate-spin motion-reduce:animate-none"
+              : undefined
+          }
+        />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-section text-ink">{headline}</p>
+        {detail && (
+          <div className="text-control text-ink-muted mt-0.5">{detail}</div>
+        )}
+        {body}
+      </div>
+      {actions && (
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          {actions}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function BulletList({ items }: { items: string[] }) {
-    return (
-        <ul className="mt-2 space-y-1.5">
-            {items.map((item, index) => (
-                <li key={`${index}-${item}`} className="flex gap-3 text-body text-ink">
-                    <span aria-hidden="true" className="mt-[0.6rem] size-1.5 shrink-0 rounded-full bg-ink-subtle/60" />
-                    <span className="min-w-0">{item}</span>
-                </li>
-            ))}
-        </ul>
-    );
+  return (
+    <ul className="mt-2 space-y-1.5">
+      {items.map((item, index) => (
+        <li key={`${index}-${item}`} className="text-body text-ink flex gap-3">
+          <span
+            aria-hidden="true"
+            className="bg-ink-subtle/60 mt-[0.6rem] size-1.5 shrink-0 rounded-full"
+          />
+          <span className="min-w-0">{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
-function SpecSection({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
-    return (
-        <section>
-            <h3 className="flex items-baseline gap-2 text-control font-semibold text-ink">
-                {title}
-                {count !== undefined && count > 0 && <span className="tabular font-normal text-ink-subtle">{count}</span>}
-            </h3>
-            {children}
-        </section>
-    );
+function SpecSection({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count?: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h3 className="text-control text-ink flex items-baseline gap-2 font-semibold">
+        {title}
+        {count !== undefined && count > 0 && (
+          <span className="tabular text-ink-subtle font-normal">{count}</span>
+        )}
+      </h3>
+      {children}
+    </section>
+  );
 }
 
 function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
-    return (
-        <div className="spec-sheet">
-            <div className="relative space-y-7 rounded-xl border border-line-strong bg-surface p-5 sm:p-6">
-                {humanSpec.preconditions.length > 0 && <SpecSection title="Preconditions" count={humanSpec.preconditions.length}>
-                    <BulletList items={humanSpec.preconditions} />
-                </SpecSection>}
+  return (
+    <div className="spec-sheet">
+      <div className="border-line-strong bg-surface relative space-y-7 rounded-xl border p-5 sm:p-6">
+        {humanSpec.preconditions.length > 0 && (
+          <SpecSection
+            title="Preconditions"
+            count={humanSpec.preconditions.length}
+          >
+            <BulletList items={humanSpec.preconditions} />
+          </SpecSection>
+        )}
 
-                <SpecSection title="Steps" count={humanSpec.steps.length}>
-                    {humanSpec.steps.length === 0 ? (
-                        <p className="mt-2 text-body text-ink-subtle">No steps recorded.</p>
-                    ) : (
-                        <ol className="mt-3">
-                            {humanSpec.steps.map((step, index) => (
-                                <li key={`${index}-${step}`} className="relative flex gap-3.5 pb-4 last:pb-0">
-                                    {index < humanSpec.steps.length - 1 && <span aria-hidden="true" className="absolute top-7 bottom-1 left-3 w-px bg-line" />}
-                                    <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-md border border-line-strong bg-surface text-meta font-semibold text-ink-muted tabular">{index + 1}</span>
-                                    <span className="min-w-0 pt-0.5 text-body text-ink"><span className="sr-only">Step {index + 1}: </span>{step}</span>
-                                </li>
-                            ))}
-                        </ol>
-                    )}
-                </SpecSection>
+        <SpecSection title="Steps" count={humanSpec.steps.length}>
+          {humanSpec.steps.length === 0 ? (
+            <p className="text-body text-ink-subtle mt-2">No steps recorded.</p>
+          ) : (
+            <ol className="mt-3">
+              {humanSpec.steps.map((step, index) => (
+                <li
+                  key={`${index}-${step}`}
+                  className="relative flex gap-3.5 pb-4 last:pb-0"
+                >
+                  {index < humanSpec.steps.length - 1 && (
+                    <span
+                      aria-hidden="true"
+                      className="bg-line absolute top-7 bottom-1 left-3 w-px"
+                    />
+                  )}
+                  <span
+                    aria-hidden="true"
+                    className="border-line-strong bg-surface text-meta text-ink-muted tabular flex size-6 shrink-0 items-center justify-center rounded-md border font-semibold"
+                  >
+                    {index + 1}
+                  </span>
+                  <span className="text-body text-ink min-w-0 pt-0.5">
+                    <span className="sr-only">Step {index + 1}: </span>
+                    {step}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </SpecSection>
 
-                {humanSpec.expectedResult && <section aria-labelledby="expected-result-heading" className="border-t border-line pt-5">
-                    <h3 id="expected-result-heading" className="flex items-center gap-1.5 text-control font-semibold text-ink">
-                        <Target size={14} aria-hidden="true" className="text-ink-muted" /> Expected result
-                    </h3>
-                    <p className="mt-1.5 text-body font-medium text-ink">{humanSpec.expectedResult}</p>
-                </section>}
+        {humanSpec.expectedResult && (
+          <section
+            aria-labelledby="expected-result-heading"
+            className="border-line border-t pt-5"
+          >
+            <h3
+              id="expected-result-heading"
+              className="text-control text-ink flex items-center gap-1.5 font-semibold"
+            >
+              <Target size={14} aria-hidden="true" className="text-ink-muted" />{" "}
+              Expected result
+            </h3>
+            <p className="text-body text-ink mt-1.5 font-medium">
+              {humanSpec.expectedResult}
+            </p>
+          </section>
+        )}
 
-                {humanSpec.postconditions.length > 0 && <SpecSection title="Postconditions" count={humanSpec.postconditions.length}>
-                    <BulletList items={humanSpec.postconditions} />
-                </SpecSection>}
-            </div>
+        {humanSpec.postconditions.length > 0 && (
+          <SpecSection
+            title="Postconditions"
+            count={humanSpec.postconditions.length}
+          >
+            <BulletList items={humanSpec.postconditions} />
+          </SpecSection>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EvidenceGallery({
+  runId,
+  passed,
+  evidence,
+  currentStep,
+  onSelect,
+}: {
+  runId: string;
+  passed: boolean;
+  evidence: RunEvidence;
+  currentStep: number | null;
+  onSelect: (step: RunEvidence["steps"][number]) => void;
+}) {
+  if (evidence.steps.length === 0) return null;
+  return (
+    <section
+      className="screenshot-section min-w-0"
+      aria-labelledby={`evidence-${runId}`}
+    >
+      <h4
+        id={`evidence-${runId}`}
+        className="text-meta text-ink-muted flex items-center gap-1.5 font-semibold"
+      >
+        <Images size={13} aria-hidden="true" /> Screenshots
+      </h4>
+      <ScrollArea orientation="horizontal" className="mt-2 w-full pb-2.5">
+        <div className="shots flex w-max gap-3.5">
+          {evidence.steps.map((step) => (
+            <figure
+              key={step.file}
+              className={cn(
+                "w-[170px] shrink-0 sm:w-[220px]",
+                step.kind === "expected" && "is-proof"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => onSelect(step)}
+                aria-label={`Enlarge screenshot${evidence.replay ? " and replay" : ""} ${evidenceStepLabel(step)}: ${step.label}`}
+                data-replay-step={step.number}
+                className={cn(
+                  "zoom border-line-strong hover:border-line-hover focus-visible:ring-ring block w-full overflow-hidden rounded-lg border transition-colors outline-none focus-visible:ring-2",
+                  currentStep === step.number &&
+                    "is-current border-primary border-2"
+                )}
+              >
+                <img
+                  src={artifactUrl(runId, step.file)}
+                  alt={`${evidenceStepLabel(step)}: ${step.label}`}
+                  loading="lazy"
+                  className="bg-surface-soft aspect-video w-full object-cover object-top"
+                />
+              </button>
+              <figcaption className="text-meta text-ink-muted mt-1.5 leading-5 break-words">
+                <b
+                  className={cn(
+                    "font-semibold",
+                    step.kind === "expected" && passed && "text-success"
+                  )}
+                >
+                  {evidenceStepLabel(step)}
+                </b>{" "}
+                {step.label}
+              </figcaption>
+            </figure>
+          ))}
         </div>
-    );
+      </ScrollArea>
+    </section>
+  );
 }
 
-function EvidenceGallery({ runId, passed, evidence, currentStep, onSelect }: { runId: string; passed: boolean; evidence: RunEvidence; currentStep: number | null; onSelect: (step: RunEvidence["steps"][number]) => void }) {
-    if (evidence.steps.length === 0) return null;
+function RunEvidencePanel({
+  run,
+  loaded,
+  onSelect,
+}: {
+  run: Run;
+  loaded: LoadedRunEvidence | undefined;
+  onSelect: (selection: EvidenceSelection) => void;
+}) {
+  const replay = useRef<ReplayController | null>(null);
+  const pendingStep = useRef<number | null>(null);
+  const [currentStep, setCurrentStep] = useState<number | null>(null);
+  const onReplayReady = useCallback((controller: ReplayController) => {
+    const step = pendingStep.current;
+    if (step !== null && controller.seekToStep(step)) {
+      setCurrentStep(step);
+      pendingStep.current = null;
+    }
+  }, []);
+  const evidence = loaded?.data;
+  if (run.status === "running")
     return (
-        <section className="screenshot-section min-w-0" aria-labelledby={`evidence-${runId}`}>
-            <h4 id={`evidence-${runId}`} className="flex items-center gap-1.5 text-meta font-semibold text-ink-muted"><Images size={13} aria-hidden="true" /> Screenshots</h4>
-            <ScrollArea orientation="horizontal" className="mt-2 w-full pb-2.5">
-                <div className="shots flex w-max gap-3.5">
-                    {evidence.steps.map((step) => (
-                        <figure key={step.file} className={cn("w-[170px] shrink-0 sm:w-[220px]", step.kind === "expected" && "is-proof")}>
-                            <button
-                                type="button"
-                                onClick={() => onSelect(step)}
-                                aria-label={`Enlarge screenshot${evidence.replay ? " and replay" : ""} ${evidenceStepLabel(step)}: ${step.label}`}
-                                data-replay-step={step.number}
-                                className={cn("zoom block w-full overflow-hidden rounded-lg border border-line-strong outline-none transition-colors hover:border-line-hover focus-visible:ring-2 focus-visible:ring-ring", currentStep === step.number && "is-current border-2 border-primary")}
-                            >
-                                <img src={artifactUrl(runId, step.file)} alt={`${evidenceStepLabel(step)}: ${step.label}`} loading="lazy" className="aspect-video w-full bg-surface-soft object-cover object-top" />
-                            </button>
-                            <figcaption className="mt-1.5 text-meta leading-5 break-words text-ink-muted"><b className={cn("font-semibold", step.kind === "expected" && passed && "text-success")}>{evidenceStepLabel(step)}</b> {step.label}</figcaption>
-                        </figure>
-                    ))}
-                </div>
-            </ScrollArea>
-        </section>
+      <p role="status" className="text-body text-ink-muted">
+        This run is in progress. Evidence appears when it finishes.
+      </p>
     );
-}
-
-function RunEvidencePanel({ run, loaded, onSelect }: { run: Run; loaded: LoadedRunEvidence | undefined; onSelect: (selection: EvidenceSelection) => void }) {
-    const replay = useRef<ReplayController | null>(null);
-    const pendingStep = useRef<number | null>(null);
-    const [currentStep, setCurrentStep] = useState<number | null>(null);
-    const onReplayReady = useCallback((controller: ReplayController) => {
-        const step = pendingStep.current;
-        if (step !== null && controller.seekToStep(step)) {
-            setCurrentStep(step);
+  if (!loaded)
+    return (
+      <Skeleton
+        className="h-24 w-full rounded-lg"
+        aria-label="Loading evidence"
+      />
+    );
+  if (loaded.error)
+    return (
+      <Alert variant="danger" role="alert">
+        <AlertDescription>
+          Could not load evidence: {loaded.error}
+        </AlertDescription>
+      </Alert>
+    );
+  if (!evidence) return null;
+  const empty =
+    evidence.steps.length === 0 &&
+    !evidence.apiSteps?.length &&
+    !evidence.video &&
+    !evidence.replay &&
+    !evidence.replayUnavailable &&
+    !evidence.diagnostics?.length &&
+    !evidence.errorContext;
+  return (
+    <div className="space-y-4">
+      {evidence.replay && (
+        <SessionReplay
+          runId={run.id}
+          failReason={run.failReason}
+          controls={replay}
+          onReady={onReplayReady}
+        />
+      )}
+      {!evidence.replay && evidence.replayUnavailable && (
+        <p className="text-meta text-ink-muted">{evidence.replayUnavailable}</p>
+      )}
+      <EvidenceGallery
+        runId={run.id}
+        passed={run.status === "passed"}
+        evidence={evidence}
+        currentStep={currentStep}
+        onSelect={(step) => {
+          if (replay.current?.seekToStep(step.number)) {
+            setCurrentStep(step.number);
             pendingStep.current = null;
-        }
-    }, []);
-    const evidence = loaded?.data;
-    if (run.status === "running") return <p role="status" className="text-body text-ink-muted">This run is in progress. Evidence appears when it finishes.</p>;
-    if (!loaded) return <Skeleton className="h-24 w-full rounded-lg" aria-label="Loading evidence" />;
-    if (loaded.error) return <Alert variant="danger" role="alert"><AlertDescription>Could not load evidence: {loaded.error}</AlertDescription></Alert>;
-    if (!evidence) return null;
-    const empty = evidence.steps.length === 0 && !evidence.apiSteps?.length && !evidence.video && !evidence.replay && !evidence.replayUnavailable && !evidence.diagnostics?.length && !evidence.errorContext;
-    return (
-        <div className="space-y-4">
-            {evidence.replay && <SessionReplay runId={run.id} failReason={run.failReason} controls={replay} onReady={onReplayReady} />}
-            {!evidence.replay && evidence.replayUnavailable && <p className="text-meta text-ink-muted">{evidence.replayUnavailable}</p>}
-            <EvidenceGallery runId={run.id} passed={run.status === "passed"} evidence={evidence} currentStep={currentStep} onSelect={(step) => {
-                if (replay.current?.seekToStep(step.number)) {
-                    setCurrentStep(step.number);
-                    pendingStep.current = null;
-                } else pendingStep.current = step.number;
-                onSelect({ runId: run.id, step });
-            }} />
-            {evidence.video && run.status !== "passed" && (
-                <section aria-labelledby={`video-${run.id}`}>
-                    <h4 id={`video-${run.id}`} className="flex items-center gap-1.5 text-meta font-semibold text-ink-muted"><Video size={13} aria-hidden="true" /> Recording</h4>
-                    <video controls preload="metadata" className="mt-2 aspect-video w-full rounded-lg border border-line bg-browser" src={artifactUrl(run.id, evidence.video)} />
-                </section>
-            )}
-            <ApiRunEvidence evidence={evidence} />
-            <RunDiagnostics evidence={evidence} />
-            {empty && <p className="text-control text-ink-subtle">No evidence was recorded for this run.</p>}
-        </div>
-    );
+          } else pendingStep.current = step.number;
+          onSelect({ runId: run.id, step });
+        }}
+      />
+      {evidence.video && run.status !== "passed" && (
+        <section aria-labelledby={`video-${run.id}`}>
+          <h4
+            id={`video-${run.id}`}
+            className="text-meta text-ink-muted flex items-center gap-1.5 font-semibold"
+          >
+            <Video size={13} aria-hidden="true" /> Recording
+          </h4>
+          <video
+            controls
+            preload="metadata"
+            className="border-line bg-browser mt-2 aspect-video w-full rounded-lg border"
+            src={artifactUrl(run.id, evidence.video)}
+          />
+        </section>
+      )}
+      <ApiRunEvidence evidence={evidence} />
+      <RunDiagnostics evidence={evidence} />
+      {empty && (
+        <p className="text-control text-ink-subtle">
+          No evidence was recorded for this run.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function RunEntry({
-    run,
-    latest,
-    last,
-    loaded,
-    onExpand,
-    onSelect,
+  run,
+  latest,
+  last,
+  loaded,
+  onExpand,
+  onSelect,
 }: {
-    run: Run;
-    latest: boolean;
-    last: boolean;
-    loaded: LoadedRunEvidence | undefined;
-    onExpand: (runId: string) => void;
-    onSelect: (selection: EvidenceSelection) => void;
+  run: Run;
+  latest: boolean;
+  last: boolean;
+  loaded: LoadedRunEvidence | undefined;
+  onExpand: (runId: string) => void;
+  onSelect: (selection: EvidenceSelection) => void;
 }) {
-    const [open, setOpen] = useState(latest);
-    const waiting = run.awaitingDeploy && run.status !== "passed" && run.status !== "running";
-    const queued = run.status === "running" && Boolean(run.queue);
-    const meta = statusMeta(waiting || queued ? "awaiting_deploy" : run.status);
-    useEffect(() => {
-        if (open && !loaded && run.status !== "running") onExpand(run.id);
-    }, [loaded, onExpand, open, run.id, run.status]);
-    const reportUrl = loaded?.data?.reportUrl;
-    return (
-        <li id={`run-${run.id}`} className="relative scroll-mt-4 pb-6 pl-8 last:pb-0">
-            {!last && <span aria-hidden="true" className="absolute top-5 bottom-0 left-[0.6875rem] w-px bg-line" />}
-            <span aria-hidden="true" className={cn("absolute top-1.5 left-1.5 size-3 rounded-full ring-4 ring-surface", meta.chart)} />
-            <Collapsible
-                open={open}
-                onOpenChange={(next) => {
-                    setOpen(next);
-                    if (next && run.status !== "running") onExpand(run.id);
-                }}
-            >
-                <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
-                    {queued ? <StatusPill status="queued" kind="run" size="sm" /> : <StatusPill status={waiting ? "awaiting_deploy" : run.status} kind="run" size="sm" />}
-                    {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
-                    <span className="flex flex-wrap items-center gap-x-1.5 text-meta text-ink-muted">
-                        <span title={formatDateTime(run.startedAt)}><RelativeTime value={run.startedAt} /></span>
-                        {environmentLabel(run.environment?.name) && <><Dot /><span title={run.baseUrl ?? undefined}>{run.environment!.name}</span></>}
-                        {run.environment?.executor === "runner" && <><Dot /><span className="inline-flex items-center gap-1" title={run.environment.runnerGroup ? `Runner group: ${run.environment.runnerGroup}` : undefined}><HardDrive size={12} aria-hidden="true" />Runner</span></>}
-                        {run.environment?.executor === "tunnel" && <><Dot /><span className="inline-flex items-center gap-1" title={`Tunnel group: ${run.environment.runnerGroup}`}><Network size={12} aria-hidden="true" />Tunnel</span></>}
-                        {run.durationMs !== null && <><Dot /><span className="tabular">{formatDuration(run.durationMs)}</span></>}
-                        {run.commitSha && <><Dot /><span className="font-mono" title="Commit">{run.commitSha.slice(0, 7)}</span></>}
-                    </span>
-                    <span className="ml-auto flex items-center gap-1">
-                        {reportUrl && (
-                            <Button asChild variant="ghost" size="sm" className="h-7 px-2">
-                                <a href={`${API_URL}${reportUrl}`} target="_blank" rel="noreferrer">View report <ExternalLink size={12} aria-hidden="true" /></a>
-                            </Button>
-                        )}
-                        {reportUrl && (
-                            <Button asChild variant="ghost" size="sm" className="h-7 px-2">
-                                <a href={`${API_URL}${reportUrl}?download`} download aria-label={`Download the report for the run ${formatDateTime(run.startedAt)}`}><Download size={12} aria-hidden="true" /></a>
-                            </Button>
-                        )}
-                        <CollapsibleTrigger asChild>
-                            <Button type="button" variant="ghost" size="sm" className="group/toggle h-7 px-2" aria-label={`${open ? "Hide" : "Show"} evidence for the run ${formatDateTime(run.startedAt)}`}>
-                                Evidence <ChevronDown size={13} aria-hidden="true" className="transition-transform group-data-[state=open]/toggle:rotate-180 motion-reduce:transition-none" />
-                            </Button>
-                        </CollapsibleTrigger>
-                    </span>
-                </div>
-                {run.retryOf && (
-                    <p className="mt-2 text-meta text-ink-muted">
-                        {run.flaky ? "Passed on the automatic retry. " : "Automatic retry. "}
-                        <a href={`#run-${run.retryOf}`} className="rounded-sm font-medium underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">View first attempt</a>
-                    </p>
-                )}
-                {queued && <RunnerQueueNotice queue={run.queue} className="mt-2" />}
-                {run.status !== "passed" && loaded?.data?.failedStep && (
-                    <p className="mt-2 text-control text-ink-muted"><span className="font-medium text-ink">Failed at step:</span> {loaded.data.failedStep}</p>
-                )}
-                {run.status !== "passed" && run.failReason && <FailureReason reason={run.failReason} tone={waiting ? "neutral" : "danger"} />}
-                <CollapsibleContent className="pt-3">
-                    {open && <RunEvidencePanel run={run} loaded={loaded} onSelect={onSelect} />}
-                </CollapsibleContent>
-            </Collapsible>
-        </li>
-    );
-}
-
-function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: React.ReactNode }) {
-    return (
-        <div className="space-y-1.5">
-            <Label htmlFor={id}>{label}</Label>
-            {children}
-            {hint && <p id={`${id}-hint`} className="text-meta text-ink-subtle">{hint}</p>}
-        </div>
-    );
-}
-
-export default function SpecPage({ params }: { params: Promise<{ projectId: string; specId: string }> }) {
-    const { canEdit } = useAuth();
-    const { projectId, specId } = use(params);
-    const router = useRouter();
-    const [detail, setDetail] = useState<SpecDetail | null>(null);
-    const [evidence, setEvidence] = useState<Record<string, LoadedRunEvidence>>({});
-    const [selectedEvidence, setSelectedEvidence] = useState<{ runId: string; step: RunEvidence["steps"][number] } | null>(null);
-    const [loadError, setLoadError] = useState("");
-    const [actionError, setActionError] = useState("");
-    const [runRefreshError, setRunRefreshError] = useState("");
-    const [running, setRunning] = useState(false);
-    const [environment, setEnvironment] = useRunEnvironment(projectId);
-    const [retryKey, setRetryKey] = useState(0);
-    const [editing, setEditing] = useState(false);
-    const [titleDraft, setTitleDraft] = useState("");
-    const [descriptionDraft, setDescriptionDraft] = useState("");
-    const [preconditionsDraft, setPreconditionsDraft] = useState("");
-    const [stepsDraft, setStepsDraft] = useState("");
-    const [expectedResultDraft, setExpectedResultDraft] = useState("");
-    const [postconditionsDraft, setPostconditionsDraft] = useState("");
-    const [rawYamlDraft, setRawYamlDraft] = useState("");
-    const [testSourceDraft, setTestSourceDraft] = useState("");
-    const [sourceOpen, setSourceOpen] = useState(false);
-    const [savedInvalid, setSavedInvalid] = useState(false);
-    const bannerRef = useRef<HTMLDivElement>(null);
-    const [saving, setSaving] = useState(false);
-
-    const evidenceRequestsRef = useRef(new Set<string>());
-
-    const ensureEvidence = useCallback((runId: string) => {
-        if (evidenceRequestsRef.current.has(runId)) return;
-        evidenceRequestsRef.current.add(runId);
-        void loadRunEvidence(runId).then((loaded) => {
-            setEvidence((current) => ({ ...current, [runId]: loaded }));
-            if (loaded.error) evidenceRequestsRef.current.delete(runId);
-        }).catch(() => evidenceRequestsRef.current.delete(runId));
-    }, []);
-
-    const showDetail = useCallback((nextDetail: SpecDetail) => {
-        evidenceRequestsRef.current = new Set();
-        setEvidence({});
-        setDetail(nextDetail);
-        if (nextDetail.runs[0] && nextDetail.runs[0].status !== "running") ensureEvidence(nextDetail.runs[0].id);
-    }, [ensureEvidence]);
-
-    useEffect(() => {
-        const controller = new AbortController();
-        setDetail(null);
-        setEvidence({});
-        setLoadError("");
-        async function load() {
-            try {
-                const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT, signal: controller.signal });
-                if (nextDetail.spec.projectId !== projectId) throw new Error("This Spec does not belong to this project.");
-                if (controller.signal.aborted) return;
-                showDetail(nextDetail);
-            } catch (error) {
-                if (!controller.signal.aborted && !isAbortError(error)) setLoadError(errorMessage(error));
-            }
-        }
-        void load();
-        return () => controller.abort();
-    }, [projectId, retryKey, showDetail, specId]);
-
-    const pendingRun = Boolean(detail?.runs.some((run) => run.status === "running" || run.automationPending));
-    useEffect(() => {
-        if (!pendingRun) return;
-        const controller = new AbortController();
-        let timer: ReturnType<typeof setTimeout>;
-        async function refreshRun() {
-            try {
-                const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT, signal: controller.signal });
-                if (nextDetail.spec.projectId !== projectId) throw new Error("This Spec does not belong to this project.");
-                setDetail(nextDetail);
-                setRunRefreshError("");
-            } catch (error) {
-                if (!isAbortError(error)) setRunRefreshError(errorMessage(error));
-            } finally {
-                if (!controller.signal.aborted) timer = setTimeout(() => void refreshRun(), 1500);
-            }
-        }
-        timer = setTimeout(() => void refreshRun(), 1500);
-        return () => {
-            controller.abort();
-            clearTimeout(timer);
-        };
-    }, [pendingRun, projectId, specId]);
-
-    async function reloadDetail(): Promise<SpecDetail | null> {
-        try {
-            const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT });
-            if (nextDetail.spec.projectId !== projectId) throw new Error("This Spec does not belong to this project.");
-            return nextDetail;
-        } catch (error) {
-            if (error instanceof ApiError && error.status === 404) {
-                router.replace(`/p/${projectId}/specs`);
-                return null;
-            }
-            throw error;
-        }
-    }
-
-    const selectedSteps = selectedEvidence ? evidence[selectedEvidence.runId]?.data?.steps ?? [] : [];
-    const selectedIndex = selectedEvidence
-        ? selectedSteps.findIndex((step) => step.file === selectedEvidence.step.file)
-        : -1;
-    const hasPrev = selectedIndex > 0;
-    const hasNext = selectedIndex >= 0 && selectedIndex < selectedSteps.length - 1;
-
-    const stepBy = useCallback(
-        (delta: number) => {
-            if (!selectedEvidence || selectedIndex < 0) return;
-            const nextStep = selectedSteps[selectedIndex + delta];
-            if (nextStep) setSelectedEvidence({ runId: selectedEvidence.runId, step: nextStep });
-        },
-        [selectedEvidence, selectedIndex, selectedSteps],
-    );
-
-    useEffect(() => {
-        if (!selectedEvidence) return;
-        function handleKeyDown(event: KeyboardEvent) {
-            if (event.key === "ArrowLeft") stepBy(-1);
-            if (event.key === "ArrowRight") stepBy(1);
-        }
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [selectedEvidence, stepBy]);
-
-    async function runNow() {
-        setRunning(true);
-        setActionError("");
-        try {
-            await runSpec(specId, environment);
-            const nextDetail = await reloadDetail();
-            if (nextDetail) showDetail(nextDetail);
-        } catch (error) {
-            setActionError(errorMessage(error));
-        } finally {
-            setRunning(false);
-        }
-    }
-
-    function startEditing() {
-        if (!detail?.content) return;
-        const { humanSpec } = detail.content;
-        setTitleDraft(detail.spec.title);
-        setDescriptionDraft(detail.spec.description);
-        setPreconditionsDraft(humanSpec ? humanSpec.preconditions.join("\n") : "");
-        setStepsDraft(humanSpec ? humanSpec.steps.join("\n") : "");
-        setExpectedResultDraft(humanSpec ? humanSpec.expectedResult : "");
-        setPostconditionsDraft(humanSpec ? humanSpec.postconditions.join("\n") : "");
-        setRawYamlDraft(detail.content.yamlSource);
-        setTestSourceDraft(detail.content.testSource);
-        setSourceOpen(false);
-        setEditing(true);
-        setActionError("");
-        setSavedInvalid(false);
-    }
-
-    async function saveFiles() {
-        if (!detail?.content) return;
-        setSaving(true);
-        setActionError("");
-        try {
-            let current = detail;
-            if (current.content?.humanSpec) {
-                const patch: { title?: string; description?: string; humanSpec?: typeof current.content.humanSpec } = {};
-                if (titleDraft.trim() !== current.spec.title) patch.title = titleDraft.trim();
-                if (descriptionDraft !== current.spec.description) patch.description = descriptionDraft;
-                const nextHumanSpec = {
-                    preconditions: splitLines(preconditionsDraft),
-                    steps: splitLines(stepsDraft),
-                    expectedResult: expectedResultDraft.trim(),
-                    postconditions: splitLines(postconditionsDraft),
-                };
-                if (JSON.stringify(nextHumanSpec) !== JSON.stringify(current.content.humanSpec)) patch.humanSpec = nextHumanSpec;
-                if (Object.keys(patch).length > 0) current = await updateSpec(specId, patch);
-            } else if (rawYamlDraft !== current.content?.yamlSource) {
-                current = await updateSpecFiles(specId, { yaml: rawYamlDraft });
-            }
-            if (current.content && testSourceDraft !== current.content.testSource) {
-                current = await updateSpecFiles(specId, { testSource: testSourceDraft });
-            }
-            setDetail(current);
-            setEditing(false);
-            const nowInvalid = current.spec.status === "invalid";
-            setSavedInvalid(nowInvalid);
-            if (nowInvalid) requestAnimationFrame(() => bannerRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
-        } catch (error) {
-            setActionError(error instanceof Error ? error.message : String(error));
-        } finally {
-            setSaving(false);
-        }
-    }
-
-    const specsCrumb: Crumb = { label: "Specs", href: `/p/${projectId}/specs` };
-
-    if (loadError && !detail) {
-        return (
-            <div className="flex min-h-full flex-col bg-surface">
-                <PageHeader title="Spec" breadcrumbs={[specsCrumb]} width="reading" />
-                <EmptyState
-                    role="alert"
-                    tone="danger"
-                    icon={FileX2}
-                    title="This Spec could not load"
-                    description={loadError}
-                    action={<Button type="button" onClick={() => setRetryKey((key) => key + 1)}><RefreshCw size={14} /> Try again</Button>}
-                />
-            </div>
-        );
-    }
-
-    if (!detail) {
-        return (
-            <div className="min-h-full bg-surface" aria-label="Loading Spec" aria-busy="true" role="status">
-                <PageHeader title={<Skeleton className="h-6 w-72 max-w-full" />} breadcrumbs={[specsCrumb]} width="reading" />
-                <PageContainer width="reading" innerClassName="space-y-8">
-                    <Skeleton className="h-[4.5rem] rounded-xl" />
-                    <div className="space-y-3"><Skeleton className="h-4 w-28" /><Skeleton className="h-4 w-2/3" /><Skeleton className="h-4 w-1/2" /></div>
-                    <div className="space-y-3"><Skeleton className="h-4 w-20" />{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-5 w-3/4" />)}</div>
-                    <Skeleton className="h-20 rounded-xl" />
-                </PageContainer>
-            </div>
-        );
-    }
-
-    const { spec, feature, content, runs } = detail;
-    const latestRun = runs[0];
-    const crumbs: Crumb[] = [specsCrumb, ...(feature ? [{ label: feature.title, href: `/p/${projectId}/specs#feature-${feature.id}` }] : [])];
-    const sourceEdited = Boolean(content && testSourceDraft !== content.testSource);
-    const changedFields = {
-        preconditions: Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(preconditionsDraft)) !== JSON.stringify(content.humanSpec.preconditions.map((title) => title.trim()))),
-        steps: Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(stepsDraft)) !== JSON.stringify(content.humanSpec.steps.map((title) => title.trim()))),
-        expectedResult: Boolean(editing && content?.humanSpec && expectedResultDraft.trim() !== content.humanSpec.expectedResult.trim()),
-        postconditions: Boolean(editing && content?.humanSpec && JSON.stringify(splitLines(postconditionsDraft)) !== JSON.stringify(content.humanSpec.postconditions.map((title) => title.trim()))),
-    };
-    const behaviorChanged = Object.values(changedFields).some(Boolean);
-
-    return (
-        <div className="min-h-full bg-surface">
-            <PageHeader
-                title={spec.title}
-                breadcrumbs={crumbs}
-                kicker={spec.path ? `${spec.path}/spec.yml` : undefined}
-                size="document"
-                width="reading"
-                titleAdornment={latestRun?.flaky && <StatusPill status="flaky" />}
-                description={spec.description || undefined}
+  const [open, setOpen] = useState(latest);
+  const waiting =
+    run.awaitingDeploy && run.status !== "passed" && run.status !== "running";
+  const queued = run.status === "running" && Boolean(run.queue);
+  const meta = statusMeta(waiting || queued ? "awaiting_deploy" : run.status);
+  useEffect(() => {
+    if (open && !loaded && run.status !== "running") onExpand(run.id);
+  }, [loaded, onExpand, open, run.id, run.status]);
+  const reportUrl = loaded?.data?.reportUrl;
+  return (
+    <li
+      id={`run-${run.id}`}
+      className="relative scroll-mt-4 pb-6 pl-8 last:pb-0"
+    >
+      {!last && (
+        <span
+          aria-hidden="true"
+          className="bg-line absolute top-5 bottom-0 left-[0.6875rem] w-px"
+        />
+      )}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "ring-surface absolute top-1.5 left-1.5 size-3 rounded-full ring-4",
+          meta.chart
+        )}
+      />
+      <Collapsible
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next && run.status !== "running") onExpand(run.id);
+        }}
+      >
+        <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
+          {queued ? (
+            <StatusPill status="queued" kind="run" size="sm" />
+          ) : (
+            <StatusPill
+              status={waiting ? "awaiting_deploy" : run.status}
+              kind="run"
+              size="sm"
             />
-            <PageContainer width="reading" className="min-w-0 [overflow-wrap:anywhere] lg:pb-14" innerClassName="space-y-9">
-                {actionError && <Alert variant="danger" role="alert"><AlertDescription>{actionError}{/pending file edits/.test(actionError) && <Link href={`/p/${projectId}/settings?tab=git`} className="mt-2 block font-medium underline underline-offset-2">Review pending edits</Link>}</AlertDescription></Alert>}
-                {runRefreshError && <Alert variant="warning" role="status"><AlertDescription>Run updates are delayed: {runRefreshError} Retrying…</AlertDescription></Alert>}
-
-                <div ref={bannerRef} className="scroll-mt-4 space-y-3">
-                {savedInvalid && spec.status === "invalid" && (
-                    <Alert variant="warning" role="alert">
-                        <AlertDescription>Your changes were saved, but the Spec is now invalid and can&apos;t run. The reason is shown below.</AlertDescription>
-                    </Alert>
-                )}
-                <VerificationBanner
-                    projectId={projectId}
-                    detail={detail}
-                    spec={spec}
-                    latestRun={latestRun}
-                    latestEvidence={latestRun ? evidence[latestRun.id] : undefined}
-                    running={running}
-                    environment={environment}
-                    actions={canEdit && spec.status !== "invalid" && <>
-                        <EnvironmentSelect projectId={projectId} value={environment} onValueChange={setEnvironment} disabled={running} />
-                        <Button type="button" size="sm" onClick={runNow} disabled={running || !content}>
-                            <Play size={12} fill="currentColor" /> {running ? "Running…" : latestRun ? "Run again" : "Run"}
-                        </Button>
-                    </>}
+          )}
+          {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
+          <span className="text-meta text-ink-muted flex flex-wrap items-center gap-x-1.5">
+            <span title={formatDateTime(run.startedAt)}>
+              <RelativeTime value={run.startedAt} />
+            </span>
+            {environmentLabel(run.environment?.name) && (
+              <>
+                <Dot />
+                <span title={run.baseUrl ?? undefined}>
+                  {run.environment!.name}
+                </span>
+              </>
+            )}
+            {run.environment?.executor === "runner" && (
+              <>
+                <Dot />
+                <span
+                  className="inline-flex items-center gap-1"
+                  title={
+                    run.environment.runnerGroup
+                      ? `Runner group: ${run.environment.runnerGroup}`
+                      : undefined
+                  }
+                >
+                  <HardDrive size={12} aria-hidden="true" />
+                  Runner
+                </span>
+              </>
+            )}
+            {run.environment?.executor === "tunnel" && (
+              <>
+                <Dot />
+                <span
+                  className="inline-flex items-center gap-1"
+                  title={`Tunnel group: ${run.environment.runnerGroup}`}
+                >
+                  <Network size={12} aria-hidden="true" />
+                  Tunnel
+                </span>
+              </>
+            )}
+            {run.durationMs !== null && (
+              <>
+                <Dot />
+                <span className="tabular">
+                  {formatDuration(run.durationMs)}
+                </span>
+              </>
+            )}
+            {run.commitSha && (
+              <>
+                <Dot />
+                <span className="font-mono" title="Commit">
+                  {run.commitSha.slice(0, 7)}
+                </span>
+              </>
+            )}
+          </span>
+          <span className="ml-auto flex items-center gap-1">
+            {reportUrl && (
+              <Button asChild variant="ghost" size="sm" className="h-7 px-2">
+                <a
+                  href={`${API_URL}${reportUrl}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View report <ExternalLink size={12} aria-hidden="true" />
+                </a>
+              </Button>
+            )}
+            {reportUrl && (
+              <Button asChild variant="ghost" size="sm" className="h-7 px-2">
+                <a
+                  href={`${API_URL}${reportUrl}?download`}
+                  download
+                  aria-label={`Download the report for the run ${formatDateTime(run.startedAt)}`}
+                >
+                  <Download size={12} aria-hidden="true" />
+                </a>
+              </Button>
+            )}
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="group/toggle h-7 px-2"
+                aria-label={`${open ? "Hide" : "Show"} evidence for the run ${formatDateTime(run.startedAt)}`}
+              >
+                Evidence{" "}
+                <ChevronDown
+                  size={13}
+                  aria-hidden="true"
+                  className="transition-transform group-data-[state=open]/toggle:rotate-180 motion-reduce:transition-none"
                 />
-                </div>
-
-                <section aria-labelledby="specification-heading">
-                    <SectionHeader id="specification-heading" title={editing ? "Edit specification" : "Specification"} className="mb-4" actions={<>
-                        <SpecHistoryDialog specId={specId} />
-                        {canEdit && <Button type="button" variant="outline" size="sm" onClick={editing ? () => setEditing(false) : startEditing} disabled={!content || saving}>
-                            <PencilLine size={13} /> {editing ? "Cancel editing" : "Edit"}
-                        </Button>}
-                    </>} />
-                    {editing && content ? (
-                        <form className="space-y-6" onSubmit={(event) => { event.preventDefault(); void saveFiles(); }}>
-                            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-line bg-surface-soft px-3.5 py-2.5">
-                                <p className="text-control text-ink-muted">Prefer to describe the change instead?</p>
-                                <Button asChild variant="outline" size="sm">
-                                    <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}><PencilLine size={13} /> Edit with AI</Link>
-                                </Button>
-                            </div>
-                            {content.humanSpec ? (
-                                <div className="space-y-5">
-                                    <Field id="spec-title" label="Title">
-                                        <Input id="spec-title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} disabled={saving} aria-invalid={!titleDraft.trim() || undefined} />
-                                    </Field>
-                                    <Field id="spec-description" label="Description">
-                                        <Textarea id="spec-description" value={descriptionDraft} onChange={(event) => setDescriptionDraft(event.target.value)} disabled={saving} rows={2} />
-                                    </Field>
-                                    <Field id="spec-preconditions" label="Preconditions" hint="One per line. Who is signed in and what state the app is in before the steps. The automation sets up and checks each one.">
-                                        <Textarea id="spec-preconditions" aria-describedby={changedFields.preconditions ? "spec-preconditions-hint spec-behavior-note" : "spec-preconditions-hint"} value={preconditionsDraft} onChange={(event) => setPreconditionsDraft(event.target.value)} disabled={saving} rows={3} placeholder="Signed in as the shopper" />
-                                    </Field>
-                                    <Field id="spec-steps" label="Steps" hint="One per line, in order. Each line becomes a numbered step.">
-                                        <Textarea id="spec-steps" aria-describedby={changedFields.steps ? "spec-steps-hint spec-behavior-note" : "spec-steps-hint"} value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)} disabled={saving} rows={6} placeholder="Open the store home page" />
-                                    </Field>
-                                    <Field id="spec-expected-result" label="Expected result" hint="One sentence the user can see on screen. The automation proves it right after the steps and keeps that screenshot as evidence.">
-                                        <Textarea id="spec-expected-result" aria-describedby={changedFields.expectedResult ? "spec-expected-result-hint spec-behavior-note" : "spec-expected-result-hint"} value={expectedResultDraft} onChange={(event) => setExpectedResultDraft(event.target.value)} disabled={saving} rows={3} />
-                                    </Field>
-                                    <Field id="spec-postconditions" label="Postconditions" hint="One per line. Side effects checked after the expected result. Optional; most Specs have none.">
-                                        <Textarea id="spec-postconditions" aria-describedby={changedFields.postconditions ? "spec-postconditions-hint spec-behavior-note" : "spec-postconditions-hint"} value={postconditionsDraft} onChange={(event) => setPostconditionsDraft(event.target.value)} disabled={saving} rows={2} />
-                                    </Field>
-                                    {behaviorChanged && (
-                                        <p id="spec-behavior-note" role="status" className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-meta text-ink">
-                                            <TriangleAlert size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-icon" />
-                                            <span>
-                                                {sourceEdited
-                                                    ? "Check that the step() titles in the automation source match the preconditions, steps, expected result and postconditions, in that order, or the Spec becomes invalid."
-                                                    : <>The automation must be updated to match these preconditions, steps, expected result and postconditions, or the Spec becomes invalid when you save. Use <Link href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`} className="font-medium underline underline-offset-2">Edit with AI</Link>, or change the step() titles in the automation source below.</>}
-                                            </span>
-                                        </p>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    <Alert variant="warning" role="alert">
-                                        <AlertDescription>The Spec file could not be read as fields. Fix the source below, then save.</AlertDescription>
-                                    </Alert>
-                                    <RawFileEditor id="spec-yaml" label="spec.yml" language="yaml" value={rawYamlDraft} onChange={setRawYamlDraft} disabled={saving} />
-                                </div>
-                            )}
-                            <Collapsible open={sourceOpen} onOpenChange={setSourceOpen} className="group/source overflow-hidden sheet rounded-xl">
-                                <CollapsibleTrigger asChild>
-                                    <button type="button" className="flex w-full items-center gap-3 px-3.5 py-3 text-left outline-none transition-colors hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
-                                        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink-muted"><FileCode2 size={15} aria-hidden="true" /></span>
-                                        <span className="min-w-0 flex-1">
-                                            <span className="flex items-center gap-2 text-control font-semibold text-ink">
-                                                Advanced: automation source
-                                                {sourceEdited && <span className="rounded-full bg-warning-soft px-1.5 text-meta font-medium text-ink">Edited</span>}
-                                            </span>
-                                            <span className="mt-0.5 block text-meta text-ink-subtle">
-                                                {sourceEdited ? "The generated automation will be replaced when you save." : "Generated Playwright test (spec.ts) for this Spec. Most edits only need the fields above."}
-                                            </span>
-                                        </span>
-                                        <ChevronDown size={15} className="shrink-0 text-ink-subtle transition-transform group-data-[state=open]/source:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
-                                    </button>
-                                </CollapsibleTrigger>
-                                <CollapsibleContent className="border-t border-line bg-surface-soft/60 p-3.5">
-                                    <RawFileEditor id="spec-test-source" label="spec.ts" language="typescript" value={testSourceDraft} onChange={setTestSourceDraft} disabled={saving} rows={16} />
-                                    <p className="mt-2 text-meta text-ink-subtle">Each step(&quot;…&quot;) title must match a step above, in order. Invalid source is still saved, and the Spec is marked for correction.</p>
-                                </CollapsibleContent>
-                            </Collapsible>
-                            <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur-sm sm:mx-0 sm:flex-row sm:items-center sm:justify-between sm:rounded-b-none sm:px-0">
-                                <p className="text-meta text-ink-subtle">Saving commits the changes to the repository.</p>
-                                <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                                    <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={saving}>Cancel</Button>
-                                    <Button type="submit" disabled={saving || (Boolean(content.humanSpec) && !titleDraft.trim())}>{saving ? "Saving…" : "Save changes"}</Button>
-                                </div>
-                            </div>
-                        </form>
-                    ) : content && content.humanSpec ? (
-                        <SpecificationView humanSpec={content.humanSpec} />
-                    ) : content ? (
-                        <div className="sheet rounded-xl">
-                            <EmptyState size="compact" tone="warning" icon={FileX2} title="The Spec file could not be read" description="Use Edit to fix the source by hand." />
-                        </div>
-                    ) : (
-                        <div className="sheet rounded-xl">
-                            <EmptyState size="compact" tone="warning" icon={FileX2} title="Spec files unavailable" description="Restore or fix the spec.yml and spec.ts files to continue." />
-                        </div>
-                    )}
-                    {!editing && detail && <SpecFolio projectId={projectId} specId={specId} featureId={detail.spec.featureId} />}
-                </section>
-
-                <section aria-labelledby="verification-heading">
-                    <SectionHeader
-                        id="verification-heading"
-                        title="Run history"
-                        count={runs.length || undefined}
-                        description={runs.length >= RUN_HISTORY_LIMIT ? `Showing the latest ${RUN_HISTORY_LIMIT} runs.` : undefined}
-                        className="mb-4"
-                    />
-                    {runs.length === 0 ? (
-                        <p className="rounded-xl border border-dashed border-line-strong px-4 py-5 text-center text-control text-ink-subtle">No runs yet. Screenshots, API responses and recordings from each run appear here.</p>
-                    ) : (
-                        <ol aria-label="Runs, newest first">
-                            {runs.map((run, index) => (
-                                <RunEntry
-                                    key={run.id}
-                                    run={run}
-                                    latest={index === 0}
-                                    last={index === runs.length - 1}
-                                    loaded={evidence[run.id]}
-                                    onExpand={ensureEvidence}
-                                    onSelect={setSelectedEvidence}
-                                />
-                            ))}
-                        </ol>
-                    )}
-                </section>
-            </PageContainer>
-            <Dialog open={selectedEvidence !== null} onOpenChange={(open) => {
-                if (!open) setSelectedEvidence(null);
-            }}>
-                <DialogContent className="max-h-[calc(100dvh-24px)] max-w-[960px] overflow-y-auto p-4 sm:p-5">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-baseline gap-2">
-                            {selectedEvidence ? evidenceStepLabel(selectedEvidence.step) : ""}
-                            {selectedSteps.length > 1 && (
-                                <span className="text-control font-normal text-ink-subtle tabular">{selectedIndex + 1} of {selectedSteps.length}</span>
-                            )}
-                        </DialogTitle>
-                        <DialogDescription>{selectedEvidence?.step.label}</DialogDescription>
-                    </DialogHeader>
-                    {selectedEvidence && (
-                        <div className="relative mt-4">
-                            <img src={artifactUrl(selectedEvidence.runId, selectedEvidence.step.file)} alt={`${evidenceStepLabel(selectedEvidence.step)}: ${selectedEvidence.step.label}`} className="max-h-[calc(100dvh-150px)] w-full rounded-lg border border-line bg-surface-soft object-contain" />
-                            {hasPrev && (
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => stepBy(-1)}
-                                    className="absolute top-1/2 left-2 -translate-y-1/2 rounded-full bg-surface/90 shadow-popover backdrop-blur-sm"
-                                    aria-label="Previous step"
-                                >
-                                    <ChevronLeft size={16} />
-                                </Button>
-                            )}
-                            {hasNext && (
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => stepBy(1)}
-                                    className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full bg-surface/90 shadow-popover backdrop-blur-sm"
-                                    aria-label="Next step"
-                                >
-                                    <ChevronRight size={16} />
-                                </Button>
-                            )}
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+              </Button>
+            </CollapsibleTrigger>
+          </span>
         </div>
+        {run.retryOf && (
+          <p className="text-meta text-ink-muted mt-2">
+            {run.flaky
+              ? "Passed on the automatic retry. "
+              : "Automatic retry. "}
+            <a
+              href={`#run-${run.retryOf}`}
+              className="hover:text-ink focus-visible:ring-ring rounded-sm font-medium underline underline-offset-2 focus-visible:ring-2 focus-visible:outline-none"
+            >
+              View first attempt
+            </a>
+          </p>
+        )}
+        {queued && <RunnerQueueNotice queue={run.queue} className="mt-2" />}
+        {run.status !== "passed" && loaded?.data?.failedStep && (
+          <p className="text-control text-ink-muted mt-2">
+            <span className="text-ink font-medium">Failed at step:</span>{" "}
+            {loaded.data.failedStep}
+          </p>
+        )}
+        {run.status !== "passed" && run.failReason && (
+          <FailureReason
+            reason={run.failReason}
+            tone={waiting ? "neutral" : "danger"}
+          />
+        )}
+        <CollapsibleContent className="pt-3">
+          {open && (
+            <RunEvidencePanel run={run} loaded={loaded} onSelect={onSelect} />
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+    </li>
+  );
+}
+
+function Field({
+  id,
+  label,
+  hint,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      {children}
+      {hint && (
+        <p id={`${id}-hint`} className="text-meta text-ink-subtle">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export default function SpecPage({
+  params,
+}: {
+  params: Promise<{ projectId: string; specId: string }>;
+}) {
+  const { canEdit } = useAuth();
+  const { projectId, specId } = use(params);
+  const router = useRouter();
+  const [detail, setDetail] = useState<SpecDetail | null>(null);
+  const [evidence, setEvidence] = useState<Record<string, LoadedRunEvidence>>(
+    {}
+  );
+  const [selectedEvidence, setSelectedEvidence] = useState<{
+    runId: string;
+    step: RunEvidence["steps"][number];
+  } | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [runRefreshError, setRunRefreshError] = useState("");
+  const [running, setRunning] = useState(false);
+  const [environment, setEnvironment] = useRunEnvironment(projectId);
+  const [retryKey, setRetryKey] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [preconditionsDraft, setPreconditionsDraft] = useState("");
+  const [stepsDraft, setStepsDraft] = useState("");
+  const [expectedResultDraft, setExpectedResultDraft] = useState("");
+  const [postconditionsDraft, setPostconditionsDraft] = useState("");
+  const [rawYamlDraft, setRawYamlDraft] = useState("");
+  const [testSourceDraft, setTestSourceDraft] = useState("");
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [savedInvalid, setSavedInvalid] = useState(false);
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState(false);
+
+  const evidenceRequestsRef = useRef(new Set<string>());
+
+  const ensureEvidence = useCallback((runId: string) => {
+    if (evidenceRequestsRef.current.has(runId)) return;
+    evidenceRequestsRef.current.add(runId);
+    void loadRunEvidence(runId)
+      .then((loaded) => {
+        setEvidence((current) => ({ ...current, [runId]: loaded }));
+        if (loaded.error) evidenceRequestsRef.current.delete(runId);
+      })
+      .catch(() => evidenceRequestsRef.current.delete(runId));
+  }, []);
+
+  const showDetail = useCallback(
+    (nextDetail: SpecDetail) => {
+      evidenceRequestsRef.current = new Set();
+      setEvidence({});
+      setDetail(nextDetail);
+      if (nextDetail.runs[0] && nextDetail.runs[0].status !== "running")
+        ensureEvidence(nextDetail.runs[0].id);
+    },
+    [ensureEvidence]
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setDetail(null);
+    setEvidence({});
+    setLoadError("");
+    async function load() {
+      try {
+        const nextDetail = await getSpec(specId, {
+          limit: RUN_HISTORY_LIMIT,
+          signal: controller.signal,
+        });
+        if (nextDetail.spec.projectId !== projectId)
+          throw new Error("This Spec does not belong to this project.");
+        if (controller.signal.aborted) return;
+        showDetail(nextDetail);
+      } catch (error) {
+        if (!controller.signal.aborted && !isAbortError(error))
+          setLoadError(errorMessage(error));
+      }
+    }
+    void load();
+    return () => controller.abort();
+  }, [projectId, retryKey, showDetail, specId]);
+
+  const pendingRun = Boolean(
+    detail?.runs.some(
+      (run) => run.status === "running" || run.automationPending
+    )
+  );
+  useEffect(() => {
+    if (!pendingRun) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function refreshRun() {
+      try {
+        const nextDetail = await getSpec(specId, {
+          limit: RUN_HISTORY_LIMIT,
+          signal: controller.signal,
+        });
+        if (nextDetail.spec.projectId !== projectId)
+          throw new Error("This Spec does not belong to this project.");
+        setDetail(nextDetail);
+        setRunRefreshError("");
+      } catch (error) {
+        if (!isAbortError(error)) setRunRefreshError(errorMessage(error));
+      } finally {
+        if (!controller.signal.aborted)
+          timer = setTimeout(() => void refreshRun(), 1500);
+      }
+    }
+    timer = setTimeout(() => void refreshRun(), 1500);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [pendingRun, projectId, specId]);
+
+  async function reloadDetail(): Promise<SpecDetail | null> {
+    try {
+      const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT });
+      if (nextDetail.spec.projectId !== projectId)
+        throw new Error("This Spec does not belong to this project.");
+      return nextDetail;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        router.replace(`/p/${projectId}/specs`);
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  const selectedSteps = selectedEvidence
+    ? (evidence[selectedEvidence.runId]?.data?.steps ?? [])
+    : [];
+  const selectedIndex = selectedEvidence
+    ? selectedSteps.findIndex(
+        (step) => step.file === selectedEvidence.step.file
+      )
+    : -1;
+  const hasPrev = selectedIndex > 0;
+  const hasNext =
+    selectedIndex >= 0 && selectedIndex < selectedSteps.length - 1;
+
+  const stepBy = useCallback(
+    (delta: number) => {
+      if (!selectedEvidence || selectedIndex < 0) return;
+      const nextStep = selectedSteps[selectedIndex + delta];
+      if (nextStep)
+        setSelectedEvidence({ runId: selectedEvidence.runId, step: nextStep });
+    },
+    [selectedEvidence, selectedIndex, selectedSteps]
+  );
+
+  useEffect(() => {
+    if (!selectedEvidence) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "ArrowLeft") stepBy(-1);
+      if (event.key === "ArrowRight") stepBy(1);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedEvidence, stepBy]);
+
+  async function runNow() {
+    setRunning(true);
+    setActionError("");
+    try {
+      await runSpec(specId, environment);
+      const nextDetail = await reloadDetail();
+      if (nextDetail) showDetail(nextDetail);
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function startEditing() {
+    if (!detail?.content) return;
+    const { humanSpec } = detail.content;
+    setTitleDraft(detail.spec.title);
+    setDescriptionDraft(detail.spec.description);
+    setPreconditionsDraft(humanSpec ? humanSpec.preconditions.join("\n") : "");
+    setStepsDraft(humanSpec ? humanSpec.steps.join("\n") : "");
+    setExpectedResultDraft(humanSpec ? humanSpec.expectedResult : "");
+    setPostconditionsDraft(
+      humanSpec ? humanSpec.postconditions.join("\n") : ""
     );
+    setRawYamlDraft(detail.content.yamlSource);
+    setTestSourceDraft(detail.content.testSource);
+    setSourceOpen(false);
+    setEditing(true);
+    setActionError("");
+    setSavedInvalid(false);
+  }
+
+  async function saveFiles() {
+    if (!detail?.content) return;
+    setSaving(true);
+    setActionError("");
+    try {
+      let current = detail;
+      if (current.content?.humanSpec) {
+        const patch: {
+          title?: string;
+          description?: string;
+          humanSpec?: typeof current.content.humanSpec;
+        } = {};
+        if (titleDraft.trim() !== current.spec.title)
+          patch.title = titleDraft.trim();
+        if (descriptionDraft !== current.spec.description)
+          patch.description = descriptionDraft;
+        const nextHumanSpec = {
+          preconditions: splitLines(preconditionsDraft),
+          steps: splitLines(stepsDraft),
+          expectedResult: expectedResultDraft.trim(),
+          postconditions: splitLines(postconditionsDraft),
+        };
+        if (
+          JSON.stringify(nextHumanSpec) !==
+          JSON.stringify(current.content.humanSpec)
+        )
+          patch.humanSpec = nextHumanSpec;
+        if (Object.keys(patch).length > 0)
+          current = await updateSpec(specId, patch);
+      } else if (rawYamlDraft !== current.content?.yamlSource) {
+        current = await updateSpecFiles(specId, { yaml: rawYamlDraft });
+      }
+      if (current.content && testSourceDraft !== current.content.testSource) {
+        current = await updateSpecFiles(specId, {
+          testSource: testSourceDraft,
+        });
+      }
+      setDetail(current);
+      setEditing(false);
+      const nowInvalid = current.spec.status === "invalid";
+      setSavedInvalid(nowInvalid);
+      if (nowInvalid)
+        requestAnimationFrame(() =>
+          bannerRef.current?.scrollIntoView({
+            block: "start",
+            behavior: "smooth",
+          })
+        );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const specsCrumb: Crumb = { label: "Specs", href: `/p/${projectId}/specs` };
+
+  if (loadError && !detail) {
+    return (
+      <div className="bg-surface flex min-h-full flex-col">
+        <PageHeader title="Spec" breadcrumbs={[specsCrumb]} width="reading" />
+        <EmptyState
+          role="alert"
+          tone="danger"
+          icon={FileX2}
+          title="This Spec could not load"
+          description={loadError}
+          action={
+            <Button type="button" onClick={() => setRetryKey((key) => key + 1)}>
+              <RefreshCw size={14} /> Try again
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div
+        className="bg-surface min-h-full"
+        aria-label="Loading Spec"
+        aria-busy="true"
+        role="status"
+      >
+        <PageHeader
+          title={<Skeleton className="h-6 w-72 max-w-full" />}
+          breadcrumbs={[specsCrumb]}
+          width="reading"
+        />
+        <PageContainer width="reading" innerClassName="space-y-8">
+          <Skeleton className="h-[4.5rem] rounded-xl" />
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-20" />
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} className="h-5 w-3/4" />
+            ))}
+          </div>
+          <Skeleton className="h-20 rounded-xl" />
+        </PageContainer>
+      </div>
+    );
+  }
+
+  const { spec, feature, content, runs } = detail;
+  const latestRun = runs[0];
+  const crumbs: Crumb[] = [
+    specsCrumb,
+    ...(feature
+      ? [
+          {
+            label: feature.title,
+            href: `/p/${projectId}/specs#feature-${feature.id}`,
+          },
+        ]
+      : []),
+  ];
+  const sourceEdited = Boolean(
+    content && testSourceDraft !== content.testSource
+  );
+  const changedFields = {
+    preconditions: Boolean(
+      editing &&
+      content?.humanSpec &&
+      JSON.stringify(splitLines(preconditionsDraft)) !==
+        JSON.stringify(
+          content.humanSpec.preconditions.map((title) => title.trim())
+        )
+    ),
+    steps: Boolean(
+      editing &&
+      content?.humanSpec &&
+      JSON.stringify(splitLines(stepsDraft)) !==
+        JSON.stringify(content.humanSpec.steps.map((title) => title.trim()))
+    ),
+    expectedResult: Boolean(
+      editing &&
+      content?.humanSpec &&
+      expectedResultDraft.trim() !== content.humanSpec.expectedResult.trim()
+    ),
+    postconditions: Boolean(
+      editing &&
+      content?.humanSpec &&
+      JSON.stringify(splitLines(postconditionsDraft)) !==
+        JSON.stringify(
+          content.humanSpec.postconditions.map((title) => title.trim())
+        )
+    ),
+  };
+  const behaviorChanged = Object.values(changedFields).some(Boolean);
+
+  return (
+    <div className="bg-surface min-h-full">
+      <PageHeader
+        title={spec.title}
+        breadcrumbs={crumbs}
+        kicker={spec.path ? `${spec.path}/spec.yml` : undefined}
+        size="document"
+        width="reading"
+        titleAdornment={latestRun?.flaky && <StatusPill status="flaky" />}
+        description={spec.description || undefined}
+      />
+      <PageContainer
+        width="reading"
+        className="min-w-0 [overflow-wrap:anywhere] lg:pb-14"
+        innerClassName="space-y-9"
+      >
+        {actionError && (
+          <Alert variant="danger" role="alert">
+            <AlertDescription>
+              {actionError}
+              {/pending file edits/.test(actionError) && (
+                <Link
+                  href={`/p/${projectId}/settings?tab=git`}
+                  className="mt-2 block font-medium underline underline-offset-2"
+                >
+                  Review pending edits
+                </Link>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+        {runRefreshError && (
+          <Alert variant="warning" role="status">
+            <AlertDescription>
+              Run updates are delayed: {runRefreshError} Retrying…
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div ref={bannerRef} className="scroll-mt-4 space-y-3">
+          {savedInvalid && spec.status === "invalid" && (
+            <Alert variant="warning" role="alert">
+              <AlertDescription>
+                Your changes were saved, but the Spec is now invalid and
+                can&apos;t run. The reason is shown below.
+              </AlertDescription>
+            </Alert>
+          )}
+          <VerificationBanner
+            projectId={projectId}
+            detail={detail}
+            spec={spec}
+            latestRun={latestRun}
+            latestEvidence={latestRun ? evidence[latestRun.id] : undefined}
+            running={running}
+            environment={environment}
+            actions={
+              canEdit &&
+              spec.status !== "invalid" && (
+                <>
+                  <EnvironmentSelect
+                    projectId={projectId}
+                    value={environment}
+                    onValueChange={setEnvironment}
+                    disabled={running}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={runNow}
+                    disabled={running || !content}
+                  >
+                    <Play size={12} fill="currentColor" />{" "}
+                    {running ? "Running…" : latestRun ? "Run again" : "Run"}
+                  </Button>
+                </>
+              )
+            }
+          />
+        </div>
+
+        <section aria-labelledby="specification-heading">
+          <SectionHeader
+            id="specification-heading"
+            title={editing ? "Edit specification" : "Specification"}
+            className="mb-4"
+            actions={
+              <>
+                <SpecHistoryDialog specId={specId} />
+                {canEdit && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={editing ? () => setEditing(false) : startEditing}
+                    disabled={!content || saving}
+                  >
+                    <PencilLine size={13} />{" "}
+                    {editing ? "Cancel editing" : "Edit"}
+                  </Button>
+                )}
+              </>
+            }
+          />
+          {editing && content ? (
+            <form
+              className="space-y-6"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveFiles();
+              }}
+            >
+              <div className="border-line bg-surface-soft flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5">
+                <p className="text-control text-ink-muted">
+                  Prefer to describe the change instead?
+                </p>
+                <Button asChild variant="outline" size="sm">
+                  <Link
+                    href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}
+                  >
+                    <PencilLine size={13} /> Edit with AI
+                  </Link>
+                </Button>
+              </div>
+              {content.humanSpec ? (
+                <div className="space-y-5">
+                  <Field id="spec-title" label="Title">
+                    <Input
+                      id="spec-title"
+                      value={titleDraft}
+                      onChange={(event) => setTitleDraft(event.target.value)}
+                      disabled={saving}
+                      aria-invalid={!titleDraft.trim() || undefined}
+                    />
+                  </Field>
+                  <Field id="spec-description" label="Description">
+                    <Textarea
+                      id="spec-description"
+                      value={descriptionDraft}
+                      onChange={(event) =>
+                        setDescriptionDraft(event.target.value)
+                      }
+                      disabled={saving}
+                      rows={2}
+                    />
+                  </Field>
+                  <Field
+                    id="spec-preconditions"
+                    label="Preconditions"
+                    hint="One per line. Who is signed in and what state the app is in before the steps. The automation sets up and checks each one."
+                  >
+                    <Textarea
+                      id="spec-preconditions"
+                      aria-describedby={
+                        changedFields.preconditions
+                          ? "spec-preconditions-hint spec-behavior-note"
+                          : "spec-preconditions-hint"
+                      }
+                      value={preconditionsDraft}
+                      onChange={(event) =>
+                        setPreconditionsDraft(event.target.value)
+                      }
+                      disabled={saving}
+                      rows={3}
+                      placeholder="Signed in as the shopper"
+                    />
+                  </Field>
+                  <Field
+                    id="spec-steps"
+                    label="Steps"
+                    hint="One per line, in order. Each line becomes a numbered step."
+                  >
+                    <Textarea
+                      id="spec-steps"
+                      aria-describedby={
+                        changedFields.steps
+                          ? "spec-steps-hint spec-behavior-note"
+                          : "spec-steps-hint"
+                      }
+                      value={stepsDraft}
+                      onChange={(event) => setStepsDraft(event.target.value)}
+                      disabled={saving}
+                      rows={6}
+                      placeholder="Open the store home page"
+                    />
+                  </Field>
+                  <Field
+                    id="spec-expected-result"
+                    label="Expected result"
+                    hint="One sentence the user can see on screen. The automation proves it right after the steps and keeps that screenshot as evidence."
+                  >
+                    <Textarea
+                      id="spec-expected-result"
+                      aria-describedby={
+                        changedFields.expectedResult
+                          ? "spec-expected-result-hint spec-behavior-note"
+                          : "spec-expected-result-hint"
+                      }
+                      value={expectedResultDraft}
+                      onChange={(event) =>
+                        setExpectedResultDraft(event.target.value)
+                      }
+                      disabled={saving}
+                      rows={3}
+                    />
+                  </Field>
+                  <Field
+                    id="spec-postconditions"
+                    label="Postconditions"
+                    hint="One per line. Side effects checked after the expected result. Optional; most Specs have none."
+                  >
+                    <Textarea
+                      id="spec-postconditions"
+                      aria-describedby={
+                        changedFields.postconditions
+                          ? "spec-postconditions-hint spec-behavior-note"
+                          : "spec-postconditions-hint"
+                      }
+                      value={postconditionsDraft}
+                      onChange={(event) =>
+                        setPostconditionsDraft(event.target.value)
+                      }
+                      disabled={saving}
+                      rows={2}
+                    />
+                  </Field>
+                  {behaviorChanged && (
+                    <p
+                      id="spec-behavior-note"
+                      role="status"
+                      className="bg-warning-soft text-meta text-ink flex items-start gap-2 rounded-md px-3 py-2"
+                    >
+                      <TriangleAlert
+                        size={13}
+                        aria-hidden="true"
+                        className="text-warning-icon mt-0.5 shrink-0"
+                      />
+                      <span>
+                        {sourceEdited ? (
+                          "Check that the step() titles in the automation source match the preconditions, steps, expected result and postconditions, in that order, or the Spec becomes invalid."
+                        ) : (
+                          <>
+                            The automation must be updated to match these
+                            preconditions, steps, expected result and
+                            postconditions, or the Spec becomes invalid when you
+                            save. Use{" "}
+                            <Link
+                              href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}
+                              className="font-medium underline underline-offset-2"
+                            >
+                              Edit with AI
+                            </Link>
+                            , or change the step() titles in the automation
+                            source below.
+                          </>
+                        )}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <Alert variant="warning" role="alert">
+                    <AlertDescription>
+                      The Spec file could not be read as fields. Fix the source
+                      below, then save.
+                    </AlertDescription>
+                  </Alert>
+                  <RawFileEditor
+                    id="spec-yaml"
+                    label="spec.yml"
+                    language="yaml"
+                    value={rawYamlDraft}
+                    onChange={setRawYamlDraft}
+                    disabled={saving}
+                  />
+                </div>
+              )}
+              <Collapsible
+                open={sourceOpen}
+                onOpenChange={setSourceOpen}
+                className="group/source sheet overflow-hidden rounded-xl"
+              >
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="hover:bg-surface-soft focus-visible:ring-ring flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                  >
+                    <span className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-lg border">
+                      <FileCode2 size={15} aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="text-control text-ink flex items-center gap-2 font-semibold">
+                        Advanced: automation source
+                        {sourceEdited && (
+                          <span className="bg-warning-soft text-meta text-ink rounded-full px-1.5 font-medium">
+                            Edited
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-meta text-ink-subtle mt-0.5 block">
+                        {sourceEdited
+                          ? "The generated automation will be replaced when you save."
+                          : "Generated Playwright test (spec.ts) for this Spec. Most edits only need the fields above."}
+                      </span>
+                    </span>
+                    <ChevronDown
+                      size={15}
+                      className="text-ink-subtle shrink-0 transition-transform group-data-[state=open]/source:rotate-180 motion-reduce:transition-none"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="border-line bg-surface-soft/60 border-t p-3.5">
+                  <RawFileEditor
+                    id="spec-test-source"
+                    label="spec.ts"
+                    language="typescript"
+                    value={testSourceDraft}
+                    onChange={setTestSourceDraft}
+                    disabled={saving}
+                    rows={16}
+                  />
+                  <p className="text-meta text-ink-subtle mt-2">
+                    Each step(&quot;…&quot;) title must match a step above, in
+                    order. Invalid source is still saved, and the Spec is marked
+                    for correction.
+                  </p>
+                </CollapsibleContent>
+              </Collapsible>
+              <div className="border-line bg-surface/95 sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t px-4 py-3 backdrop-blur-sm sm:mx-0 sm:flex-row sm:items-center sm:justify-between sm:rounded-b-none sm:px-0">
+                <p className="text-meta text-ink-subtle">
+                  Saving commits the changes to the repository.
+                </p>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditing(false)}
+                    disabled={saving}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      saving ||
+                      (Boolean(content.humanSpec) && !titleDraft.trim())
+                    }
+                  >
+                    {saving ? "Saving…" : "Save changes"}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          ) : content && content.humanSpec ? (
+            <SpecificationView humanSpec={content.humanSpec} />
+          ) : content ? (
+            <div className="sheet rounded-xl">
+              <EmptyState
+                size="compact"
+                tone="warning"
+                icon={FileX2}
+                title="The Spec file could not be read"
+                description="Use Edit to fix the source by hand."
+              />
+            </div>
+          ) : (
+            <div className="sheet rounded-xl">
+              <EmptyState
+                size="compact"
+                tone="warning"
+                icon={FileX2}
+                title="Spec files unavailable"
+                description="Restore or fix the spec.yml and spec.ts files to continue."
+              />
+            </div>
+          )}
+          {!editing && detail && (
+            <SpecFolio
+              projectId={projectId}
+              specId={specId}
+              featureId={detail.spec.featureId}
+            />
+          )}
+        </section>
+
+        <section aria-labelledby="verification-heading">
+          <SectionHeader
+            id="verification-heading"
+            title="Run history"
+            count={runs.length || undefined}
+            description={
+              runs.length >= RUN_HISTORY_LIMIT
+                ? `Showing the latest ${RUN_HISTORY_LIMIT} runs.`
+                : undefined
+            }
+            className="mb-4"
+          />
+          {runs.length === 0 ? (
+            <p className="border-line-strong text-control text-ink-subtle rounded-xl border border-dashed px-4 py-5 text-center">
+              No runs yet. Screenshots, API responses and recordings from each
+              run appear here.
+            </p>
+          ) : (
+            <ol aria-label="Runs, newest first">
+              {runs.map((run, index) => (
+                <RunEntry
+                  key={run.id}
+                  run={run}
+                  latest={index === 0}
+                  last={index === runs.length - 1}
+                  loaded={evidence[run.id]}
+                  onExpand={ensureEvidence}
+                  onSelect={setSelectedEvidence}
+                />
+              ))}
+            </ol>
+          )}
+        </section>
+      </PageContainer>
+      <Dialog
+        open={selectedEvidence !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedEvidence(null);
+        }}
+      >
+        <DialogContent className="max-h-[calc(100dvh-24px)] max-w-[960px] overflow-y-auto p-4 sm:p-5">
+          <DialogHeader>
+            <DialogTitle className="flex items-baseline gap-2">
+              {selectedEvidence ? evidenceStepLabel(selectedEvidence.step) : ""}
+              {selectedSteps.length > 1 && (
+                <span className="text-control text-ink-subtle tabular font-normal">
+                  {selectedIndex + 1} of {selectedSteps.length}
+                </span>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedEvidence?.step.label}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedEvidence && (
+            <div className="relative mt-4">
+              <img
+                src={artifactUrl(
+                  selectedEvidence.runId,
+                  selectedEvidence.step.file
+                )}
+                alt={`${evidenceStepLabel(selectedEvidence.step)}: ${selectedEvidence.step.label}`}
+                className="border-line bg-surface-soft max-h-[calc(100dvh-150px)] w-full rounded-lg border object-contain"
+              />
+              {hasPrev && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => stepBy(-1)}
+                  className="bg-surface/90 shadow-popover absolute top-1/2 left-2 -translate-y-1/2 rounded-full backdrop-blur-sm"
+                  aria-label="Previous step"
+                >
+                  <ChevronLeft size={16} />
+                </Button>
+              )}
+              {hasNext && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => stepBy(1)}
+                  className="bg-surface/90 shadow-popover absolute top-1/2 right-2 -translate-y-1/2 rounded-full backdrop-blur-sm"
+                  aria-label="Next step"
+                >
+                  <ChevronRight size={16} />
+                </Button>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }

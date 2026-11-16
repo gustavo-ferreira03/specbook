@@ -1,198 +1,247 @@
 import crypto from "node:crypto";
+
 import { and, desc, eq } from "drizzle-orm";
+
+import { createKeyedLock } from "../../core/operations/keyed-lock";
 import { db, type DbQuery } from "../db/client";
 import {
-    EMPTY_PROJECT_CONTEXT,
-    projectContextRevisions,
-    type DiscoveryBrief,
-    type ProjectContext,
+  EMPTY_PROJECT_CONTEXT,
+  projectContextRevisions,
+  type DiscoveryBrief,
+  type ProjectContext,
 } from "../db/schema";
-import { createKeyedLock } from "../../core/operations/keyed-lock";
 
-export type ProjectContextRevisionRow = typeof projectContextRevisions.$inferSelect;
+export type ProjectContextRevisionRow =
+  typeof projectContextRevisions.$inferSelect;
 
 class ProjectContextsRepository {
-    private draftLocks = createKeyedLock();
+  private draftLocks = createKeyedLock();
 
-    async withProjectContextDraftLock<T>(projectId: string, work: () => Promise<T>): Promise<T> {
-        return this.draftLocks.run(projectId, work);
-    }
+  async withProjectContextDraftLock<T>(
+    projectId: string,
+    work: () => Promise<T>
+  ): Promise<T> {
+    return this.draftLocks.run(projectId, work);
+  }
 
-    async createProjectContextDraft(
-        projectId: string,
-        brief: DiscoveryBrief,
-    ): Promise<ProjectContextRevisionRow> {
-        const now = new Date().toISOString();
-        const row: ProjectContextRevisionRow = {
-            id: crypto.randomUUID(),
-            projectId,
-            sourceChatId: null,
-            status: "draft",
-            brief,
-            context: EMPTY_PROJECT_CONTEXT,
-            createdAt: now,
-            updatedAt: now,
-            confirmedAt: null,
-        };
-        await db.insert(projectContextRevisions).values(row);
-        return row;
-    }
+  async createProjectContextDraft(
+    projectId: string,
+    brief: DiscoveryBrief
+  ): Promise<ProjectContextRevisionRow> {
+    const now = new Date().toISOString();
+    const row: ProjectContextRevisionRow = {
+      id: crypto.randomUUID(),
+      projectId,
+      sourceChatId: null,
+      status: "draft",
+      brief,
+      context: EMPTY_PROJECT_CONTEXT,
+      createdAt: now,
+      updatedAt: now,
+      confirmedAt: null,
+    };
+    await db.insert(projectContextRevisions).values(row);
+    return row;
+  }
 
-    async attachContextChat(revisionId: string, chatId: string): Promise<void> {
-        await db
-            .update(projectContextRevisions)
-            .set({ sourceChatId: chatId, updatedAt: new Date().toISOString() })
-            .where(eq(projectContextRevisions.id, revisionId));
-    }
+  async attachContextChat(revisionId: string, chatId: string): Promise<void> {
+    await db
+      .update(projectContextRevisions)
+      .set({ sourceChatId: chatId, updatedAt: new Date().toISOString() })
+      .where(eq(projectContextRevisions.id, revisionId));
+  }
 
-    async getProjectContextRevision(revisionId: string): Promise<ProjectContextRevisionRow | null> {
-        const rows = await db
-            .select()
-            .from(projectContextRevisions)
-            .where(eq(projectContextRevisions.id, revisionId));
-        return rows[0] ?? null;
-    }
+  async getProjectContextRevision(
+    revisionId: string
+  ): Promise<ProjectContextRevisionRow | null> {
+    const rows = await db
+      .select()
+      .from(projectContextRevisions)
+      .where(eq(projectContextRevisions.id, revisionId));
+    return rows[0] ?? null;
+  }
 
-    async getProjectContextForChat(chatId: string): Promise<ProjectContextRevisionRow | null> {
-        const rows = await db
-            .select()
-            .from(projectContextRevisions)
-            .where(eq(projectContextRevisions.sourceChatId, chatId))
-            .orderBy(desc(projectContextRevisions.createdAt), desc(projectContextRevisions.id));
-        return rows[0] ?? null;
-    }
+  async getProjectContextForChat(
+    chatId: string
+  ): Promise<ProjectContextRevisionRow | null> {
+    const rows = await db
+      .select()
+      .from(projectContextRevisions)
+      .where(eq(projectContextRevisions.sourceChatId, chatId))
+      .orderBy(
+        desc(projectContextRevisions.createdAt),
+        desc(projectContextRevisions.id)
+      );
+    return rows[0] ?? null;
+  }
 
-    async hasRevisions(projectId: string): Promise<boolean> {
-        const rows = await db
-            .select({ id: projectContextRevisions.id })
-            .from(projectContextRevisions)
-            .where(eq(projectContextRevisions.projectId, projectId))
-            .limit(1);
-        return rows.length > 0;
-    }
+  async hasRevisions(projectId: string): Promise<boolean> {
+    const rows = await db
+      .select({ id: projectContextRevisions.id })
+      .from(projectContextRevisions)
+      .where(eq(projectContextRevisions.projectId, projectId))
+      .limit(1);
+    return rows.length > 0;
+  }
 
-    async getLatestConfirmedProjectContext(projectId: string): Promise<ProjectContextRevisionRow | null> {
-        const rows = await db
-            .select()
-            .from(projectContextRevisions)
-            .where(
-                and(
-                    eq(projectContextRevisions.projectId, projectId),
-                    eq(projectContextRevisions.status, "confirmed"),
-                ),
-            )
-            .orderBy(desc(projectContextRevisions.confirmedAt), desc(projectContextRevisions.id));
-        return rows[0] ?? null;
-    }
+  async getLatestConfirmedProjectContext(
+    projectId: string
+  ): Promise<ProjectContextRevisionRow | null> {
+    const rows = await db
+      .select()
+      .from(projectContextRevisions)
+      .where(
+        and(
+          eq(projectContextRevisions.projectId, projectId),
+          eq(projectContextRevisions.status, "confirmed")
+        )
+      )
+      .orderBy(
+        desc(projectContextRevisions.confirmedAt),
+        desc(projectContextRevisions.id)
+      );
+    return rows[0] ?? null;
+  }
 
-    async getActiveProjectContextDraft(projectId: string): Promise<ProjectContextRevisionRow | null> {
-        const rows = await db
-            .select()
-            .from(projectContextRevisions)
-            .where(
-                and(
-                    eq(projectContextRevisions.projectId, projectId),
-                    eq(projectContextRevisions.status, "draft"),
-                ),
-            )
-            .orderBy(desc(projectContextRevisions.createdAt), desc(projectContextRevisions.id));
-        return rows[0] ?? null;
-    }
+  async getActiveProjectContextDraft(
+    projectId: string
+  ): Promise<ProjectContextRevisionRow | null> {
+    const rows = await db
+      .select()
+      .from(projectContextRevisions)
+      .where(
+        and(
+          eq(projectContextRevisions.projectId, projectId),
+          eq(projectContextRevisions.status, "draft")
+        )
+      )
+      .orderBy(
+        desc(projectContextRevisions.createdAt),
+        desc(projectContextRevisions.id)
+      );
+    return rows[0] ?? null;
+  }
 
-    async replaceProjectContextDraft(
-        revisionId: string,
-        context: ProjectContext,
-    ): Promise<ProjectContextRevisionRow | null> {
-        await db
-            .update(projectContextRevisions)
-            .set({ context, updatedAt: new Date().toISOString() })
-            .where(
-                and(eq(projectContextRevisions.id, revisionId), eq(projectContextRevisions.status, "draft")),
-            );
-        return this.getProjectContextRevision(revisionId);
-    }
+  async replaceProjectContextDraft(
+    revisionId: string,
+    context: ProjectContext
+  ): Promise<ProjectContextRevisionRow | null> {
+    await db
+      .update(projectContextRevisions)
+      .set({ context, updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(projectContextRevisions.id, revisionId),
+          eq(projectContextRevisions.status, "draft")
+        )
+      );
+    return this.getProjectContextRevision(revisionId);
+  }
 
-    private confirmedRevisionRow(
-        projectId: string,
-        brief: DiscoveryBrief,
-        context: ProjectContext,
-    ): ProjectContextRevisionRow {
-        const now = new Date().toISOString();
-        return {
-            id: crypto.randomUUID(),
-            projectId,
-            sourceChatId: null,
-            status: "confirmed",
-            brief,
-            context,
-            createdAt: now,
-            updatedAt: now,
-            confirmedAt: now,
-        };
-    }
+  private confirmedRevisionRow(
+    projectId: string,
+    brief: DiscoveryBrief,
+    context: ProjectContext
+  ): ProjectContextRevisionRow {
+    const now = new Date().toISOString();
+    return {
+      id: crypto.randomUUID(),
+      projectId,
+      sourceChatId: null,
+      status: "confirmed",
+      brief,
+      context,
+      createdAt: now,
+      updatedAt: now,
+      confirmedAt: now,
+    };
+  }
 
-    async insertConfirmedRevision(
-        projectId: string,
-        brief: DiscoveryBrief,
-        context: ProjectContext,
-    ): Promise<ProjectContextRevisionRow> {
-        const row = this.confirmedRevisionRow(projectId, brief, context);
-        await db.insert(projectContextRevisions).values(row);
-        return row;
-    }
+  async insertConfirmedRevision(
+    projectId: string,
+    brief: DiscoveryBrief,
+    context: ProjectContext
+  ): Promise<ProjectContextRevisionRow> {
+    const row = this.confirmedRevisionRow(projectId, brief, context);
+    await db.insert(projectContextRevisions).values(row);
+    return row;
+  }
 
-    insertConfirmedRevisionQuery(projectId: string, brief: DiscoveryBrief, context: ProjectContext): DbQuery {
-        return db.insert(projectContextRevisions).values(this.confirmedRevisionRow(projectId, brief, context));
-    }
+  insertConfirmedRevisionQuery(
+    projectId: string,
+    brief: DiscoveryBrief,
+    context: ProjectContext
+  ): DbQuery {
+    return db
+      .insert(projectContextRevisions)
+      .values(this.confirmedRevisionRow(projectId, brief, context));
+  }
 
-    deleteAllForProjectQuery(projectId: string): DbQuery {
-        return db.delete(projectContextRevisions).where(eq(projectContextRevisions.projectId, projectId));
-    }
+  deleteAllForProjectQuery(projectId: string): DbQuery {
+    return db
+      .delete(projectContextRevisions)
+      .where(eq(projectContextRevisions.projectId, projectId));
+  }
 
-    async confirmProjectContextRevision(revisionId: string): Promise<ProjectContextRevisionRow | null> {
-        const now = new Date().toISOString();
-        await db
-            .update(projectContextRevisions)
-            .set({ status: "confirmed", confirmedAt: now, updatedAt: now })
-            .where(
-                and(eq(projectContextRevisions.id, revisionId), eq(projectContextRevisions.status, "draft")),
-            );
-        return this.getProjectContextRevision(revisionId);
-    }
+  async confirmProjectContextRevision(
+    revisionId: string
+  ): Promise<ProjectContextRevisionRow | null> {
+    const now = new Date().toISOString();
+    await db
+      .update(projectContextRevisions)
+      .set({ status: "confirmed", confirmedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(projectContextRevisions.id, revisionId),
+          eq(projectContextRevisions.status, "draft")
+        )
+      );
+    return this.getProjectContextRevision(revisionId);
+  }
 
-    async discardProjectContextRevision(revisionId: string): Promise<ProjectContextRevisionRow | null> {
-        await db
-            .update(projectContextRevisions)
-            .set({ status: "discarded", updatedAt: new Date().toISOString() })
-            .where(
-                and(eq(projectContextRevisions.id, revisionId), eq(projectContextRevisions.status, "draft")),
-            );
-        return this.getProjectContextRevision(revisionId);
-    }
+  async discardProjectContextRevision(
+    revisionId: string
+  ): Promise<ProjectContextRevisionRow | null> {
+    await db
+      .update(projectContextRevisions)
+      .set({ status: "discarded", updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(projectContextRevisions.id, revisionId),
+          eq(projectContextRevisions.status, "draft")
+        )
+      );
+    return this.getProjectContextRevision(revisionId);
+  }
 
-    async discardDraftForChat(chatId: string): Promise<void> {
-        await db
-            .update(projectContextRevisions)
-            .set({ status: "discarded", updatedAt: new Date().toISOString() })
-            .where(
-                and(
-                    eq(projectContextRevisions.sourceChatId, chatId),
-                    eq(projectContextRevisions.status, "draft"),
-                ),
-            );
-    }
+  async discardDraftForChat(chatId: string): Promise<void> {
+    await db
+      .update(projectContextRevisions)
+      .set({ status: "discarded", updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(projectContextRevisions.sourceChatId, chatId),
+          eq(projectContextRevisions.status, "draft")
+        )
+      );
+  }
 
-    async deleteProjectContextDraft(revisionId: string): Promise<void> {
-        await db
-            .delete(projectContextRevisions)
-            .where(
-                and(eq(projectContextRevisions.id, revisionId), eq(projectContextRevisions.status, "draft")),
-            );
-    }
+  async deleteProjectContextDraft(revisionId: string): Promise<void> {
+    await db
+      .delete(projectContextRevisions)
+      .where(
+        and(
+          eq(projectContextRevisions.id, revisionId),
+          eq(projectContextRevisions.status, "draft")
+        )
+      );
+  }
 
-    async deleteAllForProject(projectId: string): Promise<void> {
-        await db.delete(projectContextRevisions).where(eq(projectContextRevisions.projectId, projectId));
-    }
+  async deleteAllForProject(projectId: string): Promise<void> {
+    await db
+      .delete(projectContextRevisions)
+      .where(eq(projectContextRevisions.projectId, projectId));
+  }
 }
 
 export const projectContextsRepository = new ProjectContextsRepository();

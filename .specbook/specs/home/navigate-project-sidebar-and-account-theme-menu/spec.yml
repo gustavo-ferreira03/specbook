@@ -1,12 +1,11 @@
 title: Navigate project sidebar and account theme menu
-description: The project sidebar reaches Home, Specs and Chats, and the account menu
-  offers the theme choices.
+description: The project sidebar reaches Home, Specs and Chats, and the account menu offers the theme choices.
 preconditions:
-- Signed in as the Specbook administrator
+  - Signed in as the Specbook administrator
 steps:
-- Open Home from the project sidebar
-- Open Specs from the project sidebar
-- Open Chats from the project sidebar
-- Open the account menu
+  - Open Home from the project sidebar
+  - Open Specs from the project sidebar
+  - Open Chats from the project sidebar
+  - Open the account menu
 expectedResult: The System theme is selected
 postconditions: []

@@ -3,89 +3,121 @@ import { stepName } from "@specbook/runtime/replay-player";
 const LOCALE = "en-US";
 
 const dateFormatter = new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium" });
-const shortDateFormatter = new Intl.DateTimeFormat(LOCALE, { month: "short", day: "numeric" });
-const dateTimeFormatter = new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium", timeStyle: "short" });
-const preciseDateTimeFormatter = new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium", timeStyle: "medium" });
-const timeFormatter = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit" });
+const shortDateFormatter = new Intl.DateTimeFormat(LOCALE, {
+  month: "short",
+  day: "numeric",
+});
+const dateTimeFormatter = new Intl.DateTimeFormat(LOCALE, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+const preciseDateTimeFormatter = new Intl.DateTimeFormat(LOCALE, {
+  dateStyle: "medium",
+  timeStyle: "medium",
+});
+const timeFormatter = new Intl.DateTimeFormat(LOCALE, {
+  hour: "2-digit",
+  minute: "2-digit",
+});
 const numberFormatter = new Intl.NumberFormat(LOCALE);
 
 type DateInput = string | number | Date;
 
 function toDate(value: DateInput): Date {
-    return value instanceof Date ? value : new Date(value);
+  return value instanceof Date ? value : new Date(value);
 }
 
 export function formatDate(value: DateInput): string {
-    return dateFormatter.format(toDate(value));
+  return dateFormatter.format(toDate(value));
 }
 
 export function formatShortDate(value: DateInput): string {
-    return shortDateFormatter.format(toDate(value));
+  return shortDateFormatter.format(toDate(value));
 }
 
-export function formatDateTime(value: DateInput, options: { seconds?: boolean } = {}): string {
-    return (options.seconds ? preciseDateTimeFormatter : dateTimeFormatter).format(toDate(value));
+export function formatDateTime(
+  value: DateInput,
+  options: { seconds?: boolean } = {}
+): string {
+  return (
+    options.seconds ? preciseDateTimeFormatter : dateTimeFormatter
+  ).format(toDate(value));
 }
 
 export function formatTime(value: DateInput): string {
-    return timeFormatter.format(toDate(value));
+  return timeFormatter.format(toDate(value));
 }
 
 export function formatNumber(value: number): string {
-    return numberFormatter.format(value);
+  return numberFormatter.format(value);
 }
 
-export function countLabel(count: number, noun: string, plural = `${noun}s`): string {
-    return `${count} ${count === 1 ? noun : plural}`;
+export function countLabel(
+  count: number,
+  noun: string,
+  plural = `${noun}s`
+): string {
+  return `${count} ${count === 1 ? noun : plural}`;
 }
 
-const relativeFormatter = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
+const relativeFormatter = new Intl.RelativeTimeFormat(LOCALE, {
+  numeric: "auto",
+});
 const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["second", 60],
-    ["minute", 60],
-    ["hour", 24],
-    ["day", 7],
-    ["week", 4.345],
-    ["month", 12],
-    ["year", Number.POSITIVE_INFINITY],
+  ["second", 60],
+  ["minute", 60],
+  ["hour", 24],
+  ["day", 7],
+  ["week", 4.345],
+  ["month", 12],
+  ["year", Number.POSITIVE_INFINITY],
 ];
 
-export function formatRelative(value: DateInput, now: number = Date.now()): string {
-    const date = toDate(value);
-    let delta = (date.getTime() - now) / 1000;
-    if (Math.abs(delta) < 45) return "just now";
-    for (const [unit, size] of RELATIVE_STEPS) {
-        if (Math.abs(delta) < size) {
-            if (unit === "year") break;
-            return relativeFormatter.format(Math.round(delta), unit);
-        }
-        delta /= size;
-        if (unit === "month" && Math.abs(delta) >= 1) return formatDate(date);
+export function formatRelative(
+  value: DateInput,
+  now: number = Date.now()
+): string {
+  const date = toDate(value);
+  let delta = (date.getTime() - now) / 1000;
+  if (Math.abs(delta) < 45) return "just now";
+  for (const [unit, size] of RELATIVE_STEPS) {
+    if (Math.abs(delta) < size) {
+      if (unit === "year") break;
+      return relativeFormatter.format(Math.round(delta), unit);
     }
-    return formatDate(date);
+    delta /= size;
+    if (unit === "month" && Math.abs(delta) >= 1) return formatDate(date);
+  }
+  return formatDate(date);
 }
 
 export function formatWaitDuration(durationMs: number): string {
-    if (durationMs < 60_000) return "under a minute";
-    const minutes = Math.floor(durationMs / 60_000);
-    if (minutes < 60) return `${minutes} min`;
-    const hours = Math.floor(minutes / 60);
-    return `${hours} hr`;
+  if (durationMs < 60_000) return "under a minute";
+  const minutes = Math.floor(durationMs / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} hr`;
 }
 
 export function formatDuration(durationMs: number): string {
-    if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
-    if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;
-    const minutes = Math.floor(durationMs / 60_000);
-    const seconds = Math.round((durationMs % 60_000) / 1000);
-    return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
+  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.round((durationMs % 60_000) / 1000);
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
-export function environmentLabel(name: string | null | undefined): string | undefined {
-    return name && name !== "Production" ? name : undefined;
+export function environmentLabel(
+  name: string | null | undefined
+): string | undefined {
+  return name && name !== "Production" ? name : undefined;
 }
 
 // Only the Spec's steps are numbered; preconditions, the expected result and postconditions are named.
-export function evidenceStepLabel(step: { kind?: "precondition" | "step" | "expected" | "postcondition"; ordinal?: number | null; number: number }): string {
-    return stepName({ kind: step.kind ?? "step" }, step.ordinal ?? step.number);
+export function evidenceStepLabel(step: {
+  kind?: "precondition" | "step" | "expected" | "postcondition";
+  ordinal?: number | null;
+  number: number;
+}): string {
+  return stepName({ kind: step.kind ?? "step" }, step.ordinal ?? step.number);
 }

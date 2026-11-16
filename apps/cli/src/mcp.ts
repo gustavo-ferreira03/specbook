@@ -1,203 +1,540 @@
-import { CLI_VERSION } from "./version.js";
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { constants } from "node:fs";
-import { randomUUID } from "node:crypto";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
-import { parseFeatureYaml, parseSpecYaml } from "@specbook/runtime/yaml";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { agentHumanSpecSchema } from "@specbook/runtime/human-spec";
+import { parseFeatureYaml, parseSpecYaml } from "@specbook/runtime/yaml";
+import { z } from "zod";
+
 import { browse } from "./browser.js";
+import {
+  outcomeSchema,
+  outcomeToolSchemas,
+  proposalSchema,
+} from "./chat-model.js";
 import { checkSpecs } from "./check.js";
-import { outcomeSchema, outcomeToolSchemas, proposalSchema } from "./chat-model.js";
 import { containsSecret, listProfiles, scrub } from "./credentials.js";
 import { runLocal, type LocalRun } from "./run.js";
-import { loadConfig, readSpec, safeWorkspacePath, specDirectories } from "./workspace.js";
+import { CLI_VERSION } from "./version.js";
+import {
+  loadConfig,
+  readSpec,
+  safeWorkspacePath,
+  specDirectories,
+} from "./workspace.js";
 
 export interface AgentState {
-    attempts: Record<string, number>;
-    writes: string[];
-    writeEvents?: string[];
-    proposalRuns?: Record<string, string>;
-    runs: LocalRun[];
+  attempts: Record<string, number>;
+  writes: string[];
+  writeEvents?: string[];
+  proposalRuns?: Record<string, string>;
+  runs: LocalRun[];
 }
 
-export const emptyAgentState = (): AgentState => ({ attempts: {}, writes: [], writeEvents: [], proposalRuns: {}, runs: [] });
+export const emptyAgentState = (): AgentState => ({
+  attempts: {},
+  writes: [],
+  writeEvents: [],
+  proposalRuns: {},
+  runs: [],
+});
 
 export async function readAgentState(session: string): Promise<AgentState> {
-    return JSON.parse(await fs.readFile(path.join(session, "state.json"), "utf8")) as AgentState;
+  return JSON.parse(
+    await fs.readFile(path.join(session, "state.json"), "utf8")
+  ) as AgentState;
 }
 
-const filePath = z.string().max(512).regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*\/(?:feature\.yml|spec\.yml|spec\.ts)$/);
-const specPath = z.string().max(500).regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/);
+const filePath = z
+  .string()
+  .max(512)
+  .regex(
+    /^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*\/(?:feature\.yml|spec\.yml|spec\.ts)$/
+  );
+const specPath = z
+  .string()
+  .max(500)
+  .regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/);
 const ref = z.string().min(1).max(300);
 const noArgs = z.strictObject({});
-const turnContextSchema = z.strictObject({ id: z.string().uuid(), selected: z.array(proposalSchema).optional() });
-type Tool = { name: string; description: string; schema: z.ZodObject; execute(input: unknown): Promise<unknown> };
+const turnContextSchema = z.strictObject({
+  id: z.string().uuid(),
+  selected: z.array(proposalSchema).optional(),
+});
+type Tool = {
+  name: string;
+  description: string;
+  schema: z.ZodObject;
+  execute(input: unknown): Promise<unknown>;
+};
 
-export async function createLocalMcpServer(workspace: string, session: string, signal?: AbortSignal): Promise<Server> {
-    const config = await loadConfig(workspace);
-    const state = await readAgentState(session);
-    let turnId: string | undefined;
-    let selection: z.infer<typeof proposalSchema>[] | undefined;
+export async function createLocalMcpServer(
+  workspace: string,
+  session: string,
+  signal?: AbortSignal
+): Promise<Server> {
+  const config = await loadConfig(workspace);
+  const state = await readAgentState(session);
+  let turnId: string | undefined;
+  let selection: z.infer<typeof proposalSchema>[] | undefined;
+  try {
+    const turn = turnContextSchema.parse(
+      JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf8"))
+    );
+    turnId = turn.id;
+    selection = turn.selected;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  let completed = false;
+  let listedCredentials = false;
+  try {
+    outcomeSchema.parse(
+      JSON.parse(await fs.readFile(path.join(session, "outcome.json"), "utf8"))
+    );
+    completed = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const server = new Server(
+    { name: "specbook", version: CLI_VERSION },
+    {
+      capabilities: { tools: {} },
+      instructions:
+        "Explore with browse tools, read existing Specs before writing, check and run selected Specs. Only Specbook files can be written. At most three runs per Spec in this turn. End each turn with exactly one outcome tool: ask_question, propose_specs, request_credentials, report_done or report_failed. No tools may be called after ending a turn. Credentials are references; never ask for their values.",
+    }
+  );
+  const tools: Tool[] = [];
+  function tool<S extends z.ZodObject>(
+    name: string,
+    description: string,
+    schema: S,
+    execute: (input: z.infer<S>) => Promise<unknown>
+  ) {
+    tools.push({
+      name,
+      description,
+      schema,
+      execute: (input) => execute(schema.parse(input)),
+    });
+  }
+  const save = async () => {
+    await writeState("state.json", state);
+  };
+  async function assertCurrentTurn(): Promise<void> {
+    if (!turnId) return;
+    const current = turnContextSchema.parse(
+      JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf8"))
+    );
+    if (current.id !== turnId)
+      throw new Error(
+        "This conversation turn was replaced; no further tools may be called"
+      );
+  }
+  async function writeState(name: string, value: unknown): Promise<void> {
+    await assertCurrentTurn();
+    const temporary = path.join(session, `${name}-${randomUUID()}.tmp`);
     try {
-        const turn = turnContextSchema.parse(JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf8")));
-        turnId = turn.id;
-        selection = turn.selected;
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await fs.writeFile(temporary, JSON.stringify(value), {
+        mode: 0o600,
+        flag: "wx",
+      });
+      await assertCurrentTurn();
+      await fs.rename(temporary, path.join(session, name));
+    } finally {
+      await fs.rm(temporary, { force: true });
     }
-    let completed = false;
-    let listedCredentials = false;
-    try {
-        outcomeSchema.parse(JSON.parse(await fs.readFile(path.join(session, "outcome.json"), "utf8")));
-        completed = true;
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  async function finish(value: unknown): Promise<unknown> {
+    const outcome = outcomeSchema.parse(value);
+    const text = [
+      outcome.message,
+      ...(outcome.status === "waiting_for_selection"
+        ? outcome.proposals.flatMap(({ title, why, feature }) => [
+            title,
+            why,
+            feature,
+          ])
+        : []),
+      ...(outcome.status === "failed" ? [outcome.error] : []),
+    ].join("\n");
+    if (await containsSecret(text))
+      throw new Error(
+        "Credential values cannot appear in conversation replies; use profile and field names only"
+      );
+    await writeState("outcome.json", outcome);
+    completed = true;
+    return { status: outcome.status, ended: true };
+  }
+  const browser = (
+    action: string,
+    args: Record<string, string | undefined> = {}
+  ) => browse(action, { workspace: session, baseUrl: config.baseUrl, ...args });
+  tool(
+    "browse_open",
+    "Open the exploration browser at the base URL or an allowed URL.",
+    z.strictObject({ url: z.string().max(4096).optional() }),
+    (args) => browser("open", args)
+  );
+  tool(
+    "browse_snapshot",
+    "Read the accessibility tree with element refs.",
+    noArgs,
+    () => browser("snapshot")
+  );
+  tool(
+    "browse_click",
+    "Click a ref from the latest snapshot; returns the new snapshot.",
+    z.strictObject({ ref }),
+    (args) => browser("click", args)
+  );
+  tool(
+    "browse_fill",
+    'Fill a ref with text, or with a credential reference (secret: "profile.field") without revealing its value.',
+    z
+      .strictObject({
+        ref,
+        value: z.string().max(20_000).optional(),
+        secret: z
+          .string()
+          .regex(/^[a-zA-Z][a-zA-Z0-9_-]*\.[a-zA-Z][a-zA-Z0-9_-]*$/)
+          .optional(),
+      })
+      .refine(
+        (args) => (args.value !== undefined) !== (args.secret !== undefined),
+        "Provide either value or secret"
+      ),
+    (args) => browser("fill", args)
+  );
+  tool(
+    "browse_inspect",
+    "Read an element's HTML, ancestors and styles.",
+    z.strictObject({ ref }),
+    (args) => browser("inspect", args)
+  );
+  tool("browse_close", "Close the exploration browser.", noArgs, () =>
+    browser("close")
+  );
+  tool(
+    "credentials_list",
+    "List local profiles: names, field names and allowed origins. Never returns values.",
+    noArgs,
+    async () => {
+      const profiles = await listProfiles();
+      listedCredentials = true;
+      return profiles;
     }
-    const server = new Server({ name: "specbook", version: CLI_VERSION }, {
-        capabilities: { tools: {} },
-        instructions: "Explore with browse tools, read existing Specs before writing, check and run selected Specs. Only Specbook files can be written. At most three runs per Spec in this turn. End each turn with exactly one outcome tool: ask_question, propose_specs, request_credentials, report_done or report_failed. No tools may be called after ending a turn. Credentials are references; never ask for their values.",
-    });
-    const tools: Tool[] = [];
-    function tool<S extends z.ZodObject>(name: string, description: string, schema: S, execute: (input: z.infer<S>) => Promise<unknown>) {
-        tools.push({ name, description, schema, execute: (input) => execute(schema.parse(input)) });
-    }
-    const save = async () => {
-        await writeState("state.json", state);
-    };
-    async function assertCurrentTurn(): Promise<void> {
-        if (!turnId) return;
-        const current = turnContextSchema.parse(JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf8")));
-        if (current.id !== turnId) throw new Error("This conversation turn was replaced; no further tools may be called");
-    }
-    async function writeState(name: string, value: unknown): Promise<void> {
-        await assertCurrentTurn();
-        const temporary = path.join(session, `${name}-${randomUUID()}.tmp`);
+  );
+  tool(
+    "spec_list",
+    "List features and Spec contracts; invalid files include their error.",
+    noArgs,
+    async () => {
+      const features = [];
+      for (const feature of await fs.readdir(
+        await safeWorkspacePath(workspace, "specs"),
+        { withFileTypes: true }
+      )) {
+        if (!feature.isDirectory()) continue;
+        const relative = `specs/${feature.name}/feature.yml`;
         try {
-            await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" });
-            await assertCurrentTurn();
-            await fs.rename(temporary, path.join(session, name));
-        } finally { await fs.rm(temporary, { force: true }); }
-    }
-    async function finish(value: unknown): Promise<unknown> {
-        const outcome = outcomeSchema.parse(value);
-        const text = [outcome.message,
-            ...(outcome.status === "waiting_for_selection" ? outcome.proposals.flatMap(({ title, why, feature }) => [title, why, feature]) : []),
-            ...(outcome.status === "failed" ? [outcome.error] : []),
-        ].join("\n");
-        if (await containsSecret(text)) throw new Error("Credential values cannot appear in conversation replies; use profile and field names only");
-        await writeState("outcome.json", outcome);
-        completed = true;
-        return { status: outcome.status, ended: true };
-    }
-    const browser = (action: string, args: Record<string, string | undefined> = {}) => browse(action, { workspace: session, baseUrl: config.baseUrl, ...args });
-    tool("browse_open", "Open the exploration browser at the base URL or an allowed URL.", z.strictObject({ url: z.string().max(4096).optional() }), (args) => browser("open", args));
-    tool("browse_snapshot", "Read the accessibility tree with element refs.", noArgs, () => browser("snapshot"));
-    tool("browse_click", "Click a ref from the latest snapshot; returns the new snapshot.", z.strictObject({ ref }), (args) => browser("click", args));
-    tool("browse_fill", "Fill a ref with text, or with a credential reference (secret: \"profile.field\") without revealing its value.", z.strictObject({ ref, value: z.string().max(20_000).optional(), secret: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]*\.[a-zA-Z][a-zA-Z0-9_-]*$/).optional() }).refine((args) => (args.value !== undefined) !== (args.secret !== undefined), "Provide either value or secret"), (args) => browser("fill", args));
-    tool("browse_inspect", "Read an element's HTML, ancestors and styles.", z.strictObject({ ref }), (args) => browser("inspect", args));
-    tool("browse_close", "Close the exploration browser.", noArgs, () => browser("close"));
-    tool("credentials_list", "List local profiles: names, field names and allowed origins. Never returns values.", noArgs, async () => {
-        const profiles = await listProfiles();
-        listedCredentials = true;
-        return profiles;
-    });
-    tool("spec_list", "List features and Spec contracts; invalid files include their error.", noArgs, async () => {
-        const features = [];
-        for (const feature of await fs.readdir(await safeWorkspacePath(workspace, "specs"), { withFileTypes: true })) {
-            if (!feature.isDirectory()) continue;
-            const relative = `specs/${feature.name}/feature.yml`;
-            try { features.push({ path: relative, ...parseFeatureYaml(await fs.readFile(await safeWorkspacePath(workspace, relative), "utf8")) }); }
-            catch (error) { features.push({ path: relative, error: error instanceof Error ? error.message : String(error) }); }
-        }
-        const specs = [];
-        for (const relative of await specDirectories(workspace)) {
-            try { specs.push({ path: relative, ...parseSpecYaml(await fs.readFile(await safeWorkspacePath(workspace, `${relative}/spec.yml`), "utf8")) }); }
-            catch (error) { specs.push({ path: relative, error: error instanceof Error ? error.message : String(error) }); }
-        }
-        return { features, specs };
-    });
-    tool("spec_read", "Read a feature.yml, spec.yml or spec.ts under .specbook/specs.", z.strictObject({ path: filePath }), async ({ path: relative }) => ({ path: relative, content: await fs.readFile(await safeWorkspacePath(workspace, relative), "utf8") }));
-    tool("spec_write", "Create or replace a feature.yml, spec.yml or spec.ts under .specbook/specs. Rejects credential values.", z.strictObject({ path: filePath, content: z.string().max(200_000) }), async ({ path: relative, content }) => {
-        if (await containsSecret(content)) throw new Error("Credential values cannot be written to Specs; use secret(profile, field)");
-        if (relative.endsWith("feature.yml")) parseFeatureYaml(content);
-        if (relative.endsWith("spec.yml")) {
-            const checked = agentHumanSpecSchema.safeParse(parseSpecYaml(content).humanSpec);
-            if (!checked.success) throw new Error(`spec.yml is incomplete: ${z.prettifyError(checked.error)}. State the expected result the user sees.`);
-        }
-        const file = await safeWorkspacePath(workspace, relative, true);
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        await safeWorkspacePath(workspace, relative, true);
-        await assertCurrentTurn();
-        const handle = await fs.open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o644);
-        try { await handle.writeFile(content, "utf8"); } finally { await handle.close(); }
-        if (!state.writes.includes(relative)) state.writes.push(relative);
-        (state.writeEvents ??= []).push(relative);
-        await save();
-        return { path: relative, written: true };
-    });
-    tool("spec_check", "Validate a Spec and check its locators against the current exploration page; locators for other page states may be missing here.", z.strictObject({ path: specPath }), ({ path: relative }) => checkSpecs(workspace, relative, session));
-    tool("run_spec", "Run one Spec in a fresh, signed-out browser; returns results, failed step and evidence paths. At most 3 runs per Spec per turn, surviving tool-server restarts. In a selected-proposals turn, pass proposalNumber; each proposal needs its own Spec path.", z.strictObject({ path: specPath, proposalNumber: z.number().int().positive().optional() }), async ({ path: relative, proposalNumber }) => {
-        if (selection) {
-            if (proposalNumber === undefined || !selection.some((proposal) => proposal.number === proposalNumber)) throw new Error("Pass a proposalNumber from this turn's selected proposals when running its Spec");
-            if (Object.entries(state.proposalRuns ?? {}).some(([number, selectedPath]) => selectedPath === relative && number !== String(proposalNumber))) throw new Error("Each selected proposal must run a distinct Spec; this path already belongs to another proposal");
-        } else if (proposalNumber !== undefined) throw new Error("This turn has no selected proposals; omit proposalNumber");
-        await readSpec(workspace, relative);
-        if ((state.attempts[relative] ?? 0) >= 3) throw new Error("This Spec has reached the three-run limit; report the observed failure instead of retrying");
-        state.attempts[relative] = (state.attempts[relative] ?? 0) + 1;
-        await save();
-        const run = await runLocal(workspace, relative, { signal });
-        state.runs.push(run);
-        if (proposalNumber !== undefined) (state.proposalRuns ??= {})[String(proposalNumber)] = relative;
-        await save();
-        return { ...run, attempts: state.attempts[relative], remainingRuns: 3 - state.attempts[relative] };
-    });
-    tool("ask_question", "End the turn with a clarifying question.", outcomeToolSchemas.ask_question, async ({ message }) => finish({ status: "waiting_for_reply", message, pendingAction: { type: "question", question: message } }));
-    tool("propose_specs", "End the turn with proposed Specs (title, why, feature) for the caller to select.", outcomeToolSchemas.propose_specs, async ({ message, proposals }) => finish({ status: "waiting_for_selection", message, proposals: proposals.map((proposal, index) => ({ ...proposal, number: index + 1 })), pendingAction: { type: "spec_selection" } }));
-    tool("request_credentials", "End the turn asking the human to add a missing local profile; give profile and field names only.", outcomeToolSchemas.request_credentials, async ({ message, profile, fields }) => {
-        if (!listedCredentials) throw new Error("Call credentials_list in this turn before requesting credentials");
-        const available = (await listProfiles()).find((item) => item.name === profile);
-        const origin = new URL(config.baseUrl).origin;
-        if (available && fields.every((field) => available.fields.includes(field)) && (!available.origins.length || available.origins.includes(origin))) {
-            throw new Error(`Credential profile ${profile} already has the requested fields for ${origin}; use its references instead`);
-        }
-        const command = `specbook credentials add ${profile}`;
-        const requestedFields = [...new Set(fields)];
-        return finish({ status: "needs_credentials", message, pendingAction: { type: "credentials", profile, fields: requestedFields, command } });
-    });
-    tool("report_done", "End the turn: the request is complete. Summarize the outcome; Specbook attaches the Specs and evidence from actual runs.", outcomeToolSchemas.report_done, async ({ message }) => finish({ status: "done", message }));
-    tool("report_failed", "End the turn: the request cannot complete. Give the cause and how to fix it and retry.", outcomeToolSchemas.report_failed, async ({ message, error }) => finish({ status: "failed", message, error }));
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.map(({ name, description, schema }) => ({ name, description, inputSchema: schema.toJSONSchema() as { type: "object"; [key: string]: unknown } })) }));
-    let tail = Promise.resolve();
-    server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-        let release!: () => void;
-        const prior = tail;
-        tail = new Promise<void>((resolve) => { release = resolve; });
-        await prior;
-        try {
-            signal?.throwIfAborted();
-            await assertCurrentTurn();
-            if (completed) throw new Error("This conversation turn has already ended; no further tools may be called");
-            const selected = tools.find((tool) => tool.name === params.name);
-            if (!selected) throw new Error("Unknown Specbook tool");
-            const result = await selected.execute(params.arguments ?? {});
-            return { content: [{ type: "text" as const, text: await scrub(JSON.stringify(result)) }] };
+          features.push({
+            path: relative,
+            ...parseFeatureYaml(
+              await fs.readFile(
+                await safeWorkspacePath(workspace, relative),
+                "utf8"
+              )
+            ),
+          });
         } catch (error) {
-            return { isError: true, content: [{ type: "text" as const, text: await scrub(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })) }] };
-        } finally { release(); }
+          features.push({
+            path: relative,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      const specs = [];
+      for (const relative of await specDirectories(workspace)) {
+        try {
+          specs.push({
+            path: relative,
+            ...parseSpecYaml(
+              await fs.readFile(
+                await safeWorkspacePath(workspace, `${relative}/spec.yml`),
+                "utf8"
+              )
+            ),
+          });
+        } catch (error) {
+          specs.push({
+            path: relative,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      return { features, specs };
+    }
+  );
+  tool(
+    "spec_read",
+    "Read a feature.yml, spec.yml or spec.ts under .specbook/specs.",
+    z.strictObject({ path: filePath }),
+    async ({ path: relative }) => ({
+      path: relative,
+      content: await fs.readFile(
+        await safeWorkspacePath(workspace, relative),
+        "utf8"
+      ),
+    })
+  );
+  tool(
+    "spec_write",
+    "Create or replace a feature.yml, spec.yml or spec.ts under .specbook/specs. Rejects credential values.",
+    z.strictObject({ path: filePath, content: z.string().max(200_000) }),
+    async ({ path: relative, content }) => {
+      if (await containsSecret(content))
+        throw new Error(
+          "Credential values cannot be written to Specs; use secret(profile, field)"
+        );
+      if (relative.endsWith("feature.yml")) parseFeatureYaml(content);
+      if (relative.endsWith("spec.yml")) {
+        const checked = agentHumanSpecSchema.safeParse(
+          parseSpecYaml(content).humanSpec
+        );
+        if (!checked.success)
+          throw new Error(
+            `spec.yml is incomplete: ${z.prettifyError(checked.error)}. State the expected result the user sees.`
+          );
+      }
+      const file = await safeWorkspacePath(workspace, relative, true);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await safeWorkspacePath(workspace, relative, true);
+      await assertCurrentTurn();
+      const handle = await fs.open(
+        file,
+        constants.O_WRONLY |
+          constants.O_CREAT |
+          constants.O_TRUNC |
+          constants.O_NOFOLLOW,
+        0o644
+      );
+      try {
+        await handle.writeFile(content, "utf8");
+      } finally {
+        await handle.close();
+      }
+      if (!state.writes.includes(relative)) state.writes.push(relative);
+      (state.writeEvents ??= []).push(relative);
+      await save();
+      return { path: relative, written: true };
+    }
+  );
+  tool(
+    "spec_check",
+    "Validate a Spec and check its locators against the current exploration page; locators for other page states may be missing here.",
+    z.strictObject({ path: specPath }),
+    ({ path: relative }) => checkSpecs(workspace, relative, session)
+  );
+  tool(
+    "run_spec",
+    "Run one Spec in a fresh, signed-out browser; returns results, failed step and evidence paths. At most 3 runs per Spec per turn, surviving tool-server restarts. In a selected-proposals turn, pass proposalNumber; each proposal needs its own Spec path.",
+    z.strictObject({
+      path: specPath,
+      proposalNumber: z.number().int().positive().optional(),
+    }),
+    async ({ path: relative, proposalNumber }) => {
+      if (selection) {
+        if (
+          proposalNumber === undefined ||
+          !selection.some((proposal) => proposal.number === proposalNumber)
+        )
+          throw new Error(
+            "Pass a proposalNumber from this turn's selected proposals when running its Spec"
+          );
+        if (
+          Object.entries(state.proposalRuns ?? {}).some(
+            ([number, selectedPath]) =>
+              selectedPath === relative && number !== String(proposalNumber)
+          )
+        )
+          throw new Error(
+            "Each selected proposal must run a distinct Spec; this path already belongs to another proposal"
+          );
+      } else if (proposalNumber !== undefined)
+        throw new Error(
+          "This turn has no selected proposals; omit proposalNumber"
+        );
+      await readSpec(workspace, relative);
+      if ((state.attempts[relative] ?? 0) >= 3)
+        throw new Error(
+          "This Spec has reached the three-run limit; report the observed failure instead of retrying"
+        );
+      state.attempts[relative] = (state.attempts[relative] ?? 0) + 1;
+      await save();
+      const run = await runLocal(workspace, relative, { signal });
+      state.runs.push(run);
+      if (proposalNumber !== undefined)
+        (state.proposalRuns ??= {})[String(proposalNumber)] = relative;
+      await save();
+      return {
+        ...run,
+        attempts: state.attempts[relative],
+        remainingRuns: 3 - state.attempts[relative],
+      };
+    }
+  );
+  tool(
+    "ask_question",
+    "End the turn with a clarifying question.",
+    outcomeToolSchemas.ask_question,
+    async ({ message }) =>
+      finish({
+        status: "waiting_for_reply",
+        message,
+        pendingAction: { type: "question", question: message },
+      })
+  );
+  tool(
+    "propose_specs",
+    "End the turn with proposed Specs (title, why, feature) for the caller to select.",
+    outcomeToolSchemas.propose_specs,
+    async ({ message, proposals }) =>
+      finish({
+        status: "waiting_for_selection",
+        message,
+        proposals: proposals.map((proposal, index) => ({
+          ...proposal,
+          number: index + 1,
+        })),
+        pendingAction: { type: "spec_selection" },
+      })
+  );
+  tool(
+    "request_credentials",
+    "End the turn asking the human to add a missing local profile; give profile and field names only.",
+    outcomeToolSchemas.request_credentials,
+    async ({ message, profile, fields }) => {
+      if (!listedCredentials)
+        throw new Error(
+          "Call credentials_list in this turn before requesting credentials"
+        );
+      const available = (await listProfiles()).find(
+        (item) => item.name === profile
+      );
+      const origin = new URL(config.baseUrl).origin;
+      if (
+        available &&
+        fields.every((field) => available.fields.includes(field)) &&
+        (!available.origins.length || available.origins.includes(origin))
+      ) {
+        throw new Error(
+          `Credential profile ${profile} already has the requested fields for ${origin}; use its references instead`
+        );
+      }
+      const command = `specbook credentials add ${profile}`;
+      const requestedFields = [...new Set(fields)];
+      return finish({
+        status: "needs_credentials",
+        message,
+        pendingAction: {
+          type: "credentials",
+          profile,
+          fields: requestedFields,
+          command,
+        },
+      });
+    }
+  );
+  tool(
+    "report_done",
+    "End the turn: the request is complete. Summarize the outcome; Specbook attaches the Specs and evidence from actual runs.",
+    outcomeToolSchemas.report_done,
+    async ({ message }) => finish({ status: "done", message })
+  );
+  tool(
+    "report_failed",
+    "End the turn: the request cannot complete. Give the cause and how to fix it and retry.",
+    outcomeToolSchemas.report_failed,
+    async ({ message, error }) => finish({ status: "failed", message, error })
+  );
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: tools.map(({ name, description, schema }) => ({
+      name,
+      description,
+      inputSchema: schema.toJSONSchema() as {
+        type: "object";
+        [key: string]: unknown;
+      },
+    })),
+  }));
+  let tail = Promise.resolve();
+  server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+    let release!: () => void;
+    const prior = tail;
+    tail = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    return server;
+    await prior;
+    try {
+      signal?.throwIfAborted();
+      await assertCurrentTurn();
+      if (completed)
+        throw new Error(
+          "This conversation turn has already ended; no further tools may be called"
+        );
+      const selected = tools.find((tool) => tool.name === params.name);
+      if (!selected) throw new Error("Unknown Specbook tool");
+      const result = await selected.execute(params.arguments ?? {});
+      return {
+        content: [
+          { type: "text" as const, text: await scrub(JSON.stringify(result)) },
+        ],
+      };
+    } catch (error) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text" as const,
+            text: await scrub(
+              JSON.stringify({
+                error: error instanceof Error ? error.message : String(error),
+              })
+            ),
+          },
+        ],
+      };
+    } finally {
+      release();
+    }
+  });
+  return server;
 }
 
-export async function runMcpServer(workspace: string, session: string): Promise<void> {
-    const cancellation = new AbortController();
-    const server = await createLocalMcpServer(workspace, session, cancellation.signal);
-    const close = () => { cancellation.abort(); void server.close(); };
-    process.once("SIGTERM", close);
-    process.once("SIGINT", close);
-    process.stdin.once("end", close);
-    await server.connect(new StdioServerTransport());
+export async function runMcpServer(
+  workspace: string,
+  session: string
+): Promise<void> {
+  const cancellation = new AbortController();
+  const server = await createLocalMcpServer(
+    workspace,
+    session,
+    cancellation.signal
+  );
+  const close = () => {
+    cancellation.abort();
+    void server.close();
+  };
+  process.once("SIGTERM", close);
+  process.once("SIGINT", close);
+  process.stdin.once("end", close);
+  await server.connect(new StdioServerTransport());
 }

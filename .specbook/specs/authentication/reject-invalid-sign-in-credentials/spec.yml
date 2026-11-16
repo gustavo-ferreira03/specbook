@@ -2,7 +2,7 @@ title: Reject invalid sign-in credentials
 description: Invalid credentials are rejected and the user stays on the sign-in page.
 preconditions: []
 steps:
-- Open the sign-in page
-- Submit invalid credentials
+  - Open the sign-in page
+  - Submit invalid credentials
 expectedResult: The sign-in page shows “Email or password is incorrect.”
 postconditions: []
