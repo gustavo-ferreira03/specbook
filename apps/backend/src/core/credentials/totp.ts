@@ -59,7 +59,7 @@ export function generateTotp(seed: string, now = Date.now()): string {
   const counter = Buffer.alloc(8);
   counter.writeBigUInt64BE(BigInt(Math.floor(now / 1000 / period)));
   const hmac = crypto.createHmac(algorithm, secret).update(counter).digest();
-  const offset = hmac.at(-1) & 0x0f;
+  const offset = hmac.at(-1)! & 0x0f;
   const binary = (hmac.readUInt32BE(offset) & 0x7f_ff_ff_ff) % 10 ** digits;
   return binary.toString().padStart(digits, "0");
 }

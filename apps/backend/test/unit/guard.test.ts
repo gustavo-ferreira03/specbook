@@ -570,7 +570,7 @@ describe("function constructor hardening", () => {
     );
     assert.equal(result.status, 0, result.stderr);
     const lines = result.stdout.trim().split("\n");
-    const outcomes = JSON.parse(lines.at(-1)) as string[];
+    const outcomes = JSON.parse(lines.at(-1)!) as string[];
     assert.deepEqual(
       outcomes,
       Array(4).fill("Code generation is not available to Specs")

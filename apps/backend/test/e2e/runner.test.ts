@@ -359,10 +359,11 @@ describe(
             const source = (
               document.querySelector("#small") as HTMLImageElement
             ).src;
-            const small = document.querySelector("#small")!;
+            const small = document.querySelector<HTMLElement>("#small")!;
             small.style.width = "120px";
             small.style.height = "60px";
-            document.querySelector("#hidden")!.style.display = "inline";
+            document.querySelector<HTMLElement>("#hidden")!.style.display =
+              "inline";
             const late = document.querySelector("#late") as HTMLImageElement;
             late.src = source;
             await late.decode();
@@ -403,7 +404,7 @@ describe(
               showWarning: false,
             });
             player.pause(
-              initialEvents.at(-1).timestamp - initialEvents[0].timestamp + 1
+              initialEvents.at(-1)!.timestamp - initialEvents[0].timestamp + 1
             );
             await new Promise((resolve) =>
               requestAnimationFrame(() => requestAnimationFrame(resolve))
@@ -424,7 +425,7 @@ describe(
               showWarning: false,
             });
             updatedPlayer.pause(
-              events.at(-1).timestamp - events[0].timestamp + 1
+              events.at(-1)!.timestamp - events[0].timestamp + 1
             );
             await new Promise((resolve) =>
               requestAnimationFrame(() => requestAnimationFrame(resolve))

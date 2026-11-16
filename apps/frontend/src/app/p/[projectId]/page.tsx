@@ -857,7 +857,7 @@ export default function HomePage({
             event.preventDefault();
             const target = returnFocus.current?.isConnected
               ? returnFocus.current
-              : document.querySelector("#main-content");
+              : document.querySelector<HTMLElement>("#main-content");
             target?.focus();
           }}
         >
