@@ -459,10 +459,10 @@ async function authenticateUpstream(
         `VNC server refused the connection: ${await readReason(queue)}`
       );
     }
-    const types = [...(await queue.read(count))];
-    if (types.includes(RFB_SECURITY_VNC_AUTH)) {
+    const types = new Set([...(await queue.read(count))]);
+    if (types.has(RFB_SECURITY_VNC_AUTH)) {
       type = RFB_SECURITY_VNC_AUTH;
-    } else if (types.includes(RFB_SECURITY_NONE)) {
+    } else if (types.has(RFB_SECURITY_NONE)) {
       type = RFB_SECURITY_NONE;
     } else {
       throw new Error("VNC server offers no supported security type");

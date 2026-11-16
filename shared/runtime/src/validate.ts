@@ -80,7 +80,7 @@ export const LOCATOR_MATCHERS = [
   "toMatchAriaSnapshot",
 ];
 const TEXT_METHODS = new Set(["fill", "pressSequentially", "type"]);
-const REQUEST_METHODS = ["get", "post", "put", "patch", "delete"];
+const REQUEST_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
 const API_MATCHERS = [
   "toBe",
   "toEqual",
@@ -539,7 +539,7 @@ class Validator {
       fail(node, "Destructure request from the test fixtures.");
     }
     noTypeArguments(node);
-    if (!REQUEST_METHODS.includes(node.callee.property.name)) {
+    if (!REQUEST_METHODS.has(node.callee.property.name)) {
       fail(
         node,
         "Only request.get(), post(), put(), patch() and delete() are allowed."

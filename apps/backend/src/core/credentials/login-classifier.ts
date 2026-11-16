@@ -109,7 +109,7 @@ export function classifyLoginControl(
   return null;
 }
 
-const CODE_TYPES = ["text", "tel", "number", "password", ""];
+const CODE_TYPES = new Set(["text", "tel", "number", "password", ""]);
 
 export function classifyOtpControls(
   controls: PageControl[]
@@ -120,7 +120,7 @@ export function classifyOtpControls(
     ) {
       return [{ control, score: 100, token: "one-time-code" }];
     }
-    if (!CODE_TYPES.includes(control.type)) {
+    if (!CODE_TYPES.has(control.type)) {
       return [];
     }
     return OTP.test(searchable(control))
@@ -132,7 +132,7 @@ export function classifyOtpControls(
   }
   const boxes = controls
     .filter(
-      (control) => control.maxLength === 1 && CODE_TYPES.includes(control.type)
+      (control) => control.maxLength === 1 && CODE_TYPES.has(control.type)
     )
     .sort((a, b) => a.index - b.index);
   let run: PageControl[] = [];
