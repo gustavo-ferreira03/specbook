@@ -17,9 +17,7 @@ export function createSafetySettingsRouter(): Hono {
     "/settings/security",
     access("admin"),
     zValidator("json", securitySettingsSchema),
-    async (c) => {
-      return c.json(await updateSecuritySettings(c.req.valid("json")));
-    }
+    async (c) => c.json(await updateSecuritySettings(c.req.valid("json")))
   );
   return router;
 }

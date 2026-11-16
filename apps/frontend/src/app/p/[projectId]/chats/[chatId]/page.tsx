@@ -168,16 +168,14 @@ const MARKDOWN_COMPONENTS: Components = {
   ),
 };
 
-const MessageContent = memo(({ content }: { content: string }) => {
-  return (
-    <ReactMarkdown
-      remarkPlugins={REMARK_PLUGINS}
-      components={MARKDOWN_COMPONENTS}
-    >
-      {content}
-    </ReactMarkdown>
-  );
-});
+const MessageContent = memo(({ content }: { content: string }) => (
+  <ReactMarkdown
+    remarkPlugins={REMARK_PLUGINS}
+    components={MARKDOWN_COMPONENTS}
+  >
+    {content}
+  </ReactMarkdown>
+));
 
 function AgentAvatar() {
   return (

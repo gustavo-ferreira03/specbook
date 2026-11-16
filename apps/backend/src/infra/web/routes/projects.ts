@@ -79,11 +79,11 @@ export function createProjectsRouter(): Hono {
     }
   );
 
-  router.get("/projects", access("viewer"), async (c) => {
-    return c.json({
+  router.get("/projects", access("viewer"), async (c) =>
+    c.json({
       projects: (await projectsRepository.listProjects()).map(publicProject),
-    });
-  });
+    })
+  );
 
   router.get("/projects/:id", access("viewer"), async (c) => {
     const project = await projectsRepository.getProject(c.req.param("id"));

@@ -121,12 +121,11 @@ export function createJobsRouter(): Hono {
     "/projects/:id/jobs",
     access("editor"),
     zValidator("json", createJobSchema),
-    async (c) => {
-      return c.json(
+    async (c) =>
+      c.json(
         { job: await enqueueJob(c.req.param("id"), c.req.valid("json")) },
         202
-      );
-    }
+      )
   );
   router.get("/projects/:id/jobs/:jobId", access("viewer"), async (c) => {
     const job = await projectJob(c.req.param("id"), c.req.param("jobId"));

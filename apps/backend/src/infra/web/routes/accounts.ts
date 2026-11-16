@@ -127,13 +127,12 @@ export function createAccountsRouter(): Hono {
     "/auth/access-tokens",
     access("viewer"),
     browserSession,
-    async (c) => {
-      return c.json({
+    async (c) =>
+      c.json({
         tokens: await accountsRepository.accessTokens(
           requireRole(c, "viewer").id
         ),
-      });
-    }
+      })
   );
   router.post(
     "/auth/access-tokens",
