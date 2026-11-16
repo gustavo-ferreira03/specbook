@@ -10,6 +10,7 @@ import { HTTPException } from "hono/http-exception";
 
 import { runsRepository } from "../../infra/repositories/runs";
 import { runsDir } from "../paths";
+
 export { isInside } from "@specbook/runtime/safe-fs";
 
 function runDirectory(runId: string): string {

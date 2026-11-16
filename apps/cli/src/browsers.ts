@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 
 import { runNodeCli } from "@specbook/runtime/process";
 import { chromium } from "playwright-core";
+
 const require = createRequire(import.meta.url);
 let installing: Promise<void> | undefined;
 

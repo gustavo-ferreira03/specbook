@@ -6,6 +6,7 @@ import {
   LOCATOR_REFINERS,
   RUNTIME_LOCATOR_ACTIONS as LOCATOR_ACTIONS,
 } from "./allowlist.ts";
+
 export type { ApiRequestEvidence } from "../evidence.ts";
 
 export interface SecretOriginPolicy {

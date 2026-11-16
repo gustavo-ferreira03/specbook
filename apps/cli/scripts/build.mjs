@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 
 import { build } from "esbuild";
+
 const manifest = JSON.parse(
   await fs.readFile(new URL("../package.json", import.meta.url), "utf-8")
 );

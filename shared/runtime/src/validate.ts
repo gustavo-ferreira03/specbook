@@ -14,6 +14,7 @@ import {
 } from "./specbook/guard.ts";
 import { executionSteps } from "./types.ts";
 import type { HumanSpec } from "./types.ts";
+
 export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist.ts";
 
 export type SpecSourceValidation = { ok: true } | { ok: false; error: string };

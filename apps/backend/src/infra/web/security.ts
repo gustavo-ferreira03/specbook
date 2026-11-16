@@ -12,6 +12,7 @@ import {
 } from "../../../../../shared/http-origin";
 import type { HostAllowlist } from "../../../../../shared/http-origin";
 import { logger } from "../logger";
+
 export { buildHostAllowlist, frontendProxyOrigin, isAllowedHost };
 
 export function publicFrontendOrigin(c: Context): string {
