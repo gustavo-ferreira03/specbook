@@ -10,70 +10,10 @@ import { before, describe, test } from "node:test";
 import { RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
 import { Hono } from "hono";
 
+import { requireValue } from "../../src/core/utils/require-value";
 import { HUMAN_SPEC, useTempStorage, VALID_SPEC } from "../helpers/storage";
 
-const storage = useTempStorage();
-const { runMigrations } = await import("../../src/infra/db/migrate");
-const { projectsRepository } =
-  await import("../../src/infra/repositories/projects");
-const { environmentsRepository } =
-  await import("../../src/infra/repositories/environments");
-const { featuresRepository } =
-  await import("../../src/infra/repositories/features");
-const { specsRepository } = await import("../../src/infra/repositories/specs");
-const { runsRepository } = await import("../../src/infra/repositories/runs");
-const { ciRepository } = await import("../../src/infra/repositories/ci");
-const { stewardRepository } =
-  await import("../../src/infra/repositories/steward");
-const { issueGitAccessToken } = await import("../../src/core/repo/access");
-const { issueCiToken, authenticateCiToken } =
-  await import("../../src/core/ci/tokens");
-const { ciResult, junitResult, markdownResult } =
-  await import("../../src/core/ci/results");
-const { ciRunSchema } = await import("../../src/core/ci/schemas");
-const { environmentSchema } = await import("../../src/core/environments");
-const { getRunBatchDirectory, getRunBatch, listRunBatches, listCiBatches } =
-  await import("../../src/core/runner/batch");
-const { createCiRouter, createCiSettingsRouter } =
-  await import("../../src/infra/web/routes/ci");
-const { createEnvironmentsRouter } =
-  await import("../../src/infra/web/routes/environments");
-const { buildHostAllowlist, csrfGuard, hostGuard, jsonBodyLimit } =
-  await import("../../src/infra/web/security");
-const { runnersRepository } =
-  await import("../../src/infra/repositories/runners");
-const { issueRunnerToken, authenticateRunnerToken, publicRunner } =
-  await import("../../src/core/private-runner/tokens");
-const {
-  enqueueRunnerBatch,
-  completeRunnerWork,
-  heartbeatRunnerWork,
-  pendingRunnerBatchIds,
-  releaseRunnerWork,
-  revokeRunnerToken,
-} = await import("../../src/core/private-runner/queue");
-
-before(runMigrations);
-const app = new Hono();
-app.use(
-  "*",
-  hostGuard(buildHostAllowlist(4000, {})),
-  csrfGuard(),
-  jsonBodyLimit()
-);
-app.use("*", async (c, next) => {
-  c.set(
-    "authentication",
-    c.req.header("X-Specbook-Request") === "1" ? "session" : null
-  );
-  await next();
-});
-app.route("/", createCiRouter());
-app.route("/", createCiSettingsRouter());
-app.route("/", createEnvironmentsRouter());
-const browserHeaders = { Host: "localhost:4000", "X-Specbook-Request": "1" };
-
-async function fixture() {
+const fixture = async function fixture() {
   const project = await projectsRepository.createProject(
     "CI",
     "https://8.8.8.8"
@@ -139,7 +79,69 @@ async function fixture() {
   await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(path.join(directory, "batch.json"), JSON.stringify(batch));
   return { project, spec, run, batch };
-}
+};
+
+const storage = useTempStorage();
+const { runMigrations } = await import("../../src/infra/db/migrate");
+const { projectsRepository } =
+  await import("../../src/infra/repositories/projects");
+const { environmentsRepository } =
+  await import("../../src/infra/repositories/environments");
+const { featuresRepository } =
+  await import("../../src/infra/repositories/features");
+const { specsRepository } = await import("../../src/infra/repositories/specs");
+const { runsRepository } = await import("../../src/infra/repositories/runs");
+const { ciRepository } = await import("../../src/infra/repositories/ci");
+const { stewardRepository } =
+  await import("../../src/infra/repositories/steward");
+const { issueGitAccessToken } = await import("../../src/core/repo/access");
+const { issueCiToken, authenticateCiToken } =
+  await import("../../src/core/ci/tokens");
+const { ciResult, junitResult, markdownResult } =
+  await import("../../src/core/ci/results");
+const { ciRunSchema } = await import("../../src/core/ci/schemas");
+const { environmentSchema } = await import("../../src/core/environments");
+const { getRunBatchDirectory, getRunBatch, listRunBatches, listCiBatches } =
+  await import("../../src/core/runner/batch");
+const { createCiRouter, createCiSettingsRouter } =
+  await import("../../src/infra/web/routes/ci");
+const { createEnvironmentsRouter } =
+  await import("../../src/infra/web/routes/environments");
+const { buildHostAllowlist, csrfGuard, hostGuard, jsonBodyLimit } =
+  await import("../../src/infra/web/security");
+const { runnersRepository } =
+  await import("../../src/infra/repositories/runners");
+const { issueRunnerToken, authenticateRunnerToken, publicRunner } =
+  await import("../../src/core/private-runner/tokens");
+const {
+  enqueueRunnerBatch,
+  completeRunnerWork,
+  heartbeatRunnerWork,
+  pendingRunnerBatchIds,
+  releaseRunnerWork,
+  revokeRunnerToken,
+} = await import("../../src/core/private-runner/queue");
+
+before(runMigrations);
+const app = new Hono();
+app.use(
+  "*",
+  hostGuard(buildHostAllowlist(4000, {})),
+  csrfGuard(),
+  jsonBodyLimit()
+);
+app.use("*", async (c, next) => {
+  c.set(
+    "authentication",
+    c.req.header("X-Specbook-Request") === "1" ? "session" : null
+  );
+  // oxlint-disable-next-line node/callback-return -- The awaited Hono middleware or HTTP helper is not a Node error-first callback.
+  await next();
+});
+app.route("/", createCiRouter());
+app.route("/", createCiSettingsRouter());
+app.route("/", createEnvironmentsRouter());
+const browserHeaders = { Host: "localhost:4000", "X-Specbook-Request": "1" };
 
 describe("CI access and quality gates", () => {
   test("tunnel environments keep vault access and require matching group and project token scope", async () => {
@@ -166,7 +168,12 @@ describe("CI access and quality gates", () => {
       runnerGroup: "tunnel",
       credentialOverrides: { shop: crypto.randomUUID() },
     });
-    const previous = (await environmentsRepository.list(project.id))[0]!;
+    const previous = requireValue(
+      await (async () => {
+        const awaitedValue5610 = await environmentsRepository.list(project.id);
+        return awaitedValue5610[0];
+      })()
+    );
     await environmentsRepository.update(previous, input);
     const environment = await resolveRunEnvironment(project.id);
     assert.deepEqual(
@@ -198,20 +205,20 @@ describe("CI access and quality gates", () => {
       [anotherProject.id],
       "tunnel"
     );
-    const runner = (await runnersRepository.get(allowed.runner.id))!;
+    const runner = requireValue(await runnersRepository.get(allowed.runner.id));
     assert.equal(runner.purpose, "tunnel");
     await assert.rejects(
       () => issueRunnerToken("Ungrouped tunnel", null, null, "tunnel"),
-      /runner group/
+      /runner group/u
     );
     await assert.rejects(
       async () =>
         configuredTunnel(
-          (await runnersRepository.get(ordinaryRunner.runner.id))!,
+          requireValue(await runnersRepository.get(ordinaryRunner.runner.id)),
           project.id,
           environment.id
         ),
-      /created for tunneling/
+      /created for tunneling/u
     );
     const configured = await configuredTunnel(
       runner,
@@ -222,20 +229,20 @@ describe("CI access and quality gates", () => {
     await assert.rejects(
       async () =>
         configuredTunnel(
-          (await runnersRepository.get(wrongGroup.runner.id))!,
+          requireValue(await runnersRepository.get(wrongGroup.runner.id)),
           project.id,
           environment.id
         ),
-      /runner group/
+      /runner group/u
     );
     await assert.rejects(
       async () =>
         configuredTunnel(
-          (await runnersRepository.get(wrongProject.runner.id))!,
+          requireValue(await runnersRepository.get(wrongProject.runner.id)),
           project.id,
           environment.id
         ),
-      /project/
+      /project/u
     );
     const abort = new AbortController();
     const runId = crypto.randomUUID();
@@ -245,21 +252,31 @@ describe("CI access and quality gates", () => {
       [runId],
       abort.signal
     );
-    const queue = (await tunnelQueueEntries()).find(
-      (entry) => entry.environmentId === environment.id
-    )!;
+    const queue = requireValue(
+      await (async () => {
+        const awaitedValue7813 = await tunnelQueueEntries();
+        return awaitedValue7813.find(
+          (entry) => entry.environmentId === environment.id
+        );
+      })()
+    );
     assert.equal(queue.queued, 1);
     assert.equal(queue.reason, "No tunnel connected in group tunnel.");
     abort.abort(new Error("Verification stopped"));
-    await assert.rejects(waiting, /Verification stopped/);
+    await assert.rejects(waiting, /Verification stopped/u);
     assert.ok(
-      !(await tunnelQueueEntries()).some(
-        (entry) => entry.environmentId === environment.id
-      )
+      !(await (async () => {
+        const awaitedValue8153 = await tunnelQueueEntries();
+        return awaitedValue8153.some(
+          (entry) => entry.environmentId === environment.id
+        );
+      })())
     );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const token of [allowed, ordinaryRunner, wrongGroup, wrongProject]) {
       await revokeRunnerToken(token.runner.id);
     }
+    /* oxlint-enable no-await-in-loop */
   });
 
   test("tunnel upgrades require a dedicated token and survive environment renames", async () => {
@@ -293,14 +310,20 @@ describe("CI access and quality gates", () => {
       hostname: "127.0.0.1",
       port: 0,
     }) as http.Server;
-    await new Promise<void>((resolve) =>
-      server.listening ? resolve() : server.once("listening", resolve)
-    );
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise<void>((resolve) => {
+      if (server.listening) {
+        resolve();
+      } else {
+        server.once("listening", resolve);
+      }
+    });
     const { port } = server.address() as AddressInfo;
     assert.ok(port > 4500);
     const detach = attachTunnelWebSockets(server, buildHostAllowlist(port, {}));
     const sockets: InstanceType<typeof WebSocket>[] = [];
     const connect = (token: string, protocol = RUNNER_PROTOCOL_VERSION) =>
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       new Promise<{
         status: number;
         websocket: InstanceType<typeof WebSocket>;
@@ -318,7 +341,9 @@ describe("CI access and quality gates", () => {
           }
         );
         sockets.push(websocket);
-        websocket.on("error", () => undefined);
+        websocket.on("error", () => {
+          /* Intentionally ignore this best-effort operation. */
+        });
         const timer = setTimeout(
           () => reject(new Error("Tunnel handshake timed out")),
           5000
@@ -326,7 +351,7 @@ describe("CI access and quality gates", () => {
         websocket.once("unexpected-response", (_request, response) => {
           clearTimeout(timer);
           response.resume();
-          resolve({ status: response.statusCode!, websocket });
+          resolve({ status: requireValue(response.statusCode), websocket });
         });
         websocket.once("message", (data) => {
           clearTimeout(timer);
@@ -335,16 +360,37 @@ describe("CI access and quality gates", () => {
         });
       });
     try {
-      assert.equal((await connect(dedicated.token, 999)).status, 426);
-      assert.equal((await connect(ordinary.token)).status, 403);
+      assert.equal(
+        await (async () => {
+          const awaitedValue11124 = await connect(dedicated.token, 999);
+          return awaitedValue11124.status;
+        })(),
+        426
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedValue11195 = await connect(ordinary.token);
+          return awaitedValue11195.status;
+        })(),
+        403
+      );
       const connected = await connect(dedicated.token);
       assert.equal(connected.status, 101);
-      assert.equal((await connect(dedicated.token)).status, 409);
+      assert.equal(
+        await (async () => {
+          const awaitedValue11359 = await connect(dedicated.token);
+          return awaitedValue11359.status;
+        })(),
+        409
+      );
       await environmentsRepository.update(environment, {
         ...input,
         name: "Renamed private",
       });
-      await new Promise((resolve) => setTimeout(resolve, 5200));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5200);
+      });
       assert.equal(connected.websocket.readyState, WebSocket.OPEN);
       assert.equal(
         publicTunnels().find((entry) => entry.environmentId === environment.id)
@@ -377,10 +423,15 @@ describe("CI access and quality gates", () => {
       }
       detach();
       server.closeIdleConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const token of [ordinary, dedicated]) {
         await revokeRunnerToken(token.runner.id);
       }
+      /* oxlint-enable no-await-in-loop */
     }
   });
 
@@ -390,7 +441,12 @@ describe("CI access and quality gates", () => {
     const { resolveRunEnvironment } =
       await import("../../src/core/environments");
     const { project, spec } = await fixture();
-    const configured = (await environmentsRepository.list(project.id))[0]!;
+    const configured = requireValue(
+      await (async () => {
+        const awaitedValue13106 = await environmentsRepository.list(project.id);
+        return awaitedValue13106[0];
+      })()
+    );
     await environmentsRepository.update(configured, {
       ...configured,
       executor: "tunnel",
@@ -431,15 +487,26 @@ describe("CI access and quality gates", () => {
     const file = path.join(getRunBatchDirectory(batch.id), "batch.json");
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, JSON.stringify(batch));
-    assert.ok((await pendingTunnelBatchRunIds()).includes(run.id));
+    assert.ok(
+      await (async () => {
+        const awaitedValue14372 = await pendingTunnelBatchRunIds();
+        return awaitedValue14372.includes(run.id);
+      })()
+    );
     await runsRepository.markInterruptedRuns();
-    assert.equal((await runsRepository.getRun(run.id))!.status, "running");
+    assert.equal(
+      requireValue(await runsRepository.getRun(run.id)).status,
+      "running"
+    );
     await fs.writeFile(
       file,
       JSON.stringify({ ...batch, waitingForTunnelAt: undefined })
     );
     await runsRepository.markInterruptedRuns();
-    assert.equal((await runsRepository.getRun(run.id))!.status, "error");
+    assert.equal(
+      requireValue(await runsRepository.getRun(run.id)).status,
+      "error"
+    );
     await fs.writeFile(
       file,
       JSON.stringify({
@@ -456,7 +523,12 @@ describe("CI access and quality gates", () => {
     const { runnerQueueSnapshot, visibleRuns } =
       await import("../../src/core/private-runner/visibility");
     const { project, spec } = await fixture();
-    const configured = (await environmentsRepository.list(project.id))[0]!;
+    const configured = requireValue(
+      await (async () => {
+        const awaitedValue15328 = await environmentsRepository.list(project.id);
+        return awaitedValue15328[0];
+      })()
+    );
     await environmentsRepository.update(configured, {
       ...configured,
       executor: "runner",
@@ -488,7 +560,12 @@ describe("CI access and quality gates", () => {
         },
       ],
     });
-    const first = (await runnerQueueSnapshot()).batchQueues.get(batchId)!;
+    const first = requireValue(
+      await (async () => {
+        const awaitedValue16299 = await runnerQueueSnapshot();
+        return awaitedValue16299.batchQueues.get(batchId);
+      })()
+    );
     assert.equal(first.queued, 1);
     assert.equal(first.environmentId, environment.id);
     assert.equal(first.reason, "No runner online in group visibility.");
@@ -499,28 +576,50 @@ describe("CI access and quality gates", () => {
     assert.equal(metrics.groups[0].queued, 1);
     assert.match(
       prometheusQueueMetrics(metrics),
-      /specbook_runner_queue_depth\{runner_group="visibility"\} 1\n/
+      /specbook_runner_queue_depth\{runner_group="visibility"\} 1\n/u
     );
     assert.match(
       prometheusQueueMetrics({
         groups: [{ group: 'office"\\\n', queued: 0, oldestWaitSeconds: 0 }],
       }),
-      /runner_group="office\\"\\\\\\n"/
+      /runner_group="office\\"\\\\\\n"/u
     );
     assert.ok(first.oldestWaitMs >= 0);
-    assert.equal((await visibleRuns([run]))[0].queue?.queued, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedResult18221 = await (async () => {
+          const awaitedValue17181 = await visibleRuns([run]);
+          return awaitedValue17181[0].queue;
+        })();
+        return awaitedResult18221?.queued;
+      })(),
+      1
+    );
     const issued = await issueRunnerToken("Visibility", "visibility");
-    const runner = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    const runner = requireValue(
+      await authenticateRunnerToken(`Bearer ${issued.token}`)
+    );
     await runnersRepository.reportInstance(runner.id, runner.id, {
       version: "0.1.0",
       protocolVersion: RUNNER_PROTOCOL_VERSION,
       concurrency: 1,
     });
-    const lease = (await runnersRepository.claim(runner, 60_000))!;
-    assert.equal((await visibleRuns([run]))[0].queue, null);
-    await releaseRunnerWork(lease.id, runner.id, lease.leaseId!);
+    const lease = requireValue(await runnersRepository.claim(runner, 60_000));
     assert.equal(
-      (await runnerQueueSnapshot()).batchQueues.get(batchId)!.reason,
+      await (async () => {
+        const awaitedValue17634 = await visibleRuns([run]);
+        return awaitedValue17634[0].queue;
+      })(),
+      null
+    );
+    await releaseRunnerWork(lease.id, runner.id, requireValue(lease.leaseId));
+    assert.equal(
+      requireValue(
+        await (async () => {
+          const awaitedValue17768 = await runnerQueueSnapshot();
+          return awaitedValue17768.batchQueues.get(batchId);
+        })()
+      ).reason,
       "Waiting for a runner to claim work."
     );
     await revokeRunnerToken(runner.id);
@@ -565,18 +664,23 @@ describe("CI access and quality gates", () => {
     assert.equal(response.status, 201);
     assert.equal(response.headers.get("cache-control"), "no-store");
     const issued = await response.json();
-    const stored = (await runnersRepository.get(issued.runner.id))!;
+    const stored = requireValue(await runnersRepository.get(issued.runner.id));
     assert.equal(stored.tokenHash.length, 64);
     assert.ok(!JSON.stringify(stored).includes(issued.token));
     assert.equal(issued.runner.online, false);
     assert.ok(await authenticateRunnerToken(`Bearer ${issued.token}`));
     assert.equal(
-      publicRunner((await runnersRepository.get(stored.id))!).online,
+      publicRunner(requireValue(await runnersRepository.get(stored.id))).online,
       true
     );
     const listing = await runnerApp.request("/runners", { headers });
     assert.equal(listing.status, 200);
-    assert.ok(!(await listing.text()).includes(issued.token));
+    assert.ok(
+      !(await (async () => {
+        const awaitedValue20165 = await listing.text();
+        return awaitedValue20165.includes(issued.token);
+      })())
+    );
     const project = await projectsRepository.createProject(
       "Token scope",
       "https://example.com"
@@ -587,7 +691,10 @@ describe("CI access and quality gates", () => {
     );
     assert.equal(
       await authenticateRunnerToken(
-        `Bearer ${(await issueCiToken(project.id)).token}`
+        `Bearer ${await (async () => {
+          const awaitedValue20510 = await issueCiToken(project.id);
+          return awaitedValue20510.token;
+        })()}`
       ),
       null
     );
@@ -599,35 +706,38 @@ describe("CI access and quality gates", () => {
     );
     assert.equal(await authenticateRunnerToken(`Bearer ${personal}`), null);
     assert.equal(
-      (
-        await runnerApp.request("/runners", {
+      await (async () => {
+        const awaitedValue20869 = await runnerApp.request("/runners", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${personal}`,
             "content-type": "application/json",
           },
           body: JSON.stringify({ name: "Forbidden" }),
-        })
-      ).status,
+        });
+        return awaitedValue20869.status;
+      })(),
       403
     );
     assert.equal(
-      (
-        await runnerApp.request("/runner/claim", {
+      await (async () => {
+        const awaitedValue21197 = await runnerApp.request("/runner/claim", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${personal}`,
             "content-type": "application/json",
           },
           body: JSON.stringify({ version: "test" }),
-        })
-      ).status,
+        });
+        return awaitedValue21197.status;
+      })(),
       401
     );
     const runnerHeaders = {
       Authorization: `Bearer ${issued.token}`,
       "content-type": "application/json",
     };
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const protocolVersion of [RUNNER_PROTOCOL_VERSION - 1, 999]) {
       const incompatible = await runnerApp.request("/runner/claim", {
         method: "POST",
@@ -640,8 +750,9 @@ describe("CI access and quality gates", () => {
         }),
       });
       assert.equal(incompatible.status, 426);
-      assert.match(await incompatible.text(), /Upgrade the CLI/);
+      assert.match(await incompatible.text(), /Upgrade the CLI/u);
     }
+    /* oxlint-enable no-await-in-loop */
     const missingVersion = await runnerApp.request("/runner/claim", {
       method: "POST",
       headers: runnerHeaders,
@@ -649,8 +760,12 @@ describe("CI access and quality gates", () => {
     });
     assert.equal(missingVersion.status, 426);
     assert.equal(
-      (await runnerApp.request("/runner/metrics", { headers: runnerHeaders }))
-        .status,
+      await (async () => {
+        const awaitedValue22388 = await runnerApp.request("/runner/metrics", {
+          headers: runnerHeaders,
+        });
+        return awaitedValue22388.status;
+      })(),
       200
     );
     const prometheus = await runnerApp.request(
@@ -658,10 +773,13 @@ describe("CI access and quality gates", () => {
       { headers: { Authorization: `Bearer ${personal}` } }
     );
     assert.equal(prometheus.status, 200);
-    assert.match(prometheus.headers.get("content-type")!, /version=0.0.4/);
+    assert.match(
+      requireValue(prometheus.headers.get("content-type")),
+      /version=0.0.4/u
+    );
     assert.match(
       await prometheus.text(),
-      /# TYPE specbook_runner_queue_depth gauge/
+      /# TYPE specbook_runner_queue_depth gauge/u
     );
     const rotation = await runnerApp.request(`/runners/${stored.id}/rotate`, {
       method: "POST",
@@ -674,12 +792,16 @@ describe("CI access and quality gates", () => {
     assert.equal(await authenticateRunnerToken(`Bearer ${issued.token}`), null);
     assert.ok(await authenticateRunnerToken(`Bearer ${rotated.token}`));
     assert.equal(
-      (
-        await runnerApp.request(`/runners/${stored.id}`, {
-          method: "DELETE",
-          headers,
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue23381 = await runnerApp.request(
+          `/runners/${stored.id}`,
+          {
+            method: "DELETE",
+            headers,
+          }
+        );
+        return awaitedValue23381.status;
+      })(),
       200
     );
     assert.equal(await authenticateRunnerToken(`Bearer ${issued.token}`), null);
@@ -711,12 +833,12 @@ describe("CI access and quality gates", () => {
     await enqueueRunnerBatch(payload.batchId, project.id, "office", payload);
     const office = await issueRunnerToken("Office", "office");
     const outside = await issueRunnerToken("Outside", "other");
-    const officeRow = (await authenticateRunnerToken(
-      `Bearer ${office.token}`
-    ))!;
-    const outsideRow = (await authenticateRunnerToken(
-      `Bearer ${outside.token}`
-    ))!;
+    const officeRow = requireValue(
+      await authenticateRunnerToken(`Bearer ${office.token}`)
+    );
+    const outsideRow = requireValue(
+      await authenticateRunnerToken(`Bearer ${outside.token}`)
+    );
     await runnersRepository.reportInstance(officeRow.id, officeRow.id, {
       version: "0.1.0",
       protocolVersion: RUNNER_PROTOCOL_VERSION,
@@ -734,9 +856,9 @@ describe("CI access and quality gates", () => {
     const restricted = await issueRunnerToken("Restricted", "office", [
       otherProject.id,
     ]);
-    const restrictedRow = (await authenticateRunnerToken(
-      `Bearer ${restricted.token}`
-    ))!;
+    const restrictedRow = requireValue(
+      await authenticateRunnerToken(`Bearer ${restricted.token}`)
+    );
     await runnersRepository.reportInstance(restrictedRow.id, restrictedRow.id, {
       version: "0.1.0",
       protocolVersion: RUNNER_PROTOCOL_VERSION,
@@ -766,16 +888,12 @@ describe("CI access and quality gates", () => {
       protocolVersion: RUNNER_PROTOCOL_VERSION,
       concurrency: 1,
     });
-    const firstJob = (await runnersRepository.claim(
-      officeRow,
-      60_000,
-      firstInstance
-    ))!;
-    const secondJob = (await runnersRepository.claim(
-      officeRow,
-      60_000,
-      secondInstance
-    ))!;
+    const firstJob = requireValue(
+      await runnersRepository.claim(officeRow, 60_000, firstInstance)
+    );
+    const secondJob = requireValue(
+      await runnersRepository.claim(officeRow, 60_000, secondInstance)
+    );
     assert.ok(
       firstJob && secondJob,
       "replicas sharing one token have independent capacity"
@@ -809,28 +927,35 @@ describe("CI access and quality gates", () => {
           protocolVersion: RUNNER_PROTOCOL_VERSION,
           concurrency: 1,
         }),
-      /disconnected/
+      /disconnected/u
     );
     const { claimRunnerWork } =
       await import("../../src/core/private-runner/queue");
     await assert.rejects(
       () =>
         claimRunnerWork(officeRow, new AbortController().signal, firstInstance),
-      /disconnected/
+      /disconnected/u
     );
     await runnersRepository.cancelBatch(secondBatch);
-    const lease = (await runnersRepository.claim(officeRow, 60_000))!;
+    const lease = requireValue(
+      await runnersRepository.claim(officeRow, 60_000)
+    );
     assert.equal(
       lease.attempts,
       0,
       "graceful disconnects do not consume attempts"
     );
-    assert.ok((await pendingRunnerBatchIds()).includes(payload.batchId));
+    assert.ok(
+      await (async () => {
+        const awaitedValue28495 = await pendingRunnerBatchIds();
+        return awaitedValue28495.includes(payload.batchId);
+      })()
+    );
     assert.equal(await runnersRepository.claim(officeRow, 60_000), null);
     const expiry = await heartbeatRunnerWork(
       lease.id,
       officeRow.id,
-      lease.leaseId!
+      requireValue(lease.leaseId)
     );
     assert.ok(Date.parse(expiry) > Date.now());
     await db
@@ -838,7 +963,9 @@ describe("CI access and quality gates", () => {
       .set({ leaseExpiresAt: new Date(0).toISOString() })
       .where(eq(runnerJobs.id, lease.id));
     await runnersRepository.reclaim();
-    const replacement = (await runnersRepository.claim(officeRow, 60_000))!;
+    const replacement = requireValue(
+      await runnersRepository.claim(officeRow, 60_000)
+    );
     assert.equal(replacement.id, lease.id);
     assert.equal(
       replacement.attempts,
@@ -847,11 +974,16 @@ describe("CI access and quality gates", () => {
     );
     assert.notEqual(replacement.leaseId, lease.leaseId);
     await assert.rejects(
-      () => heartbeatRunnerWork(lease.id, officeRow.id, lease.leaseId!),
-      /expired/
+      () =>
+        heartbeatRunnerWork(
+          lease.id,
+          officeRow.id,
+          requireValue(lease.leaseId)
+        ),
+      /expired/u
     );
     const completion = {
-      leaseId: lease.leaseId!,
+      leaseId: requireValue(lease.leaseId),
       durationMs: 100,
       processFailure: null,
       results: [
@@ -867,22 +999,25 @@ describe("CI access and quality gates", () => {
     };
     await assert.rejects(
       () => completeRunnerWork(lease.id, officeRow.id, completion),
-      /expired/
+      /expired/u
     );
     await assert.rejects(
       () =>
         completeRunnerWork(lease.id, officeRow.id, {
           ...completion,
-          leaseId: replacement.leaseId!,
+          leaseId: requireValue(replacement.leaseId),
           results: [],
         }),
-      /each Spec/
+      /each Spec/u
     );
-    await releaseRunnerWork(replacement.id, officeRow.id, replacement.leaseId!);
-    const gracefullyReleased = (await runnersRepository.claim(
-      officeRow,
-      60_000
-    ))!;
+    await releaseRunnerWork(
+      replacement.id,
+      officeRow.id,
+      requireValue(replacement.leaseId)
+    );
+    const gracefullyReleased = requireValue(
+      await runnersRepository.claim(officeRow, 60_000)
+    );
     assert.equal(
       gracefullyReleased.attempts,
       1,
@@ -891,7 +1026,7 @@ describe("CI access and quality gates", () => {
     await releaseRunnerWork(
       gracefullyReleased.id,
       officeRow.id,
-      gracefullyReleased.leaseId!
+      requireValue(gracefullyReleased.leaseId)
     );
     await runnersRepository.cancelBatch(payload.batchId);
     const revokeBatch = crypto.randomUUID();
@@ -899,16 +1034,22 @@ describe("CI access and quality gates", () => {
       ...payload,
       batchId: revokeBatch,
     });
-    const finalLease = (await runnersRepository.claim(officeRow, 60_000))!;
+    const finalLease = requireValue(
+      await runnersRepository.claim(officeRow, 60_000)
+    );
     await revokeRunnerToken(officeRow.id);
     assert.equal(
-      (await runnersRepository.job(finalLease.id))!.status,
+      requireValue(await runnersRepository.job(finalLease.id)).status,
       "queued"
     );
     await assert.rejects(
       () =>
-        heartbeatRunnerWork(finalLease.id, officeRow.id, finalLease.leaseId!),
-      /revoked/
+        heartbeatRunnerWork(
+          finalLease.id,
+          officeRow.id,
+          requireValue(finalLease.leaseId)
+        ),
+      /revoked/u
     );
     await db.delete(runnerJobs).where(eq(runnerJobs.id, finalLease.id));
     await revokeRunnerToken(outsideRow.id);
@@ -927,7 +1068,12 @@ describe("CI access and quality gates", () => {
       "Runner promotion",
       "http://app.private:4300"
     );
-    const configured = (await environmentsRepository.list(project.id))[0]!;
+    const configured = requireValue(
+      await (async () => {
+        const awaitedValue31882 = await environmentsRepository.list(project.id);
+        return awaitedValue31882[0];
+      })()
+    );
     await environmentsRepository.update(configured, {
       ...configured,
       executor: "runner",
@@ -1017,15 +1163,17 @@ describe("CI access and quality gates", () => {
       ],
     });
     const issued = await issueRunnerToken("Promotion runner", "promotion");
-    const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+    const token = requireValue(
+      await authenticateRunnerToken(`Bearer ${issued.token}`)
+    );
     await runnersRepository.reportInstance(token.id, token.id, {
       version: "0.1.0",
       protocolVersion: RUNNER_PROTOCOL_VERSION,
       concurrency: 1,
     });
-    const lease = (await runnersRepository.claim(token, 60_000))!;
+    const lease = requireValue(await runnersRepository.claim(token, 60_000));
     const completion = {
-      leaseId: lease.leaseId!,
+      leaseId: requireValue(lease.leaseId),
       durationMs: 200,
       processFailure: null,
       results: [
@@ -1074,13 +1222,19 @@ describe("CI access and quality gates", () => {
     };
     await completeRunnerWork(lease.id, token.id, completion);
     await completeRunnerWork(lease.id, token.id, completion);
-    assert.equal((await runsRepository.getRun(run.id))!.status, "passed");
-    assert.equal((await getRunBatch(batch.id))!.status, "passed");
+    assert.equal(
+      requireValue(await runsRepository.getRun(run.id)).status,
+      "passed"
+    );
+    assert.equal(requireValue(await getRunBatch(batch.id)).status, "passed");
     assert.equal(
       await specEnvironmentsRepository.awaiting(spec, environment.id),
       false
     );
-    assert.equal((await specsRepository.getSpec(spec.id))!.status, "passed");
+    assert.equal(
+      requireValue(await specsRepository.getSpec(spec.id)).status,
+      "passed"
+    );
     const evidence = await readRunEvidence(run.id);
     assert.deepEqual(
       evidence.steps.map((step: { file: string }) => step.file),
@@ -1101,8 +1255,16 @@ describe("CI access and quality gates", () => {
       "png screenshot"
     );
     assert.equal(evidence.diagnostics[0].message, "Private page loaded");
-    assert.ok(!(await pendingRunnerBatchIds()).includes(batch.id));
-    assert.equal((await runnersRepository.job(lease.id))!.status, "completed");
+    assert.ok(
+      !(await (async () => {
+        const awaitedValue37476 = await pendingRunnerBatchIds();
+        return awaitedValue37476.includes(batch.id);
+      })())
+    );
+    assert.equal(
+      requireValue(await runnersRepository.job(lease.id)).status,
+      "completed"
+    );
     await revokeRunnerToken(token.id);
   });
 
@@ -1137,13 +1299,13 @@ describe("CI access and quality gates", () => {
     assert.equal(result.results[0].status, "failed");
     assert.equal(result.results[0].awaitingDeploy, true);
     assert.equal(result.results[0].failsGate, false);
-    assert.match(junitResult(result), /<skipped message="Waiting for deploy"/);
-    assert.match(markdownResult(result), /Waiting for deploy/);
+    assert.match(junitResult(result), /<skipped message="Waiting for deploy"/u);
+    assert.match(markdownResult(result), /Waiting for deploy/u);
     const { htmlReport, runReport } = await import("../../src/core/ci/report");
-    assert.match(await htmlReport(result), /Waiting for deploy/);
+    assert.match(await htmlReport(result), /Waiting for deploy/u);
     assert.match(
       await runReport(run, { projectId: project.id, title: spec.title }),
-      /Waiting for deploy/
+      /Waiting for deploy/u
     );
   });
 
@@ -1171,17 +1333,38 @@ describe("CI access and quality gates", () => {
     assert.equal(all[0].id, first.batch.id);
     assert.deepEqual(
       all.slice(1).map((batch) => batch.id),
-      [...copies].reverse().map((batch) => batch.id)
+      [...copies].toReversed().map((batch) => batch.id)
     );
     assert.deepEqual(
-      (await listRunBatches(second.project.id)).map((batch) => batch.id),
+      await (async () => {
+        const awaitedValue40232 = await listRunBatches(second.project.id);
+        return awaitedValue40232.map((batch) => batch.id);
+      })(),
       [second.batch.id]
     );
-    assert.equal((await listCiBatches(first.project.id, 400)).length, 154);
-    assert.equal((await listRunBatches(first.project.id, 400)).length, 306);
-    const deleted = copies[0];
+    assert.equal(
+      await (async () => {
+        const awaitedValue40348 = await listCiBatches(first.project.id, 400);
+        return awaitedValue40348.length;
+      })(),
+      154
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue40424 = await listRunBatches(first.project.id, 400);
+        return awaitedValue40424.length;
+      })(),
+      306
+    );
+    const [deleted] = copies;
     await fs.rm(getRunBatchDirectory(deleted.id), { recursive: true });
-    assert.equal((await listRunBatches(first.project.id, 400)).length, 305);
+    assert.equal(
+      await (async () => {
+        const awaitedValue40604 = await listRunBatches(first.project.id, 400);
+        return awaitedValue40604.length;
+      })(),
+      305
+    );
     assert.equal(await getRunBatch(deleted.id), null);
   });
 
@@ -1223,7 +1406,7 @@ describe("CI access and quality gates", () => {
     });
     assert.equal(issue.status, 200);
     const { token } = (await issue.json()) as { token: string };
-    const row = (await ciRepository.token(first.id))!;
+    const row = requireValue(await ciRepository.token(first.id));
     assert.equal(row.tokenHash?.length, 64);
     assert.ok(!JSON.stringify(row).includes(token));
     assert.equal(await authenticateCiToken(first.id, `Bearer ${token}`), true);
@@ -1234,7 +1417,10 @@ describe("CI access and quality gates", () => {
     assert.equal(
       await authenticateCiToken(
         first.id,
-        `Bearer ${(await issueGitAccessToken(first.id)).token}`
+        `Bearer ${await (async () => {
+          const awaitedValue42456 = await issueGitAccessToken(first.id);
+          return awaitedValue42456.token;
+        })()}`
       ),
       false
     );
@@ -1253,12 +1439,16 @@ describe("CI access and quality gates", () => {
       false
     );
     assert.equal(
-      (
-        await app.request(`/projects/${first.id}/ci/token`, {
-          method: "POST",
-          headers: { Host: "localhost:4000" },
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue43019 = await app.request(
+          `/projects/${first.id}/ci/token`,
+          {
+            method: "POST",
+            headers: { Host: "localhost:4000" },
+          }
+        );
+        return awaitedValue43019.status;
+      })(),
       403
     );
   });
@@ -1282,16 +1472,17 @@ describe("CI access and quality gates", () => {
       commitSha: "abc",
     });
     assert.equal(
-      (
-        await app.request(url, {
+      await (async () => {
+        const awaitedValue43881 = await app.request(url, {
           method: "POST",
           headers: {
             Host: "external.test",
             "Content-Type": "application/json",
           },
           body,
-        })
-      ).status,
+        });
+        return awaitedValue43881.status;
+      })(),
       401
     );
     const headers = {
@@ -1299,28 +1490,46 @@ describe("CI access and quality gates", () => {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     };
-    for (let i = 0; i < 2; i++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let i = 0; i < 2; i += 1) {
       assert.equal(
-        (await app.request(url, { method: "POST", headers, body })).status,
+        await (async () => {
+          const awaitedValue44324 = await app.request(url, {
+            method: "POST",
+            headers,
+            body,
+          });
+          return awaitedValue44324.status;
+        })(),
         202
       );
     }
+    /* oxlint-enable no-await-in-loop */
     const signals = await stewardRepository.signals(project.id);
     assert.equal(signals.length, 1);
     assert.equal(signals[0]?.kind, "deployment");
     assert.equal(signals[0]?.payload.url, "https://1.1.1.1");
     assert.equal(
-      (
-        await app.request(`/projects/${project.id}/ci/token`, {
-          method: "POST",
-          headers,
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue44657 = await app.request(
+          `/projects/${project.id}/ci/token`,
+          {
+            method: "POST",
+            headers,
+          }
+        );
+        return awaitedValue44657.status;
+      })(),
       421
     );
     assert.equal(
-      (await app.request(`/ci/projects/${project.id}/client.mjs`, { headers }))
-        .status,
+      await (async () => {
+        const awaitedValue44836 = await app.request(
+          `/ci/projects/${project.id}/client.mjs`,
+          { headers }
+        );
+        return awaitedValue44836.status;
+      })(),
       404
     );
   });
@@ -1343,8 +1552,19 @@ describe("CI access and quality gates", () => {
         headers,
         body: JSON.stringify(body),
       });
-    assert.equal((await post({ url: "https://1.1.1.1" })).status, 400);
-    const production = (await environmentsRepository.list(project.id))[0]!;
+    assert.equal(
+      await (async () => {
+        const awaitedValue45648 = await post({ url: "https://1.1.1.1" });
+        return awaitedValue45648.status;
+      })(),
+      400
+    );
+    const production = requireValue(
+      await (async () => {
+        const awaitedValue45726 = await environmentsRepository.list(project.id);
+        return awaitedValue45726[0];
+      })()
+    );
     const save = await app.request(
       `/projects/${project.id}/environments/${production.id}`,
       {
@@ -1365,27 +1585,64 @@ describe("CI access and quality gates", () => {
     );
     assert.equal(save.status, 200);
     assert.equal(
-      (await save.json()).environment.allowedOrigins[0],
+      await (async () => {
+        const awaitedValue46375 = await save.json();
+        return awaitedValue46375.environment.allowedOrigins[0];
+      })(),
       "https://1.1.1.1"
     );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const target of [
       "http://127.0.0.1",
       "http://169.254.169.254",
       "http://[::1]",
     ]) {
-      assert.equal((await post({ url: target })).status, 400);
-      assert.equal((await post({ baseUrl: target }, "runs")).status, 400);
+      assert.equal(
+        await (async () => {
+          const awaitedValue46592 = await post({ url: target });
+          return awaitedValue46592.status;
+        })(),
+        400
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedValue46655 = await post({ baseUrl: target }, "runs");
+          return awaitedValue46655.status;
+        })(),
+        400
+      );
     }
-    for (let index = 0; index < 2; index++) {
-      assert.equal((await post({ url: "https://1.1.1.1" })).status, 202);
+    /* oxlint-enable no-await-in-loop */
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let index = 0; index < 2; index += 1) {
+      assert.equal(
+        await (async () => {
+          const awaitedValue46785 = await post({ url: "https://1.1.1.1" });
+          return awaitedValue46785.status;
+        })(),
+        202
+      );
     }
-    assert.equal((await stewardRepository.signals(project.id)).length, 1);
-    assert.equal((await post({ url: "https://8.8.8.8" })).status, 202);
-    const row = (await ciRepository.token(project.id))!;
+    /* oxlint-enable no-await-in-loop */
+    assert.equal(
+      await (async () => {
+        const awaitedValue46863 = await stewardRepository.signals(project.id);
+        return awaitedValue46863.length;
+      })(),
+      1
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue46938 = await post({ url: "https://8.8.8.8" });
+        return awaitedValue46938.status;
+      })(),
+      202
+    );
+    const row = requireValue(await ciRepository.token(project.id));
     const remaining = 30 - row.requestCount;
     const quota = await Promise.all(
       Array.from({ length: remaining + 5 }, () =>
-        ciRepository.consumeRequest(project.id, row.tokenHash!)
+        ciRepository.consumeRequest(project.id, requireValue(row.tokenHash))
       )
     );
     assert.equal(
@@ -1393,39 +1650,61 @@ describe("CI access and quality gates", () => {
       remaining,
       "concurrent POSTs cannot exceed the persisted limit"
     );
-    assert.equal((await post({})).status, 429);
+    assert.equal(
+      await (async () => {
+        const awaitedValue47415 = await post({});
+        return awaitedValue47415.status;
+      })(),
+      429
+    );
     const rotated = await issueCiToken(project.id);
     assert.equal(
-      (
-        await app.request(`/ci/projects/${project.id}/deploy`, {
-          method: "POST",
-          headers: { ...headers, Authorization: `Bearer ${rotated.token}` },
-          body: "{}",
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue47522 = await app.request(
+          `/ci/projects/${project.id}/deploy`,
+          {
+            method: "POST",
+            headers: { ...headers, Authorization: `Bearer ${rotated.token}` },
+            body: "{}",
+          }
+        );
+        return awaitedValue47522.status;
+      })(),
       202
     );
     const local = await projectsRepository.createProject(
       "Local app",
       "http://127.0.0.1:3000"
     );
-    const localEnvironment = (await environmentsRepository.list(local.id))[0]!;
+    const localEnvironment = requireValue(
+      await (async () => {
+        const awaitedValue47901 = await environmentsRepository.list(local.id);
+        return awaitedValue47901[0];
+      })()
+    );
     await environmentsRepository.update(localEnvironment, {
       ...localEnvironment,
       allowedOrigins: ["http://127.0.0.1:4000"],
     });
     const localHeaders = {
       ...headers,
-      Authorization: `Bearer ${(await issueCiToken(local.id)).token}`,
+      Authorization: `Bearer ${await (async () => {
+        const awaitedValue48172 = await issueCiToken(local.id);
+        return awaitedValue48172.token;
+      })()}`,
     };
     assert.equal(
-      (
-        await app.request(`/ci/projects/${local.id}/deploy`, {
-          method: "POST",
-          headers: localHeaders,
-          body: JSON.stringify({ url: "http://127.0.0.1:4000" }),
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue48243 = await app.request(
+          `/ci/projects/${local.id}/deploy`,
+          {
+            method: "POST",
+            headers: localHeaders,
+            body: JSON.stringify({ url: "http://127.0.0.1:4000" }),
+          }
+        );
+        return awaitedValue48243.status;
+      })(),
       202
     );
   });
@@ -1462,11 +1741,17 @@ describe("CI access and quality gates", () => {
     }
     await assert.rejects(
       () =>
-        resolveTarget("https://mixed.test", false, async () => [
-          { address: "8.8.8.8", family: 4 },
-          { address: "127.0.0.1", family: 4 },
-        ]),
-      /not allowed/
+        resolveTarget("https://mixed.test", false, () => {
+          try {
+            return Promise.resolve([
+              { address: "8.8.8.8", family: 4 },
+              { address: "127.0.0.1", family: 4 },
+            ]);
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        }),
+      /not allowed/u
     );
     const { projectRunPolicy } = await import("../../src/core/ci/targets");
     const reboundProject = await projectsRepository.createProject(
@@ -1475,24 +1760,41 @@ describe("CI access and quality gates", () => {
     );
     await assert.rejects(
       () =>
-        projectRunPolicy(reboundProject, reboundProject.baseUrl, async () => [
-          { address: "127.0.0.1", family: 4 },
-        ]),
-      /not allowed/,
+        projectRunPolicy(reboundProject, reboundProject.baseUrl, () => {
+          try {
+            return Promise.resolve([{ address: "127.0.0.1", family: 4 }]);
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        }),
+      /not allowed/u,
       "a public project hostname cannot turn on private access by changing its DNS"
     );
     let resolutions = 0;
-    const rebound = async () => [
-      { address: ++resolutions === 1 ? "8.8.8.8" : "127.0.0.1", family: 4 },
-    ];
+    const rebound = () => {
+      try {
+        return Promise.resolve([
+          {
+            address: (resolutions += 1) === 1 ? "8.8.8.8" : "127.0.0.1",
+            family: 4,
+          },
+        ]);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
     await resolveTarget("http://rebind.test", false, rebound);
     const blockedProxy = await createRunProxy([], rebound);
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
     const request = (proxy: string, target: string) =>
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       new Promise<number>((resolve, reject) => {
         http
           .get(proxy, { path: target }, (response) => {
             response.resume();
-            response.on("end", () => resolve(response.statusCode!));
+            response.on("end", () =>
+              resolve(requireValue(response.statusCode))
+            );
           })
           .on("error", reject);
       });
@@ -1513,16 +1815,21 @@ describe("CI access and quality gates", () => {
       receivedHost = req.headers.host ?? "";
       response.end("ok");
     });
-    await new Promise<void>((resolve) =>
-      target.listen(0, "127.0.0.1", resolve)
-    );
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise<void>((resolve) => {
+      target.listen(0, "127.0.0.1", resolve);
+    });
     let lookups = 0;
     const authority = `private-app.invalid:${(target.address() as AddressInfo).port}`;
     const pinned = await createRunProxy(
       [`http://${authority}`, `https://${authority}`],
-      async () => {
-        lookups++;
-        return [{ address: "127.0.0.1", family: 4 }];
+      () => {
+        try {
+          lookups += 1;
+          return Promise.resolve([{ address: "127.0.0.1", family: 4 }]);
+        } catch (error) {
+          return Promise.reject(error);
+        }
       }
     );
     try {
@@ -1537,6 +1844,7 @@ describe("CI access and quality gates", () => {
         1,
         "the checked hostname is not resolved again by the transport"
       );
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       const tunnel = await new Promise<string>((resolve, reject) => {
         const proxyUrl = new URL(pinned.server);
         const connect = http.request({
@@ -1560,12 +1868,15 @@ describe("CI access and quality gates", () => {
         connect.on("error", reject);
         connect.end();
       });
-      assert.match(tunnel, /200 OK/);
+      assert.match(tunnel, /200 OK/u);
       assert.equal(lookups, 2, "CONNECT also pins a single checked resolution");
     } finally {
       await pinned.close();
       target.closeAllConnections();
-      await new Promise<void>((resolve) => target.close(() => resolve()));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        target.close(() => resolve());
+      });
     }
   });
 
@@ -1573,22 +1884,38 @@ describe("CI access and quality gates", () => {
     const { project, run, spec, batch } = await fixture();
     const { token } = await issueCiToken(project.id);
     const headers = { Authorization: `Bearer ${token}` };
-    assert.equal((await app.request(`/ci/runs/${batch.id}`)).status, 401);
+    assert.equal(
+      await (async () => {
+        const awaitedValue53290 = await app.request(`/ci/runs/${batch.id}`);
+        return awaitedValue53290.status;
+      })(),
+      401
+    );
     const other = await projectsRepository.createProject(
       "Other",
       "https://example.com"
     );
     assert.equal(
-      (
-        await app.request(`/ci/runs/${batch.id}`, {
+      await (async () => {
+        const awaitedValue53480 = await app.request(`/ci/runs/${batch.id}`, {
           headers: {
-            Authorization: `Bearer ${(await issueCiToken(other.id)).token}`,
+            Authorization: `Bearer ${await (async () => {
+              const awaitedValue57443 = await issueCiToken(other.id);
+              return awaitedValue57443.token;
+            })()}`,
           },
-        })
-      ).status,
+        });
+        return awaitedValue53480.status;
+      })(),
       401
     );
-    assert.equal((await ciResult(batch)).complete, false);
+    assert.equal(
+      await (async () => {
+        const awaitedValue53706 = await ciResult(batch);
+        return awaitedValue53706.complete;
+      })(),
+      false
+    );
     const retry = await runsRepository.createRun({
       specId: spec.id,
       sourceHash: "source",
@@ -1598,51 +1925,76 @@ describe("CI access and quality gates", () => {
     await runsRepository.finishRun(retry.id, "passed", 200, null);
     await runsRepository.markFlaky(run.id, retry.id);
     await runsRepository.acknowledgeAutomation(run.id);
-    const result = await ciResult((await getRunBatch(batch.id))!);
+    const result = await ciResult(requireValue(await getRunBatch(batch.id)));
     assert.equal(result.status, "passed");
     assert.equal(result.qualityGate.flaky, 1);
     assert.equal(result.results[0]?.retryRunId, retry.id);
-    assert.match(junitResult(result), /A &lt;checkout&gt; \| test/);
+    assert.match(junitResult(result), /A &lt;checkout&gt; \| test/u);
     assert.match(
       junitResult(result),
-      /<skipped message="Flaky: passed on retry"/
+      /<skipped message="Flaky: passed on retry"/u
     );
-    assert.match(markdownResult(result), /A \\<checkout\\> \\\| test/);
+    assert.ok(
+      markdownResult(result).includes(String.raw`A \<checkout\> \| test`)
+    );
     assert.equal(
-      (
-        await ciResult({
+      await (async () => {
+        const awaitedValue54567 = await ciResult({
           ...batch,
           ci: {
             ...batch.ci,
             qualityGate: { failOnFlaky: true, failOnKnownBugs: false },
           },
-        })
-      ).status,
+        });
+        return awaitedValue54567.status;
+      })(),
       "failed"
     );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const format of ["junit", "markdown", "json"]) {
       assert.equal(
-        (
-          await app.request(`/ci/runs/${batch.id}?wait=true&format=${format}`, {
-            headers,
-          })
-        ).status,
+        await (async () => {
+          const awaitedValue54875 = await app.request(
+            `/ci/runs/${batch.id}?wait=true&format=${format}`,
+            {
+              headers,
+            }
+          );
+          return awaitedValue54875.status;
+        })(),
         200
       );
     }
-    const settings = (await (
-      await app.request(`/projects/${project.id}/ci`, {
-        headers: browserHeaders,
-      })
-    ).json()) as { token: unknown; batches: unknown[] };
+    /* oxlint-enable no-await-in-loop */
+    const settings = (await (async () => {
+      const awaitedValue55065 = await app.request(
+        `/projects/${project.id}/ci`,
+        {
+          headers: browserHeaders,
+        }
+      );
+      return awaitedValue55065.json();
+    })()) as { token: unknown; batches: unknown[] };
     assert.equal(settings.batches.length, 1);
     assert.ok(!JSON.stringify(settings).includes(token));
     const known = await fixture();
     await runsRepository.acknowledgeAutomation(known.run.id);
     known.batch.ci.knownBugSpecIds = [known.spec.id];
-    assert.equal((await ciResult(known.batch)).status, "passed");
+    assert.equal(
+      await (async () => {
+        const awaitedValue55494 = await ciResult(known.batch);
+        return awaitedValue55494.status;
+      })(),
+      "passed"
+    );
     known.batch.ci.qualityGate.failOnKnownBugs = true;
-    assert.equal((await ciResult(known.batch)).status, "failed");
+    assert.equal(
+      await (async () => {
+        const awaitedValue55615 = await ciResult(known.batch);
+        return awaitedValue55615.status;
+      })(),
+      "failed"
+    );
   });
 
   test("validates exclusive selection and credential-free HTTP preview URLs", () => {
@@ -1707,13 +2059,17 @@ describe("CI access and quality gates", () => {
   test("reports completed attempts while agent work is paused or still awaiting acknowledgement", async () => {
     const { settingsRepository } =
       await import("../../src/infra/repositories/settings");
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const global of [false, true]) {
       const { project, run, spec, batch } = await fixture();
       await stewardRepository.update(project.id, { paused: !global });
       await settingsRepository.setAgentPaused(global);
       try {
         assert.equal(
-          (await ciResult(batch)).complete,
+          await (async () => {
+            const awaitedValue57700 = await ciResult(batch);
+            return awaitedValue57700.complete;
+          })(),
           false,
           "a requested retry must still run"
         );
@@ -1724,7 +2080,10 @@ describe("CI access and quality gates", () => {
           retryOf: run.id,
         });
         assert.equal(
-          (await ciResult(batch)).complete,
+          await (async () => {
+            const awaitedValue58020 = await ciResult(batch);
+            return awaitedValue58020.complete;
+          })(),
           false,
           "an active retry is still pending"
         );
@@ -1733,7 +2092,7 @@ describe("CI access and quality gates", () => {
         assert.equal(failed.complete, true);
         assert.equal(failed.status, "failed");
         assert.equal(failed.qualityGate.failures, 1);
-        assert.match(junitResult(failed), /failures="1"/);
+        assert.match(junitResult(failed), /failures="1"/u);
         await runsRepository.finishRun(retry.id, "passed", 20, null);
         const flaky = await ciResult(batch);
         assert.equal(flaky.complete, true);
@@ -1743,11 +2102,17 @@ describe("CI access and quality gates", () => {
           1,
           "reporting cannot wait for the healer to acknowledge the result"
         );
-        assert.match(markdownResult(flaky), /Quality gate: passed/);
+        assert.match(markdownResult(flaky), /Quality gate: passed/u);
         await runsRepository.finishRun(run.id, "passed", 100, null);
         await runsRepository.deleteRun(retry.id);
         assert.equal(
-          (await ciResult({ ...batch, status: "passed" })).complete,
+          await (async () => {
+            const awaitedValue59042 = await ciResult({
+              ...batch,
+              status: "passed",
+            });
+            return awaitedValue59042.complete;
+          })(),
           true,
           "passing runs need no retry acknowledgement"
         );
@@ -1755,6 +2120,7 @@ describe("CI access and quality gates", () => {
         await settingsRepository.setAgentPaused(false);
       }
     }
+    /* oxlint-enable no-await-in-loop */
   });
 
   test("rejects busy CI triggers before preparing a batch, with atomic multi-Spec reservations", async () => {
@@ -1770,7 +2136,7 @@ describe("CI access and quality gates", () => {
     );
     await assert.rejects(
       () => acquireSpecLocks([other], { wait: false }),
-      /already in use/
+      /already in use/u
     );
     const release = await reservation;
     try {
@@ -1785,7 +2151,10 @@ describe("CI access and quality gates", () => {
       });
       assert.equal(response.status, 409);
       assert.equal(
-        (await runsRepository.listRuns(spec.id)).length,
+        await (async () => {
+          const awaitedValue60349 = await runsRepository.listRuns(spec.id);
+          return awaitedValue60349.length;
+        })(),
         1,
         "a rejected trigger creates no run"
       );
@@ -1804,7 +2173,7 @@ describe("CI access and quality gates", () => {
     const server = http.createServer((request, response) => {
       seen.push(request.headers.authorization ?? "");
       if (request.method === "POST") {
-        posts++;
+        posts += 1;
         response.statusCode = failTrigger ? 503 : 202;
         response.end(
           failTrigger
@@ -1830,7 +2199,7 @@ describe("CI access and quality gates", () => {
       } else if (request.url?.includes("format=html")) {
         response.end("<!doctype html><title>Specbook report</title>");
       } else {
-        polls++;
+        polls += 1;
         if (polls === 1) {
           response.statusCode = 503;
           response.end("Restarting");
@@ -1855,11 +2224,13 @@ describe("CI access and quality gates", () => {
         }
       }
     });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve)
-    );
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
     const directory = path.join(storage, "client-results");
     const runClient = () =>
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       new Promise<{ code: number | null; output: string }>(
         (resolve, reject) => {
           const child = spawn(
@@ -1907,15 +2278,15 @@ describe("CI access and quality gates", () => {
       );
       assert.match(
         await fs.readFile(path.join(directory, "junit.xml"), "utf-8"),
-        /failures="0"/
+        /failures="0"/u
       );
       assert.match(
         await fs.readFile(path.join(directory, "report.html"), "utf-8"),
-        /Specbook report/
+        /Specbook report/u
       );
       assert.match(
         await fs.readFile(path.join(directory, "summary.md"), "utf-8"),
-        /passed/
+        /passed/u
       );
       failTrigger = true;
       const rejected = await runClient();
@@ -1924,7 +2295,10 @@ describe("CI access and quality gates", () => {
       assert.equal(polls, 3, "a failed trigger never enters the result loop");
     } finally {
       server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
     }
   });
 
@@ -1947,8 +2321,9 @@ describe("CI access and quality gates", () => {
       author: { id: number };
       system: boolean;
     }[] = [];
+    // oxlint-disable-next-line complexity -- Keep the complete protocol scenario and its assertions together in this test.
     const server = http.createServer(async (request, response) => {
-      const target = new URL(request.url!, "http://localhost");
+      const target = new URL(requireValue(request.url), "http://localhost");
       let body = "";
       for await (const chunk of request) {
         body += chunk;
@@ -1962,8 +2337,8 @@ describe("CI access and quality gates", () => {
             !body.includes("gitlab-test-token")
         );
         if (request.method === "POST") {
-          triggerCount++;
-          environment = JSON.parse(body).environment;
+          triggerCount += 1;
+          ({ environment } = JSON.parse(body));
           response.statusCode = 202;
           response.end(
             JSON.stringify({
@@ -2008,7 +2383,7 @@ describe("CI access and quality gates", () => {
       if (!github) {
         assert.match(
           target.pathname,
-          /^\/gitlab\/projects\/123\//,
+          /^\/gitlab\/projects\/123\//u,
           "notes belong to the MR project even when the CI job runs in a fork"
         );
       }
@@ -2017,7 +2392,7 @@ describe("CI access and quality gates", () => {
         const start = (Number(target.searchParams.get("page")) - 1) * 100;
         response.end(JSON.stringify(list.slice(start, start + 100)));
       } else if (request.method === "POST") {
-        commentPosts++;
+        commentPosts += 1;
         if (failComment) {
           response.statusCode = 503;
           response.end("github-test-token gitlab-test-token");
@@ -2038,20 +2413,21 @@ describe("CI access and quality gates", () => {
         const index = list.findIndex((comment) => comment.id === id);
         assert.ok(index !== -1);
         if (request.method === "DELETE") {
-          commentDeletes++;
+          commentDeletes += 1;
           list.splice(index, 1);
           response.statusCode = 204;
           response.end();
         } else {
-          commentUpdates++;
-          list[index]!.body = JSON.parse(body).body;
+          commentUpdates += 1;
+          requireValue(list[index]).body = JSON.parse(body).body;
           response.end(JSON.stringify(list[index]));
         }
       }
     });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve)
-    );
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
     const api = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const marker = `<!-- specbook:${crypto.createHash("sha256").update(`${api}/specbook/11111111-1111-4111-8111-111111111111`).digest("hex")} -->`;
     comments.push({
@@ -2059,7 +2435,7 @@ describe("CI access and quality gates", () => {
       body: `${marker}\nHuman comment`,
       user: { login: "human" },
     });
-    for (let index = 0; index < 100; index++) {
+    for (let index = 0; index < 100; index += 1) {
       comments.push({
         id: index + 2,
         body: "Other comment",
@@ -2077,6 +2453,7 @@ describe("CI access and quality gates", () => {
       JSON.stringify({ pull_request: { number: 42 } })
     );
     const runClient = (env: Record<string, string> = {}, args: string[] = []) =>
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       new Promise<{ code: number | null; output: string }>(
         (resolve, reject) => {
           const child = spawn(
@@ -2144,9 +2521,9 @@ describe("CI access and quality gates", () => {
         102,
         "a human's matching marker is never overwritten"
       );
-      assert.match(comments.at(-1)!.body, /Specbook: passed/);
-      assert.ok(comments.at(-1)!.body.includes("[REDACTED]"));
-      comments.push({ ...comments.at(-1)!, id: 2000 });
+      assert.match(requireValue(comments.at(-1)).body, /Specbook: passed/u);
+      assert.ok(requireValue(comments.at(-1)).body.includes("[REDACTED]"));
+      comments.push({ ...requireValue(comments.at(-1)), id: 2000 });
       passing = false;
       const updated = await runClient({ SPECBOOK_COMMENT_PROVIDER: "github" });
       assert.equal(
@@ -2166,7 +2543,7 @@ describe("CI access and quality gates", () => {
         1,
         "only duplicate bot comments with this project marker are removed"
       );
-      assert.match(comments.at(-1)!.body, /Specbook: failed/);
+      assert.match(requireValue(comments.at(-1)).body, /Specbook: failed/u);
       passing = true;
       const gitlab = await runClient({
         SPECBOOK_COMMENT_PROVIDER: "gitlab",
@@ -2192,7 +2569,7 @@ describe("CI access and quality gates", () => {
         CI_JOB_TOKEN: "job-token",
       });
       assert.equal(rejected.code, 1);
-      assert.match(rejected.output, /CI_JOB_TOKEN cannot create or update/);
+      assert.match(rejected.output, /CI_JOB_TOKEN cannot create or update/u);
       assert.equal(
         triggerCount,
         beforeRejected,
@@ -2217,7 +2594,7 @@ describe("CI access and quality gates", () => {
       );
       assert.match(
         failed.output,
-        /comment API returned HTTP 503; reports are saved locally/
+        /comment API returned HTTP 503; reports are saved locally/u
       );
       assert.equal(
         commentPosts,
@@ -2236,7 +2613,7 @@ describe("CI access and quality gates", () => {
         path.join(directory, "summary.md"),
         "utf-8"
       );
-      assert.match(summary, /Specbook: passed/);
+      assert.match(summary, /Specbook: passed/u);
       assert.ok(
         !summary.includes("test-ci-token") &&
           !summary.includes("github-test-token") &&
@@ -2244,7 +2621,10 @@ describe("CI access and quality gates", () => {
       );
     } finally {
       server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
     }
   });
 
@@ -2276,7 +2656,7 @@ describe("CI access and quality gates", () => {
         !snippet.includes("https://specbook.example.com/api/"),
         provider
       );
-      assert.doesNotMatch(snippet, /npx (?:--yes )?specbook\b/);
+      assert.doesNotMatch(snippet, /npx (?:--yes )?specbook\b/u);
     }
     for (const provider of [
       "github",
@@ -2312,8 +2692,8 @@ describe("CI access and quality gates", () => {
         CI_COMMIT_BRANCH: branch,
         CI_OPEN_MERGE_REQUESTS: openMergeRequests,
       };
-      const rule = rules.find((rule) =>
-        rule.if.split(" || ").some((group) =>
+      const rule = rules.find((ruleInTest) =>
+        ruleInTest.if.split(" || ").some((group) =>
           group.split(" && ").every((expression) => {
             const [variable, expected] = expression.split(" == ");
             const value = values[variable.slice(1)];

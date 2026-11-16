@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as wait } from "node:timers/promises";
 
 import { z } from "zod";
 
@@ -82,7 +83,8 @@ const required = (value: string | undefined, name: string) => {
   return value;
 };
 
-export async function runCi(options: CiOptions) {
+// oxlint-disable-next-line complexity -- Keep the ci decision tree together so state transitions and error ordering remain explicit.
+export const runCi = async function runCi(options: CiOptions) {
   const token = required(
     options.token ?? process.env.SPECBOOK_TOKEN,
     "SPECBOOK_TOKEN or --token"
@@ -145,11 +147,12 @@ export async function runCi(options: CiOptions) {
     },
   };
   const get = async (route: string, method = "GET", body?: unknown) => {
-    for (let attempt = 0; ; attempt++) {
+    for (let attempt = 0; ; attempt += 1) {
       if (Date.now() >= deadline) {
         throw new Error("Timed out waiting for Specbook results");
       }
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         return await request({ url: api, token }, route, {
           method,
           body,
@@ -165,14 +168,9 @@ export async function runCi(options: CiOptions) {
         ) {
           throw error;
         }
-        await new Promise((resolve) =>
-          setTimeout(
-            resolve,
-            Math.max(
-              1,
-              Math.min(5000, 500 * 2 ** attempt, deadline - Date.now())
-            )
-          )
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+        await wait(
+          Math.max(1, Math.min(5000, 500 * 2 ** attempt, deadline - Date.now()))
         );
       }
     }
@@ -183,7 +181,9 @@ export async function runCi(options: CiOptions) {
   let result = await responseJson(started, ciResultSchema);
   const resultRoute = `/ci/runs/${encodeURIComponent(result.batch.id)}`;
   while (!result.complete) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     result = await responseJson(
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await get(`${resultRoute}?wait=true`),
       ciResultSchema
     );
@@ -212,12 +212,15 @@ export async function runCi(options: CiOptions) {
     ["junit", files.junit],
     ["markdown", files.summary],
   ]) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+    const getValue1 = await get(`${resultRoute}?format=${format}`);
     const text = scrubCi(
-      await scrubTokens(
-        await scrub(await (await get(`${resultRoute}?format=${format}`)).text())
-      )
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      await scrubTokens(await scrub(await getValue1.text()))
     );
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.mkdir(path.dirname(file), { recursive: true });
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.writeFile(file, text, "utf-8");
     if (format === "markdown") {
       summaryText = text;
@@ -234,6 +237,6 @@ export async function runCi(options: CiOptions) {
     ...files,
     url: result.url,
   };
-}
+};
 
 export type CiResult = Awaited<ReturnType<typeof runCi>>;

@@ -20,30 +20,18 @@ import { settingsRepository } from "../../repositories/settings";
 import { stewardRepository } from "../../repositories/steward";
 import { access } from "../access";
 
-const settingsSchema = z
-  .object({
-    autonomy: z.enum(["observe", "propose"]).optional(),
-    paused: z.boolean().optional(),
-  })
-  .strict()
-  .refine(
-    (input) => Object.keys(input).length > 0,
-    "Provide an automation setting or pause state"
-  );
-const taskSchema = z
-  .object({
-    kind: z.enum(["coverage", "explore"]),
-    goal: z.string().trim().min(1).max(6000).optional(),
-  })
-  .strict();
+const normalize = (value: string) =>
+  value.replaceAll(/\s+/gu, " ").trim().toLowerCase();
 
-export function createStewardRouter(): Hono {
+const check = async (id: string) => {
+  if (!(await projectsRepository.getProject(id))) {
+    throw new HTTPException(404, { message: "Project not found" });
+  }
+};
+
+export const createStewardRouter = function createStewardRouter(): Hono {
   const router = new Hono();
-  const check = async (id: string) => {
-    if (!(await projectsRepository.getProject(id))) {
-      throw new HTTPException(404, { message: "Project not found" });
-    }
-  };
+
   router.get("/projects/:id/steward", access("viewer"), async (c) => {
     const id = c.req.param("id");
     await check(id);
@@ -99,21 +87,23 @@ export function createStewardRouter(): Hono {
           : "Explore the app under the discovery browser policy and report reproducible bugs with evidence. Ask when access or a human decision is needed.");
       const intent = await withProjectLock(id, async () => {
         const jobs = await jobsRepository.list(id);
-        const normalize = (value: string) =>
-          value.replaceAll(/\s+/g, " ").trim().toLowerCase();
-        const existing = (await stewardRepository.intents(id)).find(
-          (row) =>
-            row.source === "user" &&
-            row.intent.kind === input.kind &&
-            normalize(row.intent.goal) === normalize(goal) &&
-            (row.status === "pending" ||
-              (row.status === "running" &&
-                jobs.some(
-                  (job) =>
-                    job.id === (row.jobId ?? row.id) &&
-                    ACTIVE_JOB_STATUSES.includes(job.status)
-                )))
-        );
+
+        const existing = await (async () => {
+          const awaitedValue3132 = await stewardRepository.intents(id);
+          return awaitedValue3132.find(
+            (row) =>
+              row.source === "user" &&
+              row.intent.kind === input.kind &&
+              normalize(row.intent.goal) === normalize(goal) &&
+              (row.status === "pending" ||
+                (row.status === "running" &&
+                  jobs.some(
+                    (job) =>
+                      job.id === (row.jobId ?? row.id) &&
+                      ACTIVE_JOB_STATUSES.includes(job.status)
+                  )))
+          );
+        })();
         return (
           existing ??
           enqueueIntent(
@@ -134,13 +124,34 @@ export function createStewardRouter(): Hono {
       });
       await processProjectSteward(id, false);
       const job = await jobsRepository.get(intent.jobId ?? intent.id);
-      const status = (await isAgentPaused(id))
-        ? "paused"
-        : job?.status === "running"
-          ? "running"
-          : "queued";
+      const status = await (async () => {
+        if (await isAgentPaused(id)) {
+          return "paused";
+        }
+        if (job?.status === "running") {
+          return "running";
+        }
+        return "queued";
+      })();
       return c.json({ intentId: intent.id, status }, 202);
     }
   );
   return router;
-}
+};
+
+const settingsSchema = z
+  .object({
+    autonomy: z.enum(["observe", "propose"]).optional(),
+    paused: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (input) => Object.keys(input).length > 0,
+    "Provide an automation setting or pause state"
+  );
+const taskSchema = z
+  .object({
+    kind: z.enum(["coverage", "explore"]),
+    goal: z.string().trim().min(1).max(6000).optional(),
+  })
+  .strict();

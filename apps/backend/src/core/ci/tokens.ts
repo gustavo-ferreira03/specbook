@@ -1,7 +1,7 @@
 import { ciRepository } from "../../infra/repositories/ci";
 import { issuePrefixedToken, verifyTokenHash } from "../accounts/tokens";
 
-export async function ciTokenInfo(projectId: string) {
+export const ciTokenInfo = async function ciTokenInfo(projectId: string) {
   const row = await ciRepository.token(projectId);
   return {
     configured: Boolean(row?.tokenHash),
@@ -9,9 +9,9 @@ export async function ciTokenInfo(projectId: string) {
     createdAt: row?.createdAt ?? null,
     lastUsedAt: row?.lastUsedAt ?? null,
   };
-}
+};
 
-export async function issueCiToken(projectId: string) {
+export const issueCiToken = async function issueCiToken(projectId: string) {
   const { token, hash, prefix } = issuePrefixedToken("sbci_");
   await ciRepository.setToken(projectId, {
     tokenHash: hash,
@@ -19,14 +19,14 @@ export async function issueCiToken(projectId: string) {
     createdAt: new Date().toISOString(),
   });
   return { token, access: await ciTokenInfo(projectId) };
-}
+};
 
-export async function authenticateCiToken(
+export const authenticateCiToken = async function authenticateCiToken(
   projectId: string,
   authorization?: string
 ): Promise<boolean> {
   const candidate = authorization?.match(
-    /^Bearer (sbci_[A-Za-z0-9_-]{43})$/
+    /^Bearer (?<capture1>sbci_[A-Za-z0-9_-]{43})$/u
   )?.[1];
   if (!candidate) {
     return false;
@@ -39,4 +39,4 @@ export async function authenticateCiToken(
     await ciRepository.touchToken(projectId, row.tokenHash);
   }
   return true;
-}
+};

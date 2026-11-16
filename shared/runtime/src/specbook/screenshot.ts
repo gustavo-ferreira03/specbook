@@ -4,11 +4,11 @@ import type { Frame, JSHandle, Locator, Page } from "@playwright/test";
 
 import { withEvidenceTimeout } from "./evidence-timeout.ts";
 
-function remaining(deadline: number): number {
+const remaining = function remaining(deadline: number): number {
   return Math.max(1, deadline - Date.now());
-}
+};
 
-async function captureWebP(
+const captureWebP = async function captureWebP(
   page: Page,
   file: string,
   deadline: number
@@ -20,11 +20,14 @@ async function captureWebP(
   try {
     const result = await withEvidenceTimeout(async () => {
       await Promise.all(
-        page
-          .frames()
-          .map((frame) =>
-            frame.evaluate(() => document.fonts.ready.then(() => undefined))
+        page.frames().map((frame) =>
+          frame.evaluate(() =>
+            // oxlint-disable-next-line promise/always-return -- This handler only cleans up or updates browser state; preserve its void result.
+            document.fonts.ready.then(() => {
+              /* Intentionally no work for this callback. */
+            })
           )
+        )
       );
       return session.send("Page.captureScreenshot", {
         format: "webp",
@@ -35,17 +38,21 @@ async function captureWebP(
     }, remaining(deadline));
     await fs.writeFile(file, Buffer.from(result.data, "base64"));
   } finally {
-    await withEvidenceTimeout(() => session.detach(), 1000).catch(
-      () => undefined
-    );
+    await withEvidenceTimeout(() => session.detach(), 1000).catch(() => {
+      /* Intentionally no work for this callback. */
+    });
   }
-}
+};
 
 const SAVED_STYLE = "data-specbook-evidence-style";
 
 // Keep input lengths while hiding their values.
-async function addMasks(mask: Locator, deadline: number): Promise<void> {
+const addMasks = async function addMasks(
+  mask: Locator,
+  deadline: number
+): Promise<void> {
   await mask.evaluateAll(
+    // oxlint-disable-next-line no-shadow -- This serialized browser callback receives copies of the outer parameters in its own realm.
     (elements, { deadline, saved }) => {
       if (Date.now() > deadline) {
         throw new Error("Browser evidence timed out");
@@ -60,9 +67,9 @@ async function addMasks(mask: Locator, deadline: number): Promise<void> {
     },
     { deadline, saved: SAVED_STYLE }
   );
-}
+};
 
-async function removeMasks(
+const removeMasks = async function removeMasks(
   frames: Frame[],
   marker: string,
   attribute: string
@@ -74,20 +81,27 @@ async function removeMasks(
         frames.map((frame) =>
           frame
             .evaluate(
+              // oxlint-disable-next-line no-shadow -- This serialized browser callback receives copies of the outer parameters in its own realm.
               ({ marker, attribute, saved }) => {
                 const roots: (Document | ShadowRoot)[] = [document];
                 for (const root of roots) {
                   for (const element of root.querySelectorAll("*")) {
-                    if (element.shadowRoot) roots.push(element.shadowRoot);
+                    if (element.shadowRoot) {
+                      roots.push(element.shadowRoot);
+                    }
                     if (
                       !element.getAttribute(attribute)?.startsWith(`${marker}-`)
-                    )
+                    ) {
                       continue;
+                    }
                     const style = element.getAttribute(saved);
                     if (style !== null) {
                       const previous = JSON.parse(style) as string | null;
-                      if (previous === null) element.removeAttribute("style");
-                      else element.setAttribute("style", previous);
+                      if (previous === null) {
+                        element.removeAttribute("style");
+                      } else {
+                        element.setAttribute("style", previous);
+                      }
                       element.removeAttribute(saved);
                     }
                     element.removeAttribute(attribute);
@@ -96,14 +110,21 @@ async function removeMasks(
               },
               { marker, attribute, saved: SAVED_STYLE }
             )
-            .catch(() => undefined)
+            .catch(() => {
+              /* Intentionally no work for this callback. */
+            })
         )
-      ).then(() => undefined),
+        // oxlint-disable-next-line promise/always-return -- This handler only cleans up or updates browser state; preserve its void result.
+      ).then(() => {
+        /* Intentionally no work for this callback. */
+      }),
     1000
-  ).catch(() => undefined);
-}
+  ).catch(() => {
+    /* Intentionally no work for this callback. */
+  });
+};
 
-export async function captureStepScreenshot(
+export const captureStepScreenshot = async function captureStepScreenshot(
   page: Page,
   file: string,
   secrets: string[]
@@ -120,30 +141,41 @@ export async function captureStepScreenshot(
           Promise.all(
             frames.map(async (frame) => {
               const saved = await frame.evaluateHandle(
+                // oxlint-disable-next-line no-shadow -- This serialized browser callback receives copies of the outer parameters in its own realm.
                 ({ secrets, deadline }) => {
+                  // oxlint-disable-next-line no-shadow -- This serialized browser callback receives copies of the outer parameters in its own realm.
                   const saved: { node: Text; value: string }[] = [];
                   const roots: (Document | ShadowRoot)[] = [document];
                   for (const root of roots) {
-                    for (const element of root.querySelectorAll("*"))
-                      if (element.shadowRoot) roots.push(element.shadowRoot);
+                    for (const element of root.querySelectorAll("*")) {
+                      if (element.shadowRoot) {
+                        roots.push(element.shadowRoot);
+                      }
+                    }
                     const walker = document.createTreeWalker(
                       root,
                       NodeFilter.SHOW_TEXT
                     );
                     while (walker.nextNode()) {
-                      if (Date.now() > deadline) break;
+                      if (Date.now() > deadline) {
+                        break;
+                      }
                       const node = walker.currentNode as Text;
                       if (
                         node.parentElement?.closest("script, style, textarea")
-                      )
+                      ) {
                         continue;
+                      }
                       const value = node.data;
-                      const masked = secrets.reduce(
-                        (text, secret) =>
-                          secret ? text.split(secret).join("••••") : text,
-                        value
-                      );
-                      if (masked === value) continue;
+                      let masked = value;
+                      for (const secret of secrets) {
+                        if (secret) {
+                          masked = masked.split(secret).join("••••");
+                        }
+                      }
+                      if (masked === value) {
+                        continue;
+                      }
                       saved.push({ node, value });
                       node.data = masked;
                     }
@@ -154,7 +186,10 @@ export async function captureStepScreenshot(
               );
               textMasks.push(saved);
             })
-          ).then(() => undefined),
+            // oxlint-disable-next-line promise/always-return -- This handler only cleans up or updates browser state; preserve its void result.
+          ).then(() => {
+            /* Intentionally no work for this callback. */
+          }),
         remaining(deadline)
       );
     }
@@ -172,15 +207,18 @@ export async function captureStepScreenshot(
               }[] = [];
               for (const root of roots) {
                 for (const element of root.querySelectorAll("*")) {
-                  if (element.shadowRoot) roots.push(element.shadowRoot);
+                  if (element.shadowRoot) {
+                    roots.push(element.shadowRoot);
+                  }
                   if (
                     !(
                       element instanceof HTMLInputElement ||
                       element instanceof HTMLTextAreaElement ||
                       element instanceof HTMLSelectElement
                     )
-                  )
+                  ) {
                     continue;
+                  }
                   elements.push(element);
                   candidates.push({
                     index: candidates.length,
@@ -195,6 +233,7 @@ export async function captureStepScreenshot(
             });
             try {
               const candidates = await state.evaluate(
+                // oxlint-disable-next-line no-shadow -- This serialized browser callback receives copies of the outer parameters in its own realm.
                 ({ candidates }) => candidates
               );
               const indices = candidates
@@ -205,6 +244,7 @@ export async function captureStepScreenshot(
                 )
                 .map((candidate) => candidate.index);
               await state.evaluate(
+                // oxlint-disable-next-line no-shadow -- This serialized browser callback receives copies of the outer parameters in its own realm.
                 ({ elements }, { indices, attribute, marker, deadline }) => {
                   if (Date.now() > deadline) {
                     return;
@@ -229,7 +269,9 @@ export async function captureStepScreenshot(
               await withEvidenceTimeout(
                 () => state.dispose(),
                 remaining(deadline)
-              ).catch(() => undefined);
+              ).catch(() => {
+                /* Intentionally no work for this callback. */
+              });
             }
           })
         ),
@@ -239,7 +281,10 @@ export async function captureStepScreenshot(
     await withEvidenceTimeout(
       () =>
         Promise.all(selected.map((mask) => addMasks(mask, deadline))).then(
-          () => undefined
+          // oxlint-disable-next-line promise/always-return -- This handler only cleans up or updates browser state; preserve its void result.
+          () => {
+            /* Intentionally no work for this callback. */
+          }
         ),
       remaining(deadline)
     );
@@ -260,15 +305,26 @@ export async function captureStepScreenshot(
             await saved
               .evaluate((items) => {
                 for (const { node, value } of items) {
-                  if (node.isConnected) node.data = value;
+                  if (node.isConnected) {
+                    node.data = value;
+                  }
                 }
               })
-              .catch(() => undefined);
-            await saved.dispose().catch(() => undefined);
+              .catch(() => {
+                /* Intentionally no work for this callback. */
+              });
+            await saved.dispose().catch(() => {
+              /* Intentionally no work for this callback. */
+            });
           })
-        ).then(() => undefined),
+          // oxlint-disable-next-line promise/always-return -- This handler only cleans up or updates browser state; preserve its void result.
+        ).then(() => {
+          /* Intentionally no work for this callback. */
+        }),
       1000
-    ).catch(() => undefined);
+    ).catch(() => {
+      /* Intentionally no work for this callback. */
+    });
     await removeMasks(frames, marker, attribute);
   }
-}
+};

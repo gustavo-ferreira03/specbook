@@ -6,41 +6,15 @@ import { projectContextsRepository } from "../../infra/repositories/project-cont
 import { runsRepository } from "../../infra/repositories/runs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { loadProjectState, projectPresentation } from "../jobs/presentation";
-import { specBatchOf, payloadOf, verificationOf } from "../jobs/schemas";
+import { specBatchOf, payloadOf } from "../jobs/schemas";
 import { getRunBatch } from "../runner/batch";
+import { requireValue } from "../utils/require-value";
 import { getActiveChatSession } from "./chat-registry";
 import { getPendingCredentialRequest } from "./credential-requests";
 import { extractText, openSession, toolStepsOf } from "./session-store";
 
-type Anchor = string | null | undefined;
-const artifactSchema = z.object({
-  id: z.string().uuid().optional(),
-  inboxId: z.string().uuid().optional(),
-  change: z.enum(["created", "updated"]).optional(),
-  runId: z.string().uuid().optional(),
-  specId: z.string().uuid().optional(),
-  evidence: z.record(z.string(), z.unknown()).optional(),
-});
-const resultTools = new Set([
-  "propose_spec_batch",
-  "start_background_task",
-  "run_spec",
-  "create_spec",
-  "update_spec",
-  "scan_page",
-]);
-const taskVerbs: Record<string, string> = {
-  coverage: "Find coverage for",
-  explore: "Explore",
-  triage: "Investigate",
-  failure_triage: "Investigate",
-  regenerate: "Repair",
-  run_specs: "Run",
-  generate_spec: "Create",
-  review: "Review",
-};
-
-async function artifactsForChat(chatId: string) {
+// oxlint-disable-next-line complexity -- Keep the results decision tree together so state transitions and error ordering remain explicit.
+const artifactsForChat = async function artifactsForChat(chatId: string) {
   const manager =
     getActiveChatSession(chatId)?.sessionManager ?? (await openSession(chatId));
   const artifacts: {
@@ -74,18 +48,21 @@ async function artifactsForChat(chatId: string) {
       if (parsed.success && parsed.data.inboxId) {
         abandonedBatchIds.add(parsed.data.inboxId);
       }
-    } catch {}
+    } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
+    }
   }
   const steps = toolStepsOf(manager);
   const calls = new Map<string, (typeof steps)[number] | undefined>();
   for (const entry of branch) {
     if (entry.type === "message" && entry.message.role === "assistant") {
       for (const part of entry.message.content) {
-        if (part.type === "toolCall")
+        if (part.type === "toolCall") {
           calls.set(
             part.id,
             steps.find((step) => step.id === `${entry.id}:${part.id}`)
           );
+        }
       }
     }
     if (
@@ -112,16 +89,19 @@ async function artifactsForChat(chatId: string) {
         afterMessageId: step?.afterMessageId,
         value: parsed.data,
       });
-    } catch {}
+    } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
+    }
   }
   for (const artifact of artifacts) {
-    if (artifact.toolName === "propose_spec_batch" && artifact.value.inboxId)
+    if (artifact.toolName === "propose_spec_batch" && artifact.value.inboxId) {
       abandonedBatchIds.delete(artifact.value.inboxId);
+    }
   }
   return { artifacts, abandonedBatchIds };
-}
+};
 
-function taskStatus(
+const taskStatus = function taskStatus(
   status: string,
   paused: boolean,
   retryAt?: string | null
@@ -158,9 +138,9 @@ function taskStatus(
     return "failed";
   }
   return "stopped";
-}
+};
 
-function scanNote(
+const scanNote = function scanNote(
   id: string,
   evidence: Record<string, unknown>,
   createdAt: string,
@@ -192,9 +172,10 @@ function scanNote(
     updatedAt: createdAt,
     afterMessageId,
   };
-}
+};
 
-export async function chatResults(chatId: string) {
+// oxlint-disable-next-line complexity -- Keep the results decision tree together so state transitions and error ordering remain explicit.
+export const chatResults = async function chatResults(chatId: string) {
   const chat = await chatsRepository.getChatRow(chatId);
   if (!chat) {
     return null;
@@ -217,10 +198,11 @@ export async function chatResults(chatId: string) {
   );
   for (const intent of state.intents) {
     if (
-      intent.sourceChatId === chatId ||
-      intent.key.startsWith(`chat:${chatId}:`)
+      (intent.sourceChatId === chatId ||
+        intent.key.startsWith(`chat:${chatId}:`)) &&
+      intent.jobId
     ) {
-      if (intent.jobId) linkedJobs.add(intent.jobId);
+      linkedJobs.add(intent.jobId);
     }
   }
   const scopedItems = await jobsRepository.itemsForChat(
@@ -239,7 +221,9 @@ export async function chatResults(chatId: string) {
     for (const item of pendingItems) {
       nextJobs.add(item.jobId);
       for (const candidate of specBatchOf(item)?.candidates ?? []) {
-        if (candidate.jobId) nextJobs.add(candidate.jobId);
+        if (candidate.jobId) {
+          nextJobs.add(candidate.jobId);
+        }
       }
       const regression = state.intents.find(
         (intent) => intent.id === payloadOf(item).regressionIntentId
@@ -255,12 +239,13 @@ export async function chatResults(chatId: string) {
     for (const id of ids) {
       loadedJobs.add(id);
     }
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     pendingItems = await jobsRepository.itemsForJobs(chat.projectId, ids);
     for (const item of pendingItems) {
       relatedItems.set(item.id, item);
     }
   }
-  const rawItems = [...relatedItems.values()].sort((a, b) =>
+  const rawItems = [...relatedItems.values()].toSorted((a, b) =>
     b.createdAt.localeCompare(a.createdAt)
   );
   const allItems = rawItems.filter((item) => {
@@ -315,20 +300,23 @@ export async function chatResults(chatId: string) {
       .map((job) => job.id)
   );
   for (const intent of intents) {
-    if (intent.jobId) jobIds.add(intent.jobId);
+    if (intent.jobId) {
+      jobIds.add(intent.jobId);
+    }
   }
   for (const item of allItems.filter(
-    (item) => belongs(item.payload) || itemAnchors.has(item.id)
+    (itemValue) => belongs(itemValue.payload) || itemAnchors.has(itemValue.id)
   )) {
     jobIds.add(item.jobId);
   }
   const jobAnchors = new Map<string, Anchor>();
   for (const intent of intents) {
-    if (intent.jobId)
+    if (intent.jobId) {
       jobAnchors.set(intent.jobId, intentAnchors.get(intent.id));
+    }
   }
   for (const item of allItems.filter(
-    (item) => belongs(item.payload) || jobIds.has(item.jobId)
+    (itemValue) => belongs(itemValue.payload) || jobIds.has(itemValue.jobId)
   )) {
     const anchor = itemAnchors.has(item.id)
       ? itemAnchors.get(item.id)
@@ -344,7 +332,7 @@ export async function chatResults(chatId: string) {
     }
     if (typeof payloadOf(item).regressionIntentId === "string") {
       const intent = state.intents.find(
-        (intent) => intent.id === payloadOf(item).regressionIntentId
+        (intentValue) => intentValue.id === payloadOf(item).regressionIntentId
       );
       if (intent && !intents.some((row) => row.id === intent.id)) {
         intents.push(intent);
@@ -388,7 +376,7 @@ export async function chatResults(chatId: string) {
       afterMessageId: anchorForItem(item),
     }));
   for (const artifact of artifacts) {
-    if (artifact.toolName === "scan_page" && artifact.value.evidence)
+    if (artifact.toolName === "scan_page" && artifact.value.evidence) {
       notes.push(
         scanNote(
           artifact.id,
@@ -398,10 +386,11 @@ export async function chatResults(chatId: string) {
           state.clean
         )
       );
+    }
   }
   const actions = await jobsRepository.actionsByJob(jobs.map((job) => job.id));
   for (const job of jobs) {
-    for (const action of actions.get(job.id) ?? [])
+    for (const action of actions.get(job.id) ?? []) {
       if (action.action === "page_scan") {
         try {
           notes.push(
@@ -413,20 +402,25 @@ export async function chatResults(chatId: string) {
               state.clean
             )
           );
-        } catch {}
+        } catch {
+          /* Cleanup is best effort after the operation has completed or failed. */
+        }
       }
+    }
   }
   const paused =
     presentation.summary.paused || presentation.summary.globallyPaused;
   const taskTitle = (kind: string, goal: string, specId?: string | null) => {
-    const spec = specId ? state.specs.find((spec) => spec.id === specId) : null;
+    const spec = specId
+      ? state.specs.find((specValue) => specValue.id === specId)
+      : null;
     return state
       .clean(
         spec
           ? `${taskVerbs[kind] ?? "Review"} “${spec.title}”`
-          : goal.split("\n")[0]!
+          : requireValue(goal.split("\n")[0])
       )
-      .replaceAll(/\s+/g, " ")
+      .replaceAll(/\s+/gu, " ")
       .trim()
       .slice(0, 160);
   };
@@ -441,7 +435,7 @@ export async function chatResults(chatId: string) {
     updatedAt: string;
     afterMessageId?: Anchor;
   }[] = intents.map((intent) => {
-    const job = jobs.find((job) => job.id === intent.jobId);
+    const job = jobs.find((jobValue) => jobValue.id === intent.jobId);
     const bug = items.find(
       (item) =>
         item.kind === "bug_report" &&
@@ -473,14 +467,14 @@ export async function chatResults(chatId: string) {
     };
   });
   for (const job of jobs.filter(
-    (job) =>
-      job.kind !== "review" &&
-      !intents.some((intent) => intent.jobId === job.id)
+    (jobValue) =>
+      jobValue.kind !== "review" &&
+      !intents.some((intent) => intent.jobId === jobValue.id)
   )) {
     const candidate = inbox
       .filter((item) => item.kind === "spec_batch")
       .flatMap((item) => specBatchOf(item)?.candidates ?? [])
-      .find((candidate) => candidate.jobId === job.id);
+      .find((candidateValue) => candidateValue.jobId === job.id);
     tasks.push({
       id: job.id,
       kind: job.kind,
@@ -498,8 +492,11 @@ export async function chatResults(chatId: string) {
   const batchIds = new Map<string, string>();
   for (const intent of intents) {
     if (intent.batchId) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const batch = await getRunBatch(intent.batchId);
-      if (batch?.projectId !== chat.projectId) continue;
+      if (batch?.projectId !== chat.projectId) {
+        continue;
+      }
       for (const spec of batch.specs) {
         runAnchors.set(spec.runId, intentAnchors.get(intent.id));
         batchIds.set(spec.runId, batch.id);
@@ -507,16 +504,22 @@ export async function chatResults(chatId: string) {
     }
   }
   for (const job of jobs) {
-    if (job.runId) runAnchors.set(job.runId, jobAnchors.get(job.id));
-  }
-  for (const item of items.filter((item) => item.kind === "spec_batch")) {
-    const batch = specBatchOf(item);
-    for (const candidate of batch?.candidates ?? []) {
-      if (candidate.runId) runAnchors.set(candidate.runId, item.afterMessageId);
+    if (job.runId) {
+      runAnchors.set(job.runId, jobAnchors.get(job.id));
     }
   }
-  const runs = (
-    await Promise.all(
+  for (const item of items.filter(
+    (itemValue) => itemValue.kind === "spec_batch"
+  )) {
+    const batch = specBatchOf(item);
+    for (const candidate of batch?.candidates ?? []) {
+      if (candidate.runId) {
+        runAnchors.set(candidate.runId, item.afterMessageId);
+      }
+    }
+  }
+  const runs = await (async () => {
+    const awaitedValue15662 = await Promise.all(
       [...runAnchors].map(async ([id, afterMessageId]) => {
         const run = await runsRepository.getRun(id);
         const spec = run ? await specsRepository.getSpec(run.specId) : null;
@@ -537,12 +540,13 @@ export async function chatResults(chatId: string) {
           afterMessageId,
         };
       })
-    )
-  )
-    .filter((run) => run !== null)
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-  const specs = (
-    await Promise.all(
+    );
+    return awaitedValue15662
+      .filter((run) => run !== null)
+      .toSorted((a, b) => a.startedAt.localeCompare(b.startedAt));
+  })();
+  const specs = await (async () => {
+    const awaitedValue16530 = await Promise.all(
       [...specArtifacts].map(async ([id, artifact]) => {
         const spec = await specsRepository.getSpec(id);
         return spec?.projectId === chat.projectId
@@ -561,8 +565,9 @@ export async function chatResults(chatId: string) {
             }
           : null;
       })
-    )
-  ).filter((spec) => spec !== null);
+    );
+    return awaitedValue16530.filter((spec) => spec !== null);
+  })();
   const credentialRequests = [chatId, ...jobs.map((job) => job.chatId)].flatMap(
     (id) => {
       const request = getPendingCredentialRequest(id);
@@ -588,4 +593,32 @@ export async function chatResults(chatId: string) {
     credentialRequests,
     contextRevision: revision?.projectId === chat.projectId ? revision : null,
   };
-}
+};
+
+type Anchor = string | null | undefined;
+const artifactSchema = z.object({
+  id: z.string().uuid().optional(),
+  inboxId: z.string().uuid().optional(),
+  change: z.enum(["created", "updated"]).optional(),
+  runId: z.string().uuid().optional(),
+  specId: z.string().uuid().optional(),
+  evidence: z.record(z.string(), z.unknown()).optional(),
+});
+const resultTools = new Set([
+  "propose_spec_batch",
+  "start_background_task",
+  "run_spec",
+  "create_spec",
+  "update_spec",
+  "scan_page",
+]);
+const taskVerbs: Record<string, string> = {
+  coverage: "Find coverage for",
+  explore: "Explore",
+  triage: "Investigate",
+  failure_triage: "Investigate",
+  regenerate: "Repair",
+  run_specs: "Run",
+  generate_spec: "Create",
+  review: "Review",
+};

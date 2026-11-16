@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function ScrollArea({
+const ScrollArea = function ScrollArea({
   className,
   children,
   orientation = "vertical",
@@ -33,9 +33,9 @@ function ScrollArea({
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   );
-}
+};
 
-function ScrollBar({
+const ScrollBar = function ScrollBar({
   className,
   orientation = "vertical",
   ...props
@@ -56,6 +56,6 @@ function ScrollBar({
       />
     </ScrollAreaPrimitive.ScrollAreaScrollbar>
   );
-}
+};
 
 export { ScrollArea, ScrollBar };

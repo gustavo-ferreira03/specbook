@@ -3,8 +3,18 @@ import crypto from "node:crypto";
 import { and, asc, desc, eq, isNull, lt, lte } from "drizzle-orm";
 
 import { decryptSecret, encryptSecret } from "../../core/credentials/crypto";
+import { requireValue } from "../../core/utils/require-value";
 import { db, runBatch } from "../db/client";
 import { projectAutomations, webhookNotifications } from "../db/schema";
+
+const withPlainWebhook = function withPlainWebhook(
+  row: ProjectAutomation
+): ProjectAutomation {
+  return {
+    ...row,
+    webhookUrl: row.webhookUrl ? decryptSecret(row.webhookUrl) : null,
+  };
+};
 
 export type ProjectAutomation = typeof projectAutomations.$inferSelect;
 export type WebhookNotification = typeof webhookNotifications.$inferSelect;
@@ -22,13 +32,6 @@ export const MAX_WEBHOOK_ATTEMPTS = 5;
 const RETRY_DELAYS = [10_000, 30_000, 120_000, 600_000];
 const now = () => new Date().toISOString();
 
-function withPlainWebhook(row: ProjectAutomation): ProjectAutomation {
-  return {
-    ...row,
-    webhookUrl: row.webhookUrl ? decryptSecret(row.webhookUrl) : null,
-  };
-}
-
 export const schedulesRepository = {
   async get(projectId: string): Promise<ProjectAutomation | null> {
     const [row] = await db
@@ -38,7 +41,7 @@ export const schedulesRepository = {
     return row ? withPlainWebhook(row) : null;
   },
   async list() {
-    return db
+    return await db
       .select({ projectId: projectAutomations.projectId })
       .from(projectAutomations);
   },
@@ -59,7 +62,7 @@ export const schedulesRepository = {
       .values({ projectId, ...patch })
       .onConflictDoUpdate({ target: projectAutomations.projectId, set: patch })
       .returning();
-    return withPlainWebhook(row!);
+    return withPlainWebhook(requireValue(row));
   },
   async update(
     projectId: string,
@@ -140,7 +143,7 @@ export const schedulesRepository = {
     ]);
   },
   async notifications(projectId: string) {
-    return db
+    return await db
       .select({
         id: webhookNotifications.id,
         batchId: webhookNotifications.batchId,
@@ -157,7 +160,7 @@ export const schedulesRepository = {
       .limit(30);
   },
   async pendingNotifications(at: string): Promise<WebhookNotification[]> {
-    return db
+    return await db
       .select()
       .from(webhookNotifications)
       .where(
@@ -209,7 +212,7 @@ export const schedulesRepository = {
         nextAttemptAt:
           error && row.attempts < MAX_WEBHOOK_ATTEMPTS
             ? new Date(
-                Date.parse(at) + RETRY_DELAYS[row.attempts - 1]!
+                Date.parse(at) + requireValue(RETRY_DELAYS[row.attempts - 1])
               ).toISOString()
             : null,
       })

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { storageRoot } from "../paths";
 
-export async function acquireStorageLock(
+export const acquireStorageLock = async function acquireStorageLock(
   root = storageRoot
 ): Promise<() => Promise<void>> {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
@@ -20,10 +20,12 @@ export async function acquireStorageLock(
     ],
     { stdio: ["pipe", "pipe", "pipe"] }
   );
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
   const exited = new Promise<void>((resolve) => {
     child.once("exit", () => resolve());
     child.once("error", () => resolve());
   });
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
   await new Promise<void>((resolve, reject) => {
     child.once("error", () =>
       reject(
@@ -47,4 +49,4 @@ export async function acquireStorageLock(
     child.stdin.end();
     await exited;
   };
-}
+};

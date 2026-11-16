@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as wait } from "node:timers/promises";
 
 import { inspectElement, redactUrls } from "@specbook/runtime/browser";
 import { createRunProxy } from "@specbook/runtime/network/proxy";
@@ -19,6 +20,7 @@ import { ensureChromium } from "./browsers.js";
 import { resolveSecret, scrub, secretOrigins } from "./credentials.js";
 import { checkPageLocators } from "./locators.js";
 import type { LocatorCheck } from "./locators.js";
+import { requiredValue } from "./values";
 
 const requestSchema = z
   .object({
@@ -50,7 +52,9 @@ export interface BrowseArgs {
   headed?: boolean;
 }
 
-async function socketPath(workspace: string): Promise<string> {
+const socketPath = async function socketPath(
+  workspace: string
+): Promise<string> {
   const root = await fs.realpath(workspace);
   const user = process.getuid?.() ?? os.userInfo().username;
   const key = createHash("sha256")
@@ -72,13 +76,14 @@ async function socketPath(workspace: string): Promise<string> {
   }
   await fs.chmod(directory, 0o700);
   return path.join(directory, `${key}.sock`);
-}
+};
 
-async function send(
+const send = async function send(
   socket: string,
   request: z.infer<typeof requestSchema>
 ): Promise<unknown> {
-  return new Promise((resolve, reject) => {
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
+  return await new Promise((resolve, reject) => {
     const connection = net.createConnection(socket);
     let response = "";
     connection.setTimeout(120_000, () =>
@@ -117,15 +122,15 @@ async function send(
       }
     });
   });
-}
+};
 
-function unavailable(error: unknown): boolean {
+const unavailable = function unavailable(error: unknown): boolean {
   return ["ENOENT", "ECONNREFUSED", "EPIPE"].includes(
     (error as NodeJS.ErrnoException)?.code ?? ""
   );
-}
+};
 
-export async function browse(
+export const browse = async function browse(
   action: string,
   args: BrowseArgs
 ): Promise<unknown> {
@@ -169,7 +174,7 @@ export async function browse(
     process.execPath,
     [
       ...process.execArgv,
-      process.argv[1]!,
+      requiredValue(process.argv[1]),
       "--browse-daemon",
       args.workspace,
       args.baseUrl,
@@ -182,12 +187,14 @@ export async function browse(
     startupError = error;
   });
   child.unref();
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     if (startupError) {
       throw startupError;
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+    await wait(100);
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       return await send(socket, request);
     } catch (error) {
       if (!unavailable(error)) {
@@ -198,9 +205,9 @@ export async function browse(
   throw new Error(
     "The browser session could not start. Check that the CLI installation is complete."
   );
-}
+};
 
-export async function checkLiveLocators(
+export const checkLiveLocators = async function checkLiveLocators(
   workspace: string,
   source: string
 ): Promise<LocatorCheck[]> {
@@ -215,9 +222,9 @@ export async function checkLiveLocators(
     }
     throw error;
   }
-}
+};
 
-export async function startBrowserDaemon(
+export const startBrowserDaemon = async function startBrowserDaemon(
   workspace: string,
   baseUrl: string,
   headed = false
@@ -235,8 +242,8 @@ export async function startBrowserDaemon(
   let closing = false;
   let socketRemoved = false;
   const connections = new Set<net.Socket>();
-  const safe = async (value: unknown): Promise<unknown> => {
-    value = redactUrls(value);
+  const safe = async (input: unknown): Promise<unknown> => {
+    const value = redactUrls(input);
     if (Array.isArray(value)) {
       return Promise.all(value.map(safe));
     }
@@ -273,19 +280,33 @@ export async function startBrowserDaemon(
     }
     closing = true;
     clearTimeout(idle);
-    await browser?.close().catch(() => undefined);
-    await proxy?.close().catch(() => undefined);
+    await browser?.close().catch(() => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+      /* The caller owns cancellation or reports the failure separately. */
+    });
+    await proxy?.close().catch(() => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+      /* The caller owns cancellation or reports the failure separately. */
+    });
     for (const connection of connections) {
       connection.destroy();
     }
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
     if (!socketRemoved && process.platform !== "win32") {
-      await fs.unlink(socket).catch(() => undefined);
+      await fs.unlink(socket).catch(() => {
+        /* No action is needed until this callback is replaced or invoked by its owner. */
+        /* The caller owns cancellation or reports the failure separately. */
+      });
     }
   };
   const touch = () => {
     clearTimeout(idle);
-    idle = setTimeout(() => void shutdown(), 30 * 60_000);
+    idle = setTimeout(() => {
+      shutdown();
+    }, 30 * 60_000);
     idle.unref();
   };
   const assertOrigin = () => {
@@ -302,8 +323,8 @@ export async function startBrowserDaemon(
     return page;
   };
   const reference = async (ref: string): Promise<Locator> => {
-    const clean = ref.replace(/^aria-ref=/, "");
-    if (!/^(?:f\d+)?e\d+$/.test(clean) || !refs.has(clean)) {
+    const clean = ref.replace(/^aria-ref=/u, "");
+    if (!/^(?:f\d+)?e\d+$/u.test(clean) || !refs.has(clean)) {
       throw new Error(
         "The element ref is stale or missing. Take a fresh browser snapshot."
       );
@@ -312,6 +333,7 @@ export async function startBrowserDaemon(
     const matches: Locator[] = [];
     for (const frame of current.frames()) {
       const locator = frame.locator(`aria-ref=${clean}`);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       if ((await locator.count().catch(() => 0)) === 1) {
         matches.push(locator);
       }
@@ -321,7 +343,7 @@ export async function startBrowserDaemon(
         "The element ref is stale or ambiguous. Take a fresh browser snapshot."
       );
     }
-    return matches[0]!;
+    return requiredValue(matches[0]);
   };
   const snapshot = async () => {
     const current = assertOrigin();
@@ -329,14 +351,18 @@ export async function startBrowserDaemon(
       .locator("body")
       .ariaSnapshot({ mode: "ai", timeout: 10_000 });
     refs = new Set(
-      [...tree.matchAll(/\[ref=((?:f\d+)?e\d+)\]/g)].map((match) => match[1]!)
+      [...tree.matchAll(/\[ref=(?<segment1>(?:f\d+)?e\d+)\]/gu)].map((match) =>
+        requiredValue(match[1])
+      )
     );
     for (const line of tree.split("\n")) {
-      const ref = line.match(/\[ref=((?:f\d+)?e\d+)\]/)?.[1];
-      if (!ref || !/\b(textbox|searchbox|combobox)\b/.test(line)) {
+      const ref = line.match(/\[ref=(?<segment1>(?:f\d+)?e\d+)\]/u)?.[1];
+      if (!ref || !/\b(?<segment1>textbox|searchbox|combobox)\b/u.test(line)) {
         continue;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const target = await reference(ref).catch(() => null);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const secretField = await target
         ?.evaluate((element) =>
           Boolean(
@@ -348,7 +374,10 @@ export async function startBrowserDaemon(
       if (secretField) {
         tree = tree.replace(
           line,
-          line.replace(/(\[ref=[^\]]+\][^:]*)(?::.*)?$/, "$1: [redacted]")
+          line.replace(
+            /(?<segment1>\[ref=[^\]]+\][^:]*)(?::.*)?$/u,
+            "$1: [redacted]"
+          )
         );
       }
     }
@@ -365,8 +394,14 @@ export async function startBrowserDaemon(
     if (page && !page.isClosed()) {
       return;
     }
-    await browser?.close().catch(() => undefined);
-    await proxy?.close().catch(() => undefined);
+    await browser?.close().catch(() => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+      /* The caller owns cancellation or reports the failure separately. */
+    });
+    await proxy?.close().catch(() => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+      /* The caller owns cancellation or reports the failure separately. */
+    });
     await ensureChromium();
     proxy = await createRunProxy(policy.allowPrivate ? policy.origins : []);
     browser = await chromium.launch({
@@ -408,13 +443,22 @@ export async function startBrowserDaemon(
         refs.clear();
       }
     });
-    page.on("dialog", (dialog) => void dialog.dismiss().catch(() => undefined));
+    page.on("dialog", (dialog) => {
+      dialog.dismiss().catch(() => {
+        /* No action is needed until this callback is replaced or invoked by its owner. */
+        /* Dialogs may close with the browser. */
+      });
+    });
     context.on("page", (other) => {
       if (other !== page) {
-        void other.close().catch(() => undefined);
+        other.close().catch(() => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+          /* The caller owns cancellation or reports the failure separately. */
+        });
       }
     });
   };
+  // oxlint-disable-next-line complexity -- Keep the browser decision tree together so state transitions and error ordering remain explicit.
   const execute = async (
     request: z.infer<typeof requestSchema>
   ): Promise<unknown> => {
@@ -422,7 +466,10 @@ export async function startBrowserDaemon(
     if (request.action === "close") {
       server.close();
       if (process.platform !== "win32") {
-        await fs.unlink(socket).catch(() => undefined);
+        await fs.unlink(socket).catch(() => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+          /* The caller owns cancellation or reports the failure separately. */
+        });
       }
       socketRemoved = true;
       return { closed: true };
@@ -441,7 +488,7 @@ export async function startBrowserDaemon(
       }
       await ensureBrowser();
       refs.clear();
-      await page!.goto(destination.toString(), {
+      await requiredValue(page).goto(destination.toString(), {
         waitUntil: "domcontentloaded",
       });
       return snapshot();
@@ -459,7 +506,7 @@ export async function startBrowserDaemon(
       );
     }
     if (request.action === "inspect") {
-      const target = /^(?:aria-ref=)?(?:f\d+)?e\d+$/.test(request.ref)
+      const target = /^(?:aria-ref=)?(?:f\d+)?e\d+$/u.test(request.ref)
         ? await reference(request.ref)
         : current.locator(request.ref);
       if ((await target.count()) !== 1) {
@@ -486,11 +533,12 @@ export async function startBrowserDaemon(
       if (!request.secret && request.value === undefined) {
         throw new Error("fill requires a value or --secret profile.field");
       }
+      const allowedCredentialOrigins = request.secret
+        ? await secretOrigins(request.secret, baseUrl)
+        : undefined;
       if (
-        request.secret &&
-        !(await secretOrigins(request.secret, baseUrl)).includes(
-          new URL(current.url()).origin
-        )
+        allowedCredentialOrigins &&
+        !allowedCredentialOrigins.includes(new URL(current.url()).origin)
       ) {
         throw new Error(
           "This credential profile does not allow the current page origin"
@@ -498,7 +546,7 @@ export async function startBrowserDaemon(
       }
       const value = request.secret
         ? await resolveSecret(request.secret)
-        : request.value!;
+        : requiredValue(request.value);
       if (request.secret) {
         secrets.add(value);
         await target.evaluate((element) => {
@@ -512,7 +560,10 @@ export async function startBrowserDaemon(
     if (new URL(current.url()).origin !== origin) {
       await current
         .goto(previousUrl, { waitUntil: "domcontentloaded" })
-        .catch(() => undefined);
+        .catch(() => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+          /* The caller owns cancellation or reports the failure separately. */
+        });
       throw new Error(
         "Navigation outside the workspace origin was blocked. The previous page was restored."
       );
@@ -522,7 +573,10 @@ export async function startBrowserDaemon(
   const server = net.createServer((connection) => {
     connections.add(connection);
     connection.on("close", () => connections.delete(connection));
-    connection.on("error", () => undefined);
+    connection.on("error", () => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+      /* The caller owns cancellation or reports the failure separately. */
+    });
     connection.setTimeout(120_000, () => connection.destroy());
     let input = "";
     connection.on("data", (chunk) => {
@@ -536,13 +590,14 @@ export async function startBrowserDaemon(
       }
       connection.removeAllListeners("data");
       queue = queue
+        // oxlint-disable-next-line promise/always-return -- This continuation performs a side effect; its fulfilled value is intentionally unused.
         .then(async () => {
           let action: string | undefined;
           try {
             const request = requestSchema.parse(
               JSON.parse(input.slice(0, input.indexOf("\n")))
             );
-            action = request.action;
+            ({ action } = request);
             const result = await execute(request);
             connection.end(`${JSON.stringify({ ok: true, result })}\n`);
           } catch (error) {
@@ -554,7 +609,9 @@ export async function startBrowserDaemon(
             );
           }
           if (action === "close") {
-            connection.once("close", () => void shutdown());
+            connection.once("close", () => {
+              shutdown();
+            });
           }
         })
         .catch(() => {
@@ -562,6 +619,7 @@ export async function startBrowserDaemon(
         });
     });
   });
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(socket, resolve);
@@ -570,6 +628,10 @@ export async function startBrowserDaemon(
     await fs.chmod(socket, 0o600);
   }
   touch();
-  process.once("SIGTERM", () => void shutdown());
-  process.once("SIGINT", () => void shutdown());
-}
+  process.once("SIGTERM", () => {
+    shutdown();
+  });
+  process.once("SIGINT", () => {
+    shutdown();
+  });
+};

@@ -31,11 +31,11 @@ import type {
 
 export const API_URL = "/api";
 
-export function websocketUrl(path: string): string {
+export const websocketUrl = function websocketUrl(path: string): string {
   const url = new URL(`${API_URL}${path}`, window.location.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
-}
+};
 
 export class ApiError extends Error {
   readonly status: number;
@@ -52,15 +52,15 @@ export class ApiError extends Error {
 export const SERVER_UNREACHABLE_MESSAGE =
   "Can't reach the Specbook server. Check that the backend is running, then try again.";
 
-export function isAbortError(error: unknown): boolean {
+export const isAbortError = function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
-}
+};
 
-export function errorMessage(error: unknown): string {
+export const errorMessage = function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
+};
 
-export function apiPath(
+export const apiPath = function apiPath(
   strings: TemplateStringsArray,
   ...values: (string | number)[]
 ): string {
@@ -71,13 +71,15 @@ export function apiPath(
       (index < values.length ? encodeURIComponent(String(values[index])) : ""),
     ""
   );
-}
+};
 
-export function safeReturnPath(value: string | null): string {
+export const safeReturnPath = function safeReturnPath(
+  value: string | null
+): string {
   if (
     !value?.startsWith("/") ||
     value.startsWith("//") ||
-    /[\\\r\n]/.test(value)
+    /[\\\r\n]/u.test(value)
   ) {
     return "/";
   }
@@ -89,102 +91,113 @@ export function safeReturnPath(value: string | null): string {
     return "/";
   }
   return `${url.pathname}${url.search}${url.hash}`;
-}
+};
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const method = (init?.method ?? "GET").toUpperCase();
-  const headers = new Headers(init?.headers);
-  if (init?.body && !headers.has("content-type")) {
-    headers.set("content-type", "application/json");
-  }
-  if (method !== "GET" && method !== "HEAD") {
-    headers.set("X-Specbook-Request", "1");
-  }
+export const api =
+  /* oxlint-disable eslint/complexity -- Keep the existing render states and their coordinated actions together during the lint migration. */
+  async function api<T>(path: string, init?: RequestInit): Promise<T> {
+    const method = (init?.method ?? "GET").toUpperCase();
+    const headers = new Headers(init?.headers);
+    if (init?.body && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+    if (method !== "GET" && method !== "HEAD") {
+      headers.set("X-Specbook-Request", "1");
+    }
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {
-      credentials: "same-origin",
-      ...init,
-      headers,
-    });
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw error;
-    }
-    throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0, "network_error");
-  }
-  if (!response.ok) {
-    if (
-      response.status === 401 &&
-      typeof window !== "undefined" &&
-      !path.startsWith("/auth/") &&
-      !path.startsWith("/setup/") &&
-      !["/login", "/setup", "/join"].includes(window.location.pathname)
-    ) {
-      const next = safeReturnPath(
-        `${window.location.pathname}${window.location.search}${window.location.hash}`
-      );
-      window.location.replace(`/login?next=${encodeURIComponent(next)}`);
-    }
-    const text = await response.text().catch(() => "");
-    let message = text;
-    let code: string | undefined;
+    let response: Response;
     try {
-      const body = JSON.parse(text) as {
-        error?: string;
-        message?: string;
-        code?: string;
-        nextStep?: string;
-      };
-      message = [body.error ?? body.message ?? text, body.nextStep]
-        .filter(Boolean)
-        .join(" ");
-      code = typeof body.code === "string" ? body.code : undefined;
-    } catch {}
-    throw new ApiError(
-      message || `Request failed with status ${response.status}`,
-      response.status,
-      code
-    );
-  }
-  if (method !== "GET" && method !== "HEAD") {
-    invalidate({ resource: resourceForPath(path) });
-  }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return response.json() as Promise<T>;
-}
+      response = await fetch(`${API_URL}${path}`, {
+        credentials: "same-origin",
+        ...init,
+        headers,
+      });
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0, "network_error");
+    }
+    if (!response.ok) {
+      if (
+        response.status === 401 &&
+        typeof window !== "undefined" &&
+        !path.startsWith("/auth/") &&
+        !path.startsWith("/setup/") &&
+        !["/login", "/setup", "/join"].includes(window.location.pathname)
+      ) {
+        const next = safeReturnPath(
+          `${window.location.pathname}${window.location.search}${window.location.hash}`
+        );
+        window.location.replace(`/login?next=${encodeURIComponent(next)}`);
+      }
+      const text = await (async () => {
+        try {
+          return await response.text();
+        } catch {
+          return "";
+        }
+      })();
+      let message = text;
+      let code: string | undefined;
+      try {
+        const body = JSON.parse(text) as {
+          error?: string;
+          message?: string;
+          code?: string;
+          nextStep?: string;
+        };
+        message = [body.error ?? body.message ?? text, body.nextStep]
+          .filter(Boolean)
+          .join(" ");
+        code = typeof body.code === "string" ? body.code : undefined;
+      } catch {
+        // Keep the last usable state if this optional operation fails.
+      }
+      throw new ApiError(
+        message || `Request failed with status ${response.status}`,
+        response.status,
+        code
+      );
+    }
+    if (method !== "GET" && method !== "HEAD") {
+      invalidate({ resource: resourceForPath(path) });
+    }
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    return response.json() as Promise<T>;
+  };
+/* oxlint-enable eslint/complexity */
 
-export function listProjects(
+export const listProjects = function listProjects(
   signal?: AbortSignal
 ): Promise<{ projects: Project[] }> {
   return api("/projects", { signal });
-}
+};
 
-export function getProject(
+export const getProject = function getProject(
   projectId: string,
   signal?: AbortSignal
 ): Promise<{ project: Project }> {
   return api(apiPath`/projects/${projectId}`, { signal });
-}
+};
 
-export function getProjectTree(
+export const getProjectTree = function getProjectTree(
   projectId: string,
   signal?: AbortSignal
 ): Promise<ProjectTree> {
   return api(apiPath`/projects/${projectId}/tree`, { signal });
-}
+};
 
-export function listProjectChats(
+export const listProjectChats = function listProjectChats(
   projectId: string,
   signal?: AbortSignal
 ): Promise<{ chats: Chat[] }> {
   return api(apiPath`/projects/${projectId}/chats`, { signal });
-}
+};
 
-export function startProjectChat(
+export const startProjectChat = function startProjectChat(
   projectId: string,
   text: string
 ): Promise<{ chat: { id: string } }> {
@@ -192,20 +205,22 @@ export function startProjectChat(
     method: "POST",
     body: JSON.stringify({ text }),
   });
-}
+};
 
-export function getHealth(signal?: AbortSignal): Promise<{ ok: boolean }> {
+export const getHealth = function getHealth(
+  signal?: AbortSignal
+): Promise<{ ok: boolean }> {
   return api("/health", { signal });
-}
+};
 
-export function getChat(
+export const getChat = function getChat(
   chatId: string,
   signal?: AbortSignal
 ): Promise<ChatState> {
   return api(apiPath`/chats/${chatId}`, { signal });
-}
+};
 
-export function sendChatMessage(
+export const sendChatMessage = function sendChatMessage(
   chatId: string,
   text: string
 ): Promise<{ ok: true }> {
@@ -213,17 +228,17 @@ export function sendChatMessage(
     method: "POST",
     body: JSON.stringify({ text }),
   });
-}
+};
 
-export function chatEventsUrl(chatId: string): string {
+export const chatEventsUrl = function chatEventsUrl(chatId: string): string {
   return `${API_URL}${apiPath`/chats/${chatId}/events`}`;
-}
+};
 
-export function deleteChat(chatId: string): Promise<void> {
+export const deleteChat = function deleteChat(chatId: string): Promise<void> {
   return api(apiPath`/chats/${chatId}`, { method: "DELETE" });
-}
+};
 
-export function getSpec(
+export const getSpec = function getSpec(
   specId: string,
   options: { limit?: number; signal?: AbortSignal } = {}
 ): Promise<SpecDetail> {
@@ -231,9 +246,9 @@ export function getSpec(
   return api(`${apiPath`/specs/${specId}`}${query}`, {
     signal: options.signal,
   });
-}
+};
 
-export function runSpec(
+export const runSpec = function runSpec(
   specId: string,
   environment?: string
 ): Promise<{ run: Run }> {
@@ -241,29 +256,31 @@ export function runSpec(
     `${apiPath`/specs/${specId}/run`}${environment ? `?environment=${encodeURIComponent(environment)}` : ""}`,
     { method: "POST" }
   );
-}
+};
 
-export function deleteSpec(specId: string): Promise<void> {
+export const deleteSpec = function deleteSpec(specId: string): Promise<void> {
   return api(apiPath`/specs/${specId}`, { method: "DELETE" });
-}
+};
 
-export function deleteFeature(featureId: string): Promise<void> {
+export const deleteFeature = function deleteFeature(
+  featureId: string
+): Promise<void> {
   return api(apiPath`/features/${featureId}`, { method: "DELETE" });
-}
+};
 
-export function getRunEvidence(
+export const getRunEvidence = function getRunEvidence(
   runId: string,
   signal?: AbortSignal
 ): Promise<RunEvidence> {
   return api(apiPath`/runs/${runId}/evidence`, { signal });
-}
+};
 
-export function getRunReplay(
+export const getRunReplay = function getRunReplay(
   runId: string,
   signal?: AbortSignal
 ): Promise<ReplayRecording> {
   return api(apiPath`/runs/${runId}/replay`, { signal });
-}
+};
 
 export interface DiscoveryBriefInput {
   goal?: string;
@@ -271,7 +288,7 @@ export interface DiscoveryBriefInput {
   safetyNotes?: string[];
 }
 
-export function createContextDiscovery(
+export const createContextDiscovery = function createContextDiscovery(
   projectId: string,
   brief: DiscoveryBriefInput
 ): Promise<{ revision: ProjectContextRevision; chat: { id: string } }> {
@@ -279,15 +296,15 @@ export function createContextDiscovery(
     method: "POST",
     body: JSON.stringify(brief),
   });
-}
+};
 
-export function getProjectContext(
+export const getProjectContext = function getProjectContext(
   projectId: string
 ): Promise<ProjectContextState> {
   return api(`/projects/${encodeURIComponent(projectId)}/context`);
-}
+};
 
-export function patchProjectContext(
+export const patchProjectContext = function patchProjectContext(
   revisionId: string,
   patch: { context?: ProjectContext }
 ): Promise<{ revision: ProjectContextRevision }> {
@@ -295,25 +312,25 @@ export function patchProjectContext(
     method: "PATCH",
     body: JSON.stringify(patch),
   });
-}
+};
 
-export function confirmProjectContext(
+export const confirmProjectContext = function confirmProjectContext(
   revisionId: string
 ): Promise<{ revision: ProjectContextRevision }> {
   return api(`/project-contexts/${encodeURIComponent(revisionId)}/confirm`, {
     method: "POST",
   });
-}
+};
 
-export function discardProjectContext(
+export const discardProjectContext = function discardProjectContext(
   revisionId: string
 ): Promise<{ revision: ProjectContextRevision }> {
   return api(`/project-contexts/${encodeURIComponent(revisionId)}/discard`, {
     method: "POST",
   });
-}
+};
 
-export function startRunBatch(
+export const startRunBatch = function startRunBatch(
   projectId: string,
   specIds: string[],
   label: string,
@@ -323,16 +340,16 @@ export function startRunBatch(
     method: "POST",
     body: JSON.stringify({ specIds, label, environment }),
   });
-}
+};
 
-export function getRunBatch(
+export const getRunBatch = function getRunBatch(
   batchId: string,
   signal?: AbortSignal
 ): Promise<{ batch: RunBatch; reportUrl: string | null }> {
   return api(`/run-batches/${encodeURIComponent(batchId)}`, { signal });
-}
+};
 
-export function updateProject(
+export const updateProject = function updateProject(
   projectId: string,
   input: { name?: string; baseUrl?: string }
 ): Promise<{ project: Project }> {
@@ -340,9 +357,9 @@ export function updateProject(
     method: "PATCH",
     body: JSON.stringify(input),
   });
-}
+};
 
-export function editChatMessage(
+export const editChatMessage = function editChatMessage(
   chatId: string,
   messageId: string,
   text: string
@@ -351,9 +368,9 @@ export function editChatMessage(
     `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
     { method: "PATCH", body: JSON.stringify({ text }) }
   );
-}
+};
 
-export function retryChatMessage(
+export const retryChatMessage = function retryChatMessage(
   chatId: string,
   messageId: string
 ): Promise<{ ok: boolean }> {
@@ -361,9 +378,9 @@ export function retryChatMessage(
     `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/retry`,
     { method: "POST" }
   );
-}
+};
 
-export function queueChatFollowUp(
+export const queueChatFollowUp = function queueChatFollowUp(
   chatId: string,
   text: string
 ): Promise<{ ok: boolean }> {
@@ -374,79 +391,88 @@ export function queueChatFollowUp(
       body: JSON.stringify({ text }),
     }
   );
-}
+};
 
-export function abortChatTurn(chatId: string): Promise<{ ok: boolean }> {
+export const abortChatTurn = function abortChatTurn(
+  chatId: string
+): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>(`/chats/${encodeURIComponent(chatId)}/abort`, {
     method: "POST",
   });
-}
+};
 
-export function deleteProject(projectId: string): Promise<void> {
+export const deleteProject = function deleteProject(
+  projectId: string
+): Promise<void> {
   return api(`/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",
   });
-}
+};
 
-export function getProjectGitRemote(
+export const getProjectGitRemote = function getProjectGitRemote(
   projectId: string
 ): Promise<{ remote: GitRemoteAccess }> {
   return api(`/projects/${encodeURIComponent(projectId)}/git/remote`);
-}
+};
 
-export function issueProjectGitRemoteToken(
+export const issueProjectGitRemoteToken = function issueProjectGitRemoteToken(
   projectId: string
 ): Promise<{ token: string; remote: GitRemoteAccess }> {
   return api(`/projects/${encodeURIComponent(projectId)}/git/remote/token`, {
     method: "POST",
   });
-}
+};
 
-export function revokeProjectGitRemoteToken(
+export const revokeProjectGitRemoteToken = function revokeProjectGitRemoteToken(
   projectId: string
 ): Promise<{ remote: GitRemoteAccess }> {
   return api(`/projects/${encodeURIComponent(projectId)}/git/remote/token`, {
     method: "DELETE",
   });
-}
+};
 
-export function getSpecHistory(specId: string): Promise<{
+export const getSpecHistory = function getSpecHistory(specId: string): Promise<{
   entries: { sha: string; date: string; message: string }[];
 }> {
   return api(`/specs/${encodeURIComponent(specId)}/history`);
-}
+};
 
-export function getSpecAtCommit(
+export const getSpecAtCommit = function getSpecAtCommit(
   specId: string,
   sha: string
 ): Promise<{ yaml: string | null; testSource: string | null }> {
   return api(
     `/specs/${encodeURIComponent(specId)}/history/${encodeURIComponent(sha)}`
   );
-}
+};
 
-export function testLlmConnection(): Promise<{ ok: true; message: string }> {
+export const testLlmConnection = function testLlmConnection(): Promise<{
+  ok: true;
+  message: string;
+}> {
   return api("/settings/llm/test", { method: "POST" });
-}
+};
 
-export function getLlmSettings(): Promise<LlmSettingsResponse> {
-  return api<LlmSettingsResponse>("/settings/llm");
-}
+export const getLlmSettings =
+  function getLlmSettings(): Promise<LlmSettingsResponse> {
+    return api<LlmSettingsResponse>("/settings/llm");
+  };
 
-export function getLlmRuntimeStatus(): Promise<LlmRuntimeStatus> {
-  return api<LlmRuntimeStatus>("/settings/llm/status");
-}
+export const getLlmRuntimeStatus =
+  function getLlmRuntimeStatus(): Promise<LlmRuntimeStatus> {
+    return api<LlmRuntimeStatus>("/settings/llm/status");
+  };
 
-export function updateLlmSettings(
+export const updateLlmSettings = function updateLlmSettings(
   update: Partial<LlmCurrentSettings>
 ): Promise<LlmCurrentSettings> {
   return api<LlmCurrentSettings>("/settings/llm", {
     method: "PATCH",
     body: JSON.stringify(update),
   });
-}
+};
 
-export function saveLlmProviderApiKey(
+export const saveLlmProviderApiKey = function saveLlmProviderApiKey(
   providerId: string,
   apiKey: string
 ): Promise<{ ok: boolean }> {
@@ -457,9 +483,9 @@ export function saveLlmProviderApiKey(
       body: JSON.stringify({ apiKey }),
     }
   );
-}
+};
 
-export function removeLlmProviderAuth(
+export const removeLlmProviderAuth = function removeLlmProviderAuth(
   providerId: string
 ): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>(
@@ -468,9 +494,9 @@ export function removeLlmProviderAuth(
       method: "DELETE",
     }
   );
-}
+};
 
-export function startLlmProviderOAuth(
+export const startLlmProviderOAuth = function startLlmProviderOAuth(
   providerId: string
 ): Promise<LlmOAuthStart> {
   return api<LlmOAuthStart>(
@@ -479,18 +505,18 @@ export function startLlmProviderOAuth(
       method: "POST",
     }
   );
-}
+};
 
-export function pollLlmProviderOAuth(
+export const pollLlmProviderOAuth = function pollLlmProviderOAuth(
   providerId: string,
   sessionId: string
 ): Promise<LlmOAuthPoll> {
   return api<LlmOAuthPoll>(
     `/settings/llm/providers/${encodeURIComponent(providerId)}/oauth/poll?sessionId=${encodeURIComponent(sessionId)}`
   );
-}
+};
 
-export function submitLlmProviderOAuthInput(
+export const submitLlmProviderOAuthInput = function submitLlmProviderOAuthInput(
   providerId: string,
   sessionId: string,
   input: string
@@ -502,9 +528,9 @@ export function submitLlmProviderOAuthInput(
       body: JSON.stringify({ sessionId, input }),
     }
   );
-}
+};
 
-export function updateSpecFiles(
+export const updateSpecFiles = function updateSpecFiles(
   specId: string,
   input: { yaml?: string; testSource?: string }
 ): Promise<SpecDetail> {
@@ -512,9 +538,9 @@ export function updateSpecFiles(
     method: "PUT",
     body: JSON.stringify(input),
   });
-}
+};
 
-export function updateSpec(
+export const updateSpec = function updateSpec(
   specId: string,
   input: { title?: string; description?: string; humanSpec?: HumanSpec }
 ): Promise<SpecDetail> {
@@ -522,9 +548,9 @@ export function updateSpec(
     method: "PATCH",
     body: JSON.stringify(input),
   });
-}
+};
 
-export function createManualSpec(
+export const createManualSpec = function createManualSpec(
   projectId: string,
   featureId: string,
   title: string
@@ -533,9 +559,9 @@ export function createManualSpec(
     method: "POST",
     body: JSON.stringify({ featureId, title }),
   });
-}
+};
 
-export function createFeature(
+export const createFeature = function createFeature(
   projectId: string,
   input: { parentId?: string; title: string; description?: string }
 ): Promise<{ feature: Feature }> {
@@ -543,9 +569,9 @@ export function createFeature(
     method: "POST",
     body: JSON.stringify(input),
   });
-}
+};
 
-export function updateFeature(
+export const updateFeature = function updateFeature(
   featureId: string,
   input: { title?: string; description?: string }
 ): Promise<{ feature: Feature }> {
@@ -553,15 +579,15 @@ export function updateFeature(
     method: "PATCH",
     body: JSON.stringify(input),
   });
-}
+};
 
-export function listCredentialProfiles(
+export const listCredentialProfiles = function listCredentialProfiles(
   projectId: string
 ): Promise<{ profiles: CredentialProfile[] }> {
   return api(`/projects/${encodeURIComponent(projectId)}/credentials`);
-}
+};
 
-export function createCredentialProfile(
+export const createCredentialProfile = function createCredentialProfile(
   projectId: string,
   input: {
     name: string;
@@ -573,9 +599,9 @@ export function createCredentialProfile(
     method: "POST",
     body: JSON.stringify(input),
   });
-}
+};
 
-export function updateCredentialProfile(
+export const updateCredentialProfile = function updateCredentialProfile(
   profileId: string,
   input: { allowedOrigins?: string[]; fields: CredentialFieldInput[] }
 ): Promise<{ profile: CredentialProfile }> {
@@ -583,59 +609,62 @@ export function updateCredentialProfile(
     method: "PUT",
     body: JSON.stringify(input),
   });
-}
+};
 
-export function deleteCredentialProfile(profileId: string): Promise<void> {
+export const deleteCredentialProfile = function deleteCredentialProfile(
+  profileId: string
+): Promise<void> {
   return api(`/credentials/${encodeURIComponent(profileId)}`, {
     method: "DELETE",
   });
-}
+};
 
-export function resolveChatCredentialRequest(
-  chatId: string,
-  requestId: string,
-  body:
-    | { action: "dismiss" }
-    | { action: "submit"; values: Record<string, string> }
-): Promise<{ ok: boolean }> {
-  return api(
-    `/chats/${encodeURIComponent(chatId)}/credential-requests/${encodeURIComponent(requestId)}`,
-    {
-      method: "POST",
-      body: JSON.stringify(body),
-    }
-  );
-}
+export const resolveChatCredentialRequest =
+  function resolveChatCredentialRequest(
+    chatId: string,
+    requestId: string,
+    body:
+      | { action: "dismiss" }
+      | { action: "submit"; values: Record<string, string> }
+  ): Promise<{ ok: boolean }> {
+    return api(
+      `/chats/${encodeURIComponent(chatId)}/credential-requests/${encodeURIComponent(requestId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  };
 
-export function getEnvironments(
+export const getEnvironments = function getEnvironments(
   projectId: string,
   signal?: AbortSignal
 ): Promise<{ environments: ProjectEnvironment[] }> {
   return api(apiPath`/projects/${projectId}/environments`, { signal });
-}
+};
 
-export function getProjectTunnels(
+export const getProjectTunnels = function getProjectTunnels(
   projectId: string,
   signal?: AbortSignal
 ): Promise<{ tunnels: ProjectTunnel[] }> {
   return api(apiPath`/projects/${projectId}/tunnels`, { signal });
-}
+};
 
-export function getOverview(
+export const getOverview = function getOverview(
   projectId: string,
   signal?: AbortSignal
 ): Promise<OverviewResponse> {
   return api(apiPath`/projects/${projectId}/overview`, { signal });
-}
+};
 
-export function getCoverage(
+export const getCoverage = function getCoverage(
   projectId: string,
   signal?: AbortSignal
 ): Promise<CoverageResponse> {
   return api(apiPath`/projects/${projectId}/coverage`, { signal });
-}
+};
 
-export function requestTask(
+export const requestTask = function requestTask(
   projectId: string,
   kind: "coverage" | "explore"
 ): Promise<{ intentId: string; status: "queued" | "running" | "paused" }> {
@@ -643,9 +672,9 @@ export function requestTask(
     method: "POST",
     body: JSON.stringify({ kind }),
   });
-}
+};
 
-export function setStewardPaused(
+export const setStewardPaused = function setStewardPaused(
   projectId: string,
   paused: boolean
 ): Promise<unknown> {
@@ -653,4 +682,4 @@ export function setStewardPaused(
     method: "PUT",
     body: JSON.stringify({ paused }),
   });
-}
+};

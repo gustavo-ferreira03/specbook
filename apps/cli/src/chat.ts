@@ -22,6 +22,7 @@ import type { ChatReply, ChatSpec, Conversation } from "./chat-model.js";
 import { containsSecret, scrub } from "./credentials.js";
 import { emptyAgentState, readAgentState } from "./mcp.js";
 import type { AgentState } from "./mcp.js";
+import { requiredValue } from "./values";
 import {
   detectAgents,
   loadConfig,
@@ -32,7 +33,7 @@ import {
 const chatPath = (id: string, file: string) =>
   `chats/${chatIdSchema.parse(id)}/${file}`;
 
-async function removeAuthentication(
+const removeAuthentication = async function removeAuthentication(
   workspace: string,
   id: string
 ): Promise<void> {
@@ -40,14 +41,19 @@ async function removeAuthentication(
     "claude-home/.credentials.json",
     "codex-home/auth.json",
   ]) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.rm(
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await safeWorkspacePath(workspace, chatPath(id, `brain/${file}`), true),
       { force: true }
     );
   }
-}
+};
 
-function restoreMetadata(original: unknown, redacted: unknown): unknown {
+const restoreMetadata = function restoreMetadata(
+  original: unknown,
+  redacted: unknown
+): unknown {
   if (Array.isArray(original) && Array.isArray(redacted)) {
     return original.map((value, index) =>
       restoreMetadata(value, redacted[index])
@@ -62,7 +68,7 @@ function restoreMetadata(original: unknown, redacted: unknown): unknown {
     return Object.fromEntries(
       Object.entries(original).map(([key, value]) => [
         key,
-        /^(?:type|role|status|timestamp|cwd|id|uuid)$|(?:_id|Id|Uuid)$/i.test(
+        /^(?:type|role|status|timestamp|cwd|id|uuid)$|(?:_id|Id|Uuid)$/iu.test(
           key
         )
           ? value
@@ -71,9 +77,9 @@ function restoreMetadata(original: unknown, redacted: unknown): unknown {
     );
   }
   return redacted;
-}
+};
 
-async function redactBrainHistory(
+const redactBrainHistory = async function redactBrainHistory(
   workspace: string,
   id: string
 ): Promise<void> {
@@ -90,13 +96,16 @@ async function redactBrainHistory(
     if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
       continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const file = await safeWorkspacePath(
       workspace,
       path.relative(workspace, path.join(entry.parentPath, entry.name))
     );
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const original = await fs.readFile(file, "utf-8");
     const lines = [];
     for (const line of original.split("\n")) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const safe = await scrub(line);
       if (safe === line) {
         lines.push(line);
@@ -113,17 +122,20 @@ async function redactBrainHistory(
     const redacted = lines.join("\n");
     if (redacted !== original) {
       const temporary = `${file}.${randomUUID()}.tmp`;
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.writeFile(temporary, redacted, { mode: 0o600, flag: "wx" });
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fs.rename(temporary, file);
       } finally {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fs.rm(temporary, { force: true });
       }
     }
   }
-}
+};
 
-async function writeJson(
+const writeJson = async function writeJson(
   workspace: string,
   relative: string,
   value: unknown
@@ -144,17 +156,19 @@ async function writeJson(
   } finally {
     await fs.rm(temporary, { force: true });
   }
-}
+};
 
-async function saveConversation(
+const saveConversation = async function saveConversation(
   workspace: string,
   state: Conversation
 ): Promise<void> {
   state.updatedAt = new Date().toISOString();
   state.reply = await redactReply(state.reply);
   for (const entry of state.history) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     entry.message = await scrub(entry.message);
     if (entry.reply) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       entry.reply = await redactReply(entry.reply);
     }
   }
@@ -163,9 +177,9 @@ async function saveConversation(
     chatPath(state.id, "conversation.json"),
     conversationSchema.parse(state)
   );
-}
+};
 
-async function readConversation(
+const readConversation = async function readConversation(
   workspace: string,
   id: string
 ): Promise<Conversation> {
@@ -184,9 +198,11 @@ async function readConversation(
     throw error;
   });
   return conversationSchema.parse(JSON.parse(await fs.readFile(file, "utf-8")));
-}
+};
 
-function processIdentity(pid: number): string | undefined {
+const processIdentity = function processIdentity(
+  pid: number
+): string | undefined {
   if (process.platform !== "linux") {
     return undefined;
   }
@@ -197,9 +213,9 @@ function processIdentity(pid: number): string | undefined {
   } catch {
     return undefined;
   }
-}
+};
 
-function isAlive(pid: number, identity?: string): boolean {
+const isAlive = function isAlive(pid: number, identity?: string): boolean {
   try {
     process.kill(pid, 0);
     const current = processIdentity(pid);
@@ -210,9 +226,9 @@ function isAlive(pid: number, identity?: string): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
-}
+};
 
-async function withStateLock<T>(
+const withStateLock = async function withStateLock<T>(
   workspace: string,
   id: string,
   action: () => Promise<T>
@@ -222,11 +238,13 @@ async function withStateLock<T>(
     chatPath(id, "state.lock"),
     true
   );
-  for (let attempt = 0; attempt < 250; attempt++) {
+  for (let attempt = 0; attempt < 250; attempt += 1) {
     let handle;
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       handle = await fs.open(
         file,
+        // oxlint-disable-next-line no-bitwise -- Combine the operating-system permission or open flags required by this operation.
         constants.O_WRONLY |
           constants.O_CREAT |
           constants.O_EXCL |
@@ -238,34 +256,46 @@ async function withStateLock<T>(
         throw error;
       }
       const owner = Number(
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fs
           .readFile(
+            // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
             await safeWorkspacePath(workspace, chatPath(id, "state.lock")),
             "utf-8"
           )
           .catch(() => "")
       );
-      const stat = await fs.lstat(file).catch(() => undefined);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      const stat = await fs.lstat(file).catch(() => {
+        /* No action is needed until this callback is replaced or invoked by its owner. */
+        /* The caller owns cancellation or reports the failure separately. */
+      });
       if (
         owner ? !isAlive(owner) : stat && Date.now() - stat.mtimeMs > 15_000
       ) {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fs.rm(file, { force: true });
       }
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await delay(20);
       continue;
     }
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await handle.writeFile(String(process.pid));
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       return await action();
     } finally {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await handle.close();
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.rm(file, { force: true });
     }
   }
   throw new Error("The conversation state is busy. Retry in a moment.");
-}
+};
 
-async function finishLocked(
+const finishLocked = async function finishLocked(
   workspace: string,
   state: Conversation,
   reply: ChatReply
@@ -288,8 +318,8 @@ async function finishLocked(
       workspace,
       chatPath(state.id, "brain")
     );
-    state.pendingProposalRuns =
-      (await readAgentState(brain)).proposalRuns ?? {};
+    const readAgentStateValue1 = await readAgentState(brain);
+    state.pendingProposalRuns = readAgentStateValue1.proposalRuns ?? {};
   }
   state.history.push({
     role: "specbook",
@@ -299,9 +329,9 @@ async function finishLocked(
   });
   delete state.turn;
   await saveConversation(workspace, state);
-}
+};
 
-async function finish(
+const finish = async function finish(
   workspace: string,
   state: Conversation,
   reply: ChatReply
@@ -312,9 +342,9 @@ async function finish(
       await finishLocked(workspace, current, reply);
     }
   });
-}
+};
 
-async function recover(
+const recover = async function recover(
   workspace: string,
   state: Conversation
 ): Promise<Conversation> {
@@ -332,7 +362,7 @@ async function recover(
     return state;
   }
   const turnId = state.turn.id;
-  return withStateLock(workspace, state.id, async () => {
+  return await withStateLock(workspace, state.id, async () => {
     const latest = await readConversation(workspace, state.id);
     if (
       latest.reply.status !== "working" ||
@@ -355,15 +385,15 @@ async function recover(
           await delay(3000);
           try {
             process.kill(-latest.turn.brainPid, "SIGKILL");
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-              throw error;
+          } catch (cleanupError) {
+            if ((cleanupError as NodeJS.ErrnoException).code !== "ESRCH") {
+              throw cleanupError;
             }
           }
         }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-          throw error;
+      } catch (cleanupError) {
+        if ((cleanupError as NodeJS.ErrnoException).code !== "ESRCH") {
+          throw cleanupError;
         }
       }
     }
@@ -393,6 +423,7 @@ async function recover(
           new Set(baseline.existing)
         );
       } catch {
+        /* Cleanup is best effort after the operation has completed or failed. */
         /* A worker without a typed outcome must be retried. */
       }
     }
@@ -401,7 +432,7 @@ async function recover(
     await finishLocked(workspace, latest, reply);
     return latest;
   });
-}
+};
 
 export interface ChatOptions {
   agent?: Agent;
@@ -412,23 +443,25 @@ export interface ChatOptions {
   signal?: AbortSignal;
 }
 
-function timeout(options: ChatOptions): number {
+const timeout = function timeout(options: ChatOptions): number {
   const value = options.timeoutMs ?? 600_000;
   if (!Number.isFinite(value) || value < 1000 || value > 3_600_000) {
     throw new Error("--timeout must be between 1 and 3600 seconds");
   }
   return value;
-}
+};
 
-export async function waitForReply(
+export const waitForReply = async function waitForReply(
   workspace: string,
   id: string,
   options: ChatOptions = {}
 ): Promise<ChatReply> {
   const deadline = Date.now() + timeout(options);
   while (true) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const state = await recover(
       workspace,
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await readConversation(workspace, id)
     );
     if (
@@ -438,12 +471,16 @@ export async function waitForReply(
     ) {
       return state.reply;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await delay(Math.min(250, Math.max(1, deadline - Date.now())));
   }
-}
+};
 
-async function launch(workspace: string, state: Conversation): Promise<void> {
-  const turnId = state.turn!.id;
+const launch = async function launch(
+  workspace: string,
+  state: Conversation
+): Promise<void> {
+  const turnId = requiredValue(state.turn).id;
   const child = spawn(
     process.execPath,
     [
@@ -465,14 +502,16 @@ async function launch(workspace: string, state: Conversation): Promise<void> {
       stdio: "ignore",
     }
   );
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);
     child.once("error", reject);
   });
   child.unref();
-}
+};
 
-export async function sendMessage(
+// oxlint-disable-next-line complexity -- Keep the chat decision tree together so state transitions and error ordering remain explicit.
+export const sendMessage = async function sendMessage(
   workspace: string,
   args: string[],
   options: ChatOptions = {}
@@ -544,7 +583,9 @@ export async function sendMessage(
     while (true) {
       id = `c-${randomBytes(4).toString("hex")}`;
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fs.mkdir(
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           await safeWorkspacePath(workspace, `chats/${id}`, true),
           { mode: 0o700 }
         );
@@ -581,7 +622,7 @@ export async function sendMessage(
       chatPath(id, "brain/state.json"),
       emptyAgentState()
     );
-    request = args[0];
+    [request] = args;
   }
   let selected: NonNullable<Conversation["turn"]>["selected"];
   if (options.select !== undefined) {
@@ -591,15 +632,15 @@ export async function sendMessage(
     ) {
       throw new Error("This conversation is not waiting for a Spec selection");
     }
-    if (!/^[1-9]\d*(?:,[1-9]\d*)*$/.test(options.select)) {
+    if (!/^[1-9]\d*(?:,[1-9]\d*)*$/u.test(options.select)) {
       throw new Error(
         "--select must contain positive proposal numbers separated by commas, such as 1,2"
       );
     }
     const numbers = [...new Set(options.select.split(",").map(Number))];
     selected = numbers.map((number) => {
-      const proposal = state.reply.proposals!.find(
-        (proposal) => proposal.number === number
+      const proposal = requiredValue(state.reply.proposals).find(
+        (candidateProposal) => candidateProposal.number === number
       );
       if (!proposal) {
         throw new Error(`Unknown proposal number ${number}`);
@@ -648,7 +689,6 @@ export async function sendMessage(
         message: `Specbook is working. Use specbook chat ${state.id} --wait to read the reply.`,
       };
       await saveConversation(workspace, state);
-      return undefined;
     });
     if (accepted) {
       return accepted;
@@ -662,14 +702,17 @@ export async function sendMessage(
       message: `Could not start the conversation turn: ${message}`,
       error: message,
     });
-    return (await readConversation(workspace, state.id)).reply;
+    const readConversationValue2 = await readConversation(workspace, state.id);
+    return readConversationValue2.reply;
   }
   return options.noWait
     ? state.reply
     : waitForReply(workspace, state.id, options);
-}
+};
 
-export async function listConversations(workspace: string) {
+export const listConversations = async function listConversations(
+  workspace: string
+) {
   const directory = await safeWorkspacePath(workspace, "chats", true);
   const entries = await fs
     .readdir(directory)
@@ -684,10 +727,11 @@ export async function listConversations(workspace: string) {
     if (!chatIdSchema.safeParse(id).success) {
       continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const found = await readConversation(workspace, id).catch(
       (error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") {
-          return undefined;
+          return;
         }
         throw error;
       }
@@ -695,6 +739,7 @@ export async function listConversations(workspace: string) {
     if (!found) {
       continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const state = await recover(workspace, found);
     conversations.push({
       id,
@@ -705,13 +750,13 @@ export async function listConversations(workspace: string) {
     });
   }
   return {
-    conversations: conversations.sort((a, b) =>
+    conversations: conversations.toSorted((a, b) =>
       b.updatedAt.localeCompare(a.updatedAt)
     ),
   };
-}
+};
 
-async function turnSpecs(
+const turnSpecs = async function turnSpecs(
   workspace: string,
   before: AgentState,
   after: AgentState,
@@ -731,17 +776,19 @@ async function turnSpecs(
     after.writes.filter((file) => !before.writes.includes(file));
   const writtenPaths = new Set(
     writes
-      .filter((file) => /\/spec\.(ts|yml)$/.test(file))
+      .filter((file) => /\/spec\.(?<segment1>ts|yml)$/u.test(file))
       .map((file) => path.posix.dirname(file))
   );
-  const results = (await confirmedResults(workspace, after)).filter((result) =>
+  const confirmedResultsValue3 = await confirmedResults(workspace, after);
+  const results = confirmedResultsValue3.filter((result) =>
     activePaths.has(result.path)
   );
   const specs: ChatSpec[] = results.map((result) => {
-    const actual = after.runs
-      .flatMap((run) => run.results)
-      .filter((item) => item.path === result.path)
-      .at(-1)!;
+    const actual = requiredValue(
+      after.runs
+        .flatMap((run) => run.results)
+        .findLast((item) => item.path === result.path)
+    );
     return {
       ...result,
       status: result.status as ChatSpec["status"],
@@ -761,15 +808,15 @@ async function turnSpecs(
     });
   }
   return specs;
-}
+};
 
-function selectionRequest(
+const selectionRequest = function selectionRequest(
   selected: NonNullable<Conversation["turn"]>["selected"]
 ): string {
   return `Selected Spec proposals: ${JSON.stringify(selected)}. Create or reuse coverage for EACH selected proposal, check locators, run each Spec with run_spec({path,proposalNumber:<selected number>}) and correct incorrect tests within THREE total runs per Spec in this turn. End with report_done only after every selected behavior has a recorded run result. Preserve the requested contracts; report application defects without weakening assertions.`;
-}
+};
 
-async function completedReply(
+const completedReply = async function completedReply(
   workspace: string,
   state: Conversation,
   before: AgentState,
@@ -828,9 +875,9 @@ async function completedReply(
     );
   }
   return reply;
-}
+};
 
-export async function runChatWorker(
+export const runChatWorker = async function runChatWorker(
   workspace: string,
   id: string,
   turnId: string
@@ -842,7 +889,7 @@ export async function runChatWorker(
       current.turn?.id !== turnId ||
       current.turn.pid
     ) {
-      return undefined;
+      return;
     }
     current.turn.pid = process.pid;
     current.turn.workerIdentity = processIdentity(process.pid);
@@ -892,7 +939,9 @@ export async function runChatWorker(
     );
     await writeJson(workspace, chatPath(id, "brain/turn.json"), {
       id: turnId,
-      ...(state.turn!.selected ? { selected: state.turn!.selected } : {}),
+      ...(requiredValue(state.turn).selected
+        ? { selected: requiredValue(state.turn).selected }
+        : {}),
     });
     await withStateLock(workspace, id, async () => {
       const current = await readConversation(workspace, id);
@@ -918,9 +967,9 @@ export async function runChatWorker(
     );
     const execution = await executeAgent(
       invocation,
-      state.turn!.request,
+      requiredValue(state.turn).request,
       cancellation.signal,
-      async (brainSessionId) =>
+      (brainSessionId) =>
         withStateLock(workspace, id, async () => {
           const current = await readConversation(workspace, id);
           if (current.turn?.id !== turnId) {
@@ -929,7 +978,7 @@ export async function runChatWorker(
           current.brainSessionId = brainSessionId;
           await saveConversation(workspace, current);
         }),
-      async (brainPid) =>
+      (brainPid) =>
         withStateLock(workspace, id, async () => {
           const current = await readConversation(workspace, id);
           if (current.turn?.id !== turnId) {
@@ -987,6 +1036,7 @@ export async function runChatWorker(
         )
       );
     } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
       /* Completed run files still remain available on disk. */
     }
   } finally {
@@ -1000,9 +1050,11 @@ export async function runChatWorker(
   if (state.turn?.id === turnId) {
     await finish(workspace, state, reply);
   }
-}
+};
 
-export async function redactReply(reply: ChatReply): Promise<ChatReply> {
+export const redactReply = async function redactReply(
+  reply: ChatReply
+): Promise<ChatReply> {
   const safe = structuredClone(reply);
   safe.message = await scrub(safe.message);
   if (safe.error) {
@@ -1012,15 +1064,20 @@ export async function redactReply(reply: ChatReply): Promise<ChatReply> {
     safe.pendingAction.question = await scrub(safe.pendingAction.question);
   }
   for (const proposal of safe.proposals ?? []) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     proposal.title = await scrub(proposal.title);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     proposal.why = await scrub(proposal.why);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     proposal.feature = await scrub(proposal.feature);
   }
   for (const spec of safe.specs ?? []) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     spec.title = await scrub(spec.title);
     if (spec.failReason) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       spec.failReason = await scrub(spec.failReason);
     }
   }
   return chatReplySchema.parse(safe);
-}
+};

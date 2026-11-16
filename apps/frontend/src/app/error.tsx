@@ -3,10 +3,10 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
-import { EmptyState } from "@/components/EmptyState";
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 
-export default function ErrorPage({
+const ErrorPage = function ErrorPage({
   error,
   retry,
 }: {
@@ -39,4 +39,5 @@ export default function ErrorPage({
       )}
     </main>
   );
-}
+};
+export default ErrorPage;

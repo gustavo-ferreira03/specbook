@@ -16,9 +16,11 @@ import type { BrowserMcp } from "../browser/mcp";
 import { decryptSecret, encryptSecret } from "../credentials/crypto";
 import { resolveCredentialProfile } from "../credentials/resolve";
 
-const sessionProfileSchema = z.object({ profile: z.string() });
-
-function text(value: string, isError = false, errorCode?: ErrorCode) {
+const text = function text(
+  value: string,
+  isError = false,
+  errorCode?: ErrorCode
+) {
   return {
     content: [{ type: "text" as const, text: value }],
     details: undefined,
@@ -26,20 +28,12 @@ function text(value: string, isError = false, errorCode?: ErrorCode) {
     terminate: false,
     ...(isError ? { isError: true } : {}),
   };
-}
+};
 
-export interface SessionToolOptions {
-  projectId: string;
-  baseUrl: string;
-  productionBaseUrl?: string;
-  environment?: RunEnvironment;
-  mcp: BrowserMcp | null;
-  workDir: string | null;
-}
-
-export function createSessionTools(options: SessionToolOptions) {
-  const appOrigins = new WeakMap<CredentialProfileRow, Set<string>>();
-  async function profileFor(
+export const createSessionTools = function createSessionTools(
+  options: SessionToolOptions
+) {
+  const profileFor = async function profileFor(
     name: string
   ): Promise<CredentialProfileRow | null> {
     const resolved = await resolveCredentialProfile(
@@ -53,14 +47,18 @@ export function createSessionTools(options: SessionToolOptions) {
     }
     appOrigins.set(resolved.profile, resolved.appOrigins);
     return resolved.profile;
-  }
-  function allows(
+  };
+
+  const allows = function allows(
     profile: CredentialProfileRow,
     _name: string,
     url: string
   ): boolean {
     return appOrigins.get(profile)?.has(new URL(url).origin) ?? false;
-  }
+  };
+
+  const appOrigins = new WeakMap<CredentialProfileRow, Set<string>>();
+
   return [
     defineTool({
       name: "save_session",
@@ -70,9 +68,9 @@ export function createSessionTools(options: SessionToolOptions) {
       parameters: Type.Unsafe<z.infer<typeof sessionProfileSchema>>(
         sessionProfileSchema.toJSONSchema()
       ),
-      async execute(_id, params, signal) {
+      async execute(_id, inputParams, signal) {
         signal?.throwIfAborted();
-        params = sessionProfileSchema.parse(params);
+        const params = sessionProfileSchema.parse(inputParams);
         if (!options.mcp || !options.workDir) {
           return text(
             "save_session failed: the agent browser is not available this turn."
@@ -102,6 +100,7 @@ export function createSessionTools(options: SessionToolOptions) {
             { signal }
           );
           if (saved.isError) {
+            // oxlint-disable-next-line unicorn/prefer-type-error -- This error reports failure returned by the browser tool, rather than an invalid JavaScript argument type.
             throw new Error(
               `browser tool failed: ${await renderMcpResult(saved as { content?: unknown }, options.workDir)}`
             );
@@ -136,9 +135,9 @@ export function createSessionTools(options: SessionToolOptions) {
       parameters: Type.Unsafe<z.infer<typeof sessionProfileSchema>>(
         sessionProfileSchema.toJSONSchema()
       ),
-      async execute(_id, params, signal) {
+      async execute(_id, inputParams, signal) {
         signal?.throwIfAborted();
-        params = sessionProfileSchema.parse(params);
+        const params = sessionProfileSchema.parse(inputParams);
         if (!options.mcp || !options.workDir) {
           return text(
             "resume_session failed: the agent browser is not available this turn."
@@ -178,6 +177,7 @@ export function createSessionTools(options: SessionToolOptions) {
             { signal }
           );
           if (restored.isError) {
+            // oxlint-disable-next-line unicorn/prefer-type-error -- This error reports failure returned by the browser tool, rather than an invalid JavaScript argument type.
             throw new Error(
               `browser tool failed: ${await renderMcpResult(restored as { content?: unknown }, options.workDir)}\nIf the saved session is invalid, sign in using the saved credential profile instead.`
             );
@@ -213,4 +213,15 @@ export function createSessionTools(options: SessionToolOptions) {
       },
     }),
   ];
+};
+
+const sessionProfileSchema = z.object({ profile: z.string() });
+
+export interface SessionToolOptions {
+  projectId: string;
+  baseUrl: string;
+  productionBaseUrl?: string;
+  environment?: RunEnvironment;
+  mcp: BrowserMcp | null;
+  workDir: string | null;
 }

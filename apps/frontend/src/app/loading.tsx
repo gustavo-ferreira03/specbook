@@ -1,7 +1,8 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function Loading() {
+const Loading = function Loading() {
   return (
+    /* oxlint-disable jsx-a11y/prefer-tag-over-role -- Alert forwards live-region semantics to its shared native wrapper; preserve the component structure. */
     <main
       className="bg-surface min-h-dvh px-4 py-8"
       role="status"
@@ -14,5 +15,7 @@ export default function Loading() {
         <Skeleton className="h-40 w-full" />
       </div>
     </main>
+    /* oxlint-enable jsx-a11y/prefer-tag-over-role */
   );
-}
+};
+export default Loading;

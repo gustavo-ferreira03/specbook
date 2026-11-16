@@ -3,7 +3,9 @@ import { parse, stringify } from "yaml";
 import { EMPTY_PROJECT_CONTEXT } from "./types.ts";
 import type { HumanSpec, ProjectContext } from "./types.ts";
 
-export class YamlParseError extends Error {}
+export class YamlParseError extends Error {
+  override name = "YamlParseError";
+}
 
 export interface SpecYaml {
   title: string | null;
@@ -16,7 +18,9 @@ export interface FeatureYaml {
   description: string;
 }
 
-function parseDocument(source: string): Record<string, unknown> {
+const parseDocument = function parseDocument(
+  source: string
+): Record<string, unknown> {
   let data: unknown;
   try {
     data = parse(source);
@@ -34,9 +38,9 @@ function parseDocument(source: string): Record<string, unknown> {
     );
   }
   return data as Record<string, unknown>;
-}
+};
 
-function rejectUnknownKeys(
+const rejectUnknownKeys = function rejectUnknownKeys(
   data: Record<string, unknown>,
   allowed: string[],
   label: string
@@ -48,9 +52,9 @@ function rejectUnknownKeys(
       );
     }
   }
-}
+};
 
-function optionalString(
+const optionalString = function optionalString(
   data: Record<string, unknown>,
   key: string
 ): string | null {
@@ -62,9 +66,12 @@ function optionalString(
     throw new YamlParseError(`"${key}" must be a string`);
   }
   return value.trim() || null;
-}
+};
 
-function stringWithDefault(data: Record<string, unknown>, key: string): string {
+const stringWithDefault = function stringWithDefault(
+  data: Record<string, unknown>,
+  key: string
+): string {
   const value = data[key];
   if (value === undefined || value === null) {
     return "";
@@ -76,9 +83,12 @@ function stringWithDefault(data: Record<string, unknown>, key: string): string {
     return String(value);
   }
   throw new YamlParseError(`"${key}" must be a string`);
-}
+};
 
-function stringArray(data: Record<string, unknown>, key: string): string[] {
+const stringArray = function stringArray(
+  data: Record<string, unknown>,
+  key: string
+): string[] {
   const value = data[key];
   if (value === undefined || value === null) {
     return [];
@@ -95,9 +105,9 @@ function stringArray(data: Record<string, unknown>, key: string): string[] {
     }
     throw new YamlParseError(`"${key}[${index}]" must be a string`);
   });
-}
+};
 
-function recordArray(
+const recordArray = function recordArray(
   data: Record<string, unknown>,
   key: string
 ): Record<string, unknown>[] {
@@ -114,7 +124,7 @@ function recordArray(
     }
     return item as Record<string, unknown>;
   });
-}
+};
 
 const SPEC_KEYS = [
   "title",
@@ -125,7 +135,7 @@ const SPEC_KEYS = [
   "postconditions",
 ];
 
-export function serializeSpecYaml(doc: {
+export const serializeSpecYaml = function serializeSpecYaml(doc: {
   title: string;
   description: string;
   humanSpec: HumanSpec;
@@ -138,9 +148,9 @@ export function serializeSpecYaml(doc: {
     expectedResult: doc.humanSpec.expectedResult,
     postconditions: doc.humanSpec.postconditions,
   });
-}
+};
 
-export function parseSpecYaml(source: string): SpecYaml {
+export const parseSpecYaml = function parseSpecYaml(source: string): SpecYaml {
   const data = parseDocument(source);
   rejectUnknownKeys(data, SPEC_KEYS, "spec.yml");
   return {
@@ -153,25 +163,27 @@ export function parseSpecYaml(source: string): SpecYaml {
       postconditions: stringArray(data, "postconditions"),
     },
   };
-}
+};
 
 const FEATURE_KEYS = ["title", "description"];
 
-export function serializeFeatureYaml(doc: {
+export const serializeFeatureYaml = function serializeFeatureYaml(doc: {
   title: string;
   description: string;
 }): string {
   return stringify({ title: doc.title, description: doc.description });
-}
+};
 
-export function parseFeatureYaml(source: string): FeatureYaml {
+export const parseFeatureYaml = function parseFeatureYaml(
+  source: string
+): FeatureYaml {
   const data = parseDocument(source);
   rejectUnknownKeys(data, FEATURE_KEYS, "feature.yml");
   return {
     title: optionalString(data, "title"),
     description: stringWithDefault(data, "description"),
   };
-}
+};
 
 const CONTEXT_KEYS = [
   "summary",
@@ -185,7 +197,9 @@ const CONTEXT_KEYS = [
   "sources",
 ];
 
-export function serializeContextYaml(context: ProjectContext): string {
+export const serializeContextYaml = function serializeContextYaml(
+  context: ProjectContext
+): string {
   return stringify({
     summary: context.summary,
     areas: context.areas,
@@ -197,9 +211,11 @@ export function serializeContextYaml(context: ProjectContext): string {
     unknowns: context.unknowns,
     sources: context.sources,
   });
-}
+};
 
-export function parseContextYaml(source: string): ProjectContext {
+export const parseContextYaml = function parseContextYaml(
+  source: string
+): ProjectContext {
   const data = parseDocument(source);
   rejectUnknownKeys(data, CONTEXT_KEYS, "context.yml");
   const areas = recordArray(data, "areas").map((area, index) => {
@@ -247,9 +263,11 @@ export function parseContextYaml(source: string): ProjectContext {
     unknowns: stringArray(data, "unknowns"),
     sources,
   };
-}
+};
 
-export function parseYamlTitle(source: string): string | null {
+export const parseYamlTitle = function parseYamlTitle(
+  source: string
+): string | null {
   try {
     const data = parseDocument(source);
     return typeof data.title === "string" && data.title.trim()
@@ -258,30 +276,41 @@ export function parseYamlTitle(source: string): string | null {
   } catch {
     return null;
   }
-}
+};
 
-function canonicalJson(value: unknown): string {
+const canonicalJson = function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(",")}]`;
   }
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+      .toSorted(([left], [right]) =>
+        left < right
+          ? -1
+          : (() => {
+              if (left > right) {
+                return 1;
+              }
+              return 0;
+            })()
+      );
     return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
   }
   return JSON.stringify(value ?? null);
-}
+};
 
-function normalizedContext(context: ProjectContext): ProjectContext {
+const normalizedContext = function normalizedContext(
+  context: ProjectContext
+): ProjectContext {
   try {
     return parseContextYaml(serializeContextYaml(context));
   } catch {
     return context;
   }
-}
+};
 
-export function sameProjectContext(
+export const sameProjectContext = function sameProjectContext(
   left: ProjectContext,
   right: ProjectContext
 ): boolean {
@@ -289,4 +318,4 @@ export function sameProjectContext(
     canonicalJson(normalizedContext(left)) ===
     canonicalJson(normalizedContext(right))
   );
-}
+};

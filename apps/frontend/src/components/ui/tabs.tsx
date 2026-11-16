@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Tabs({
+const Tabs = function Tabs({
   className,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
@@ -16,12 +16,12 @@ function Tabs({
       {...props}
     />
   );
-}
+};
 
 type TabsVariant = "underline" | "segmented";
 const TabsVariantContext = React.createContext<TabsVariant>("underline");
 
-function TabsList({
+const TabsList = function TabsList({
   className,
   variant = "underline",
   ...props
@@ -44,9 +44,9 @@ function TabsList({
       />
     </TabsVariantContext.Provider>
   );
-}
+};
 
-function TabsTrigger({
+const TabsTrigger = function TabsTrigger({
   className,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
@@ -64,9 +64,9 @@ function TabsTrigger({
       {...props}
     />
   );
-}
+};
 
-function TabsContent({
+const TabsContent = function TabsContent({
   className,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Content>) {
@@ -77,6 +77,6 @@ function TabsContent({
       {...props}
     />
   );
-}
+};
 
 export { Tabs, TabsContent, TabsList, TabsTrigger };

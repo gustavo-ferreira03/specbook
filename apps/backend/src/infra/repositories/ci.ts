@@ -6,12 +6,13 @@ import { projectCiTokens } from "../db/schema";
 export const ciRepository = {
   async token(projectId: string) {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue213 = await db
           .select()
           .from(projectCiTokens)
-          .where(eq(projectCiTokens.projectId, projectId))
-      )[0] ?? null
+          .where(eq(projectCiTokens.projectId, projectId));
+        return awaitedValue213[0];
+      })()) ?? null
     );
   },
   async setToken(

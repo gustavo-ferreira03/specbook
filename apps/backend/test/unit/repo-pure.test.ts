@@ -89,9 +89,9 @@ describe("yaml", () => {
 
   test("rejects unknown keys, non-mappings and invalid YAML", () => {
     assert.throws(() => parseSpecYaml("title: x\nextra: 1\n"), YamlParseError);
-    assert.throws(() => parseFeatureYaml("- a\n- b\n"), /must be a mapping/);
-    assert.throws(() => parseSpecYaml("title: [unclosed\n"), /Invalid YAML/);
-    assert.throws(() => parseSpecYaml("steps: nope\n"), /must be a list/);
+    assert.throws(() => parseFeatureYaml("- a\n- b\n"), /must be a mapping/u);
+    assert.throws(() => parseSpecYaml("title: [unclosed\n"), /Invalid YAML/u);
+    assert.throws(() => parseSpecYaml("steps: nope\n"), /must be a list/u);
     assert.equal(parseYamlTitle("title: [unclosed"), null);
     assert.deepEqual(parseSpecYaml(""), {
       title: null,
@@ -119,7 +119,7 @@ describe("yaml", () => {
     assert.deepEqual(parseContextYaml(serializeContextYaml(context)), context);
     assert.throws(
       () => parseContextYaml("areas:\n  - name: x\n    bogus: 1\n"),
-      /Unknown key "bogus"/
+      /Unknown key "bogus"/u
     );
   });
 

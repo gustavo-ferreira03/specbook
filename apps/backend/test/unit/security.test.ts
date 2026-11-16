@@ -1,7 +1,49 @@
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { describe, test } from "node:test";
 
 import { Hono } from "hono";
+
+const appWith = function appWith(
+  env: NodeJS.ProcessEnv = {},
+  maxBody = 64
+): Hono {
+  const app = new Hono();
+  app.use("*", hostGuard(buildHostAllowlist(4000, env)));
+  app.use("*", csrfGuard());
+  app.use("*", jsonBodyLimit(maxBody));
+  app.get("/health", (c) => c.json({ ok: true }));
+  app.get("/projects", (c) => c.json({ ok: true }));
+  app.post("/projects", async (c) =>
+    c.json({
+      received: await (async () => {
+        const awaitedValue516 = await c.req.text();
+        return awaitedValue516.length;
+      })(),
+    })
+  );
+  app.post("/git/p/git-receive-pack", async (c) =>
+    c.json({
+      received: await (async () => {
+        const awaitedValue626 = await c.req.text();
+        return awaitedValue626.length;
+      })(),
+    })
+  );
+  return app;
+};
+
+const request = function request(
+  path: string,
+  init: RequestInit & { host?: string } = {}
+): Request {
+  const headers = new Headers(init.headers);
+  headers.set("host", init.host ?? "localhost:4000");
+  return new Request(`http://${init.host ?? "localhost:4000"}${path}`, {
+    ...init,
+    headers,
+  });
+};
 
 process.env.LOG_LEVEL ??= "silent";
 const {
@@ -15,34 +57,6 @@ const {
   jsonBodyLimit,
   REQUEST_HEADER,
 } = await import("../../src/infra/web/security");
-
-function appWith(env: NodeJS.ProcessEnv = {}, maxBody = 64): Hono {
-  const app = new Hono();
-  app.use("*", hostGuard(buildHostAllowlist(4000, env)));
-  app.use("*", csrfGuard());
-  app.use("*", jsonBodyLimit(maxBody));
-  app.get("/health", (c) => c.json({ ok: true }));
-  app.get("/projects", (c) => c.json({ ok: true }));
-  app.post("/projects", async (c) =>
-    c.json({ received: (await c.req.text()).length })
-  );
-  app.post("/git/p/git-receive-pack", async (c) =>
-    c.json({ received: (await c.req.text()).length })
-  );
-  return app;
-}
-
-function request(
-  path: string,
-  init: RequestInit & { host?: string } = {}
-): Request {
-  const headers = new Headers(init.headers);
-  headers.set("host", init.host ?? "localhost:4000");
-  return new Request(`http://${init.host ?? "localhost:4000"}${path}`, {
-    ...init,
-    headers,
-  });
-}
 
 describe("host allowlist", () => {
   test("literal addresses support published ports and DNS names must be configured", () => {
@@ -178,14 +192,14 @@ describe("security middleware", () => {
     assert.ok(
       !policy.includes(createHash("sha256").update("events").digest("base64"))
     );
-    assert.match(policy, /default-src 'none'/);
-    assert.match(policy, /frame-src about: blob:/);
-    assert.match(policy, /sandbox allow-scripts/);
-    assert.match(policy, /sandbox allow-scripts allow-same-origin/);
-    assert.match(policy, /connect-src 'none'/);
+    assert.match(policy, /default-src 'none'/u);
+    assert.match(policy, /frame-src about: blob:/u);
+    assert.match(policy, /sandbox allow-scripts/u);
+    assert.match(policy, /sandbox allow-scripts allow-same-origin/u);
+    assert.match(policy, /connect-src 'none'/u);
     assert.match(
       htmlReportHeaders("<p>No replay</p>")["Content-Security-Policy"],
-      /script-src 'none'/
+      /script-src 'none'/u
     );
     const compressed = gzipSync(script).toString("base64");
     const compressedHeaders = htmlReportHeaders(
@@ -207,7 +221,7 @@ describe("security middleware", () => {
         htmlReportHeaders(
           `<script id="specbook-replay-library" type="application/octet-stream">${invalid}</script>`
         )["Content-Security-Policy"],
-        /script-src 'none'/
+        /script-src 'none'/u
       );
     }
   });
@@ -248,7 +262,9 @@ describe("security middleware", () => {
                 fetch('https://outside.invalid/').catch(() => window.networkBlocked = true);
             </script>`;
         const requests: string[] = [];
-        page.on("request", (request) => requests.push(request.url()));
+        page.on("request", (requestInTest) =>
+          requests.push(requestInTest.url())
+        );
         await page.route("**/*", (route) =>
           route.fulfill({
             status: 200,
@@ -269,7 +285,13 @@ describe("security middleware", () => {
             replayFrameReadable?: boolean;
             untrustedOuterExecuted?: boolean;
           };
-          const frame = document.querySelector("iframe")!;
+          const frame = (() => {
+            const existing = document.querySelector("iframe");
+            if (existing === null || existing === undefined) {
+              throw new Error("Expected a browser value");
+            }
+            return existing;
+          })();
           return {
             frameReadable: globals.replayFrameReadable,
             outerScript: globals.untrustedOuterExecuted === true,
@@ -295,18 +317,29 @@ describe("security middleware", () => {
 
   test("host guard rejects unknown hosts except for /health and Git HTTP", async () => {
     const app = appWith();
-    assert.equal((await app.request(request("/projects"))).status, 200);
     assert.equal(
-      (
-        await app.request(
+      await (async () => {
+        const awaitedValue11017 = await app.request(request("/projects"));
+        return awaitedValue11017.status;
+      })(),
+      200
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue11097 = await app.request(
           request("/projects", { host: "rebind.attacker:4000" })
-        )
-      ).status,
+        );
+        return awaitedValue11097.status;
+      })(),
       421
     );
     assert.equal(
-      (await app.request(request("/health", { host: "rebind.attacker:4000" })))
-        .status,
+      await (async () => {
+        const awaitedValue11258 = await app.request(
+          request("/health", { host: "rebind.attacker:4000" })
+        );
+        return awaitedValue11258.status;
+      })(),
       200
     );
   });
@@ -317,7 +350,13 @@ describe("security middleware", () => {
       request("/projects", { method: "POST", body: "{}" })
     );
     assert.equal(missing.status, 403);
-    assert.match((await missing.json()).error, /X-Specbook-Request/);
+    assert.match(
+      await (async () => {
+        const awaitedValue11632 = await missing.json();
+        return awaitedValue11632.error;
+      })(),
+      /X-Specbook-Request/u
+    );
     const wrong = await app.request(
       request("/projects", {
         method: "POST",
@@ -335,7 +374,12 @@ describe("security middleware", () => {
     );
     assert.equal(ok.status, 200);
     assert.equal(
-      (await app.request(request("/projects", { method: "GET" }))).status,
+      await (async () => {
+        const awaitedValue12118 = await app.request(
+          request("/projects", { method: "GET" })
+        );
+        return awaitedValue12118.status;
+      })(),
       200
     );
     const git = await app.request(
@@ -379,22 +423,22 @@ describe("bounded API documentation reads", () => {
       await import("../../src/core/network/documentation");
     let lookups = 0;
     let visits = 0;
-    const server = http.createServer((request, response) => {
-      visits++;
-      assert.equal(request.headers.cookie, undefined);
-      assert.equal(request.headers.authorization, undefined);
-      assert.match(request.headers.host ?? "", /^docs\.example\.test:/);
-      if (request.url === "/redirect") {
+    const server = http.createServer((requestInTest, response) => {
+      visits += 1;
+      assert.equal(requestInTest.headers.cookie, undefined);
+      assert.equal(requestInTest.headers.authorization, undefined);
+      assert.match(requestInTest.headers.host ?? "", /^docs\.example\.test:/u);
+      if (requestInTest.url === "/redirect") {
         response.writeHead(302, { location: "http://127.0.0.1:1/private" });
         response.end();
         return;
       }
-      if (request.url === "/binary") {
+      if (requestInTest.url === "/binary") {
         response.writeHead(200, { "content-type": "application/octet-stream" });
         response.end("binary");
         return;
       }
-      if (request.url === "/large") {
+      if (requestInTest.url === "/large") {
         response.writeHead(200, { "content-type": "text/plain" });
         response.end("x".repeat(131_073));
         return;
@@ -404,17 +448,22 @@ describe("bounded API documentation reads", () => {
         JSON.stringify({ openapi: "3.1.0", paths: { "/health": { get: {} } } })
       );
     });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve)
-    );
-    const { port } = server.address() as import("node:net").AddressInfo;
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const { port } = server.address() as AddressInfo;
     const origin = `http://docs.example.test:${port}`;
     const options = {
       origins: [origin],
       allowPrivate: true,
-      resolver: async () => {
-        lookups++;
-        return [{ address: "127.0.0.1", family: 4 }];
+      resolver: () => {
+        try {
+          lookups += 1;
+          return Promise.resolve([{ address: "127.0.0.1", family: 4 }]);
+        } catch (error) {
+          return Promise.reject(error);
+        }
       },
     };
     try {
@@ -427,15 +476,15 @@ describe("bounded API documentation reads", () => {
       assert.equal(JSON.parse(document.text).openapi, "3.1.0");
       await assert.rejects(
         () => readApiDocumentation(`${origin}/redirect`, options),
-        /redirects/
+        /redirects/u
       );
       await assert.rejects(
         () => readApiDocumentation(`${origin}/binary`, options),
-        /did not return text/
+        /did not return text/u
       );
       await assert.rejects(
         () => readApiDocumentation(`${origin}/large`, options),
-        /larger than 128 KiB/
+        /larger than 128 KiB/u
       );
       assert.equal(visits, 4);
       await assert.rejects(
@@ -444,7 +493,7 @@ describe("bounded API documentation reads", () => {
             ...options,
             origins: [],
           }),
-        /origin is not allowed/
+        /origin is not allowed/u
       );
       await assert.rejects(
         () =>
@@ -452,7 +501,7 @@ describe("bounded API documentation reads", () => {
             ...options,
             allowPrivate: false,
           }),
-        /Private, loopback/
+        /Private, loopback/u
       );
       await assert.rejects(
         () =>
@@ -461,7 +510,7 @@ describe("bounded API documentation reads", () => {
             origins: [`http://127.0.0.1:${port}`],
             allowPrivate: false,
           }),
-        /Private, loopback/
+        /Private, loopback/u
       );
       const controller = new AbortController();
       controller.abort();
@@ -471,7 +520,7 @@ describe("bounded API documentation reads", () => {
             ...options,
             signal: controller.signal,
           }),
-        /abort/i
+        /abort/iu
       );
       assert.equal(visits, 4);
       assert.equal(
@@ -480,7 +529,10 @@ describe("bounded API documentation reads", () => {
         "blocked origins and cancelled requests never resolve; checked addresses are not looked up again by HTTP"
       );
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
     }
   });
 });

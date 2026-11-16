@@ -34,6 +34,7 @@ import { runsDir } from "../paths";
 import { markdownHashOf } from "../repo/writer";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { areSpecsLocked } from "../specs/lifecycle";
+import { requireValue } from "../utils/require-value";
 import { applyVerifiedRepairs } from "./approval";
 import { stewardIntentSchema } from "./schemas";
 import type { StewardIntent } from "./schemas";
@@ -44,33 +45,33 @@ import {
   runTriggerForIntent,
 } from "./signals";
 
-const locks = createKeyedLock();
-let stopped = false;
-let timer: ReturnType<typeof setInterval> | undefined;
-let processing = false;
-class IntentDeferred extends Error {}
+class IntentDeferredError extends Error {
+  name = "IntentDeferredError";
+}
 
-export async function withProjectLock<T>(
+export const withProjectLock = async function withProjectLock<T>(
   id: string,
   work: () => Promise<T>
 ): Promise<T> {
-  return locks.run(id, work);
-}
+  return await locks.run(id, work);
+};
 
-async function intentFingerprint(
+const intentFingerprint = async function intentFingerprint(
   projectId: string,
   intent: StewardIntent,
   source: "user" | "event",
   key: string,
-  specs?: Spec[]
+  specsInput?: Spec[]
 ): Promise<string> {
+  let specs = specsInput;
+
   specs ??= await specsRepository.listSpecs(projectId);
   const run =
     intent.kind === "triage" && intent.runId
       ? await runsRepository.getRun(intent.runId)
       : null;
   if (run) {
-    const spec = specs.find((spec) => spec.id === run.specId);
+    const spec = specs.find((specValue) => specValue.id === run.specId);
     if (!spec || intent.specIds?.some((id) => id !== spec.id)) {
       throw new Error(
         "The failed run must belong to the selected Spec in this project"
@@ -99,7 +100,7 @@ async function intentFingerprint(
       (spec) => !intent.specIds?.length || intent.specIds.includes(spec.id)
     )
     .map((spec) => [spec.id, spec.sourceHash, spec.markdownHash])
-    .sort();
+    .toSorted();
   if (intent.kind === "regenerate") {
     return fingerprint({ kind: intent.kind, targets });
   }
@@ -111,13 +112,13 @@ async function intentFingerprint(
     environment: intent.environment,
     goal:
       source === "user"
-        ? intent.goal.replaceAll(/\s+/g, " ").trim().toLowerCase()
+        ? intent.goal.replaceAll(/\s+/gu, " ").trim().toLowerCase()
         : undefined,
     regressionKey: key.startsWith("regression:") ? key : undefined,
   });
-}
+};
 
-export async function enqueueIntent(
+export const enqueueIntent = async function enqueueIntent(
   projectId: string,
   input: unknown,
   key: string,
@@ -156,9 +157,9 @@ export async function enqueueIntent(
     reason: intent.reason,
     fingerprint: await intentFingerprint(projectId, intent, source, key, specs),
   });
-}
+};
 
-export async function recordFailureSignal(
+export const recordFailureSignal = async function recordFailureSignal(
   projectId: string,
   runId: string,
   specId: string,
@@ -173,9 +174,11 @@ export async function recordFailureSignal(
     body: "Investigate the failed step and evidence to distinguish test drift, an application bug, or an environment problem.",
     payload: { runId, originalRunId, specIds: [specId] },
   });
-}
+};
 
-async function signalSpec(signal: ProjectSignal): Promise<Spec | null> {
+const signalSpec = async function signalSpec(
+  signal: ProjectSignal
+): Promise<Spec | null> {
   const specId = Array.isArray(signal.payload.specIds)
     ? signal.payload.specIds[0]
     : null;
@@ -187,9 +190,11 @@ async function signalSpec(signal: ProjectSignal): Promise<Spec | null> {
     spec.markdownHash === signal.payload.markdownHash
     ? spec
     : null;
-}
+};
 
-async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
+const isCurrentSignal = async function isCurrentSignal(
+  signal: ProjectSignal
+): Promise<boolean> {
   if (signal.kind === "spec_failure") {
     return !!(await currentFailure(
       signal.projectId,
@@ -199,7 +204,12 @@ async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
     ));
   }
   if (signal.kind === "invalid_spec") {
-    return (await signalSpec(signal))?.status === "invalid";
+    return (
+      (await (async () => {
+        const resolvedValue7198 = await signalSpec(signal);
+        return resolvedValue7198?.status;
+      })()) === "invalid"
+    );
   }
   if (signal.kind === "spec_changed") {
     const spec = await signalSpec(signal);
@@ -212,8 +222,10 @@ async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
     );
   }
   if (signal.kind === "deployment_changed") {
-    const { deployment } = (await stewardRepository.get(signal.projectId))
-      .observation;
+    const { deployment } = await (async () => {
+      const awaitedValue7548 = await stewardRepository.get(signal.projectId);
+      return awaitedValue7548.observation;
+    })();
     return (
       !!deployment &&
       deployment.baseUrl === signal.payload.baseUrl &&
@@ -222,19 +234,25 @@ async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
     );
   }
   if (signal.kind === "deployment") {
-    const latest = (
-      await stewardRepository.signals(signal.projectId, null)
-    ).find(
-      (other) =>
-        other.kind === "deployment" &&
-        other.payload.environment === signal.payload.environment
-    );
+    const latest = await (async () => {
+      const awaitedValue7895 = await stewardRepository.signals(
+        signal.projectId,
+        null
+      );
+      return awaitedValue7895.find(
+        (other) =>
+          other.kind === "deployment" &&
+          other.payload.environment === signal.payload.environment
+      );
+    })();
     return latest?.id === signal.id;
   }
   return true;
-}
+};
 
-export async function resumeCurrentSignals(projectId: string): Promise<void> {
+export const resumeCurrentSignals = async function resumeCurrentSignals(
+  projectId: string
+): Promise<void> {
   await withProjectLock(projectId, async () => {
     for (const signal of await stewardRepository.signals(projectId, null)) {
       if (signal.status !== "observed") {
@@ -243,7 +261,9 @@ export async function resumeCurrentSignals(projectId: string): Promise<void> {
       const applicable =
         ["spec_changed", "deployment_changed", "deployment"].includes(
           signal.kind
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         ) && (await isCurrentSignal(signal));
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await stewardRepository.acknowledge(
         signal.id,
         applicable ? "pending" : "handled"
@@ -251,20 +271,29 @@ export async function resumeCurrentSignals(projectId: string): Promise<void> {
     }
     const specs = await specsRepository.listSpecs(projectId);
     for (const spec of specs) {
-      const run = (await runsRepository.listRuns(spec.id, { limit: 1 }))[0];
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      const run = await (async () => {
+        const awaitedValue8861 = await runsRepository.listRuns(spec.id, {
+          limit: 1,
+        });
+        return awaitedValue8861[0];
+      })();
       if (
         !run ||
         run.automationPending ||
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         !(await currentFailure(projectId, run.id))
       ) {
         continue;
       }
       const original = run.retryOf
-        ? await runsRepository.getRun(run.retryOf)
+        ? // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+          await runsRepository.getRun(run.retryOf)
         : run;
       if (!original?.healOnFailure) {
         continue;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await recordFailureSignal(
         projectId,
         run.id,
@@ -272,17 +301,26 @@ export async function resumeCurrentSignals(projectId: string): Promise<void> {
         spec.title,
         original.id
       );
-      const signal = (await stewardRepository.signals(projectId, null)).find(
-        (row) => row.key === `failure:${original.id}`
-      );
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      const signal = await (async () => {
+        const awaitedValue9387 = await stewardRepository.signals(
+          projectId,
+          null
+        );
+        return awaitedValue9387.find(
+          (row) => row.key === `failure:${original.id}`
+        );
+      })();
       if (signal) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await stewardRepository.acknowledge(signal.id, "pending");
       }
     }
   });
-}
+};
 
-async function handleSignal(
+// oxlint-disable-next-line complexity -- Keep the engine decision tree together so state transitions and error ordering remain explicit.
+const handleSignal = async function handleSignal(
   signal: ProjectSignal,
   observe: boolean
 ): Promise<void> {
@@ -316,6 +354,7 @@ async function handleSignal(
       "question",
       ["pending"]
     )) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       if (await isAgentPaused(signal.projectId)) {
         return;
       }
@@ -326,20 +365,25 @@ async function handleSignal(
       ) {
         continue;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const job = await jobsRepository.get(item.jobId);
       if (
         job?.status !== "blocked" ||
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         !(await canRunAgentJob(job)) ||
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         !(await jobsRepository.claimItem(item.id))
       ) {
         continue;
       }
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await jobsRepository.answer(
           item,
           "Credential profiles changed. Check the available profiles and continue if the requested access is now available."
         );
       } catch {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await jobsRepository.updateItem(item.id, { status: "pending" });
       }
     }
@@ -360,12 +404,15 @@ async function handleSignal(
           typeof signal.payload.environment === "string"
             ? signal.payload.environment
             : undefined,
-        priority:
-          signal.kind === "spec_failure"
-            ? 100
-            : signal.kind === "invalid_spec"
-              ? 80
-              : 40,
+        priority: (() => {
+          if (signal.kind === "spec_failure") {
+            return 100;
+          }
+          if (signal.kind === "invalid_spec") {
+            return 80;
+          }
+          return 40;
+        })(),
       },
       `signal:${signal.id}`
     );
@@ -374,9 +421,9 @@ async function handleSignal(
     signal.id,
     observe ? "observed" : "handled"
   );
-}
+};
 
-async function askForRunPrerequisite(
+const askForRunPrerequisite = async function askForRunPrerequisite(
   row: Intent,
   reason: string,
   code?: ErrorCode | null
@@ -403,36 +450,41 @@ async function askForRunPrerequisite(
     stopReason: reason,
     ...(code ? { errorCode: code } : {}),
   });
-  const existing = (await jobsRepository.itemsForJob(job.id)).some(
-    (item) => item.jobId === job!.id && payloadOf(item).runIntentId === row.id
-  );
+  const existing = await (async () => {
+    const awaitedValue13126 = await jobsRepository.itemsForJob(job.id);
+    return awaitedValue13126.some(
+      (item) =>
+        item.jobId === requireValue(job).id &&
+        payloadOf(item).runIntentId === row.id
+    );
+  })();
   if (!existing) {
-    const question = isCredentialFailure(
-      reason,
-      code ?? job.errorCode,
-      "prerequisite"
-    )
-      ? {
+    const question = (() => {
+      if (isCredentialFailure(reason, code ?? job.errorCode, "prerequisite")) {
+        return {
           title: "Can you provide access to run these Specs?",
           body: "Add the missing sign-in details in Settings → Credentials, then answer here. Do not paste passwords in your answer.",
           waitingFor: "credentials",
-        }
-      : (
-            (code ?? job.errorCode)
-              ? (code ?? job.errorCode) === "repository_dirty"
-              : /uncommitted|repository.*dirty/i.test(reason)
-          )
-        ? {
-            title:
-              "Can you save or discard the pending edits before running these Specs?",
-            body: "Save or discard the pending edits in the project repository, then answer here to retry.",
-            waitingFor: "run_prerequisite",
-          }
-        : {
-            title: "Can you resolve this prerequisite so the Specs can run?",
-            body: "The requested Specs could not start. Resolve the prerequisite described below, then answer here to retry.",
-            waitingFor: "run_prerequisite",
-          };
+        };
+      }
+      if (
+        (code ?? job.errorCode)
+          ? (code ?? job.errorCode) === "repository_dirty"
+          : /uncommitted|repository.*dirty/iu.test(reason)
+      ) {
+        return {
+          title:
+            "Can you save or discard the pending edits before running these Specs?",
+          body: "Save or discard the pending edits in the project repository, then answer here to retry.",
+          waitingFor: "run_prerequisite",
+        };
+      }
+      return {
+        title: "Can you resolve this prerequisite so the Specs can run?",
+        body: "The requested Specs could not start. Resolve the prerequisite described below, then answer here to retry.",
+        waitingFor: "run_prerequisite",
+      };
+    })();
     await jobsRepository.addItem({
       projectId: row.projectId,
       jobId: job.id,
@@ -453,101 +505,100 @@ async function askForRunPrerequisite(
     jobId: job.id,
     reason,
   });
-}
+};
 
-export async function recordScheduledPrerequisite(
-  projectId: string,
-  specIds: string[],
-  dueAt: string,
-  reason: string,
-  healFailures: boolean,
-  code?: ErrorCode
-): Promise<void> {
-  await withProjectLock(projectId, async () => {
-    if (await isAgentPaused(projectId)) {
-      return;
-    }
-    const [intents, signals, jobs] = await Promise.all([
-      stewardRepository.intents(projectId),
-      stewardRepository.signals(projectId, null),
-      jobsRepository.list(projectId),
-    ]);
-    const selection = JSON.stringify([...specIds].sort());
-    const existing = intents.find(
-      (intent) =>
-        intent.intent.kind === "run_specs" &&
-        runTriggerForIntent(intent, intents, signals) === "schedule" &&
-        JSON.stringify([...(intent.intent.specIds ?? [])].sort()) ===
-          selection &&
-        jobs.some(
-          (job) =>
-            job.id === intent.jobId &&
-            job.status === "blocked" &&
-            job.stopReason === reason
-        )
-    );
-    if (existing) {
-      await askForRunPrerequisite(existing, reason, code);
-      return;
-    }
-    const key = `schedule:${dueAt}`;
-    await stewardRepository.signal({
-      projectId,
-      key,
-      kind: "schedule",
-      title: "A scheduled run needs a prerequisite",
-      body: reason,
-      payload: { specIds, healFailures },
+export const recordScheduledPrerequisite =
+  async function recordScheduledPrerequisite(
+    projectId: string,
+    specIds: string[],
+    dueAt: string,
+    reason: string,
+    healFailures: boolean,
+    code?: ErrorCode
+  ): Promise<void> {
+    await withProjectLock(projectId, async () => {
+      if (await isAgentPaused(projectId)) {
+        return;
+      }
+      const [intents, signals, jobs] = await Promise.all([
+        stewardRepository.intents(projectId),
+        stewardRepository.signals(projectId, null),
+        jobsRepository.list(projectId),
+      ]);
+      const selection = JSON.stringify([...specIds].toSorted());
+      const existing = intents.find(
+        (intent) =>
+          intent.intent.kind === "run_specs" &&
+          runTriggerForIntent(intent, intents, signals) === "schedule" &&
+          JSON.stringify([...(intent.intent.specIds ?? [])].toSorted()) ===
+            selection &&
+          jobs.some(
+            (job) =>
+              job.id === intent.jobId &&
+              job.status === "blocked" &&
+              job.stopReason === reason
+          )
+      );
+      if (existing) {
+        await askForRunPrerequisite(existing, reason, code);
+        return;
+      }
+      const key = `schedule:${dueAt}`;
+      await stewardRepository.signal({
+        projectId,
+        key,
+        kind: "schedule",
+        title: "A scheduled run needs a prerequisite",
+        body: reason,
+        payload: { specIds, healFailures },
+      });
+      const signal = requireValue(
+        await (async () => {
+          const awaitedValue16376 = await stewardRepository.signals(
+            projectId,
+            null
+          );
+          return awaitedValue16376.find((row) => row.key === key);
+        })()
+      );
+      const intent = stewardIntentSchema.parse({
+        kind: "run_specs",
+        specIds,
+        priority: 70,
+        goal: "Run the Specs selected for this scheduled occurrence after its prerequisite is resolved.",
+        reason: "Scheduled run",
+      });
+      const row = await stewardRepository.addIntent({
+        projectId,
+        key: `signal:${signal.id}`,
+        source: "event",
+        intent,
+        priority: intent.priority,
+        reason: intent.reason,
+        fingerprint: fingerprint({ projectId, key, specIds }),
+      });
+      await stewardRepository.acknowledge(signal.id, "handled");
+      await askForRunPrerequisite(row, reason, code);
     });
-    const signal = (await stewardRepository.signals(projectId, null)).find(
-      (row) => row.key === key
-    )!;
-    const intent = stewardIntentSchema.parse({
-      kind: "run_specs",
-      specIds,
-      priority: 70,
-      goal: "Run the Specs selected for this scheduled occurrence after its prerequisite is resolved.",
-      reason: "Scheduled run",
-    });
-    const row = await stewardRepository.addIntent({
-      projectId,
-      key: `signal:${signal.id}`,
-      source: "event",
-      intent,
-      priority: intent.priority,
-      reason: intent.reason,
-      fingerprint: fingerprint({ projectId, key, specIds }),
-    });
-    await stewardRepository.acknowledge(signal.id, "handled");
-    await askForRunPrerequisite(row, reason, code);
-  });
-}
+  };
 
-const KIND_INSTRUCTIONS = {
-  regenerate:
-    "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval.",
-  explore:
-    "Explore only the area requested by the human. Inspect available access and ask through the Inbox when a prerequisite needs human help.",
-  coverage:
-    "Compare confirmed areas, roles and rules to the existing Specs and propose additional coverage only for the requested scope. Ask when blocked.",
-  failure_triage:
-    "Investigate the failed Spec and classify its cause without changing expected behavior.",
-} as const;
-
-function driftWithoutFix(
+const driftWithoutFix = function driftWithoutFix(
   intent: Intent,
   jobs: Job[],
   inbox: InboxItem[]
 ): boolean {
-  const job = jobs.find((job) => job.id === intent.jobId);
+  const job = jobs.find((jobValue) => jobValue.id === intent.jobId);
   return (
     job?.kind === "failure_triage" &&
     job.classification === "test_drift" &&
     !inbox.some((item) => item.jobId === job.id && item.kind === "spec_fix")
   );
-}
+};
 
-async function dispatchIntent(row: Intent): Promise<void> {
+// oxlint-disable-next-line complexity -- Keep the engine decision tree together so state transitions and error ordering remain explicit.
+const dispatchIntent = async function dispatchIntent(
+  row: Intent
+): Promise<void> {
   if (await isAgentPaused(row.projectId)) {
     return;
   }
@@ -555,7 +606,10 @@ async function dispatchIntent(row: Intent): Promise<void> {
   const signals = await stewardRepository.signals(row.projectId, null);
   const runTrigger = runTriggerForIntent(row, relatedIntents, signals);
   if (
-    (await stewardRepository.get(row.projectId)).autonomy === "observe" &&
+    (await (async () => {
+      const awaitedValue17891 = await stewardRepository.get(row.projectId);
+      return awaitedValue17891.autonomy;
+    })()) === "observe" &&
     row.source !== "user" &&
     !(row.intent.kind === "run_specs" && runTrigger === "schedule")
   ) {
@@ -582,24 +636,23 @@ async function dispatchIntent(row: Intent): Promise<void> {
   const projectJobs = await jobsRepository.list(row.projectId);
   const existing = await jobsRepository.get(row.id);
   if (existing) {
-    if (
-      row.intent.kind === "run_specs" &&
-      existing.status === "blocked" &&
-      existing.stopReason
-    ) {
-      await askForRunPrerequisite(row, existing.stopReason, existing.errorCode);
-    } else {
-      await stewardRepository.updateIntent(row.id, {
-        status: "running",
-        jobId: existing.id,
-      });
-    }
+    await (row.intent.kind === "run_specs" &&
+    existing.status === "blocked" &&
+    existing.stopReason
+      ? askForRunPrerequisite(row, existing.stopReason, existing.errorCode)
+      : stewardRepository.updateIntent(row.id, {
+          status: "running",
+          jobId: existing.id,
+        }));
     return;
   }
-  for (const job of projectJobs.filter((job) =>
-    ["queued", "running"].includes(job.status)
+  for (const job of projectJobs.filter((jobValue) =>
+    ["queued", "running"].includes(jobValue.status)
   )) {
-    if (await canRunAgentJob(job)) return;
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+    if (await canRunAgentJob(job)) {
+      return;
+    }
   }
   if (
     relatedIntents.some(
@@ -631,7 +684,8 @@ async function dispatchIntent(row: Intent): Promise<void> {
     }
     const subject =
       other.intent.kind === "triage"
-        ? await intentFingerprint(
+        ? // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+          await intentFingerprint(
             other.projectId,
             other.intent,
             other.source,
@@ -722,10 +776,14 @@ async function dispatchIntent(row: Intent): Promise<void> {
             (await isAgentPaused(row.projectId)) ||
             (row.source === "event" &&
               runTrigger !== "schedule" &&
-              (await stewardRepository.get(row.projectId)).autonomy ===
-                "observe")
+              (await (async () => {
+                const awaitedValue22964 = await stewardRepository.get(
+                  row.projectId
+                );
+                return awaitedValue22964.autonomy;
+              })()) === "observe")
           ) {
-            throw new IntentDeferred(
+            throw new IntentDeferredError(
               "Automatic execution was deferred before the Specs started"
             );
           }
@@ -743,21 +801,28 @@ async function dispatchIntent(row: Intent): Promise<void> {
   }
   const kind =
     row.intent.kind === "triage" ? "failure_triage" : row.intent.kind;
-  const decisions = (await jobsRepository.decisions(row.projectId)).map(
-    (item) => ({ title: item.title, status: item.status })
-  );
+  const decisions = await (async () => {
+    const awaitedValue23585 = await jobsRepository.decisions(row.projectId);
+    return awaitedValue23585.map((item) => ({
+      title: item.title,
+      status: item.status,
+    }));
+  })();
   const goal = `${row.intent.goal}\nReason: ${row.intent.reason}\n${row.intent.specIds?.length ? `Selected Specs: ${row.intent.specIds.join(", ")}.` : ""}\n${KIND_INSTRUCTIONS[kind]}\nRecent human decisions: ${JSON.stringify(decisions)}`;
   const job = await enqueueJob(
     row.projectId,
     {
       kind,
       goal: goal.slice(0, 12_000),
-      trigger:
-        row.source === "user"
-          ? "manual"
-          : row.intent.kind === "triage"
-            ? "spec_failure"
-            : "steward",
+      trigger: (() => {
+        if (row.source === "user") {
+          return "manual";
+        }
+        if (row.intent.kind === "triage") {
+          return "spec_failure";
+        }
+        return "steward";
+      })(),
       specId: row.intent.specIds?.[0],
       runId: row.intent.runId,
       limits: jobLimitsSchema.parse({}),
@@ -769,12 +834,13 @@ async function dispatchIntent(row: Intent): Promise<void> {
     status: "running",
     jobId: job.id,
   });
-}
+};
 
-export async function processProjectSteward(
+export const processProjectSteward = async function processProjectSteward(
   projectId: string,
   collect = true
 ): Promise<void> {
+  // oxlint-disable-next-line complexity -- Keep the engine decision tree together so state transitions and error ordering remain explicit.
   await withProjectLock(projectId, async () => {
     const project = await projectsRepository.getProject(projectId);
     if (!project) {
@@ -788,7 +854,11 @@ export async function processProjectSteward(
     for (const blocked of projectJobs.filter(
       (job) => job.status === "blocked" && job.safetyRetries > 0
     )) {
-      if (await canRunAgentJob(blocked)) await retryStalledJob(blocked);
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      if (await canRunAgentJob(blocked)) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        await retryStalledJob(blocked);
+      }
     }
     const runnable = await Promise.all(
       projectJobs
@@ -799,7 +869,11 @@ export async function processProjectSteward(
       for (const stalled of projectJobs.filter(
         (job) => job.status === "stalled"
       )) {
-        if (await canRunAgentJob(stalled)) await retryStalledJob(stalled);
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        if (await canRunAgentJob(stalled)) {
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+          await retryStalledJob(stalled);
+        }
       }
     }
     if (collect) {
@@ -808,32 +882,41 @@ export async function processProjectSteward(
       });
     }
     for (const signal of await stewardRepository.pendingSignals(projectId)) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await handleSignal(signal, settings.autonomy === "observe");
     }
     const intents = await stewardRepository.intents(projectId);
     for (const intent of intents.filter(
-      (intent) => intent.status === "running"
+      (intentValue) => intentValue.status === "running"
     )) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const job = intent.jobId ? await jobsRepository.get(intent.jobId) : null;
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const batch = intent.batchId ? await getRunBatch(intent.batchId) : null;
       if (
         intent.intent.kind === "run_specs" &&
         job?.status === "blocked" &&
         job.stopReason
       ) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await askForRunPrerequisite(intent, job.stopReason, job.errorCode);
       }
       if (job && ["completed", "cancelled"].includes(job.status)) {
         if (intent.intent.kind === "run_specs" && job.status === "completed") {
-          const answered = (
-            await jobsRepository.itemsForJob(job.id, { statuses: ["answered"] })
-          ).find(
-            (item) =>
-              item.jobId === job.id &&
-              payloadOf(item).runIntentId === intent.id &&
-              item.status === "answered"
-          );
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+          const answered = await (async () => {
+            const awaitedValue26616 = await jobsRepository.itemsForJob(job.id, {
+              statuses: ["answered"],
+            });
+            return awaitedValue26616.find(
+              (item) =>
+                item.jobId === job.id &&
+                payloadOf(item).runIntentId === intent.id &&
+                item.status === "answered"
+            );
+          })();
           if (answered) {
+            // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
             await enqueueIntent(
               projectId,
               intent.intent,
@@ -843,10 +926,12 @@ export async function processProjectSteward(
             );
           }
         }
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await stewardRepository.updateIntent(intent.id, {
           status: job.status === "completed" ? "completed" : "failed",
         });
       } else if (batch && batch.status !== "running") {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await stewardRepository.updateIntent(intent.id, {
           status: batch.status === "passed" ? "completed" : "failed",
         });
@@ -856,20 +941,24 @@ export async function processProjectSteward(
       return;
     }
     await applyVerifiedRepairs(projectId);
-    const pending = (await stewardRepository.intents(projectId)).filter(
-      (intent) => intent.status === "pending"
-    );
+    const pending = await (async () => {
+      const awaitedValue27654 = await stewardRepository.intents(projectId);
+      return awaitedValue27654.filter((intent) => intent.status === "pending");
+    })();
     for (const intent of pending) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       if (stopped || (await isAgentPaused(projectId))) {
         break;
       }
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await dispatchIntent(intent);
       } catch (error) {
-        if (error instanceof IntentDeferred) {
+        if (error instanceof IntentDeferredError) {
           continue;
         }
         if (error instanceof StaleTriageError) {
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           await stewardRepository.updateIntent(intent.id, {
             status: "ignored",
             reason: error.message,
@@ -877,19 +966,19 @@ export async function processProjectSteward(
           continue;
         }
         const scrub = createProjectScrubber(projectId);
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         const reason = await scrub(String(error));
-        if (intent.intent.kind === "run_specs") {
-          await askForRunPrerequisite(
-            intent,
-            reason,
-            errorCodeOf(error) ?? "failed"
-          );
-        } else {
-          await stewardRepository.updateIntent(intent.id, {
-            status: "failed",
-            reason,
-          });
-        }
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+        await (intent.intent.kind === "run_specs"
+          ? askForRunPrerequisite(
+              intent,
+              reason,
+              errorCodeOf(error) ?? "failed"
+            )
+          : stewardRepository.updateIntent(intent.id, {
+              status: "failed",
+              reason,
+            }));
         logger.warn("steward intent failed", {
           projectId,
           intentId: intent.id,
@@ -898,9 +987,9 @@ export async function processProjectSteward(
       }
     }
   });
-}
+};
 
-export async function processStewards(): Promise<void> {
+export const processStewards = async function processStewards(): Promise<void> {
   if (processing || stopped) {
     return;
   }
@@ -910,6 +999,7 @@ export async function processStewards(): Promise<void> {
       if (stopped) {
         break;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await processProjectSteward(project.id).catch((error) =>
         logger.warn("project steward failed", { projectId: project.id, error })
       );
@@ -917,15 +1007,32 @@ export async function processStewards(): Promise<void> {
   } finally {
     processing = false;
   }
-}
+};
 
-export function startSteward(): void {
+export const startSteward = function startSteward(): void {
   stopped = false;
-  timer = setInterval(() => void processStewards(), 30_000);
+  timer = setInterval(() => processStewards(), 30_000);
   timer.unref();
-  void processStewards();
-}
-export function stopSteward(): void {
+  processStewards();
+};
+
+export const stopSteward = function stopSteward(): void {
   stopped = true;
   clearInterval(timer);
-}
+};
+
+const locks = createKeyedLock();
+let stopped = false;
+let timer: ReturnType<typeof setInterval> | undefined;
+let processing = false;
+
+const KIND_INSTRUCTIONS = {
+  regenerate:
+    "Repair only spec.ts to implement the existing spec.yml. Never change the behavior contract. Verify the proposal before requesting approval.",
+  explore:
+    "Explore only the area requested by the human. Inspect available access and ask through the Inbox when a prerequisite needs human help.",
+  coverage:
+    "Compare confirmed areas, roles and rules to the existing Specs and propose additional coverage only for the requested scope. Ask when blocked.",
+  failure_triage:
+    "Investigate the failed Spec and classify its cause without changing expected behavior.",
+} as const;

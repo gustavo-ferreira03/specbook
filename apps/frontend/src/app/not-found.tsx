@@ -4,11 +4,11 @@ import { Target, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Brand } from "@/components/LogoMark";
-import { SpecGrid } from "@/components/SpecGrid";
+import { Brand } from "@/components/logo-mark";
+import { SpecGrid } from "@/components/spec-grid";
 import { Button } from "@/components/ui/button";
 
-export default function NotFound() {
+const NotFound = function NotFound() {
   const path = usePathname() || "/";
   return (
     <main className="bg-surface relative isolate flex min-h-dvh flex-col overflow-hidden px-6 py-6 sm:px-10">
@@ -54,4 +54,5 @@ export default function NotFound() {
       </div>
     </main>
   );
-}
+};
+export default NotFound;

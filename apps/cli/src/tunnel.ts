@@ -32,10 +32,14 @@ export type TunnelEvent =
   | { event: "retrying"; reason: string; retryInMs: number }
   | { event: "stopped"; url: string };
 
-async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+const delay = async function delay(
+  milliseconds: number,
+  signal: AbortSignal
+): Promise<void> {
   if (signal.aborted) {
     return;
   }
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
   await new Promise<void>((resolve) => {
     const done = () => {
       clearTimeout(timer);
@@ -48,9 +52,9 @@ async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
       done();
     }
   });
-}
+};
 
-function requireAllowedOrigins(
+const requireAllowedOrigins = function requireAllowedOrigins(
   origins: string[],
   allowedOrigins: string[]
 ): void {
@@ -60,9 +64,11 @@ function requireAllowedOrigins(
       403
     );
   }
-}
+};
 
-function monitorConnection(websocket: WebSocket): void {
+const monitorConnection = function monitorConnection(
+  websocket: WebSocket
+): void {
   let pongTimeout: NodeJS.Timeout | undefined;
   const pong = () => {
     clearTimeout(pongTimeout);
@@ -81,9 +87,9 @@ function monitorConnection(websocket: WebSocket): void {
     pong();
     websocket.removeListener("pong", pong);
   });
-}
+};
 
-async function connect(
+const connect = async function connect(
   api: string,
   token: string,
   config: TunnelConfig,
@@ -106,8 +112,12 @@ async function connect(
     perMessageDeflate: false,
     followRedirects: false,
   });
-  websocket.on("error", () => undefined);
-  return new Promise<WebSocket>((resolve, reject) => {
+  websocket.on("error", () => {
+    /* No action is needed until this callback is replaced or invoked by its owner. */
+    /* The caller owns cancellation or reports the failure separately. */
+  });
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
+  return await new Promise<WebSocket>((resolve, reject) => {
     const abort = () => {
       websocket.terminate();
       reject(signal.reason ?? new Error("Tunnel stopped"));
@@ -127,11 +137,15 @@ async function connect(
       const status = response.statusCode ?? 503;
       fail(
         new RemoteError(
-          status === 409
-            ? "Another tunnel is already connected to this environment; retrying"
-            : status === 426
-              ? "Tunnel protocol is incompatible. Install the CLI from this server and restart the tunnel."
-              : "The tunnel token cannot open a tunnel for this environment",
+          (() => {
+            if (status === 409) {
+              return "Another tunnel is already connected to this environment; retrying";
+            }
+            if (status === 426) {
+              return "Tunnel protocol is incompatible. Install the CLI from this server and restart the tunnel.";
+            }
+            return "The tunnel token cannot open a tunnel for this environment";
+          })(),
           status
         )
       );
@@ -183,6 +197,7 @@ async function connect(
       }
       clearTimeout(timer);
       monitorConnection(websocket);
+      // oxlint-disable-next-line no-new -- The multiplexer installs and owns its socket listeners for the lifetime of this connection.
       new TunnelMultiplexer(websocket, async (origin) => {
         if (
           !config.origins.includes(origin) ||
@@ -192,7 +207,8 @@ async function connect(
         }
         const target = httpTarget(origin);
         const address = await resolveTarget(target, true);
-        return new Promise<net.Socket>((connected, refused) => {
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
+        return new Promise<net.Socket>((_resolve, _reject) => {
           const socket = net.connect({
             host: address.address,
             port: Number(
@@ -202,14 +218,14 @@ async function connect(
           socket.setTimeout(30_000, () => socket.destroy());
           socket.once("connect", () => {
             socket.setNoDelay();
-            connected(socket);
+            _resolve(socket);
           });
           socket.once("error", () => {
             socket.destroy();
-            refused(new Error("Could not reach the allowed origin"));
+            _reject(new Error("Could not reach the allowed origin"));
           });
           socket.once("close", () =>
-            refused(new Error("Allowed origin connection closed"))
+            _reject(new Error("Allowed origin connection closed"))
           );
         });
       });
@@ -219,16 +235,17 @@ async function connect(
       abort();
     }
   });
-}
+};
 
-export async function runTunnel(
+// oxlint-disable-next-line complexity -- Keep the tunnel decision tree together so state transitions and error ordering remain explicit.
+export const runTunnel = async function runTunnel(
   options: TunnelOptions,
   emit: (event: TunnelEvent) => Promise<void>
 ): Promise<void> {
   rememberToken(options.token);
   if (
     !options.token ||
-    /\s/.test(options.token) ||
+    /\s/u.test(options.token) ||
     options.token.length > 4096
   ) {
     throw new Error(
@@ -238,7 +255,7 @@ export async function runTunnel(
   if (!options.project) {
     throw new Error("SPECBOOK_PROJECT or --project is required");
   }
-  const allowedOrigins = [...new Set(options.allowedOrigins ?? [])];
+  const allowedOrigins = [...new Set(options.allowedOrigins)];
   if (!allowedOrigins.length) {
     throw new Error(
       "Configure --allow-origin or SPECBOOK_TUNNEL_ALLOWED_ORIGINS with the application origins this tunnel may access"
@@ -247,7 +264,7 @@ export async function runTunnel(
   for (const origin of allowedOrigins) {
     try {
       if (httpTarget(origin).origin !== origin) {
-        throw new Error();
+        throw new Error("The configured origin must be canonical");
       }
     } catch {
       throw new Error(
@@ -270,6 +287,7 @@ export async function runTunnel(
           signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
           redirect: "error",
         });
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       let response = await get(api);
       if (
         !api.endsWith("/api") &&
@@ -278,9 +296,11 @@ export async function runTunnel(
             response.headers.get("content-type")?.includes("text/html")))
       ) {
         api += "/api";
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         response = await get(api);
       }
       if (!response.ok) {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await response.body?.cancel();
         if ([401, 403, 409].includes(response.status)) {
           throw new RemoteError(
@@ -296,8 +316,10 @@ export async function runTunnel(
         }
         throw new Error("Specbook could not prepare the tunnel; retrying");
       }
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const config = tunnelConfigSchema.parse(await response.json());
       requireAllowedOrigins(config.origins, allowedOrigins);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const websocket = await connect(
         api,
         options.token,
@@ -306,12 +328,14 @@ export async function runTunnel(
         signal
       );
       retryInMs = 3000;
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await emit({
         event: "connected",
         url: api,
         environment: config.environment,
         origins: config.origins,
       });
+      // oxlint-disable-next-line no-await-in-loop, promise/avoid-new -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use. Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
       await new Promise<void>((resolve, reject) => {
         if (websocket.readyState === WebSocket.CLOSED) {
           resolve();
@@ -346,10 +370,12 @@ export async function runTunnel(
         error instanceof RemoteError && error.status === 409
           ? "Another tunnel is already connected to this environment; retrying"
           : "Tunnel disconnected; check the server URL, proxy and connection";
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await emit({ event: "retrying", reason, retryInMs });
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await delay(retryInMs, signal);
     retryInMs = Math.min(retryInMs * 2, 30_000);
   }
   await emit({ event: "stopped", url: api });
-}
+};

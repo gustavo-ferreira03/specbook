@@ -12,7 +12,7 @@ export type ExecutionStepKind =
   | "postcondition";
 
 // spec.ts runs one step() per precondition (set up and check that state), one per step, one that proves the expected result, then one per postcondition (clean up and check).
-export function executionPlan(
+export const executionPlan = function executionPlan(
   human: HumanSpec
 ): { title: string; kind: ExecutionStepKind; ordinal: number | null }[] {
   const plan: { title: string; kind: ExecutionStepKind }[] = [
@@ -30,15 +30,22 @@ export function executionPlan(
     .map((entry) => ({ ...entry, title: entry.title.trim() }))
     .filter((entry) => entry.title);
   let ordinal = 0;
-  return plan.map((entry) => ({
-    ...entry,
-    ordinal: entry.kind === "step" ? ++ordinal : null,
-  }));
-}
+  return plan.map((entry) => {
+    if (entry.kind === "step") {
+      ordinal += 1;
+    }
+    return {
+      ...entry,
+      ordinal: entry.kind === "step" ? ordinal : null,
+    };
+  });
+};
 
-export function executionSteps(human: HumanSpec): string[] {
+export const executionSteps = function executionSteps(
+  human: HumanSpec
+): string[] {
   return executionPlan(human).map((entry) => entry.title);
-}
+};
 
 export type RunStatus = "running" | "passed" | "failed" | "error";
 

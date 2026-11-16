@@ -10,7 +10,7 @@ import { accountsRepository } from "../../repositories/accounts";
 import { projectsRepository } from "../../repositories/projects";
 import { access } from "../access";
 
-export function createSetupRouter(): Hono {
+export const createSetupRouter = function createSetupRouter(): Hono {
   const router = new Hono();
 
   router.get("/ready", access("public"), async (c) => {
@@ -65,4 +65,4 @@ export function createSetupRouter(): Hono {
   });
 
   return router;
-}
+};

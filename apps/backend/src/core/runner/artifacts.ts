@@ -11,18 +11,18 @@ import { HTTPException } from "hono/http-exception";
 import { runsRepository } from "../../infra/repositories/runs";
 import { runsDir } from "../paths";
 
-export { isInside } from "@specbook/runtime/safe-fs";
-
-function runDirectory(runId: string): string {
+const runDirectory = function runDirectory(runId: string): string {
   const root = path.resolve(runsDir);
   const directory = path.resolve(root, runId);
   if (path.dirname(directory) !== root) {
     throw new HTTPException(400, { message: "Invalid run id" });
   }
   return directory;
-}
+};
 
-export async function realRunDirectory(runId: string): Promise<string | null> {
+export const realRunDirectory = async function realRunDirectory(
+  runId: string
+): Promise<string | null> {
   const directory = runDirectory(runId);
   try {
     const [root, realDirectory] = await Promise.all([
@@ -42,9 +42,9 @@ export async function realRunDirectory(runId: string): Promise<string | null> {
     }
     throw error;
   }
-}
+};
 
-export async function listArtifactFiles(
+export const listArtifactFiles = async function listArtifactFiles(
   directory: string,
   relative = ""
 ): Promise<string[]> {
@@ -52,22 +52,24 @@ export async function listArtifactFiles(
     withFileTypes: true,
   });
   const files: string[] = [];
-  for (const entry of entries.sort((left, right) =>
+  for (const entry of entries.toSorted((left, right) =>
     left.name.localeCompare(right.name)
   )) {
     const artifact = relative
       ? path.posix.join(relative, entry.name)
       : entry.name;
     if (entry.isDirectory()) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       files.push(...(await listArtifactFiles(directory, artifact)));
     } else if (entry.isFile()) {
       files.push(artifact);
     }
   }
   return files;
-}
+};
 
-export async function readRunEvidence(runId: string) {
+// oxlint-disable-next-line complexity -- Keep the artifacts decision tree together so state transitions and error ordering remain explicit.
+export const readRunEvidence = async function readRunEvidence(runId: string) {
   const run = await runsRepository.getRun(runId);
   if (!run) {
     throw new HTTPException(404, { message: "Run not found" });
@@ -138,4 +140,6 @@ export async function readRunEvidence(runId: string) {
     environment: run.environment,
     errorContext: manifest.errorContext ?? null,
   };
-}
+};
+
+export { isInside } from "@specbook/runtime/safe-fs";

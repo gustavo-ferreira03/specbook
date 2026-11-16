@@ -3,6 +3,18 @@ import { stopActiveProcesses } from "@specbook/runtime/process";
 import { executeSingleSpecBatch } from "./batch";
 import type { ExecutedRun, RunOptions } from "./execution";
 
+export const executeSpec = async function executeSpec(
+  specId: string,
+  options: RunOptions = {}
+): Promise<ExecutedRun> {
+  options.signal?.throwIfAborted();
+  return await executeSingleSpecBatch(specId, options);
+};
+
+export const stopActiveRunProcesses = function stopActiveRunProcesses(): void {
+  stopActiveProcesses();
+};
+
 export {
   analyzeForRun,
   MAX_FAIL_REASON_CHARS,
@@ -11,15 +23,3 @@ export {
   StaleRunError,
 } from "./execution";
 export type { ExecutedRun } from "./execution";
-
-export async function executeSpec(
-  specId: string,
-  options: RunOptions = {}
-): Promise<ExecutedRun> {
-  options.signal?.throwIfAborted();
-  return executeSingleSpecBatch(specId, options);
-}
-
-export function stopActiveRunProcesses(): void {
-  stopActiveProcesses();
-}

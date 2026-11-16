@@ -6,18 +6,19 @@ import type { Job } from "../../infra/repositories/jobs";
 import { specsRepository } from "../../infra/repositories/specs";
 import { createProjectScrubber } from "../credentials/scrub";
 import { isAgentPaused } from "./pause";
-import { specBatchOf, payloadOf, verificationOf } from "./schemas";
+import { specBatchOf, verificationOf } from "./schemas";
 
-export const MAX_SAFETY_RETRIES = 2;
-
-async function askAboutStalledWork(job: Job): Promise<void> {
+const askAboutStalledWork = async function askAboutStalledWork(
+  job: Job
+): Promise<void> {
   const existing =
-    (
-      await jobsRepository.itemsForJob(job.id, {
+    (await (async () => {
+      const awaitedValue608 = await jobsRepository.itemsForJob(job.id, {
         kind: "question",
         statuses: ["pending", "applying"],
-      })
-    ).length > 0;
+      });
+      return awaitedValue608.length;
+    })()) > 0;
   if (existing) {
     return;
   }
@@ -28,7 +29,7 @@ async function askAboutStalledWork(job: Job): Promise<void> {
       : null;
   const candidate = (
     source ? specBatchOf(source) : undefined
-  )?.candidates?.find((candidate) => candidate.jobId === job.id);
+  )?.candidates?.find((candidateValue) => candidateValue.jobId === job.id);
   if (!spec && candidate?.specId) {
     spec = await specsRepository.getSpec(candidate.specId);
   }
@@ -55,9 +56,9 @@ async function askAboutStalledWork(job: Job): Promise<void> {
       ...(source ? { sourceItemId: source.id } : {}),
     },
   });
-}
+};
 
-export async function stallJob(
+export const stallJob = async function stallJob(
   job: Job,
   fallback: string,
   code?: ErrorCode
@@ -72,7 +73,7 @@ export async function stallJob(
     .find(Boolean);
   const actions = await jobsRepository.actions(job.id);
   const lastError = [...actions]
-    .reverse()
+    .toReversed()
     .find((action) => action.action.endsWith(":error"))?.detail;
   const stopReason = await createProjectScrubber(job.projectId)(
     failure ?? lastError ?? fallback
@@ -100,9 +101,11 @@ export async function stallJob(
   if (changed) {
     await jobsRepository.log(job.id, "stalled", stopReason);
   }
-}
+};
 
-export async function retryStalledJob(job: Job): Promise<void> {
+export const retryStalledJob = async function retryStalledJob(
+  job: Job
+): Promise<void> {
   const current = await jobsRepository.get(job.id);
   if (!current || current.startedAt || (await isAgentPaused(job.projectId))) {
     return;
@@ -154,9 +157,9 @@ export async function retryStalledJob(job: Job): Promise<void> {
       `Attempt ${current.safetyRetries + 1}: ${current.stopReason ?? "No confirmed result"}`
     );
   }
-}
+};
 
-export async function retryInfrastructure(
+export const retryInfrastructure = async function retryInfrastructure(
   job: Job,
   error: string,
   code: ErrorCode = "infrastructure"
@@ -190,4 +193,6 @@ export async function retryInfrastructure(
   if (changed) {
     await jobsRepository.log(job.id, "service_retry", message);
   }
-}
+};
+
+export const MAX_SAFETY_RETRIES = 2;

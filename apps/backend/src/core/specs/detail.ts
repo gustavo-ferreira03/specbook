@@ -10,7 +10,10 @@ import type { Spec } from "../../infra/repositories/specs";
 import { visibleRuns } from "../private-runner/visibility";
 import { readSpecRawFiles } from "../repo/manual";
 
-export async function specDetail(spec: Spec, runLimit?: number) {
+export const specDetail = async function specDetail(
+  spec: Spec,
+  runLimit?: number
+) {
   const feature = await featuresRepository.getFeature(spec.featureId);
   const runs = await runsRepository.listRuns(spec.id, { limit: runLimit });
   const raw = await readSpecRawFiles(spec).catch((error) => {
@@ -22,7 +25,7 @@ export async function specDetail(spec: Spec, runLimit?: number) {
   let humanSpec: HumanSpec | null = null;
   if (raw.yaml !== null) {
     try {
-      humanSpec = parseSpecYaml(raw.yaml).humanSpec;
+      ({ humanSpec } = parseSpecYaml(raw.yaml));
     } catch {
       humanSpec = null;
     }
@@ -36,14 +39,15 @@ export async function specDetail(spec: Spec, runLimit?: number) {
         }
       : null;
   const environments = await environmentsRepository.list(spec.projectId);
-  const environmentStates = (await specEnvironmentsRepository.list(spec)).map(
-    (state) => ({
+  const environmentStates = await (async () => {
+    const awaitedValue1565 = await specEnvironmentsRepository.list(spec);
+    return awaitedValue1565.map((state) => ({
       ...state,
       name: environments.find(
         (environment) => environment.id === state.environmentId
       )?.name,
-    })
-  );
+    }));
+  })();
   return {
     spec,
     feature,
@@ -51,4 +55,4 @@ export async function specDetail(spec: Spec, runLimit?: number) {
     runs: await visibleRuns(runs),
     environmentStates,
   };
-}
+};

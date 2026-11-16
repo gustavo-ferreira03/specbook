@@ -1,15 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { migrate } from "drizzle-orm/libsql/migrator";
 
 import { migrateCredentialFields } from "../../core/credentials/migration";
 import { db, initializeDatabase } from "./client";
 
-const moduleDir = import.meta.dirname;
-
-function migrationsFolder(): string {
+const migrationsFolder = function migrationsFolder(): string {
   const candidates = [
     process.env.SPECBOOK_MIGRATIONS_DIR,
     path.resolve(moduleDir, "..", "..", "..", "drizzle"),
@@ -25,11 +22,13 @@ function migrationsFolder(): string {
     );
   }
   return found;
-}
+};
 
-export async function runMigrations(): Promise<void> {
+export const runMigrations = async function runMigrations(): Promise<void> {
   await initializeDatabase();
   // Encrypt legacy usernames before the schema migration removes their plaintext column.
   await migrateCredentialFields();
   await migrate(db, { migrationsFolder: migrationsFolder() });
-}
+};
+
+const moduleDir = import.meta.dirname;

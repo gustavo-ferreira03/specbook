@@ -32,9 +32,9 @@ import {
   selectSpecBatch,
 } from "../../../core/jobs/spec-batches";
 import { proposalDirectory } from "../../../core/jobs/verification";
-import type { ProposalVerification } from "../../../core/jobs/verification";
 import { drainJobs, enqueueJob } from "../../../core/jobs/worker";
 import { enqueueIntent } from "../../../core/steward/engine";
+import { requireValue } from "../../../core/utils/require-value";
 import { logger } from "../../logger";
 import { chatsRepository } from "../../repositories/chats";
 import { jobsRepository } from "../../repositories/jobs";
@@ -42,15 +42,15 @@ import type { InboxItem, Job } from "../../repositories/jobs";
 import { projectsRepository } from "../../repositories/projects";
 import { access } from "../access";
 
-async function projectJob(projectId: string, jobId: string) {
+const projectJob = async function projectJob(projectId: string, jobId: string) {
   const job = await jobsRepository.get(jobId);
   if (!job || job.projectId !== projectId) {
     throw new HTTPException(404, { message: "Job not found" });
   }
   return job;
-}
+};
 
-async function projectItem(
+const projectItem = async function projectItem(
   projectId: string,
   itemId: string,
   message = "Inbox item not found"
@@ -60,9 +60,11 @@ async function projectItem(
     throw new HTTPException(404, { message });
   }
   return item;
-}
+};
 
-async function sourceChatForItem(item: InboxItem): Promise<string | undefined> {
+const sourceChatForItem = async function sourceChatForItem(
+  item: InboxItem
+): Promise<string | undefined> {
   const job = await jobsRepository.get(item.jobId);
   for (const id of [
     payloadOf(item).discussionChatId,
@@ -72,15 +74,16 @@ async function sourceChatForItem(item: InboxItem): Promise<string | undefined> {
     if (typeof id !== "string") {
       continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const chat = await chatsRepository.getChatRow(id);
     if (chat?.projectId === item.projectId) {
       return chat.id;
     }
   }
   return undefined;
-}
+};
 
-async function cancelJob(
+const cancelJob = async function cancelJob(
   job: Job,
   classification?: Job["classification"]
 ): Promise<boolean> {
@@ -98,9 +101,9 @@ async function cancelJob(
     ]);
   }
   return true;
-}
+};
 
-export function createJobsRouter(): Hono {
+export const createJobsRouter = function createJobsRouter(): Hono {
   const router = new Hono();
   router.get("/projects/:id/overview", access("viewer"), async (c) => {
     if (!(await projectsRepository.getProject(c.req.param("id")))) {
@@ -109,10 +112,12 @@ export function createJobsRouter(): Hono {
     return c.json(await projectOverview(c.req.param("id")));
   });
   router.use("/projects/:id/jobs/*", async (c, next) => {
-    if (!(await projectsRepository.getProject(c.req.param("id")!))) {
+    if (
+      !(await projectsRepository.getProject(requireValue(c.req.param("id"))))
+    ) {
       throw new HTTPException(404, { message: "Project not found" });
     }
-    await next();
+    return await next();
   });
   router.get("/projects/:id/jobs", access("viewer"), async (c) =>
     c.json({ jobs: await jobsRepository.list(c.req.param("id")) })
@@ -259,6 +264,7 @@ ${item.body}`.slice(0, 6000),
     "/projects/:id/inbox/:itemId/review",
     access("editor"),
     zValidator("json", reviewSchema),
+    // oxlint-disable-next-line complexity -- Keep the jobs decision tree together so state transitions and error ordering remain explicit.
     async (c) => {
       const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
       const { action, answer } = c.req.valid("json");
@@ -301,17 +307,21 @@ ${item.body}`.slice(0, 6000),
             commitSha,
           });
         } else if (action === "answer") {
-          await jobsRepository.answer(item, answer!);
-          void drainJobs();
+          await jobsRepository.answer(item, requireValue(answer));
+          drainJobs();
         } else if (action === "report_bug") {
           const { params } = payloadOf(item);
-          const existing = (
-            await jobsRepository.itemsByKind(item.projectId, "bug_report")
-          ).find(
-            (other) =>
-              other.kind === "bug_report" &&
-              payloadOf(other).sourceItemId === item.id
-          );
+          const existing = await (async () => {
+            const awaitedValue10510 = await jobsRepository.itemsByKind(
+              item.projectId,
+              "bug_report"
+            );
+            return awaitedValue10510.find(
+              (other) =>
+                other.kind === "bug_report" &&
+                payloadOf(other).sourceItemId === item.id
+            );
+          })();
           if (!existing) {
             await jobsRepository.addItem({
               projectId: item.projectId,
@@ -348,18 +358,16 @@ ${item.body}`.slice(0, 6000),
         await jobsRepository.log(item.jobId, `inbox:${action}`, item.id);
         return c.json({ item: await jobsRepository.item(item.id) });
       } catch (error) {
-        if (commitSha) {
-          await jobsRepository
-            .updateItem(item.id, { status: "approved", commitSha })
-            .catch((cause) =>
-              logger.error("approved proposal could not be recorded", {
-                itemId: item.id,
-                cause,
-              })
-            );
-        } else {
-          await jobsRepository.updateItem(item.id, { status: "pending" });
-        }
+        await (commitSha
+          ? jobsRepository
+              .updateItem(item.id, { status: "approved", commitSha })
+              .catch((error_) =>
+                logger.error("approved proposal could not be recorded", {
+                  itemId: item.id,
+                  cause: error_,
+                })
+              )
+          : jobsRepository.updateItem(item.id, { status: "pending" }));
         throw new HTTPException(409, {
           message: error instanceof Error ? error.message : String(error),
         });
@@ -367,4 +375,4 @@ ${item.body}`.slice(0, 6000),
     }
   );
   return router;
-}
+};

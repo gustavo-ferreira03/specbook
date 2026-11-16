@@ -6,7 +6,7 @@ import type { Spec } from "../../infra/repositories/specs";
 import { runsDir } from "../paths";
 import { markdownHashOf } from "../repo/writer";
 
-export async function matchesCurrentSpec(
+export const matchesCurrentSpec = async function matchesCurrentSpec(
   run: Run,
   spec: Spec
 ): Promise<boolean> {
@@ -21,4 +21,4 @@ export async function matchesCurrentSpec(
     .readFile(path.join(runsDir, run.id, "spec.yml"), "utf-8")
     .catch(() => null);
   return yaml !== null && markdownHashOf(yaml) === spec.markdownHash;
-}
+};

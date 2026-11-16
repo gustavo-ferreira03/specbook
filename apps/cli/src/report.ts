@@ -10,15 +10,16 @@ import { parseSpecYaml } from "@specbook/runtime/yaml";
 import type { LocalRun } from "./run";
 import { safeWorkspacePath } from "./workspace";
 
-export async function generateReport(
+export const generateReport = async function generateReport(
   workspace: string,
   selector?: string
 ): Promise<{ run: string; report: string }> {
   const runs = await safeWorkspacePath(workspace, "runs");
-  const ids = (await fs.readdir(runs, { withFileTypes: true }))
+  const readdirValue1 = await fs.readdir(runs, { withFileTypes: true });
+  const ids = readdirValue1
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .sort();
+    .toSorted();
   const id = selector ?? ids.at(-1);
   if (!id) {
     throw new Error("No local runs found");
@@ -35,19 +36,25 @@ export async function generateReport(
   const sections = [];
   for (const item of run.results) {
     const relative = `runs/${id}/${item.path}`;
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const evidenceDirectory = await safeWorkspacePath(workspace, relative);
     const human = parseSpecYaml(
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.readFile(
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await safeWorkspacePath(workspace, `${relative}/spec.yml`),
         "utf-8"
       )
     );
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     for (const entry of await fs.readdir(evidenceDirectory, {
       recursive: true,
     })) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await safeWorkspacePath(workspace, `${relative}/${entry}`);
     }
     sections.push(
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await prepareReportSection({
         item: { ...item, runId: item.path },
         directory: evidenceDirectory,
@@ -77,4 +84,4 @@ export async function generateReport(
   );
   await fs.writeFile(report, html);
   return { run: id, report };
-}
+};

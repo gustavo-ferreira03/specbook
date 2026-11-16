@@ -8,19 +8,20 @@ import { enqueueIntent } from "./engine";
 import { stewardIntentSchema } from "./schemas";
 import type { StewardIntent, StewardIntentInput } from "./schemas";
 
-function result(value: string) {
+const result = function result(value: string) {
   return {
     content: [{ type: "text" as const, text: value }],
     details: undefined,
     terminate: false,
   };
-}
+};
 
-async function validateReferences(
+const validateReferences = async function validateReferences(
   projectId: string,
   intent: StewardIntent
 ): Promise<void> {
   for (const specId of intent.specIds ?? []) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const spec = await specsRepository.getSpec(specId);
     if (!spec || spec.projectId !== projectId) {
       throw new Error("Every selected Spec must belong to this project");
@@ -40,9 +41,9 @@ async function validateReferences(
       throw new Error("Triage needs a failed run");
     }
   }
-}
+};
 
-export function createBackgroundTaskTool(
+export const createBackgroundTaskTool = function createBackgroundTaskTool(
   projectId: string,
   sourceKey: string,
   sourceChatId?: string
@@ -71,4 +72,4 @@ export function createBackgroundTaskTool(
       return result(await scrub(JSON.stringify(queued)));
     },
   });
-}
+};

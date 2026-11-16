@@ -1,14 +1,31 @@
 import http from "node:http";
 import net from "node:net";
-import type { AddressInfo, Socket } from "node:net";
+import type { AddressInfo, LookupFunction, Socket } from "node:net";
 import type { Duplex } from "node:stream";
 
 import { httpTarget, resolveTarget } from "./targets.ts";
-import type { AddressResolver } from "./targets.ts";
+import type { AddressResolver, ResolvedAddress } from "./targets.ts";
+
+const resolvedLookup = (
+  address: ResolvedAddress | undefined
+): LookupFunction => {
+  if (!address) {
+    throw new Error("Network target was not resolved");
+  }
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This callback is required by the Node networking or player event API.
+  return (_hostname, options, callback) => {
+    if (options.all) {
+      // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This callback is required by the Node networking or player event API.
+      return callback(null, [address]);
+    }
+    // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This callback is required by the Node networking or player event API.
+    return callback(null, address.address, address.family);
+  };
+};
 
 export type TargetConnector = (target: URL) => Promise<Duplex>;
 
-export async function createRunProxy(
+export const createRunProxy = async function createRunProxy(
   privateOrigins: string[],
   resolver?: AddressResolver,
   connectTarget?: TargetConnector
@@ -59,14 +76,7 @@ export async function createRunProxy(
           ...(connection
             ? { createConnection: () => connection as Socket, agent: undefined }
             : {
-                lookup: (
-                  _hostname: string,
-                  options: { all?: boolean },
-                  callback: Function
-                ) =>
-                  options.all
-                    ? callback(null, [address!])
-                    : callback(null, address!.address, address!.family),
+                lookup: resolvedLookup(address),
                 agent: false,
               }),
         },
@@ -114,7 +124,13 @@ export async function createRunProxy(
               privateOrigins.includes(target.origin) ? target : plain
             )
           : net.connect({
-              host: address!.address,
+              host: (() => {
+                const presentValue = address;
+                if (presentValue === null || presentValue === undefined) {
+                  throw new Error("Expected an existing value");
+                }
+                return presentValue;
+              })().address,
               port: Number(target.port || 443),
             })
       );
@@ -144,7 +160,7 @@ export async function createRunProxy(
   });
   server.on("upgrade", (request, socket, head) => {
     void (async () => {
-      const target = httpTarget((request.url ?? "").replace(/^ws:/, "http:"));
+      const target = httpTarget((request.url ?? "").replace(/^ws:/u, "http:"));
       if (target.protocol !== "http:") {
         throw new Error("Use CONNECT for HTTPS");
       }
@@ -176,19 +192,12 @@ export async function createRunProxy(
         ...(connection
           ? { createConnection: () => connection as Socket, agent: undefined }
           : {
-              lookup: (
-                _hostname: string,
-                options: { all?: boolean },
-                callback: Function
-              ) =>
-                options.all
-                  ? callback(null, [address!])
-                  : callback(null, address!.address, address!.family),
+              lookup: resolvedLookup(address),
               agent: false,
             }),
       });
       upstream.on("socket", track);
-      upstream.on("upgrade", (response, connection, upstreamHead) => {
+      upstream.on("upgrade", (response, upgradedConnection, upstreamHead) => {
         socket.write(
           `HTTP/1.1 ${response.statusCode} ${response.statusMessage}\r\n${Object.entries(
             response.headers
@@ -197,14 +206,14 @@ export async function createRunProxy(
             .join("\r\n")}\r\n\r\n`
         );
         if (head.length) {
-          connection.write(head);
+          upgradedConnection.write(head);
         }
         if (upstreamHead.length) {
           socket.write(upstreamHead);
         }
-        connection.pipe(socket);
-        socket.pipe(connection);
-        socket.on("close", () => connection.destroy());
+        upgradedConnection.pipe(socket);
+        socket.pipe(upgradedConnection);
+        socket.on("close", () => upgradedConnection.destroy());
       });
       upstream.on("response", () => {
         upstream.destroy();
@@ -218,6 +227,7 @@ export async function createRunProxy(
     );
   });
   server.on("clientError", (_error, socket) => socket.destroy());
+  // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -228,7 +238,10 @@ export async function createRunProxy(
       for (const socket of sockets) {
         socket.destroy();
       }
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
     },
   };
-}
+};

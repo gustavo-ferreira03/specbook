@@ -28,7 +28,7 @@ test("Run every Spec from the Specs list", async ({ page, step, secret }) => {
       { timeout: 60_000 }
     );
     await expect(
-      batch.getByText(/^\d+ passed across \d+ Specs?\.$/)
+      batch.getByText(/^\d+ passed across \d+ Specs?\.$/u)
     ).toBeVisible();
   });
 });

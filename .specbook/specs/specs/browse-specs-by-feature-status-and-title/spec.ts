@@ -17,7 +17,7 @@ test("Browse Specs by feature, status, and title", async ({
       .fill(secret("dogfood-admin", "password"));
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(
-      /\/p\/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe\/specs$/
+      /\/p\/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe\/specs$/u
     );
   });
   await step(
@@ -37,9 +37,9 @@ test("Browse Specs by feature, status, and title", async ({
     }
   );
   await step("Filter the list to passing Specs", async () => {
-    await page.getByRole("button", { name: /^Passing \d+$/ }).click();
+    await page.getByRole("button", { name: /^Passing \d+$/u }).click();
     await expect(
-      page.getByRole("button", { name: /^Passing \d+$/ })
+      page.getByRole("button", { name: /^Passing \d+$/u })
     ).toHaveAttribute("aria-pressed", "true");
   });
   await step("Search for \u201CHome page opens\u201D", async () => {

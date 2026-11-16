@@ -21,26 +21,7 @@ import { runsRepository } from "../../repositories/runs";
 import { specsRepository } from "../../repositories/specs";
 import { access } from "../access";
 
-const createProjectSchema = z.object({
-  name: z.string().min(1),
-  baseUrl: z.string().url(),
-});
-
-const updateProjectSchema = z
-  .object({
-    name: z.string().min(1).optional(),
-    baseUrl: z.string().url().optional(),
-  })
-  .refine((value) => value.name !== undefined || value.baseUrl !== undefined, {
-    message: "Provide at least one of name or baseUrl",
-  });
-
-const createSpecSchema = z.object({
-  featureId: z.string().min(1),
-  title: z.string().min(1),
-});
-
-function mapManualError(error: unknown): never {
+const mapManualError = function mapManualError(error: unknown): never {
   if (error instanceof HTTPException) {
     throw error;
   }
@@ -55,14 +36,14 @@ function mapManualError(error: unknown): never {
   }
   if (
     error instanceof Error &&
-    /unfinished rebase|uncommitted changes/.test(error.message)
+    /unfinished rebase|uncommitted changes/u.test(error.message)
   ) {
     throw new HTTPException(409, { message: error.message });
   }
   throw error;
-}
+};
 
-export function createProjectsRouter(): Hono {
+export const createProjectsRouter = function createProjectsRouter(): Hono {
   const router = new Hono();
 
   router.post(
@@ -81,7 +62,10 @@ export function createProjectsRouter(): Hono {
 
   router.get("/projects", access("viewer"), async (c) =>
     c.json({
-      projects: (await projectsRepository.listProjects()).map(publicProject),
+      projects: await (async () => {
+        const awaitedValue2261 = await projectsRepository.listProjects();
+        return awaitedValue2261.map(publicProject);
+      })(),
     })
   );
 
@@ -117,15 +101,18 @@ export function createProjectsRouter(): Hono {
     access("editor"),
     zValidator("json", updateProjectSchema),
     async (c) =>
-      withProjectEnvironmentLock(c.req.param("id"), async () => {
+      await withProjectEnvironmentLock(c.req.param("id"), async () => {
         const project = await projectsRepository.getProject(c.req.param("id"));
         if (!project) {
           throw new HTTPException(404, { message: "Project not found" });
         }
         const input = c.req.valid("json");
-        const environment = (
-          await environmentsRepository.list(project.id)
-        ).find((row) => row.name === "Production");
+        const environment = await (async () => {
+          const awaitedValue3792 = await environmentsRepository.list(
+            project.id
+          );
+          return awaitedValue3792.find((row) => row.name === "Production");
+        })();
         if (
           input.baseUrl &&
           environment &&
@@ -210,4 +197,23 @@ export function createProjectsRouter(): Hono {
   );
 
   return router;
-}
+};
+
+const createProjectSchema = z.object({
+  name: z.string().min(1),
+  baseUrl: z.string().url(),
+});
+
+const updateProjectSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    baseUrl: z.string().url().optional(),
+  })
+  .refine((value) => value.name !== undefined || value.baseUrl !== undefined, {
+    message: "Provide at least one of name or baseUrl",
+  });
+
+const createSpecSchema = z.object({
+  featureId: z.string().min(1),
+  title: z.string().min(1),
+});

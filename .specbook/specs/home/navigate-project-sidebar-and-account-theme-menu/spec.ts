@@ -14,7 +14,7 @@ test("Navigate project sidebar and account theme menu", async ({
       .getByRole("textbox", { name: "Password" })
       .fill(secret("dogfood-admin", "password"));
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(/\/p\/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe$/);
+    await expect(page).toHaveURL(/\/p\/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe$/u);
     await expect(
       page.getByRole("button", { name: "Sauce Demo" })
     ).toBeVisible();
@@ -22,19 +22,19 @@ test("Navigate project sidebar and account theme menu", async ({
   await step("Open Home from the project sidebar", async () => {
     await page.getByRole("link", { name: "Home", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: /^\d+ of \d+ Specs? passing$/ })
+      page.getByRole("heading", { name: /^\d+ of \d+ Specs? passing$/u })
     ).toBeVisible();
   });
   await step("Open Specs from the project sidebar", async () => {
     await page.getByRole("link", { name: "Specs", exact: true }).click();
-    await expect(page).toHaveURL(/\/specs$/);
+    await expect(page).toHaveURL(/\/specs$/u);
     await expect(
       page.getByRole("heading", { name: "Specs", exact: true })
     ).toBeVisible();
   });
   await step("Open Chats from the project sidebar", async () => {
     await page.getByRole("link", { name: "Chats", exact: true }).click();
-    await expect(page).toHaveURL(/\/chats$/);
+    await expect(page).toHaveURL(/\/chats$/u);
     await expect(
       page.getByRole("heading", { name: "Chats", exact: true })
     ).toBeVisible();

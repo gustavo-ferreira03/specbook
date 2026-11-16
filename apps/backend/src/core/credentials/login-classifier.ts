@@ -1,81 +1,41 @@
-// Ported from Hermes Agent agent/vault_login_classifier.py (MIT, Copyright (c) 2025 Nous Research) and Merit-Systems/OpenInstinct kernel-login-autofill.ts (MIT).
-
-export type LoginToken = "username" | "email" | "tel" | "current-password";
-
-export interface PageControl {
-  autocomplete: string;
-  formIndex: number | null;
-  index: number;
-  label: string;
-  name: string;
-  type: string;
-  maxLength: number | null;
-}
-
-export interface ClassifiedControl {
-  control: PageControl;
-  score: number;
-  token: LoginToken | "one-time-code";
-}
-
-export interface ControlFill {
-  index: number;
-  token: ClassifiedControl["token"];
-  value: string;
-}
-
-const LOGIN_TOKENS: LoginToken[] = [
-  "username",
-  "email",
-  "tel",
-  "current-password",
-];
-const EXCLUDED_AUTOCOMPLETE = new Set(["new-password", "one-time-code"]);
-const EXCLUDED_PASSWORD =
-  /\b(?:new|confirm|create|repeat|nova|confirmar|confirme|repita)\s*(?:password|senha)\b/;
-const EMAIL = /\b(?:e\s?mail|email address)\b/;
-const TEL = /\b(?:phone|telephone|mobile|celular|telefone)\b/;
-const USERNAME =
-  /\b(?:user\s*name|username|login|account|member|usuario|cpf)\b/;
-const OTP =
-  /\b(?:one\s?time|verification|verificacao|security|seguranca|auth(?:entication|enticator)?|2fa|two\s?factor|mfa|totp|otp|passcode|sms)\b.*\b(?:code|codigo|pin|token)\b|\b(?:otp|totp|2fa|mfa|verification\s*code|codigo\s*de\s*verificacao|passcode)\b/;
-
-export function loginFieldKeys(keys: string[]): {
+export const loginFieldKeys = function loginFieldKeys(keys: string[]): {
   identifier?: string;
   password?: string;
   totp?: string;
 } {
-  const password = keys.find((key) => /pass|senha|pwd/.test(key));
+  const password = keys.find((key) => /pass|senha|pwd/u.test(key));
   const totp = keys.find((key) =>
-    /^(totp|otp|2fa|mfa|authenticator)/.test(key)
+    /^(?<capture1>totp|otp|2fa|mfa|authenticator)/u.test(key)
   );
   const rest = keys.filter((key) => key !== password && key !== totp);
   const identifier =
     rest.find((key) =>
-      /^(username|user|email|login|identifier|phone|cpf|usuario)/.test(key)
+      /^(?<capture1>username|user|email|login|identifier|phone|cpf|usuario)/u.test(
+        key
+      )
     ) ?? (password && rest.length === 1 ? rest[0] : undefined);
   return { identifier, password, totp };
-}
+};
 
-function normalize(value: string): string {
+const normalize = function normalize(value: string): string {
   return value
     .normalize("NFKD")
-    .replaceAll(/[̀-ͯ]/g, "")
+    .replaceAll(/[̀-ͯ]/gu, "")
     .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, " ")
+    .replaceAll(/[^a-z0-9]+/gu, " ")
     .trim();
-}
+};
 
-function searchable(control: PageControl): string {
+const searchable = function searchable(control: PageControl): string {
   return normalize([control.name, control.label].filter(Boolean).join(" "));
-}
+};
 
-export function classifyLoginControl(
+export const classifyLoginControl = function classifyLoginControl(
   control: PageControl
 ): ClassifiedControl | null {
   const tokens = control.autocomplete
     .toLowerCase()
-    .split(/\s+/)
+    .split(/\s+/u)
     .filter(Boolean);
   if (tokens.some((token) => EXCLUDED_AUTOCOMPLETE.has(token))) {
     return null;
@@ -107,16 +67,14 @@ export function classifyLoginControl(
     return { control, score: 70, token: "username" };
   }
   return null;
-}
+};
 
-const CODE_TYPES = new Set(["text", "tel", "number", "password", ""]);
-
-export function classifyOtpControls(
+export const classifyOtpControls = function classifyOtpControls(
   controls: PageControl[]
 ): ClassifiedControl[] {
   const matched = controls.flatMap((control): ClassifiedControl[] => {
     if (
-      control.autocomplete.toLowerCase().split(/\s+/).includes("one-time-code")
+      control.autocomplete.toLowerCase().split(/\s+/u).includes("one-time-code")
     ) {
       return [{ control, score: 100, token: "one-time-code" }];
     }
@@ -134,7 +92,7 @@ export function classifyOtpControls(
     .filter(
       (control) => control.maxLength === 1 && CODE_TYPES.has(control.type)
     )
-    .sort((a, b) => a.index - b.index);
+    .toSorted((a, b) => a.index - b.index);
   let run: PageControl[] = [];
   for (const box of boxes) {
     const previous = run.at(-1);
@@ -156,14 +114,9 @@ export function classifyOtpControls(
     }
   }
   return [];
-}
+};
 
-const best = (controls: ClassifiedControl[]) =>
-  [...controls].sort(
-    (a, b) => b.score - a.score || a.control.index - b.control.index
-  )[0];
-
-export function selectLoginFills(
+export const selectLoginFills = function selectLoginFills(
   controls: PageControl[],
   values: { identifier?: string; password?: string }
 ): ControlFill[] {
@@ -198,15 +151,15 @@ export function selectLoginFills(
     });
   }
   return fills;
-}
+};
 
-export function selectOtpFills(
+export const selectOtpFills = function selectOtpFills(
   otpControls: ClassifiedControl[],
   code: string
 ): ControlFill[] {
   const boxes = otpControls
     .filter((item) => item.control.maxLength === 1)
-    .sort((a, b) => a.control.index - b.control.index);
+    .toSorted((a, b) => a.control.index - b.control.index);
   const perDigit =
     boxes.length === code.length &&
     new Set(boxes.map((box) => box.control.formIndex)).size === 1 &&
@@ -225,11 +178,11 @@ export function selectOtpFills(
   return top
     ? [{ index: top.control.index, token: "one-time-code", value: code }]
     : [];
-}
+};
 
-const STAMP = "data-specbook-vault-slot";
-
-export function inspectionFunction(nonce: string): string {
+export const inspectionFunction = function inspectionFunction(
+  nonce: string
+): string {
   return `() => {
   const nonce = ${JSON.stringify(nonce)};
   const elements = Array.from(document.querySelectorAll("input, select"));
@@ -255,9 +208,9 @@ export function inspectionFunction(nonce: string): string {
     }];
   });
 }`;
-}
+};
 
-export function fillFunction(
+export const fillFunction = function fillFunction(
   fills: ControlFill[],
   expectedOrigin: string,
   nonce: string
@@ -282,9 +235,11 @@ export function fillFunction(
   document.querySelectorAll("[${STAMP}]").forEach((node) => node.removeAttribute(${JSON.stringify(STAMP)}));
   return { filled };
 }`;
-}
+};
 
-export function parsePageControls(value: unknown): PageControl[] {
+export const parsePageControls = function parsePageControls(
+  value: unknown
+): PageControl[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -305,4 +260,54 @@ export function parsePageControls(value: unknown): PageControl[] {
       },
     ];
   });
+};
+// Ported from Hermes Agent agent/vault_login_classifier.py (MIT, Copyright (c) 2025 Nous Research) and Merit-Systems/OpenInstinct kernel-login-autofill.ts (MIT).
+
+export type LoginToken = "username" | "email" | "tel" | "current-password";
+
+export interface PageControl {
+  autocomplete: string;
+  formIndex: number | null;
+  index: number;
+  label: string;
+  name: string;
+  type: string;
+  maxLength: number | null;
 }
+
+export interface ClassifiedControl {
+  control: PageControl;
+  score: number;
+  token: LoginToken | "one-time-code";
+}
+
+export interface ControlFill {
+  index: number;
+  token: ClassifiedControl["token"];
+  value: string;
+}
+
+const LOGIN_TOKENS: LoginToken[] = [
+  "username",
+  "email",
+  "tel",
+  "current-password",
+];
+const EXCLUDED_AUTOCOMPLETE = new Set(["new-password", "one-time-code"]);
+const EXCLUDED_PASSWORD =
+  /\b(?:new|confirm|create|repeat|nova|confirmar|confirme|repita)\s*(?:password|senha)\b/u;
+const EMAIL = /\b(?:e\s?mail|email address)\b/u;
+const TEL = /\b(?:phone|telephone|mobile|celular|telefone)\b/u;
+const USERNAME =
+  /\b(?:user\s*name|username|login|account|member|usuario|cpf)\b/u;
+const OTP =
+  /\b(?:one\s?time|verification|verificacao|security|seguranca|auth(?:entication|enticator)?|2fa|two\s?factor|mfa|totp|otp|passcode|sms)\b.*\b(?:code|codigo|pin|token)\b|\b(?:otp|totp|2fa|mfa|verification\s*code|codigo\s*de\s*verificacao|passcode)\b/u;
+
+const CODE_TYPES = new Set(["text", "tel", "number", "password", ""]);
+
+const best = (controls: ClassifiedControl[]) =>
+  [...controls].toSorted(
+    (a, b) => b.score - a.score || a.control.index - b.control.index
+  )[0];
+
+const STAMP = "data-specbook-vault-slot";

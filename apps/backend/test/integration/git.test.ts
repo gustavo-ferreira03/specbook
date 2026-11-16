@@ -9,6 +9,77 @@ import type { SimpleGit } from "simple-git";
 
 import { tempDir, useTempStorage } from "../helpers/storage";
 
+const newProject = async function newProject(): Promise<{
+  id: string;
+  checkout: string;
+  git: SimpleGit;
+}> {
+  const project = await projectsRepository.createProject(
+    "P",
+    "https://app.example.com"
+  );
+  await repoGit.ensureProjectRepo(project.id, { create: true });
+  await repoBare.ensureBareRepo(project.id, repoGit.getRepoDir(project.id));
+  return {
+    id: project.id,
+    checkout: repoGit.getRepoDir(project.id),
+    git: repoGit.getProjectGit(project.id),
+  };
+};
+
+const commitInCheckout = async function commitInCheckout(
+  git: SimpleGit,
+  dir: string,
+  file: string,
+  content: string
+): Promise<string> {
+  await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+  await fs.writeFile(path.join(dir, file), content);
+  await git.add(["-A"]);
+  await git.commit(`edit ${file}`);
+  return await (async () => {
+    const awaitedValue1178 = await git.revparse(["HEAD"]);
+    return awaitedValue1178.trim();
+  })();
+};
+
+const cloneBare = async function cloneBare(
+  projectId: string
+): Promise<{ dir: string; git: SimpleGit }> {
+  const dir = path.join(tempDir(), "clone");
+  await simpleGit().clone(repoBare.getBareRepoDir(projectId), dir);
+  return { dir, git: simpleGit(dir) };
+};
+
+const pushCommit = async function pushCommit(
+  client: { dir: string; git: SimpleGit },
+  file: string,
+  content: string
+): Promise<string> {
+  await fs.mkdir(path.dirname(path.join(client.dir, file)), {
+    recursive: true,
+  });
+  await fs.writeFile(path.join(client.dir, file), content);
+  await client.git.raw([...AUTHOR, "add", "-A"]);
+  await client.git.raw([...AUTHOR, "commit", "-m", `client ${file}`]);
+  await client.git.raw(["push", "origin", "main"]);
+  return await (async () => {
+    const awaitedValue1962 = await client.git.revparse(["HEAD"]);
+    return awaitedValue1962.trim();
+  })();
+};
+
+const stateError = async function stateError(
+  projectId: string
+): Promise<string | null> {
+  return (
+    (await (async () => {
+      const awaitedResult2279 = await projectsRepository.getProject(projectId);
+      return awaitedResult2279?.gitExternalSyncError;
+    })()) ?? null
+  );
+};
+
 useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
 const { repoGit } = await import("../../src/core/repo/git");
@@ -29,72 +100,17 @@ before(async () => {
   await runMigrations();
 });
 
-async function newProject(): Promise<{
-  id: string;
-  checkout: string;
-  git: SimpleGit;
-}> {
-  const project = await projectsRepository.createProject(
-    "P",
-    "https://app.example.com"
-  );
-  await repoGit.ensureProjectRepo(project.id, { create: true });
-  await repoBare.ensureBareRepo(project.id, repoGit.getRepoDir(project.id));
-  return {
-    id: project.id,
-    checkout: repoGit.getRepoDir(project.id),
-    git: repoGit.getProjectGit(project.id),
-  };
-}
-
-async function commitInCheckout(
-  git: SimpleGit,
-  dir: string,
-  file: string,
-  content: string
-): Promise<string> {
-  await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true });
-  await fs.writeFile(path.join(dir, file), content);
-  await git.add(["-A"]);
-  await git.commit(`edit ${file}`);
-  return (await git.revparse(["HEAD"])).trim();
-}
-
-async function cloneBare(
-  projectId: string
-): Promise<{ dir: string; git: SimpleGit }> {
-  const dir = path.join(tempDir(), "clone");
-  await simpleGit().clone(repoBare.getBareRepoDir(projectId), dir);
-  return { dir, git: simpleGit(dir) };
-}
-
-async function pushCommit(
-  client: { dir: string; git: SimpleGit },
-  file: string,
-  content: string
-): Promise<string> {
-  await fs.mkdir(path.dirname(path.join(client.dir, file)), {
-    recursive: true,
-  });
-  await fs.writeFile(path.join(client.dir, file), content);
-  await client.git.raw([...AUTHOR, "add", "-A"]);
-  await client.git.raw([...AUTHOR, "commit", "-m", `client ${file}`]);
-  await client.git.raw(["push", "origin", "main"]);
-  return (await client.git.revparse(["HEAD"])).trim();
-}
-
-async function stateError(projectId: string): Promise<string | null> {
-  return (
-    (await projectsRepository.getProject(projectId))?.gitExternalSyncError ??
-    null
-  );
-}
-
 describe("repoBare", () => {
   test("publish copies a checkout that is ahead", async () => {
     const project = await newProject();
     assert.equal(
-      (await repoBare.compare(project.id, project.checkout)).relation,
+      await (async () => {
+        const awaitedValue2863 = await repoBare.compare(
+          project.id,
+          project.checkout
+        );
+        return awaitedValue2863.relation;
+      })(),
       "equal"
     );
     const sha = await commitInCheckout(
@@ -104,13 +120,25 @@ describe("repoBare", () => {
       "title: A\n"
     );
     assert.equal(
-      (await repoBare.compare(project.id, project.checkout)).relation,
+      await (async () => {
+        const awaitedValue3111 = await repoBare.compare(
+          project.id,
+          project.checkout
+        );
+        return awaitedValue3111.relation;
+      })(),
       "checkout-ahead"
     );
     await repoBare.publish(project.id, project.checkout);
     assert.equal(await repoBare.getBareHeadSha(project.id), sha);
     assert.equal(
-      (await repoBare.compare(project.id, project.checkout)).relation,
+      await (async () => {
+        const awaitedValue3354 = await repoBare.compare(
+          project.id,
+          project.checkout
+        );
+        return awaitedValue3354.relation;
+      })(),
       "equal"
     );
   });
@@ -124,7 +152,13 @@ describe("repoBare", () => {
       "title: B\n"
     );
     assert.equal(
-      (await repoBare.compare(project.id, project.checkout)).relation,
+      await (async () => {
+        const awaitedValue3770 = await repoBare.compare(
+          project.id,
+          project.checkout
+        );
+        return awaitedValue3770.relation;
+      })(),
       "bare-ahead"
     );
 
@@ -133,7 +167,7 @@ describe("repoBare", () => {
       BareStateError
     );
     assert.equal(await repoBare.getBareHeadSha(project.id), pushed);
-    assert.match((await stateError(project.id)) ?? "", /has not followed yet/);
+    assert.match((await stateError(project.id)) ?? "", /has not followed yet/u);
 
     assert.deepEqual(
       await repoBare.fastForwardCheckout(project.id, project.checkout),
@@ -154,7 +188,7 @@ describe("repoBare", () => {
     await fs.writeFile(path.join(project.checkout, "local.txt"), "wip");
     await assert.rejects(
       repoBare.fastForwardCheckout(project.id, project.checkout),
-      /uncommitted changes/
+      /uncommitted changes/u
     );
     assert.ok(existsSync(path.join(project.checkout, "local.txt")));
   });
@@ -173,27 +207,33 @@ describe("repoBare", () => {
       "local"
     );
     assert.equal(
-      (await repoBare.compare(project.id, project.checkout)).relation,
+      await (async () => {
+        const awaitedValue5421 = await repoBare.compare(
+          project.id,
+          project.checkout
+        );
+        return awaitedValue5421.relation;
+      })(),
       "diverged"
     );
     await assert.rejects(
       repoBare.publish(project.id, project.checkout),
-      /diverged/
+      /diverged/u
     );
     await assert.rejects(
       repoBare.fastForwardCheckout(project.id, project.checkout),
-      /diverged/
+      /diverged/u
     );
     assert.equal(await repoBare.getBareHeadSha(project.id), pushed);
     assert.equal(await repoGit.getHeadSha(project.id), local);
-    assert.match((await stateError(project.id)) ?? "", /diverged/);
+    assert.match((await stateError(project.id)) ?? "", /diverged/u);
   });
 });
 
 describe("pre-receive hook of the canonical repository", () => {
   test("rejects a pushed commit that contains a symbolic link", async () => {
     const project = await newProject();
-    const before = await repoBare.getBareHeadSha(project.id);
+    const beforeInTest = await repoBare.getBareHeadSha(project.id);
     const client = await cloneBare(project.id);
     await fs.mkdir(path.join(client.dir, "specs", "x"), { recursive: true });
     await fs.symlink(
@@ -204,9 +244,9 @@ describe("pre-receive hook of the canonical repository", () => {
     await client.git.raw([...AUTHOR, "commit", "-m", "symlink"]);
     await assert.rejects(
       client.git.raw(["push", "origin", "main"]),
-      /does not accept symbolic links/
+      /does not accept symbolic links/u
     );
-    assert.equal(await repoBare.getBareHeadSha(project.id), before);
+    assert.equal(await repoBare.getBareHeadSha(project.id), beforeInTest);
   });
 
   test("rejects a symbolic link hidden in an earlier commit of the push", async () => {
@@ -221,17 +261,16 @@ describe("pre-receive hook of the canonical repository", () => {
     await client.git.raw([...AUTHOR, "commit", "-m", "remove link"]);
     await assert.rejects(
       client.git.raw(["push", "origin", "main"]),
-      /symbolic links/
+      /symbolic links/u
     );
   });
 
   test("rejects branches other than main, deletions and non-fast-forwards", async () => {
     const project = await newProject();
     const client = await cloneBare(project.id);
-    await client.git.raw(["push", "origin", "main:feature"]).then(
-      () => assert.fail("push to another branch should fail"),
-      (error: Error) =>
-        assert.match(error.message, /accepts pushes to refs\/heads\/main only/)
+    await assert.rejects(
+      client.git.raw(["push", "origin", "main:feature"]),
+      /accepts pushes to refs\/heads\/main only/u
     );
     await assert.rejects(client.git.raw(["push", "origin", ":main"]));
     await pushCommit(client, "a.txt", "a");
@@ -257,7 +296,7 @@ describe("repoGit.recoverInterruptedState", () => {
     const lock = path.join(project.checkout, ".git", "index.lock");
     await fs.writeFile(lock, "");
     await fs.writeFile(path.join(project.checkout, "a.txt"), "a");
-    await assert.rejects(project.git.add(["-A"]), /index\.lock/);
+    await assert.rejects(project.git.add(["-A"]), /index\.lock/u);
     await repoGit.recoverInterruptedState(project.id);
     assert.ok(!existsSync(lock));
     await project.git.add(["-A"]);
@@ -276,14 +315,16 @@ describe("repoGit.recoverInterruptedState", () => {
     await project.git.raw(["checkout", "-b", "other", base]);
     await commitInCheckout(project.git, project.checkout, "f.txt", "other\n");
     await project.git.raw(["checkout", "main"]);
-    await project.git.rebase(["other"]).catch(() => undefined);
+    await project.git.rebase(["other"]).catch(() => {
+      /* Intentionally ignore this best-effort operation. */
+    });
     assert.ok(
       existsSync(path.join(project.checkout, ".git", "rebase-merge")),
       "the rebase stopped on a conflict"
     );
     await assert.rejects(
       repoGit.assertRepoWritableUnlocked(project.id),
-      /unfinished rebase/
+      /unfinished rebase/u
     );
 
     await repoGit.recoverInterruptedState(project.id);
@@ -302,14 +343,19 @@ describe("repoGit.recoverInterruptedState", () => {
 
   test("refuses to run while a repository operation holds the lock", async () => {
     const project = await newProject();
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
     let release: () => void = () => {};
     const held = repoGit.withRepoLock(
       project.id,
-      () => new Promise<void>((resolve) => (release = resolve))
+      () =>
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
     );
     await assert.rejects(
       repoGit.recoverInterruptedState(project.id),
-      /Refusing to recover/
+      /Refusing to recover/u
     );
     release();
     await held;
@@ -419,9 +465,18 @@ test("coverage gives each confirmed area the Specs of its feature and of its tes
     contextDraft.id,
     context
   );
-  assert.equal((await projectCoverage(project.id)).confirmed, false);
+  assert.equal(
+    await (async () => {
+      const awaitedValue14823 = await projectCoverage(project.id);
+      return awaitedValue14823.confirmed;
+    })(),
+    false
+  );
   assert.deepEqual(
-    (await projectCoverage(project.id)).areas,
+    await (async () => {
+      const awaitedValue14902 = await projectCoverage(project.id);
+      return awaitedValue14902.areas;
+    })(),
     [],
     "unconfirmed discovery cannot claim coverage"
   );
@@ -454,24 +509,33 @@ test("coverage gives each confirmed area the Specs of its feature and of its tes
   );
   const app = new Hono().route("/", createCoverageRouter());
   assert.equal(
-    (
-      await app.request(
+    await (async () => {
+      const awaitedValue16075 = await app.request(
         "/projects/00000000-0000-4000-8000-000000000000/coverage"
-      )
-    ).status,
+      );
+      return awaitedValue16075.status;
+    })(),
     404
   );
   assert.equal(
-    (await app.request(`/projects/${project.id}/coverage`)).status,
+    await (async () => {
+      const awaitedValue16223 = await app.request(
+        `/projects/${project.id}/coverage`
+      );
+      return awaitedValue16223.status;
+    })(),
     200
   );
   await project.git.add(["-A"]);
   await project.git.commit("specs");
   await createAreaFeatures(project.id, context);
   assert.deepEqual(
-    (await featuresRepository.listFeatures(project.id))
-      .map((item) => item.title)
-      .sort(),
+    await (async () => {
+      const awaitedValue16443 = await featuresRepository.listFeatures(
+        project.id
+      );
+      return awaitedValue16443.map((item) => item.title).toSorted();
+    })(),
     ["API", "Accounts", "Checkout", "Reports", "Settings"],
     "areas reuse features with the same title in any case"
   );

@@ -10,6 +10,20 @@ import {
 
 import { VALID_SPEC } from "../helpers/storage";
 
+const spec = function spec(
+  body: string,
+  fixtures = "page, step, secret",
+  header = 'import { test, expect } from "specbook";'
+): string {
+  return `${header}\ntest("T", async ({ ${fixtures} }) => {\n    await step("S", async () => {\n        ${body}\n    });\n});\n`;
+};
+
+const errorOf = function errorOf(source: string): string {
+  const result = analyzeSpecSource(source);
+  assert.equal(result.ok, false, `expected a rejection for:\n${source}`);
+  return result.ok ? "" : result.error;
+};
+
 const LOGIN_SPEC = `import { test, expect } from "specbook";
 
 // Comments are fine.
@@ -33,20 +47,6 @@ test("Sign in with valid credentials", async ({ page, step, secret }) => {
     });
 });
 `;
-
-function spec(
-  body: string,
-  fixtures = "page, step, secret",
-  header = 'import { test, expect } from "specbook";'
-): string {
-  return `${header}\ntest("T", async ({ ${fixtures} }) => {\n    await step("S", async () => {\n        ${body}\n    });\n});\n`;
-}
-
-function errorOf(source: string): string {
-  const result = analyzeSpecSource(source);
-  assert.equal(result.ok, false, `expected a rejection for:\n${source}`);
-  return result.ok ? "" : result.error;
-}
 
 describe("analyzeSpecSource: accepted Specs", () => {
   test("accepts deterministic API requests and only response assertions", () => {
@@ -212,7 +212,7 @@ describe("analyzeSpecSource: rejected structure", () => {
   test("rejects syntax errors with a line number", () => {
     assert.match(
       errorOf("import { test } from 'specbook';\ntest(("),
-      /Line 2, column \d+: Syntax error/
+      /Line 2, column \d+: Syntax error/u
     );
   });
 
@@ -225,7 +225,7 @@ describe("analyzeSpecSource: rejected structure", () => {
           'import { test, expect } from "@playwright/test";'
         )
       ),
-      /Imports from "@playwright\/test" are not allowed/
+      /Imports from "@playwright\/test" are not allowed/u
     );
     assert.match(
       errorOf(
@@ -235,7 +235,7 @@ describe("analyzeSpecSource: rejected structure", () => {
           'import { test, expect as e } from "specbook";'
         )
       ),
-      /Renaming imports/
+      /Renaming imports/u
     );
     assert.match(
       errorOf(
@@ -245,7 +245,7 @@ describe("analyzeSpecSource: rejected structure", () => {
           'import { test, devices } from "specbook";'
         )
       ),
-      /"devices" is not exported/
+      /"devices" is not exported/u
     );
     assert.match(
       errorOf(
@@ -255,7 +255,7 @@ describe("analyzeSpecSource: rejected structure", () => {
           'import * as specbook from "specbook";'
         )
       ),
-      /Import only named bindings/
+      /Import only named bindings/u
     );
     assert.match(
       errorOf(
@@ -265,40 +265,41 @@ describe("analyzeSpecSource: rejected structure", () => {
           'import type { test } from "specbook";'
         )
       ),
-      /value import/
+      /value import/u
     );
     assert.match(
       errorOf(`import fs from "node:fs";\n${VALID_SPEC}`),
-      /Imports from "node:fs" are not allowed/
+      /Imports from "node:fs" are not allowed/u
     );
     assert.match(
       errorOf(`const x = 1;\n${VALID_SPEC}`),
-      /must start with: import/
+      /must start with: import/u
     );
     assert.match(
       errorOf(`${VALID_SPEC}\nimport fs from "node:fs";`),
-      /only the specbook import and one test/
+      /only the specbook import and one test/u
     );
     assert.match(
       errorOf(
         VALID_SPEC.replace('"specbook";', '"specbook" with { type: "json" };')
       ),
-      /Import attributes/
+      /Import attributes/u
     );
   });
 
   test("allows exactly one plain test() call", () => {
     assert.match(
       errorOf(`${VALID_SPEC}\n${VALID_SPEC.split("\n").slice(2).join("\n")}`),
-      /only the specbook import and one test/
+      /only the specbook import and one test/u
     );
     assert.match(
       errorOf(VALID_SPEC.replace('test("Open', 'test.only("Open')),
-      /Expected one test/
+      /Expected one test/u
     );
     assert.match(
+      // oxlint-disable-next-line no-template-curly-in-string -- Keep interpolation syntax literal so the Spec validator can reject it.
       errorOf(VALID_SPEC.replace('test("Open the application"', "test(`${1}`")),
-      /title must be a non-empty string literal/
+      /title must be a non-empty string literal/u
     );
     assert.match(
       errorOf(
@@ -307,7 +308,7 @@ describe("analyzeSpecSource: rejected structure", () => {
           "async function ({ page, step })"
         )
       ),
-      /async arrow function/
+      /async arrow function/u
     );
     assert.match(
       errorOf(
@@ -316,312 +317,329 @@ describe("analyzeSpecSource: rejected structure", () => {
           "async ({ page, step }, testInfo)"
         )
       ),
-      /one destructured parameter/
+      /one destructured parameter/u
     );
     assert.match(
       errorOf(VALID_SPEC.replace("{ page, step }", "{ page, step, context }")),
-      /Fixture "context" is not available/
+      /Fixture "context" is not available/u
     );
     assert.match(
       errorOf(VALID_SPEC.replace("{ page, step }", "{ page: p, step }")),
-      /without defaults or renaming/
+      /without defaults or renaming/u
     );
     assert.match(
       errorOf(VALID_SPEC.replace("{ page, step }", "{ page, step, ...rest }")),
-      /without defaults or renaming/
+      /without defaults or renaming/u
     );
     assert.match(
       errorOf(VALID_SPEC.replace("{ page, step }", "{ page = 1, step }")),
-      /without defaults or renaming/
+      /without defaults or renaming/u
     );
-    assert.match(errorOf(`#!/usr/bin/env node\n${VALID_SPEC}`), /hashbang/);
-    assert.match(errorOf(`"use strict";\n${VALID_SPEC}`), /Directives/);
+    assert.match(errorOf(`#!/usr/bin/env node\n${VALID_SPEC}`), /hashbang/u);
+    assert.match(errorOf(`"use strict";\n${VALID_SPEC}`), /Directives/u);
   });
 
   test("requires named, non-nested steps", () => {
     const noStep =
       'import { test } from "specbook";\ntest("T", async ({ page }) => {\n    await page.goto("/");\n});\n';
-    assert.match(errorOf(noStep), /only await step\("Title"/);
+    assert.match(errorOf(noStep), /only await step\("Title"/u);
     assert.match(
       errorOf(
         spec('await step("inner", async () => { await page.goto("/"); });')
       ),
-      /Steps cannot be nested/
+      /Steps cannot be nested/u
     );
-    assert.match(errorOf(spec("const x = 1;")), /Only locators can be stored/);
+    assert.match(errorOf(spec("const x = 1;")), /Only locators can be stored/u);
     assert.match(
       errorOf(VALID_SPEC.replace('step("Open the page"', 'step("  "')),
-      /non-empty string literals/
+      /non-empty string literals/u
     );
     assert.match(
       errorOf(VALID_SPEC.replace("async () => {", "async (x) => {")),
-      /without parameters/
+      /without parameters/u
     );
     assert.match(
       errorOf(VALID_SPEC.replace("await step(", "step(")),
-      /only await step/
+      /only await step/u
     );
-    assert.match(errorOf(spec('page.goto("/");')), /only await statements/);
+    assert.match(errorOf(spec('page.goto("/");')), /only await statements/u);
     assert.match(
       errorOf(
         'import { test } from "specbook";\ntest("T", async ({ page, step }) => {\n});\n'
       ),
-      /at least one await step/
+      /at least one await step/u
     );
   });
 });
 
 describe("analyzeSpecSource: rejected expressions and escape attempts", () => {
   const cases: [string, RegExp][] = [
-    ['await [].constructor.constructor("return process")();', /not allowed/],
-    ['await page.constructor.constructor("return process")();', /not allowed/],
-    ['await page.goto.constructor("return process")();', /not allowed/],
-    ['await page["evaluate"]("1");', /Computed property access/],
-    ['await (0, eval)("1");', /not allowed/],
-    ['await eval("1");', /"eval" is not available/],
-    ["await page.evaluate(() => 1);", /page\.evaluate\(\) is not allowed/],
-    ['await page.evaluateHandle("1");', /not allowed/],
-    ['await page.addInitScript("1");', /not allowed/],
-    ['await page.route("**", () => {});', /not allowed/],
-    ['await page.exposeFunction("f", () => 1);', /not allowed/],
-    ['await page.setContent("<b>x</b>");', /not allowed/],
-    ["await page.pdf();", /not allowed/],
-    ["await page.context().newPage();", /not allowed/],
+    ['await [].constructor.constructor("return process")();', /not allowed/u],
+    ['await page.constructor.constructor("return process")();', /not allowed/u],
+    ['await page.goto.constructor("return process")();', /not allowed/u],
+    ['await page["evaluate"]("1");', /Computed property access/u],
+    ['await (0, eval)("1");', /not allowed/u],
+    ['await eval("1");', /"eval" is not available/u],
+    ["await page.evaluate(() => 1);", /page\.evaluate\(\) is not allowed/u],
+    ['await page.evaluateHandle("1");', /not allowed/u],
+    ['await page.addInitScript("1");', /not allowed/u],
+    ['await page.route("**", () => {});', /not allowed/u],
+    ['await page.exposeFunction("f", () => 1);', /not allowed/u],
+    ['await page.setContent("<b>x</b>");', /not allowed/u],
+    ["await page.pdf();", /not allowed/u],
+    ["await page.context().newPage();", /not allowed/u],
     [
       'await page.request.get("http://169.254.169.254/");',
-      /Property "request" is not allowed/,
+      /Property "request" is not allowed/u,
     ],
     [
       'await page.locator("a").evaluate("1");',
-      /Locator method evaluate\(\) is not allowed/,
+      /Locator method evaluate\(\) is not allowed/u,
     ],
-    ['await page.locator("a").getAttribute("href");', /not allowed/],
-    ['await page.locator("a")["click"]();', /Computed property access/],
-    ['await page?.goto("/");', /not allowed/],
-    ['await page.goto?.("/");', /not allowed/],
-    ["await globalThis.process.exit(1);", /"globalThis" is not available/],
-    ["await process.exit(1);", /"process" is not available/],
+    ['await page.locator("a").getAttribute("href");', /not allowed/u],
+    ['await page.locator("a")["click"]();', /Computed property access/u],
+    ['await page?.goto("/");', /not allowed/u],
+    ['await page.goto?.("/");', /not allowed/u],
+    ["await globalThis.process.exit(1);", /"globalThis" is not available/u],
+    ["await process.exit(1);", /"process" is not available/u],
     [
       'await require("fs").readFileSync("/etc/passwd");',
-      /Only page and locator methods/,
+      /Only page and locator methods/u,
     ],
-    ['await import("node:fs");', /not allowed/],
-    ['await fetch("http://example.com");', /not allowed|not available/],
-    ["await window.close();", /"window" is not available/],
+    ['await import("node:fs");', /not allowed/u],
+    ['await fetch("http://example.com");', /not allowed|not available/u],
+    ["await window.close();", /"window" is not available/u],
     [
       'await page.goto("https://evil.example");',
-      /path string starting with "\/"/,
+      /path string starting with "\/"/u,
     ],
-    ['await page.goto("//evil.example/");', /path string starting with "\/"/],
-    ['await page.goto("/\\\\evil.example");', /path string starting with "\/"/],
-    ["await page.goto(`/${1}`);", /path string starting with/],
+    ['await page.goto("//evil.example/");', /path string starting with "\/"/u],
     [
+      'await page.goto("/\\\\evil.example");',
+      /path string starting with "\/"/u,
+    ],
+    // oxlint-disable-next-line no-template-curly-in-string -- Keep interpolation syntax literal so the Spec validator can reject it.
+    ["await page.goto(`/${1}`);", /path string starting with/u],
+    [
+      // oxlint-disable-next-line no-template-curly-in-string -- Keep interpolation syntax literal so the Spec validator can reject it.
       "await page.getByText(`${process.env.HOME}`).click();",
-      /string or a regular expression literal/,
+      /string or a regular expression literal/u,
     ],
     [
+      // oxlint-disable-next-line no-template-curly-in-string -- Keep interpolation syntax literal so the Spec validator can reject it.
       'await page.getByRole("button", { name: `${1}` }).click();',
-      /Template literals cannot contain/,
+      /Template literals cannot contain/u,
     ],
     [
       'await page.getByRole("button", { ["name"]: "x" }).click();',
-      /plain key: value pairs/,
+      /plain key: value pairs/u,
     ],
     [
       'await page.getByRole("button", { __proto__: { x: 1 } }).click();',
-      /Option "__proto__" is not allowed/,
+      /Option "__proto__" is not allowed/u,
     ],
     [
       'await page.getByRole("button", { constructor: "x" }).click();',
-      /Option "constructor" is not allowed/,
+      /Option "constructor" is not allowed/u,
     ],
     [
       'await page.getByRole("button", { name }).click();',
-      /plain key: value pairs/,
+      /plain key: value pairs/u,
     ],
     [
       'await page.getByRole("button", { ...x }).click();',
-      /plain key: value pairs/,
+      /plain key: value pairs/u,
     ],
     [
       'await page.getByRole("button", { get name() { return 1; } }).click();',
-      /plain key: value pairs/,
+      /plain key: value pairs/u,
     ],
     [
       "await page.getByText(String.raw`x`).click();",
-      /string or a regular expression literal/,
+      /string or a regular expression literal/u,
     ],
-    ['await page.locator("a").click(...args);', /Spread arguments/],
+    ['await page.locator("a").click(...args);', /Spread arguments/u],
     [
       'await page.locator("internal:control=enter-frame").click();',
-      /internal:/,
+      /internal:/u,
     ],
-    ['await page.getByText("a").fill(page.url());', /string literal or secret/],
-    ['await page.getByText("a").fill("x" + "y");', /string literal or secret/],
+    [
+      'await page.getByText("a").fill(page.url());',
+      /string literal or secret/u,
+    ],
+    ['await page.getByText("a").fill("x" + "y");', /string literal or secret/u],
     [
       'await page.getByText("a").click({ timeout: 1 + 1 });',
-      /not allowed here|Arguments must be literals/,
+      /not allowed here|Arguments must be literals/u,
     ],
     [
       'await page.getByText("a").click({ timeout: undefined });',
-      /"undefined" cannot be used/,
+      /"undefined" cannot be used/u,
     ],
     [
       'await page.getByText("a").click({ position: { x: 1, y: { z: { w: 1 } } } });',
-      /nested too deeply/,
+      /nested too deeply/u,
     ],
     [
       'await page.getByText(secret("a", "b")).click();',
-      /string or a regular expression literal/,
+      /string or a regular expression literal/u,
     ],
     [
       'await page.getByText("a").click({ force: secret("a", "b") });',
-      /secret\(\.\.\.\) may only be the text argument/,
+      /secret\(\.\.\.\) may only be the text argument/u,
     ],
     [
       'await page.getByText("a").fill(secret("Admin", "password"));',
-      /secret\(\) takes a credential profile name/,
+      /secret\(\) takes a credential profile name/u,
     ],
     [
       'await page.getByText("a").fill(secret("admin"));',
-      /secret\(\) takes a credential profile name/,
+      /secret\(\) takes a credential profile name/u,
     ],
     [
+      // oxlint-disable-next-line no-template-curly-in-string -- Keep interpolation syntax literal so the Spec validator can reject it.
       'await page.getByText("a").fill(secret(`${"a"}`, "b"));',
-      /secret\(\) takes a credential profile name/,
+      /secret\(\) takes a credential profile name/u,
     ],
     [
       'await expect(page.locator("a")).toHaveScreenshot();',
-      /Matcher toHaveScreenshot\(\) is not allowed/,
+      /Matcher toHaveScreenshot\(\) is not allowed/u,
     ],
     [
       'await expect(page.locator("body")).toMatchAriaSnapshot();',
-      /inline snapshot string literal/,
+      /inline snapshot string literal/u,
     ],
     [
       'await expect(page.locator("body")).toMatchAriaSnapshot({ name: "../../secret.yml" });',
-      /inline snapshot string literal/,
+      /inline snapshot string literal/u,
     ],
     [
       'await expect(page.locator("body")).toMatchAriaSnapshot(/Home/);',
-      /inline snapshot string literal/,
+      /inline snapshot string literal/u,
     ],
     [
+      // oxlint-disable-next-line no-template-curly-in-string -- Keep interpolation syntax literal so the Spec validator can reject it.
       'await expect(page.locator("body")).toMatchAriaSnapshot(`- heading "${1}"`);',
-      /inline snapshot string literal/,
+      /inline snapshot string literal/u,
     ],
     [
       'await expect(page.locator("body")).toMatchAriaSnapshot("- heading", "snapshot.yml");',
-      /options object/,
+      /options object/u,
     ],
     [
       "await expect(page).toBeVisible();",
-      /Matcher toBeVisible\(\) is not allowed for the page/,
+      /Matcher toBeVisible\(\) is not allowed for the page/u,
     ],
     [
       'await expect(page.locator("a"), "message").toBeVisible();',
-      /exactly one argument/,
+      /exactly one argument/u,
     ],
     [
       'await expect.soft(page.locator("a")).toBeVisible();',
-      /expect\.\* helpers are not allowed/,
+      /expect\.\* helpers are not allowed/u,
     ],
     [
       "await expect.poll(() => 1).toBe(1);",
-      /expect\.\* helpers are not allowed/,
+      /expect\.\* helpers are not allowed/u,
     ],
     [
       'await expect(page.locator("a")).not.not.toBeVisible();',
-      /Only page and locator methods/,
+      /Only page and locator methods/u,
     ],
     [
       "await expect(page.keyboard).toBeVisible();",
-      /takes the page or a locator/,
+      /takes the page or a locator/u,
     ],
-    ["await expect(1).toBe(1);", /not allowed/],
-    ['await page.getByText("a");', /A locator on its own does nothing/],
-    ['await page.getByText("a").click()!;', /not allowed/],
-    ['await (page.getByText("a") as any).click();', /not allowed/],
-    ['await page.getByText<string>("a").click();', /Type arguments/],
-    ['await page.keyboard.down("Shift");', /keyboard\.down\(\) is not allowed/],
-    ["await page.mouse.drag(1, 1);", /mouse\.drag\(\) is not allowed/],
-    ['await page.mouse.move("1", 1);', /coordinates must be literal numbers/],
-    ["await page.mouse.move(1);", /takes 2 literal numbers/],
-    ["await page.mouse.move(1, 2, 3);", /options must be a literal object/],
+    ["await expect(1).toBe(1);", /not allowed/u],
+    ['await page.getByText("a");', /A locator on its own does nothing/u],
+    ['await page.getByText("a").click()!;', /not allowed/u],
+    ['await (page.getByText("a") as any).click();', /not allowed/u],
+    ['await page.getByText<string>("a").click();', /Type arguments/u],
+    [
+      'await page.keyboard.down("Shift");',
+      /keyboard\.down\(\) is not allowed/u,
+    ],
+    ["await page.mouse.drag(1, 1);", /mouse\.drag\(\) is not allowed/u],
+    ['await page.mouse.move("1", 1);', /coordinates must be literal numbers/u],
+    ["await page.mouse.move(1);", /takes 2 literal numbers/u],
+    ["await page.mouse.move(1, 2, 3);", /options must be a literal object/u],
     [
       'await page.mouse.click(1, 2, { button: "left" }, 4);',
-      /takes 2 literal numbers/,
+      /takes 2 literal numbers/u,
     ],
-    ["await page.mouse.down(1, 2);", /takes no coordinates/],
-    ["await page.mouse.wheel(0, 1, { steps: 1 });", /takes 2 literal numbers/],
+    ["await page.mouse.down(1, 2);", /takes no coordinates/u],
+    ["await page.mouse.wheel(0, 1, { steps: 1 });", /takes 2 literal numbers/u],
     [
       'const x = page.getByText("a");\n        await page.mouse.move(x, 1);',
-      /coordinates must be literal numbers/,
+      /coordinates must be literal numbers/u,
     ],
-    ["await page.mouse.move(1 + 1, 1);", /coordinates must be literal numbers/],
+    [
+      "await page.mouse.move(1 + 1, 1);",
+      /coordinates must be literal numbers/u,
+    ],
     [
       'await page.mouse.move(1, 1, { steps: page.getByText("a") });',
-      /Expressions cannot be used as values/,
+      /Expressions cannot be used as values/u,
     ],
-    ["await expect(page.mouse).toBeVisible();", /takes the page or a locator/],
-    ["const m = page.mouse;", /Only locators can be stored/],
+    ["await expect(page.mouse).toBeVisible();", /takes the page or a locator/u],
+    ["const m = page.mouse;", /Only locators can be stored/u],
     [
       'await page.getByText("a").dragTo("#b");',
-      /dragTo\(\) takes the target locator/,
+      /dragTo\(\) takes the target locator/u,
     ],
     [
       'await page.getByText("a").dragTo();',
-      /dragTo\(\) takes the target locator/,
+      /dragTo\(\) takes the target locator/u,
     ],
     [
       'await page.getByText("a").dragTo(undeclared);',
-      /"undeclared" is not available/,
+      /"undeclared" is not available/u,
     ],
     [
       'await page.getByText("a").dragTo(page.mouse);',
-      /Property "mouse" is not allowed|takes the target locator/,
+      /Property "mouse" is not allowed|takes the target locator/u,
     ],
-    ['await page.locator("a").nth("1").click();', /nth\(\) takes one number/],
-    ['await page.locator("a").first(1).click();', /takes no arguments/],
+    ['await page.locator("a").nth("1").click();', /nth\(\) takes one number/u],
+    ['await page.locator("a").first(1).click();', /takes no arguments/u],
     [
       'await page.locator("a").and("b").click();',
-      /not allowed|takes one locator/,
+      /not allowed|takes one locator/u,
     ],
-    ['await page.locator("a").filter({ has: "b" }).click();', /not allowed/],
+    ['await page.locator("a").filter({ has: "b" }).click();', /not allowed/u],
     [
       "await page.getByText(/a/v).click();",
-      /Unsupported regular expression flags/,
+      /Unsupported regular expression flags/u,
     ],
     [
       'await page.goto("/"); await page.goto("/"); x = 1;',
-      /only await statements/,
+      /only await statements/u,
     ],
-    ["for (;;) {}", /only await statements/],
-    ["while (true) {}", /only await statements/],
-    ["if (1) {}", /only await statements/],
-    ['await new Function("return 1")();', /not allowed/],
-    ['await page.getByText("a").click().then(() => 1);', /not allowed/],
-    ["await (async () => 1)();", /Functions are only allowed/],
-    ['await `x`.constructor.constructor("return process")();', /not allowed/],
+    ["for (;;) {}", /only await statements/u],
+    ["while (true) {}", /only await statements/u],
+    ["if (1) {}", /only await statements/u],
+    ['await new Function("return 1")();', /not allowed/u],
+    ['await page.getByText("a").click().then(() => 1);', /not allowed/u],
+    ["await (async () => 1)();", /Functions are only allowed/u],
+    ['await `x`.constructor.constructor("return process")();', /not allowed/u],
     [
       'await page.getByText(/a/).constructor.constructor("return process")();',
-      /not allowed/,
+      /not allowed/u,
     ],
-    ['let button = page.getByText("a");', /Only const locator declarations/],
-    ["const { goto } = page;", /Destructuring is not allowed/],
-    ["const page2 = page;", /Only locators can be stored/],
-    ["const k = page.keyboard;", /Only locators can be stored/],
-    ['const page = page.getByText("a");', /"page" is reserved/],
+    ['let button = page.getByText("a");', /Only const locator declarations/u],
+    ["const { goto } = page;", /Destructuring is not allowed/u],
+    ["const page2 = page;", /Only locators can be stored/u],
+    ["const k = page.keyboard;", /Only locators can be stored/u],
+    ['const page = page.getByText("a");', /"page" is reserved/u],
     [
       'const a = page.getByText("a");\n        const a = page.getByText("b");',
-      /already been declared/,
+      /already been declared/u,
     ],
     [
       'const a = page.getByText("a");\n        await step("x", async () => { const a = page.getByText("b"); await a.click(); });',
-      /Steps cannot be nested/,
+      /Steps cannot be nested/u,
     ],
-    ['const a: any = page.getByText("a");', /Type annotations/],
-    ["await undeclared.click();", /"undeclared" is not available/],
+    ['const a: any = page.getByText("a");', /Type annotations/u],
+    ["await undeclared.click();", /"undeclared" is not available/u],
   ];
   for (const [statement, pattern] of cases) {
     test(statement, () => {
@@ -634,7 +652,7 @@ describe("analyzeSpecSource: rejected expressions and escape attempts", () => {
       'import { test } from "specbook";\ntest("T", async ({ page, step }) => {\n' +
       '    await step("A", async () => {\n        const button = page.getByRole("button");\n        await button.click();\n    });\n' +
       '    await step("B", async () => {\n        await button.click();\n    });\n});\n';
-    assert.match(errorOf(source), /"button" is not available/);
+    assert.match(errorOf(source), /"button" is not available/u);
   });
 
   test("fixtures and expect must be destructured or imported before use", () => {
@@ -642,7 +660,7 @@ describe("analyzeSpecSource: rejected expressions and escape attempts", () => {
       errorOf(
         spec('await page.getByText("a").fill(secret("a", "b"));', "page, step")
       ),
-      /Destructure secret/
+      /Destructure secret/u
     );
     assert.match(
       errorOf(
@@ -652,24 +670,25 @@ describe("analyzeSpecSource: rejected expressions and escape attempts", () => {
           'import { test } from "specbook";'
         )
       ),
-      /Import expect/
+      /Import expect/u
     );
     assert.match(
       errorOf(spec("await page.reload();", "step")),
-      /Destructure page/
+      /Destructure page/u
     );
   });
 
   test("rejects oversized sources", () => {
     assert.match(
       errorOf(`${VALID_SPEC}//${"x".repeat(200_001)}`),
-      /larger than/
+      /larger than/u
     );
   });
 });
 
 describe("named steps", () => {
   test("step() titles must match spec.yml preconditions, steps, expected result and postconditions, ignoring case and spacing", () => {
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
     const human = (
       steps: string[],
       more: {
@@ -707,23 +726,23 @@ describe("named steps", () => {
         ["Log in", "Open the page"],
         human(["Open the page", "Log in"])
       ) ?? "",
-      /step\(\) 1 of spec\.ts is "Log in" but spec\.yml expects "Open the page"/
+      /step\(\) 1 of spec\.ts is "Log in" but spec\.yml expects "Open the page"/u
     );
     assert.match(
       stepTitlesError(
         ["Open the page"],
         human(["Open the page"], { expectedResult: "Hello appears" })
       ) ?? "",
-      /no step\(\) for "Hello appears"/
+      /no step\(\) for "Hello appears"/u
     );
     assert.match(
       stepTitlesError(["Open the page", "Extra"], human(["Open the page"])) ??
         "",
-      /extra step\(\) 2 "Extra"/
+      /extra step\(\) 2 "Extra"/u
     );
     assert.match(
       stepTitlesError(["Open the page"], human([])) ?? "",
-      /spec\.yml lists no steps/
+      /spec\.yml lists no steps/u
     );
   });
 
@@ -766,13 +785,14 @@ describe("agent instructions", () => {
     const lines = prompt.split("\n");
     const starts = lines
       .map((line, index) =>
-        /^- (?:API example|Drawing example|Example)/.test(line) ? index : -1
+        /^- (?:API example|Drawing example|Example)/u.test(line) ? index : -1
       )
       .filter((index) => index >= 0);
     assert.equal(starts.length, 3);
     for (const start of starts) {
       const human = JSON.parse(
-        /\(spec\.yml: (\{.*\})\):$/.exec(lines[start])?.[1] ?? "null"
+        /\(spec\.yml: (?<capture1>\{.*\})\):$/u.exec(lines[start])?.[1] ??
+          "null"
       ) as {
         preconditions: string[];
         steps: string[];

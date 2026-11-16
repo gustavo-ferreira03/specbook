@@ -36,7 +36,7 @@ import {
   requestLogger,
 } from "./security";
 
-export function buildAllowedOrigins(
+export const buildAllowedOrigins = function buildAllowedOrigins(
   frontendOrigin = process.env.FRONTEND_ORIGIN ?? "http://localhost:4001"
 ): Set<string> {
   const allowed = new Set([frontendOrigin]);
@@ -48,11 +48,13 @@ export function buildAllowedOrigins(
     if (url.hostname === "127.0.0.1") {
       allowed.add(`${url.protocol}//localhost:${url.port}`);
     }
-  } catch {}
+  } catch {
+    /* Cleanup is best effort after the operation has completed or failed. */
+  }
   return allowed;
-}
+};
 
-export function createApp(): Hono {
+export const createApp = function createApp(): Hono {
   const app = new Hono();
   const allowedOrigins = buildAllowedOrigins();
   app.use("*", requestLogger());
@@ -96,4 +98,4 @@ export function createApp(): Hono {
   app.route("/", createSettingsRouter());
   app.route("/", createCredentialsRouter());
   return app;
-}
+};

@@ -2,22 +2,37 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+
+const csvCell = function csvCell(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const text =
+    typeof value === "object" ? JSON.stringify(value) : String(value);
+  return /[",\n\r]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+};
+
+const counter = function counter(value) {
+  return Object.entries(value ?? {})
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .map(([key, count]) => `${key}:${count}`)
+    .join(";");
+};
 
 const backendRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
 const runsMode = args.includes("--runs");
 const agentMode = args.includes("--agent");
 const outIndex = args.indexOf("--out");
-const outPath = outIndex !== -1 ? args[outIndex + 1] : null;
-const positional = args.filter(
+const outPath = outIndex === -1 ? null : args[outIndex + 1];
+const positional = args.find(
   (arg, index) =>
     !arg.startsWith("--") && (outIndex === -1 || index !== outIndex + 1)
 );
 const storageRoot =
   process.env.SPECBOOK_STORAGE_DIR ?? path.join(backendRoot, "storage");
 const inputPath =
-  positional[0] ??
+  positional ??
   path.join(
     storageRoot,
     "metrics",
@@ -35,33 +50,18 @@ if (!fs.existsSync(inputPath)) {
 }
 
 const records = [];
-fs.readFileSync(inputPath, "utf-8")
+for (const [index, line] of fs
+  .readFileSync(inputPath, "utf-8")
   .split("\n")
-  .forEach((line, index) => {
-    if (!line.trim()) {
-      return;
-    }
-    try {
-      records.push(JSON.parse(line));
-    } catch {
-      console.error(`Skipping malformed line ${index + 1}`);
-    }
-  });
-
-function csvCell(value) {
-  if (value === null || value === undefined) {
-    return "";
+  .entries()) {
+  if (!line.trim()) {
+    continue;
   }
-  const text =
-    typeof value === "object" ? JSON.stringify(value) : String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function counter(value) {
-  return Object.entries(value ?? {})
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, count]) => `${key}:${count}`)
-    .join(";");
+  try {
+    records.push(JSON.parse(line));
+  } catch {
+    console.error(`Skipping malformed line ${index + 1}`);
+  }
 }
 
 const turnColumns = [
@@ -113,11 +113,14 @@ const turnColumns = [
     "validatorRejectionRules",
     (r) =>
       counter(
-        (r.validatorRejections ?? []).reduce((acc, item) => {
-          const key = `${item.tool}/${item.rule}`;
-          acc[key] = (acc[key] ?? 0) + 1;
-          return acc;
-        }, {})
+        (() => {
+          const counts = {};
+          for (const item of r.validatorRejections ?? []) {
+            const key = `${item.tool}/${item.rule}`;
+            counts[key] = (counts[key] ?? 0) + 1;
+          }
+          return counts;
+        })()
       ),
   ],
 ];
@@ -161,16 +164,16 @@ const agentColumns = [
   "actor",
   "verificationStatus",
 ].map((name) => [name, (r) => r[name]]);
-const [columns, rows] = agentMode
-  ? [agentColumns, records]
-  : runsMode
-    ? [
-        runColumns,
-        records.flatMap((turn) =>
-          (turn.runSpec ?? []).map((run) => ({ turn, run }))
-        ),
-      ]
-    : [turnColumns, records];
+let columns = turnColumns;
+let rows = records;
+if (agentMode) {
+  columns = agentColumns;
+} else if (runsMode) {
+  columns = runColumns;
+  rows = records.flatMap((turn) =>
+    (turn.runSpec ?? []).map((run) => ({ turn, run }))
+  );
+}
 
 const csv = `${[
   columns.map(([name]) => name).join(","),

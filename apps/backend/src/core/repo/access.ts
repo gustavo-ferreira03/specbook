@@ -2,27 +2,18 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import type { Project } from "../../infra/repositories/projects";
 import { issuePrefixedToken, verifyTokenHash } from "../accounts/tokens";
 
-const TOUCH_INTERVAL_MS = 60_000;
-
-const lastTouched = new Map<string, number>();
-
-export interface GitAccessTokenInfo {
-  hasToken: boolean;
-  prefix: string | null;
-  createdAt: string | null;
-  lastUsedAt: string | null;
-}
-
-export function accessTokenInfoOf(project: Project): GitAccessTokenInfo {
+export const accessTokenInfoOf = function accessTokenInfoOf(
+  project: Project
+): GitAccessTokenInfo {
   return {
     hasToken: Boolean(project.gitAccessTokenHash),
     prefix: project.gitAccessTokenPrefix,
     createdAt: project.gitAccessTokenCreatedAt,
     lastUsedAt: project.gitAccessTokenLastUsedAt,
   };
-}
+};
 
-export async function issueGitAccessToken(
+export const issueGitAccessToken = async function issueGitAccessToken(
   projectId: string
 ): Promise<{ token: string; info: GitAccessTokenInfo }> {
   const { token, hash, prefix } = issuePrefixedToken("sbk_");
@@ -37,23 +28,27 @@ export async function issueGitAccessToken(
     token,
     info: { hasToken: true, prefix, createdAt, lastUsedAt: null },
   };
-}
+};
 
-export async function revokeGitAccessToken(projectId: string): Promise<void> {
+export const revokeGitAccessToken = async function revokeGitAccessToken(
+  projectId: string
+): Promise<void> {
   await projectsRepository.setGitAccessToken(projectId, null);
   lastTouched.delete(projectId);
-}
+};
 
-export function verifyGitAccessToken(
+export const verifyGitAccessToken = function verifyGitAccessToken(
   project: Project,
   candidate: string
 ): boolean {
   return project.gitAccessTokenHash
     ? verifyTokenHash(project.gitAccessTokenHash, candidate)
     : false;
-}
+};
 
-export async function noteGitAccessTokenUse(projectId: string): Promise<void> {
+export const noteGitAccessTokenUse = async function noteGitAccessTokenUse(
+  projectId: string
+): Promise<void> {
   const now = Date.now();
   const previous = lastTouched.get(projectId) ?? 0;
   if (now - previous < TOUCH_INTERVAL_MS) {
@@ -64,4 +59,15 @@ export async function noteGitAccessTokenUse(projectId: string): Promise<void> {
     projectId,
     new Date(now).toISOString()
   );
+};
+
+const TOUCH_INTERVAL_MS = 60_000;
+
+const lastTouched = new Map<string, number>();
+
+export interface GitAccessTokenInfo {
+  hasToken: boolean;
+  prefix: string | null;
+  createdAt: string | null;
+  lastUsedAt: string | null;
 }

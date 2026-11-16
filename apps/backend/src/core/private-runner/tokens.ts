@@ -8,6 +8,100 @@ import { runnersRepository } from "../../infra/repositories/runners";
 import type { RunnerToken } from "../../infra/repositories/runners";
 import { issuePrefixedToken, tokenHash } from "../accounts/tokens";
 
+export const runnerIsOutdated = function runnerIsOutdated(
+  version: string | null,
+  protocolVersion: number | null
+): boolean {
+  if (!version) {
+    return false;
+  }
+  if (protocolVersion !== RUNNER_PROTOCOL_VERSION) {
+    return true;
+  }
+  const actual = version.split(/[.-]/u).slice(0, 3).map(Number);
+  const current = RUNNER_CLI_VERSION.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (actual[index] !== current[index]) {
+      return actual[index] < current[index];
+    }
+  }
+  return version.includes("-");
+};
+
+export const publicRunner = function publicRunner(runner: RunnerToken) {
+  return {
+    id: runner.id,
+    name: runner.name,
+    purpose: runner.purpose,
+    group: runner.group,
+    createdAt: runner.createdAt,
+    lastSeenAt: runner.lastSeenAt,
+    cliVersion: runner.cliVersion,
+    protocolVersion: runner.protocolVersion,
+    concurrency: runner.concurrency,
+    projectIds: runner.projectIds,
+    outdated: runnerIsOutdated(runner.cliVersion, runner.protocolVersion),
+    online:
+      runner.lastSeenAt !== null &&
+      Date.now() - Date.parse(runner.lastSeenAt) < 90_000,
+  };
+};
+
+export const issueRunnerToken = async function issueRunnerToken(
+  name: string,
+  group: string | null,
+  projectIds: string[] | null = null,
+  purpose: RunnerToken["purpose"] = "runner"
+) {
+  if (purpose === "tunnel" && !group) {
+    throw new HTTPException(400, {
+      message: "Tunnel tokens require a runner group.",
+    });
+  }
+  if (projectIds) {
+    const available = new Set(
+      await (async () => {
+        const awaitedValue2046 = await projectsRepository.listProjects();
+        return awaitedValue2046.map((project) => project.id);
+      })()
+    );
+    if (projectIds.some((id) => !available.has(id))) {
+      throw new HTTPException(400, {
+        message: "A selected project no longer exists.",
+      });
+    }
+  }
+  const issued = issuePrefixedToken("sb_runner_");
+  const runner = await runnersRepository.create(
+    name,
+    group,
+    issued.hash,
+    projectIds,
+    purpose
+  );
+  return { token: issued.token, runner: publicRunner(runner) };
+};
+
+export const authenticateRunnerToken = async function authenticateRunnerToken(
+  authorization?: string,
+  touch = true
+): Promise<RunnerToken | null> {
+  const candidate = authorization?.match(
+    /^Bearer (?<capture1>sb_runner_[A-Za-z0-9_-]{43})$/u
+  )?.[1];
+  if (!candidate) {
+    return null;
+  }
+  const runner = await runnersRepository.token(tokenHash(candidate));
+  if (!runner) {
+    return null;
+  }
+  if (touch) {
+    await runnersRepository.touch(runner.id);
+  }
+  return runner;
+};
+
 export const runnerTokenSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
@@ -36,94 +130,3 @@ export const runnerTokenSchema = z
     path: ["group"],
     message: "Tunnel tokens require a runner group",
   });
-
-export function runnerIsOutdated(
-  version: string | null,
-  protocolVersion: number | null
-): boolean {
-  if (!version) {
-    return false;
-  }
-  if (protocolVersion !== RUNNER_PROTOCOL_VERSION) {
-    return true;
-  }
-  const actual = version.split(/[.-]/).slice(0, 3).map(Number);
-  const current = RUNNER_CLI_VERSION.split(".").map(Number);
-  for (let index = 0; index < 3; index++) {
-    if (actual[index] !== current[index]) {
-      return actual[index] < current[index];
-    }
-  }
-  return version.includes("-");
-}
-
-export function publicRunner(runner: RunnerToken) {
-  return {
-    id: runner.id,
-    name: runner.name,
-    purpose: runner.purpose,
-    group: runner.group,
-    createdAt: runner.createdAt,
-    lastSeenAt: runner.lastSeenAt,
-    cliVersion: runner.cliVersion,
-    protocolVersion: runner.protocolVersion,
-    concurrency: runner.concurrency,
-    projectIds: runner.projectIds,
-    outdated: runnerIsOutdated(runner.cliVersion, runner.protocolVersion),
-    online:
-      runner.lastSeenAt !== null &&
-      Date.now() - Date.parse(runner.lastSeenAt) < 90_000,
-  };
-}
-
-export async function issueRunnerToken(
-  name: string,
-  group: string | null,
-  projectIds: string[] | null = null,
-  purpose: RunnerToken["purpose"] = "runner"
-) {
-  if (purpose === "tunnel" && !group) {
-    throw new HTTPException(400, {
-      message: "Tunnel tokens require a runner group.",
-    });
-  }
-  if (projectIds) {
-    const available = new Set(
-      (await projectsRepository.listProjects()).map((project) => project.id)
-    );
-    if (projectIds.some((id) => !available.has(id))) {
-      throw new HTTPException(400, {
-        message: "A selected project no longer exists.",
-      });
-    }
-  }
-  const issued = issuePrefixedToken("sb_runner_");
-  const runner = await runnersRepository.create(
-    name,
-    group,
-    issued.hash,
-    projectIds,
-    purpose
-  );
-  return { token: issued.token, runner: publicRunner(runner) };
-}
-
-export async function authenticateRunnerToken(
-  authorization?: string,
-  touch = true
-): Promise<RunnerToken | null> {
-  const candidate = authorization?.match(
-    /^Bearer (sb_runner_[A-Za-z0-9_-]{43})$/
-  )?.[1];
-  if (!candidate) {
-    return null;
-  }
-  const runner = await runnersRepository.token(tokenHash(candidate));
-  if (!runner) {
-    return null;
-  }
-  if (touch) {
-    await runnersRepository.touch(runner.id);
-  }
-  return runner;
-}

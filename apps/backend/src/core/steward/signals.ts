@@ -7,42 +7,30 @@ import { stewardRepository } from "../../infra/repositories/steward";
 import type { Intent, ProjectSignal } from "../../infra/repositories/steward";
 import type { RunBatchTrigger } from "../runner/batch";
 
-export interface ProjectObservation {
-  specs?: Record<string, string>;
-  specGenerations?: Record<string, number>;
-  credentials?: string;
-  deployment?: {
-    baseUrl: string;
-    fingerprint: string | null;
-    nextCheckAt: number;
-    failures: number;
-    generation?: number;
-  };
-}
-export const fingerprint = (value: unknown) =>
-  crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
-
-export function runSignalForIntent(
-  intent: Intent | undefined,
+export const runSignalForIntent = function runSignalForIntent(
+  intentInput: Intent | undefined,
   intents: Intent[],
   signals: ProjectSignal[]
 ): ProjectSignal | undefined {
+  let intent = intentInput;
+
   const visited = new Set<string>();
   while (intent && !visited.has(intent.id)) {
     visited.add(intent.id);
     const signal = signals.find(
-      (signal) => intent?.key === `signal:${signal.id}`
+      // oxlint-disable-next-line no-loop-func -- This awaited or explicitly chained callback observes the current operation state; iterations retain their sequencing.
+      (signalValue) => intent?.key === `signal:${signalValue.id}`
     );
     if (signal) {
       return signal;
     }
-    const parentId = /^resume-run:([^:]+):/.exec(intent.key)?.[1];
+    const parentId = /^resume-run:(?<capture1>[^:]+):/u.exec(intent.key)?.[1];
     intent = parentId ? intents.find((row) => row.id === parentId) : undefined;
   }
   return undefined;
-}
+};
 
-export function runTriggerForIntent(
+export const runTriggerForIntent = function runTriggerForIntent(
   intent: Intent | undefined,
   intents: Intent[],
   signals: ProjectSignal[]
@@ -58,9 +46,11 @@ export function runTriggerForIntent(
     return "schedule";
   }
   return "manual";
-}
+};
 
-async function deploymentFingerprint(url: string): Promise<string> {
+const deploymentFingerprint = async function deploymentFingerprint(
+  url: string
+): Promise<string> {
   const response = await fetch(url, {
     signal: AbortSignal.timeout(5000),
     headers: { Accept: "text/html" },
@@ -76,6 +66,7 @@ async function deploymentFingerprint(url: string): Promise<string> {
     const decoder = new TextDecoder();
     try {
       while (html.length < 256_000) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         const part = await reader.read();
         if (part.done) {
           break;
@@ -87,10 +78,12 @@ async function deploymentFingerprint(url: string): Promise<string> {
     }
   }
   const assets = [
-    ...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css)(?:\?[^"']*)?)["']/g),
+    ...html.matchAll(
+      /(?:src|href)=["'](?<capture1>[^"']+\.(?:js|css)(?:\?[^"']*)?)["']/gu
+    ),
   ]
     .map((match) => match[1])
-    .sort();
+    .toSorted();
   return fingerprint(
     assets.length
       ? assets
@@ -98,9 +91,10 @@ async function deploymentFingerprint(url: string): Promise<string> {
           response.headers.get("last-modified") ??
           html)
   );
-}
+};
 
-export async function collectProjectSignals(
+// oxlint-disable-next-line complexity -- Keep the signals decision tree together so state transitions and error ordering remain explicit.
+export const collectProjectSignals = async function collectProjectSignals(
   project: Project,
   previous: ProjectObservation,
   at = Date.now()
@@ -140,6 +134,7 @@ export async function collectProjectSignals(
       (previous.specGenerations?.[spec.id] ?? 0) + (changed ? 1 : 0);
     generations[spec.id] = generation;
     if (spec.status === "invalid") {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await signal(
         "invalid_spec",
         `invalid:${spec.id}:${hash}`,
@@ -153,6 +148,7 @@ export async function collectProjectSignals(
       );
     }
     if (spec.status !== "invalid" && changed) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await signal(
         "spec_changed",
         `changed:${spec.id}:${generation}:${fingerprint([previous.specs?.[spec.id] ?? null, hash])}`,
@@ -223,4 +219,19 @@ export async function collectProjectSignals(
     }
   }
   return observation;
+};
+
+export interface ProjectObservation {
+  specs?: Record<string, string>;
+  specGenerations?: Record<string, number>;
+  credentials?: string;
+  deployment?: {
+    baseUrl: string;
+    fingerprint: string | null;
+    nextCheckAt: number;
+    failures: number;
+    generation?: number;
+  };
 }
+export const fingerprint = (value: unknown) =>
+  crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");

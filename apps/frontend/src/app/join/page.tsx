@@ -4,16 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import { useAuth } from "@/components/AuthProvider";
-import { AuthField, AuthShell } from "@/components/AuthShell";
-import { InlineFeedback } from "@/components/SettingsLayout";
+import { useAuth } from "@/components/auth-provider";
+import { AuthField, AuthShell } from "@/components/auth-shell";
+import { InlineFeedback } from "@/components/settings-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, errorMessage } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 
-export default function JoinPage() {
+const JoinPage = function JoinPage() {
   const router = useRouter();
   const { refresh } = useAuth();
   const token = useRef<string | null>(null);
@@ -39,25 +39,31 @@ export default function JoinPage() {
       return;
     }
     let active = true;
-    void api<{ email: string; role: string; expiresAt: string }>(
-      "/auth/invitations/inspect",
-      { method: "POST", body: JSON.stringify({ token: token.current }) }
-    )
-      .then((result) => {
+    (async () => {
+      try {
+        const resolvedValue = await api<{
+          email: string;
+          role: string;
+          expiresAt: string;
+        }>("/auth/invitations/inspect", {
+          method: "POST",
+          body: JSON.stringify({ token: token.current }),
+        });
+        const result = resolvedValue;
         if (active) {
           setInvitation(result);
         }
-      })
-      .catch((reason) => {
+      } catch (error_) {
         if (active) {
-          setError(errorMessage(reason));
+          setError(errorMessage(error_));
         }
-      });
+      }
+    })();
     return () => {
       active = false;
     };
   }, []);
-  async function accept(event: React.FormEvent) {
+  const accept = async function accept(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
@@ -74,11 +80,11 @@ export default function JoinPage() {
       token.current = "";
       await refresh();
       router.replace("/");
-    } catch (reason) {
-      setError(errorMessage(reason));
+    } catch (error_) {
+      setError(errorMessage(error_));
       setBusy(false);
     }
-  }
+  };
   return (
     <AuthShell
       title="Join Specbook"
@@ -92,60 +98,66 @@ export default function JoinPage() {
         </Link>
       }
     >
-      {invitation ? (
-        <form onSubmit={accept} className="space-y-4">
-          <div className="border-line rounded-lg border px-3.5 py-3">
-            <p className="text-body text-ink">
-              Invited as{" "}
-              <strong className="font-medium">{invitation.email}</strong> with{" "}
-              <span className="font-medium">{invitation.role}</span> access.
-            </p>
-            <p className="text-meta text-ink-muted mt-0.5">
-              Expires {formatDateTime(invitation.expiresAt)}
-            </p>
-          </div>
-          <AuthField id="join-name" label="Name">
-            <Input
-              id="join-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              autoComplete="name"
-              required
-              disabled={busy}
-              className="h-10"
-            />
-          </AuthField>
-          <AuthField
-            id="join-password"
-            label="Password"
-            hint="Use at least 12 characters."
-          >
-            <Input
-              id="join-password"
-              aria-describedby="join-password-hint"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-              autoComplete="new-password"
-              minLength={12}
-              maxLength={128}
-              required
-              disabled={busy}
-              className="h-10"
-            />
-          </AuthField>
-          <InlineFeedback
-            feedback={error ? { type: "error", text: error } : null}
-          />
-          <Button type="submit" className="h-10 w-full" disabled={busy}>
-            {busy ? "Creating account…" : "Accept invitation"}
-          </Button>
-        </form>
-      ) : error ? (
-        <InlineFeedback feedback={{ type: "error", text: error }} />
-      ) : (
-        <Skeleton className="h-44 w-full" />
-      )}
+      {(() => {
+        if (invitation) {
+          return (
+            <form onSubmit={accept} className="space-y-4">
+              <div className="border-line rounded-lg border px-3.5 py-3">
+                <p className="text-body text-ink">
+                  Invited as{" "}
+                  <strong className="font-medium">{invitation.email}</strong>{" "}
+                  with <span className="font-medium">{invitation.role}</span>{" "}
+                  access.
+                </p>
+                <p className="text-meta text-ink-muted mt-0.5">
+                  Expires {formatDateTime(invitation.expiresAt)}
+                </p>
+              </div>
+              <AuthField id="join-name" label="Name">
+                <Input
+                  id="join-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  autoComplete="name"
+                  required
+                  disabled={busy}
+                  className="h-10"
+                />
+              </AuthField>
+              <AuthField
+                id="join-password"
+                label="Password"
+                hint="Use at least 12 characters."
+              >
+                <Input
+                  id="join-password"
+                  aria-describedby="join-password-hint"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={12}
+                  maxLength={128}
+                  required
+                  disabled={busy}
+                  className="h-10"
+                />
+              </AuthField>
+              <InlineFeedback
+                feedback={error ? { type: "error", text: error } : null}
+              />
+              <Button type="submit" className="h-10 w-full" disabled={busy}>
+                {busy ? "Creating account…" : "Accept invitation"}
+              </Button>
+            </form>
+          );
+        }
+        if (error) {
+          return <InlineFeedback feedback={{ type: "error", text: error }} />;
+        }
+        return <Skeleton className="h-44 w-full" />;
+      })()}
     </AuthShell>
   );
-}
+};
+export default JoinPage;

@@ -1,15 +1,6 @@
-import type {
-  HumanSpec,
-  RunStatus,
-  ProjectContext,
-} from "@specbook/runtime/types";
-
-export {
-  EMPTY_PROJECT_CONTEXT,
-  type HumanSpec,
-  type RunStatus,
-  type ProjectContext,
-} from "@specbook/runtime/types";
+import type { ErrorCode } from "@specbook/runtime/errors";
+import type { RunnerPayload } from "@specbook/runtime/runner-protocol";
+import type { RunStatus, ProjectContext } from "@specbook/runtime/types";
 import {
   index,
   integer,
@@ -17,6 +8,23 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+
+import type { SsoSettings, UserRole } from "../../core/accounts/schemas";
+import type { SecuritySettings } from "../../core/chat/safety-settings";
+import type { JobStatus, JobLimits, InboxKind } from "../../core/jobs/schemas";
+import type {
+  RetentionSettings,
+  RetentionCleanup,
+} from "../../core/operations/schemas";
+import type { StewardIntent } from "../../core/steward/schemas";
+import type { ProjectObservation } from "../../core/steward/signals";
+
+export {
+  EMPTY_PROJECT_CONTEXT,
+  type HumanSpec,
+  type RunStatus,
+  type ProjectContext,
+} from "@specbook/runtime/types";
 
 export type SpecStatus =
   | "unverified"
@@ -121,9 +129,7 @@ export const runnerJobs = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     group: text("group"),
-    payload: text("payload", { mode: "json" })
-      .$type<import("@specbook/runtime/runner-protocol").RunnerPayload>()
-      .notNull(),
+    payload: text("payload", { mode: "json" }).$type<RunnerPayload>().notNull(),
     status: text("status")
       .$type<"queued" | "leased" | "completing" | "completed">()
       .notNull()
@@ -271,8 +277,7 @@ export const runs = sqliteTable(
     startedAt: text("started_at").notNull(),
     durationMs: integer("duration_ms"),
     failReason: text("fail_reason"),
-    errorCode:
-      text("error_code").$type<import("@specbook/runtime/errors").ErrorCode>(),
+    errorCode: text("error_code").$type<ErrorCode>(),
     automationPending: integer("automation_pending", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -341,18 +346,12 @@ export const appSettings = sqliteTable("app_settings", {
   agentPaused: integer("agent_paused", { mode: "boolean" })
     .notNull()
     .default(false),
-  sso: text("sso", { mode: "json" }).$type<
-    import("../../core/accounts/schemas").SsoSettings
-  >(),
-  retention: text("retention", { mode: "json" }).$type<
-    import("../../core/operations/schemas").RetentionSettings
-  >(),
-  retentionLastCleanup: text("retention_last_cleanup", { mode: "json" }).$type<
-    import("../../core/operations/schemas").RetentionCleanup
-  >(),
-  security: text("security", { mode: "json" }).$type<
-    import("../../core/chat/safety-settings").SecuritySettings
-  >(),
+  sso: text("sso", { mode: "json" }).$type<SsoSettings>(),
+  retention: text("retention", { mode: "json" }).$type<RetentionSettings>(),
+  retentionLastCleanup: text("retention_last_cleanup", {
+    mode: "json",
+  }).$type<RetentionCleanup>(),
+  security: text("security", { mode: "json" }).$type<SecuritySettings>(),
   updatedAt: text("updated_at").notNull(),
 });
 
@@ -361,9 +360,7 @@ export const users = sqliteTable("users", {
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
   passwordHash: text("password_hash"),
-  role: text("role")
-    .$type<import("../../core/accounts/schemas").UserRole>()
-    .notNull(),
+  role: text("role").$type<UserRole>().notNull(),
   disabledAt: text("disabled_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
@@ -405,9 +402,7 @@ export const userInvites = sqliteTable("user_invites", {
   id: text("id").primaryKey(),
   tokenHash: text("token_hash").notNull().unique(),
   email: text("email").notNull(),
-  role: text("role")
-    .$type<import("../../core/accounts/schemas").UserRole>()
-    .notNull(),
+  role: text("role").$type<UserRole>().notNull(),
   createdBy: text("created_by")
     .notNull()
     .references(() => users.id),
@@ -488,12 +483,8 @@ export const jobs = sqliteTable(
       "test_drift" | "application_bug" | "environment"
     >(),
     goal: text("goal").notNull(),
-    status: text("status")
-      .$type<import("../../core/jobs/schemas").JobStatus>()
-      .notNull(),
-    limits: text("limits", { mode: "json" })
-      .$type<import("../../core/jobs/schemas").JobLimits>()
-      .notNull(),
+    status: text("status").$type<JobStatus>().notNull(),
+    limits: text("limits", { mode: "json" }).$type<JobLimits>().notNull(),
     tokensUsed: integer("tokens_used").notNull().default(0),
     actionsUsed: integer("actions_used").notNull().default(0),
     elapsedMs: integer("elapsed_ms").notNull().default(0),
@@ -501,8 +492,7 @@ export const jobs = sqliteTable(
     safetyRetries: integer("safety_retries").notNull().default(0),
     retryAt: text("retry_at"),
     systemError: text("system_error"),
-    errorCode:
-      text("error_code").$type<import("@specbook/runtime/errors").ErrorCode>(),
+    errorCode: text("error_code").$type<ErrorCode>(),
     infrastructureRetries: integer("infrastructure_retries")
       .notNull()
       .default(0),
@@ -525,9 +515,7 @@ export const inboxItems = sqliteTable(
     jobId: text("job_id")
       .notNull()
       .references(() => jobs.id, { onDelete: "cascade" }),
-    kind: text("kind")
-      .$type<import("../../core/jobs/schemas").InboxKind>()
-      .notNull(),
+    kind: text("kind").$type<InboxKind>().notNull(),
     status: text("status")
       .$type<
         | "pending"
@@ -631,7 +619,7 @@ export const projectStewards = sqliteTable("project_stewards", {
     .default("propose"),
   paused: integer("paused", { mode: "boolean" }).notNull().default(false),
   observation: text("observation", { mode: "json" })
-    .$type<import("../../core/steward/signals").ProjectObservation>()
+    .$type<ProjectObservation>()
     .notNull()
     .default({}),
   updatedAt: text("updated_at").notNull(),
@@ -674,9 +662,7 @@ export const stewardIntents = sqliteTable(
     sourceChatId: text("source_chat_id").references(() => chats.id, {
       onDelete: "set null",
     }),
-    intent: text("intent", { mode: "json" })
-      .$type<import("../../core/steward/schemas").StewardIntent>()
-      .notNull(),
+    intent: text("intent", { mode: "json" }).$type<StewardIntent>().notNull(),
     priority: integer("priority").notNull(),
     status: text("status")
       .$type<"pending" | "running" | "completed" | "ignored" | "failed">()

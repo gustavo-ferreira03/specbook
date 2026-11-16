@@ -26,7 +26,7 @@ test("Home dashboard shows the passing headline", async ({
     await expect(
       page.getByRole("heading", {
         level: 1,
-        name: /^(\d+) of \1 Specs? passing$/,
+        name: /^(?<capture1>\d+) of \1 Specs? passing$/u,
       })
     ).toBeVisible();
   });

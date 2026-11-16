@@ -11,57 +11,43 @@ import {
 } from "@specbook/runtime/network/targets";
 
 import { storageRoot } from "../paths";
+import { requireValue } from "../utils/require-value";
 
-const faviconsDir = path.join(storageRoot, "favicons");
-const MAX_PAGE_BYTES = 262_144;
-const MAX_ICON_BYTES = 102_400;
-const MAX_REDIRECTS = 3;
-const FOUND_TTL_MS = 24 * 60 * 60 * 1000;
-const MISSING_TTL_MS = 6 * 60 * 60 * 1000;
-const ICON_TYPES = new Set([
-  "image/png",
-  "image/x-icon",
-  "image/vnd.microsoft.icon",
-  "image/gif",
-  "image/jpeg",
-  "image/webp",
-]);
+const attribute = (tag: string, name: string) =>
+  tag
+    .match(
+      new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu")
+    )
+    ?.slice(2)
+    .find((value) => value !== undefined);
 
-export interface Favicon {
-  contentType: string;
-  body: Buffer;
-}
-
-interface Fetched {
-  url: URL;
-  contentType: string;
-  body: Buffer;
-}
-
-function allowsPrivate(baseUrl: URL): boolean {
-  const hostname = baseUrl.hostname.replaceAll(/^\[|\]$/g, "");
+const allowsPrivate = function allowsPrivate(baseUrl: URL): boolean {
+  const hostname = baseUrl.hostname.replaceAll(/^\[|\]$/gu, "");
   return isIP(hostname)
     ? isPrivateAddress(hostname)
     : hostname === "localhost" || hostname.endsWith(".localhost");
-}
+};
 
-async function fetchLimited(
+const fetchLimited = async function fetchLimited(
   start: URL,
   project: URL,
   accept: string,
   maxBytes: number
 ): Promise<Fetched | null> {
   let url = start;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const address = await resolveTarget(
       url,
       url.origin === project.origin && allowsPrivate(project)
     );
+    // oxlint-disable-next-line promise/avoid-new, no-await-in-loop -- Bridge an event or callback API to the asynchronous operation. Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const result = await new Promise<{
       status: number;
       location?: string;
       contentType: string;
       body: Buffer | null;
+      // oxlint-disable-next-line no-loop-func -- This awaited or explicitly chained callback observes the current operation state; iterations retain their sequencing.
     }>((resolve, reject) => {
       const request = (url.protocol === "https:" ? https : http).request(
         url,
@@ -70,15 +56,19 @@ async function fetchLimited(
           agent: false,
           signal: AbortSignal.timeout(8000),
           headers: { Accept: accept, "User-Agent": "Specbook" },
+          // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
           lookup: (_hostname, options, callback) =>
             options.all
-              ? callback(null, [address])
-              : callback(null, address.address, address.family),
+              ? // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+                callback(null, [address])
+              : // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+                callback(null, address.address, address.family),
         },
         (response) => {
           const status = response.statusCode ?? 502;
-          const contentType = String(response.headers["content-type"] ?? "")
-            .split(";")[0]!
+          const contentType = requireValue(
+            String(response.headers["content-type"] ?? "").split(";")[0]
+          )
             .trim()
             .toLowerCase();
           if (status < 200 || status >= 300) {
@@ -120,20 +110,17 @@ async function fetchLimited(
       : null;
   }
   return null;
-}
+};
 
-function iconCandidates(html: string, pageUrl: URL): URL[] {
-  const links = [...html.matchAll(/<link\b[^>]*>/gi)].map((match) => match[0]);
-  const attribute = (tag: string, name: string) =>
-    tag
-      .match(
-        new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i")
-      )
-      ?.slice(2)
-      .find((value) => value !== undefined);
+const iconCandidates = function iconCandidates(
+  html: string,
+  pageUrl: URL
+): URL[] {
+  const links = [...html.matchAll(/<link\b[^>]*>/giu)].map((match) => match[0]);
+
   const ranked = links
     .flatMap((tag) => {
-      const rel = (attribute(tag, "rel") ?? "").toLowerCase().split(/\s+/);
+      const rel = (attribute(tag, "rel") ?? "").toLowerCase().split(/\s+/u);
       const href = attribute(tag, "href");
       if (
         !href ||
@@ -142,14 +129,14 @@ function iconCandidates(html: string, pageUrl: URL): URL[] {
         return [];
       }
       if (
-        /\.svg(?:[?#]|$)/i.test(href) ||
-        /svg/i.test(attribute(tag, "type") ?? "")
+        /\.svg(?:[?#]|$)/iu.test(href) ||
+        /svg/iu.test(attribute(tag, "type") ?? "")
       ) {
         return [];
       }
       return [{ href, score: rel.includes("apple-touch-icon") ? 1 : 0 }];
     })
-    .sort((a, b) => a.score - b.score);
+    .toSorted((a, b) => a.score - b.score);
   const urls = ranked.flatMap(({ href }) => {
     try {
       return [httpTarget(new URL(href, pageUrl).href)];
@@ -158,9 +145,11 @@ function iconCandidates(html: string, pageUrl: URL): URL[] {
     }
   });
   return [...urls, new URL("/favicon.ico", pageUrl.origin)];
-}
+};
 
-async function discover(baseUrl: string): Promise<Favicon | null> {
+const discover = async function discover(
+  baseUrl: string
+): Promise<Favicon | null> {
   const project = httpTarget(baseUrl);
   const page = await fetchLimited(
     project,
@@ -173,6 +162,7 @@ async function discover(baseUrl: string): Promise<Favicon | null> {
       ? iconCandidates(page.body.toString("utf-8"), page.url)
       : [new URL("/favicon.ico", project.origin)];
   for (const candidate of candidates) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const icon = await fetchLimited(
       candidate,
       project,
@@ -193,9 +183,9 @@ async function discover(baseUrl: string): Promise<Favicon | null> {
     }
   }
   return null;
-}
+};
 
-export async function projectFavicon(
+export const projectFavicon = async function projectFavicon(
   projectId: string,
   baseUrl: string
 ): Promise<Favicon | null> {
@@ -239,4 +229,30 @@ export async function projectFavicon(
     })
   );
   return icon;
+};
+
+const faviconsDir = path.join(storageRoot, "favicons");
+const MAX_PAGE_BYTES = 262_144;
+const MAX_ICON_BYTES = 102_400;
+const MAX_REDIRECTS = 3;
+const FOUND_TTL_MS = 24 * 60 * 60 * 1000;
+const MISSING_TTL_MS = 6 * 60 * 60 * 1000;
+const ICON_TYPES = new Set([
+  "image/png",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "image/gif",
+  "image/jpeg",
+  "image/webp",
+]);
+
+export interface Favicon {
+  contentType: string;
+  body: Buffer;
+}
+
+interface Fetched {
+  url: URL;
+  contentType: string;
+  body: Buffer;
 }

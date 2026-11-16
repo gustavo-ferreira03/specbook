@@ -13,7 +13,7 @@ const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
 const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
-function DropdownMenuContent({
+const DropdownMenuContent = function DropdownMenuContent({
   className,
   sideOffset = 6,
   ...props
@@ -31,9 +31,9 @@ function DropdownMenuContent({
       />
     </DropdownMenuPrimitive.Portal>
   );
-}
+};
 
-function DropdownMenuItem({
+const DropdownMenuItem = function DropdownMenuItem({
   className,
   inset,
   variant = "default",
@@ -54,9 +54,9 @@ function DropdownMenuItem({
       {...props}
     />
   );
-}
+};
 
-function DropdownMenuCheckboxItem({
+const DropdownMenuCheckboxItem = function DropdownMenuCheckboxItem({
   className,
   children,
   checked,
@@ -80,9 +80,9 @@ function DropdownMenuCheckboxItem({
       {children}
     </DropdownMenuPrimitive.CheckboxItem>
   );
-}
+};
 
-function DropdownMenuRadioItem({
+const DropdownMenuRadioItem = function DropdownMenuRadioItem({
   className,
   children,
   indicator = true,
@@ -110,9 +110,9 @@ function DropdownMenuRadioItem({
       {children}
     </DropdownMenuPrimitive.RadioItem>
   );
-}
+};
 
-function DropdownMenuLabel({
+const DropdownMenuLabel = function DropdownMenuLabel({
   className,
   inset,
   ...props
@@ -130,9 +130,9 @@ function DropdownMenuLabel({
       {...props}
     />
   );
-}
+};
 
-function DropdownMenuSeparator({
+const DropdownMenuSeparator = function DropdownMenuSeparator({
   className,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
@@ -143,9 +143,9 @@ function DropdownMenuSeparator({
       {...props}
     />
   );
-}
+};
 
-function DropdownMenuShortcut({
+const DropdownMenuShortcut = function DropdownMenuShortcut({
   className,
   ...props
 }: React.ComponentProps<"span">) {
@@ -159,9 +159,9 @@ function DropdownMenuShortcut({
       {...props}
     />
   );
-}
+};
 
-function DropdownMenuSubTrigger({
+const DropdownMenuSubTrigger = function DropdownMenuSubTrigger({
   className,
   inset,
   children,
@@ -183,9 +183,9 @@ function DropdownMenuSubTrigger({
       <ChevronRight className="ml-auto size-3.5" />
     </DropdownMenuPrimitive.SubTrigger>
   );
-}
+};
 
-function DropdownMenuSubContent({
+const DropdownMenuSubContent = function DropdownMenuSubContent({
   className,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
@@ -199,7 +199,7 @@ function DropdownMenuSubContent({
       {...props}
     />
   );
-}
+};
 
 export {
   DropdownMenu,

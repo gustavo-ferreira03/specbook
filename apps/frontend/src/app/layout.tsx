@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Recursive } from "next/font/google";
 
-import { AuthProvider } from "@/components/AuthProvider";
-import { RunStateAnnouncementProvider } from "@/components/RunStateAnnouncement";
-import { SetupGate } from "@/components/SetupGate";
+import { AuthProvider } from "@/components/auth-provider";
+import { RunStateAnnouncementProvider } from "@/components/run-state-announcement";
+import { SetupGate } from "@/components/setup-gate";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_INIT_SCRIPT } from "@/lib/theme-script";
 
@@ -33,7 +33,7 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({
+const RootLayout = function RootLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -45,7 +45,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* oxlint-disable react/no-danger -- The inserted markup is escaped code highlighting produced by Prism, not raw user HTML. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* oxlint-enable react/no-danger */}
       </head>
       <body>
         <TooltipProvider>
@@ -60,4 +62,5 @@ export default function RootLayout({
       </body>
     </html>
   );
-}
+};
+export default RootLayout;

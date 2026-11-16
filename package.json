@@ -6,7 +6,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "build": "pnpm -r build",
     "test": "pnpm -r --if-present test",
-    "check": "pnpm typecheck && pnpm test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
     "lint": "ultracite check",
     "fix": "ultracite fix"
   },

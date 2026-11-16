@@ -4,9 +4,9 @@ import https from "node:https";
 import { httpTarget, resolveTarget } from "@specbook/runtime/network/targets";
 import type { AddressResolver } from "@specbook/runtime/network/targets";
 
-const MAX_DOCUMENTATION_BYTES = 131_072;
+import { requireValue } from "../utils/require-value";
 
-export async function readApiDocumentation(
+export const readApiDocumentation = async function readApiDocumentation(
   value: string,
   options: {
     origins: string[];
@@ -31,6 +31,7 @@ export async function readApiDocumentation(
   const signal = options.signal
     ? AbortSignal.any([options.signal, timeout])
     : timeout;
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
   return new Promise<{ url: string; contentType: string; text: string }>(
     (resolve, reject) => {
       const request = (url.protocol === "https:" ? https : http).request(
@@ -44,10 +45,13 @@ export async function readApiDocumentation(
               "application/json, application/yaml, text/yaml, text/plain, text/html",
             "User-Agent": "Specbook",
           },
+          // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
           lookup: (_hostname, lookupOptions, callback) =>
             lookupOptions.all
-              ? callback(null, [address])
-              : callback(null, address.address, address.family),
+              ? // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+                callback(null, [address])
+              : // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+                callback(null, address.address, address.family),
         },
         (response) => {
           const status = response.statusCode ?? 502;
@@ -62,11 +66,11 @@ export async function readApiDocumentation(
             response.destroy();
             return;
           }
-          const contentType = String(
-            response.headers["content-type"] ?? ""
-          ).split(";")[0]!;
+          const contentType = requireValue(
+            String(response.headers["content-type"] ?? "").split(";")[0]
+          );
           if (
-            !/^(?:text\/(?:plain|html|yaml|x-yaml)|application\/(?:json|yaml|x-yaml|[^/]+\+json))$/i.test(
+            !/^(?:text\/(?:plain|html|yaml|x-yaml)|application\/(?:json|yaml|x-yaml|[^/]+\+json))$/iu.test(
               contentType
             )
           ) {
@@ -107,4 +111,6 @@ export async function readApiDocumentation(
       request.end();
     }
   );
-}
+};
+
+const MAX_DOCUMENTATION_BYTES = 131_072;

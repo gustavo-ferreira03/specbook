@@ -16,6 +16,7 @@ import {
   sourceHashOf,
 } from "../repo/writer";
 import { withSpecLock } from "../specs/lifecycle";
+import { requireValue } from "../utils/require-value";
 import { jobBaseUrl } from "./environment";
 import {
   payloadOf,
@@ -25,9 +26,7 @@ import {
   newSpecProposalSchema,
 } from "./schemas";
 
-type FixProposal = z.infer<typeof fixProposalSchema>;
-
-export function isImplementationOnly(
+export const isImplementationOnly = function isImplementationOnly(
   patch: FixProposal
 ): patch is FixProposal & { testSource: string } {
   return (
@@ -36,16 +35,19 @@ export function isImplementationOnly(
     patch.title === undefined &&
     patch.description === undefined
   );
-}
+};
 
-export async function proposeMutation(
+export const proposeMutation = async function proposeMutation(
   job: Job,
   name: string,
   input: unknown
 ): Promise<InboxItem> {
   if (
     job.kind === "failure_triage" &&
-    (await jobsRepository.get(job.id))?.classification !== "test_drift"
+    (await (async () => {
+      const resolvedValue1396 = await jobsRepository.get(job.id);
+      return resolvedValue1396?.classification;
+    })()) !== "test_drift"
   ) {
     throw new Error(
       "Investigate and classify the failure as test_drift before proposing an implementation fix."
@@ -120,14 +122,19 @@ export async function proposeMutation(
       title = `Proposed Feature: ${proposed.title}`;
       params = proposed;
     }
-    const rejected = (
-      await jobsRepository.itemsByKind(job.projectId, kind, ["rejected"])
-    ).find(
-      (item) =>
-        item.status === "rejected" &&
-        item.kind === kind &&
-        JSON.stringify(payloadOf(item).params) === JSON.stringify(params)
-    );
+    const rejected = await (async () => {
+      const awaitedValue4254 = await jobsRepository.itemsByKind(
+        job.projectId,
+        kind,
+        ["rejected"]
+      );
+      return awaitedValue4254.find(
+        (item) =>
+          item.status === "rejected" &&
+          item.kind === kind &&
+          JSON.stringify(payloadOf(item).params) === JSON.stringify(params)
+      );
+    })();
     if (rejected) {
       throw new Error(
         "The human rejected this proposal. Respect that decision; ask a question if new evidence changes the recommendation."
@@ -140,15 +147,18 @@ export async function proposeMutation(
       before,
       requiresVerification: ["failure_triage", "regenerate"].includes(job.kind),
     };
-    const existing = (
-      await jobsRepository.itemsForJob(job.id, { statuses: ["pending"] })
-    ).find(
-      (item) =>
-        item.jobId === job.id &&
-        item.status === "pending" &&
-        payloadOf(item).baseHead === baseHead &&
-        JSON.stringify(payloadOf(item).params) === JSON.stringify(params)
-    );
+    const existing = await (async () => {
+      const awaitedValue4893 = await jobsRepository.itemsForJob(job.id, {
+        statuses: ["pending"],
+      });
+      return awaitedValue4893.find(
+        (item) =>
+          item.jobId === job.id &&
+          item.status === "pending" &&
+          payloadOf(item).baseHead === baseHead &&
+          JSON.stringify(payloadOf(item).params) === JSON.stringify(params)
+      );
+    })();
     if (existing) {
       return existing;
     }
@@ -161,9 +171,9 @@ export async function proposeMutation(
       payload,
     });
   });
-}
+};
 
-export async function applyProposal(
+export const applyProposal = async function applyProposal(
   item: InboxItem,
   checkPolicy?: () => Promise<void>
 ): Promise<string> {
@@ -197,7 +207,7 @@ export async function applyProposal(
       payloadOf(item).params
     );
     if (payloadOf(item).requiresVerification) {
-      const verified = verificationOf(item)!;
+      const verified = requireValue(verificationOf(item));
       const project = await projectsRepository.getProject(item.projectId);
       const job = await jobsRepository.get(item.jobId);
       const override = job ? await jobBaseUrl(job) : undefined;
@@ -215,23 +225,28 @@ export async function applyProposal(
       if (!spec || spec.projectId !== item.projectId) {
         throw new Error("Spec no longer exists in this project");
       }
-      return (
-        await updateSpecInRepo(spec, patch, {
+      return await (async () => {
+        const awaitedValue7197 = await updateSpecInRepo(spec, patch, {
           ...options,
           expectedHead: undefined,
           expectedSpec: {
             yaml: payloadOf(item).before?.yaml ?? "",
             testSource: payloadOf(item).before?.testSource ?? null,
           },
-        })
-      ).commitSha;
+        });
+        return awaitedValue7197.commitSha;
+      })();
     });
   }
   if (item.kind === "new_spec") {
     const input = newSpecProposalSchema.parse(payloadOf(item).params);
-    return (
-      await createSpecInRepo({ ...input, projectId: item.projectId }, options)
-    ).commitSha;
+    return await (async () => {
+      const awaitedValue7621 = await createSpecInRepo(
+        { ...input, projectId: item.projectId },
+        options
+      );
+      return awaitedValue7621.commitSha;
+    })();
   }
   if (item.kind === "feature") {
     const input = featureProposalSchema.parse(payloadOf(item).params);
@@ -242,15 +257,18 @@ export async function applyProposal(
       input.description,
       options
     );
-    return (
-      await git.raw([
+    return await (async () => {
+      const awaitedValue7986 = await git.raw([
         "log",
         "--format=%H",
         "--fixed-strings",
         `--grep=${marker}`,
         "-1",
-      ])
-    ).trim();
+      ]);
+      return awaitedValue7986.trim();
+    })();
   }
   throw new Error("This Inbox item has no repository change to approve");
-}
+};
+
+type FixProposal = z.infer<typeof fixProposalSchema>;

@@ -9,16 +9,20 @@ import type {
 import { decryptSecret, encryptSecret } from "../credentials/crypto";
 import { writeProtectedFile } from "../credentials/files";
 
-type CredentialData = Record<string, Credential>;
-
 export class FileCredentialStore implements CredentialStore {
+  private readonly filePath: string;
+
   private operation = Promise.resolve();
 
-  constructor(private readonly filePath: string) {}
+  constructor(filePath: string) {
+    /* No action is needed until this callback is replaced or invoked by its owner. */
+    this.filePath = filePath;
+  }
 
   private async withLock<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.operation;
     let release!: () => void;
+    // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
     this.operation = new Promise<void>((resolve) => {
       release = resolve;
     });
@@ -51,11 +55,17 @@ export class FileCredentialStore implements CredentialStore {
   }
 
   async read(providerId: string): Promise<Credential | undefined> {
-    return this.withLock(async () => (await this.readData())[providerId]);
+    return await this.withLock(
+      async () =>
+        await (async () => {
+          const awaitedValue1416 = await this.readData();
+          return awaitedValue1416[providerId];
+        })()
+    );
   }
 
   async list(): Promise<readonly CredentialInfo[]> {
-    return this.withLock(async () => {
+    return await this.withLock(async () => {
       const data = await this.readData();
       return Object.entries(data).map(([providerId, credential]) => ({
         providerId,
@@ -68,7 +78,7 @@ export class FileCredentialStore implements CredentialStore {
     providerId: string,
     fn: (current: Credential | undefined) => Promise<Credential | undefined>
   ): Promise<Credential | undefined> {
-    return this.withLock(async () => {
+    return await this.withLock(async () => {
       const data = await this.readData();
       const next = await fn(data[providerId]);
       if (next === undefined) {
@@ -83,8 +93,10 @@ export class FileCredentialStore implements CredentialStore {
   async delete(providerId: string): Promise<void> {
     await this.withLock(async () => {
       const data = await this.readData();
-      delete data[providerId];
+      Reflect.deleteProperty(data, providerId);
       await this.writeData(data);
     });
   }
 }
+
+type CredentialData = Record<string, Credential>;

@@ -2,30 +2,32 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 
 import { remoteFetch } from "./network";
+import { requiredValue } from "./values";
 
-export function scrubCi(value: string): string {
+export const scrubCi = function scrubCi(input: string): string {
+  let value = input;
   for (const token of [
     process.env.SPECBOOK_TOKEN,
     process.env.GITHUB_TOKEN,
     process.env.SPECBOOK_GITLAB_TOKEN,
     process.env.CI_JOB_TOKEN,
   ]
-    .filter((value): value is string => !!value)
-    .sort((a, b) => b.length - a.length)) {
+    .filter((candidateValue): candidateValue is string => !!candidateValue)
+    .toSorted((a, b) => b.length - a.length)) {
     value = value.replaceAll(token, "[REDACTED]");
   }
   return value;
-}
+};
 
-function required(name: string): string {
+const required = function required(name: string): string {
   const value = process.env[name];
   if (!value) {
     throw new Error(`${name} is required`);
   }
   return value;
-}
+};
 
-function httpUrl(value: string, name: string): string {
+const httpUrl = function httpUrl(value: string, name: string): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -43,15 +45,15 @@ function httpUrl(value: string, name: string): string {
       `${name} must be an HTTP(S) URL without credentials, query or fragment`
     );
   }
-  return url.href.replace(/\/$/, "");
-}
+  return url.href.replace(/\/$/u, "");
+};
 
-function number(value: unknown, name: string): string {
-  if (!/^[1-9]\d*$/.test(String(value))) {
+const number = function number(value: unknown, name: string): string {
+  if (!/^[1-9]\d*$/u.test(String(value))) {
     throw new Error(`${name} must be a positive integer`);
   }
   return String(value);
-}
+};
 
 export interface CiCommentContext {
   provider: "github" | "gitlab";
@@ -61,7 +63,7 @@ export interface CiCommentContext {
   headers: Record<string, string>;
 }
 
-export async function ciCommentContext(
+export const ciCommentContext = async function ciCommentContext(
   provider: string
 ): Promise<CiCommentContext | null> {
   if (provider === "none") {
@@ -79,7 +81,7 @@ export async function ciCommentContext(
       return null;
     }
     const repository = required("GITHUB_REPOSITORY");
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
       throw new Error("GITHUB_REPOSITORY must be owner/repository");
     }
     return {
@@ -117,7 +119,7 @@ export async function ciCommentContext(
     route: `/projects/${encodeURIComponent(project)}/merge_requests/${number(mergeRequest, "Merge request number")}/notes`,
     headers: { "PRIVATE-TOKEN": required("SPECBOOK_GITLAB_TOKEN") },
   };
-}
+};
 
 interface ProviderComment {
   id: number;
@@ -127,7 +129,7 @@ interface ProviderComment {
   system?: boolean;
 }
 
-export async function publishCiComment(
+export const publishCiComment = async function publishCiComment(
   context: CiCommentContext | null,
   api: string,
   project: string,
@@ -137,7 +139,7 @@ export async function publishCiComment(
     return;
   }
   const deadline = Date.now() + 60_000;
-  async function request(
+  const request = async function request(
     route: string,
     method = "GET",
     body?: { body: string }
@@ -145,22 +147,28 @@ export async function publishCiComment(
     if (Date.now() >= deadline) {
       throw new Error("Timed out publishing the Specbook comment");
     }
-    const response = await remoteFetch(`${context!.api}${route}`, {
-      method,
-      headers: { ...context!.headers, "Content-Type": "application/json" },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      redirect: "error",
-      signal: AbortSignal.timeout(
-        Math.min(30_000, Math.max(1, deadline - Date.now()))
-      ),
-    });
+    const response = await remoteFetch(
+      `${requiredValue(context).api}${route}`,
+      {
+        method,
+        headers: {
+          ...requiredValue(context).headers,
+          "Content-Type": "application/json",
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        redirect: "error",
+        signal: AbortSignal.timeout(
+          Math.min(30_000, Math.max(1, deadline - Date.now()))
+        ),
+      }
+    );
     if (!response.ok) {
       throw new Error(
-        `${context!.provider === "github" ? "GitHub" : "GitLab"} comment API returned HTTP ${response.status}; reports are saved locally`
+        `${requiredValue(context).provider === "github" ? "GitHub" : "GitLab"} comment API returned HTTP ${response.status}; reports are saved locally`
       );
     }
     return response.status === 204 ? null : response.json();
-  }
+  };
   const marker = `<!-- specbook:${crypto.createHash("sha256").update(`${api}/${project}`).digest("hex")} -->`;
   let body = `${marker}\n${scrubCi(summary)}`;
   if (Buffer.byteLength(body, "utf-8") > 60_000) {
@@ -168,7 +176,7 @@ export async function publishCiComment(
       .subarray(0, 55_000)
       .toString("utf-8")
       .replace(
-        /\uFFFD$/,
+        /\uFFFD$/u,
         ""
       )}\n\nSummary truncated. Download specbook-summary.md from the job artifacts for all results.`;
   }
@@ -180,12 +188,13 @@ export async function publishCiComment(
         )
       : null;
   const matches: ProviderComment[] = [];
-  for (let page = 1; ; page++) {
+  for (let page = 1; ; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const comments = await request(
       `${context.route}?per_page=100&page=${page}`
     );
     if (!Array.isArray(comments)) {
-      throw new Error("Comment API returned an invalid list");
+      throw new TypeError("Comment API returned an invalid list");
     }
     matches.push(
       ...(comments as ProviderComment[]).filter(
@@ -212,14 +221,15 @@ export async function publishCiComment(
       : `${context.route}/${number(comment.id, "Note ID")}`;
   if (matches.length) {
     await request(
-      route(matches[0]!),
+      route(requiredValue(matches[0])),
       context.provider === "github" ? "PATCH" : "PUT",
       { body }
     );
     for (const duplicate of matches.slice(1)) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await request(route(duplicate), "DELETE");
     }
   } else {
     await request(context.route, "POST", { body });
   }
-}
+};

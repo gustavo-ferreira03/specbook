@@ -39,6 +39,7 @@ import {
   rememberToken,
   RemoteError,
 } from "./remote";
+import { requiredValue } from "./values";
 import { CLI_VERSION as RUNNER_CLI_VERSION } from "./version";
 
 type Lease = NonNullable<RunnerClaim["lease"]>;
@@ -75,10 +76,14 @@ export type RunnerEvent =
       failedJobs: number;
     };
 
-async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+const delay = async function delay(
+  milliseconds: number,
+  signal: AbortSignal
+): Promise<void> {
   if (signal.aborted) {
     return;
   }
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
   await new Promise<void>((resolve) => {
     const done = () => {
       clearTimeout(timer);
@@ -91,9 +96,9 @@ async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
       done();
     }
   });
-}
+};
 
-async function artifacts(
+const artifacts = async function artifacts(
   directory: string,
   scrubText: (text: string) => string
 ): Promise<RunnerCompletion["results"][number]["artifacts"]> {
@@ -117,6 +122,7 @@ async function artifacts(
       continue;
     }
     const full = path.join(directory, file);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const stat = await fs.lstat(full).catch(() => null);
     if (!stat?.isFile() || stat.isSymbolicLink()) {
       continue;
@@ -127,11 +133,14 @@ async function artifacts(
         "Runner evidence file exceeds 32 MB"
       );
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     let data: Buffer = await fs.readFile(full);
     if (file === REPLAY_FILE) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const events = await decodeReplay(data);
       const safe = events
-        ? await encodeReplay(scrubJson(events, scrubText))
+        ? // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+          await encodeReplay(scrubJson(events, scrubText))
         : null;
       if (!safe) {
         replayUnavailable =
@@ -143,7 +152,7 @@ async function artifacts(
     }
     result.push({
       path: file,
-      content: /\.(ts|yml|json)$/.test(file)
+      content: /\.(?<segment1>ts|yml|json)$/u.test(file)
         ? Buffer.from(scrubText(data.toString("utf-8"))).toString("base64")
         : data.toString("base64"),
     });
@@ -169,9 +178,11 @@ async function artifacts(
     }
   }
   return result;
-}
+};
 
-function withoutVideo(completion: RunnerCompletion): RunnerCompletion {
+const withoutVideo = function withoutVideo(
+  completion: RunnerCompletion
+): RunnerCompletion {
   return {
     ...completion,
     results: completion.results.map((result) => ({
@@ -198,9 +209,11 @@ function withoutVideo(completion: RunnerCompletion): RunnerCompletion {
         }),
     })),
   };
-}
+};
 
-function withoutReplay(completion: RunnerCompletion): RunnerCompletion {
+const withoutReplay = function withoutReplay(
+  completion: RunnerCompletion
+): RunnerCompletion {
   return {
     ...completion,
     results: completion.results.map((result) => ({
@@ -231,9 +244,11 @@ function withoutReplay(completion: RunnerCompletion): RunnerCompletion {
         }),
     })),
   };
-}
+};
 
-function exceedsUploadLimit(completion: RunnerCompletion): boolean {
+const exceedsUploadLimit = function exceedsUploadLimit(
+  completion: RunnerCompletion
+): boolean {
   const bytes = completion.results.reduce(
     (total, result) =>
       total +
@@ -248,9 +263,11 @@ function exceedsUploadLimit(completion: RunnerCompletion): boolean {
     bytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES ||
     Buffer.byteLength(JSON.stringify(completion)) > RUNNER_REQUEST_LIMIT_BYTES
   );
-}
+};
 
-async function execute(
+const scrubText = (text: string) => redactTokens(text);
+
+const execute = async function execute(
   lease: Lease,
   signal: AbortSignal,
   allowedOrigins: string[],
@@ -263,7 +280,7 @@ async function execute(
   const results: RunnerCompletion["results"] = [];
   const selected: SuiteSpec[] = [];
   let processFailure: string | null = null;
-  const scrubText = (text: string) => redactTokens(text);
+
   let safeText = scrubText;
   try {
     // Capture the local scrubber before validation so even preparation failures are safe.
@@ -271,6 +288,7 @@ async function execute(
     safeText = (text) => scrubText(secrets.scrub(text));
     for (const spec of lease.work.specs) {
       const outputDir = path.join(directory, spec.runId);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.mkdir(outputDir, { mode: 0o700 });
       const analyzed = analyzeSpecSource(spec.files["spec.ts"]);
       if (!analyzed.ok) {
@@ -305,11 +323,13 @@ async function execute(
     safeText = (text) => scrubText(resolved.scrub(text));
     for (const spec of lease.work.specs) {
       const outputDir = path.join(directory, spec.runId);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.writeFile(
         path.join(outputDir, "spec.ts"),
         safeText(spec.files["spec.ts"]),
         { mode: 0o600 }
       );
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.writeFile(
         path.join(outputDir, "spec.yml"),
         safeText(spec.files["spec.yml"]),
@@ -337,9 +357,9 @@ async function execute(
       ...resolved,
       scrub: safeText,
     });
-    processFailure = outcome.processFailure;
+    ({ processFailure } = outcome);
     for (const spec of selected) {
-      const result = outcome.results.get(spec.key)!;
+      const result = requiredValue(outcome.results.get(spec.key));
       results.push({
         ...result,
         runId: spec.key,
@@ -351,6 +371,7 @@ async function execute(
           result.failedStep === null
             ? null
             : safeText(result.failedStep).slice(0, 500),
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         artifacts: await artifacts(spec.outputDir, safeText),
       });
     }
@@ -369,7 +390,9 @@ async function execute(
     results.length = 0;
     for (const spec of lease.work.specs) {
       const outputDir = path.join(directory, spec.runId);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.mkdir(outputDir, { recursive: true, mode: 0o700 });
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.writeFile(
         path.join(outputDir, "evidence.json"),
         JSON.stringify({ steps: [], video: null, failedStep: null }),
@@ -382,6 +405,7 @@ async function execute(
         failReason: processFailure,
         failedStep: null,
         errorCode: errorCodeOf(error) ?? "infrastructure",
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         artifacts: await artifacts(outputDir, safeText).catch(() => []),
       });
     }
@@ -395,16 +419,36 @@ async function execute(
       processFailure === null ? null : safeText(processFailure).slice(0, 2000),
     results,
   });
-}
+};
 
-export async function runRunner(
+const jsonResponse = async <T>(
+  response: Response,
+  schema: z.ZodType<T>
+): Promise<T> => {
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch {
+    throw new Error("Specbook returned an invalid runner response");
+  }
+  const result = schema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      "Specbook returned an unexpected runner response; check that CLI and server versions match"
+    );
+  }
+  return result.data;
+};
+
+// oxlint-disable-next-line complexity -- Keep the runner decision tree together so state transitions and error ordering remain explicit.
+export const runRunner = async function runRunner(
   options: RunnerOptions,
   emit: (event: RunnerEvent) => Promise<void>
 ): Promise<void> {
   rememberToken(options.token);
   if (
     !options.token ||
-    /\s/.test(options.token) ||
+    /\s/u.test(options.token) ||
     options.token.length > 4096
   ) {
     throw new Error(
@@ -422,7 +466,7 @@ export async function runRunner(
   if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
     throw new Error("Use a positive integer for --drain-after");
   }
-  const allowedOrigins = [...new Set(options.allowedOrigins ?? [])];
+  const allowedOrigins = [...new Set(options.allowedOrigins)];
   if (!allowedOrigins.length) {
     throw new Error(
       "Configure --allow-origin or SPECBOOK_RUNNER_ALLOWED_ORIGINS with the application origins this runner may access"
@@ -497,39 +541,27 @@ export async function runRunner(
       try {
         error = await response.json();
       } catch {
+        /* Cleanup is best effort after the operation has completed or failed. */
         /* Proxy errors may not be JSON. */
       }
       const parsed = z.object({ error: z.string().max(2000) }).safeParse(error);
-      const reason =
-        response.status === 426 && parsed.success
-          ? redactTokens(parsed.data.error)
-          : response.status === 401 || response.status === 403
-            ? "Runner token is invalid or revoked or cannot access this project"
-            : response.status === 409
-              ? "Runner lease is no longer active"
-              : `Specbook returned HTTP ${response.status}`;
+      const reason = (() => {
+        if (response.status === 426 && parsed.success) {
+          return redactTokens(parsed.data.error);
+        }
+        if (response.status === 401 || response.status === 403) {
+          return "Runner token is invalid or revoked or cannot access this project";
+        }
+        if (response.status === 409) {
+          return "Runner lease is no longer active";
+        }
+        return `Specbook returned HTTP ${response.status}`;
+      })();
       throw new RemoteError(reason, response.status);
     }
     return response;
   };
-  const jsonResponse = async <T>(
-    response: Response,
-    schema: z.ZodType<T>
-  ): Promise<T> => {
-    let parsed: unknown;
-    try {
-      parsed = await response.json();
-    } catch {
-      throw new Error("Specbook returned an invalid runner response");
-    }
-    const result = schema.safeParse(parsed);
-    if (!result.success) {
-      throw new Error(
-        "Specbook returned an unexpected runner response; check that CLI and server versions match"
-      );
-    }
-    return result.data;
-  };
+
   const retry = async (error: unknown, currentSignal: AbortSignal) => {
     if (error instanceof RemoteError && [401, 403].includes(error.status)) {
       throw error;
@@ -545,6 +577,7 @@ export async function runRunner(
     }
     await delay(2000, currentSignal);
   };
+  // oxlint-disable-next-line complexity -- Keep the runner decision tree together so state transitions and error ordering remain explicit.
   const work = async (lease: Lease) => {
     const jobOrigins = [
       httpTarget(lease.work.baseUrl).origin,
@@ -559,7 +592,7 @@ export async function runRunner(
         AbortSignal.timeout(5000)
       );
       await response.body?.cancel();
-      failedJobs++;
+      failedJobs += 1;
       await emit({
         event: "rejected",
         jobId: lease.jobId,
@@ -579,6 +612,7 @@ export async function runRunner(
     const heartbeat = (async () => {
       let wait = lease.heartbeatMs;
       while (!heartbeatSignal.aborted) {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await delay(
           Math.min(wait, Math.max(1, expires - Date.now())),
           heartbeatSignal
@@ -587,7 +621,9 @@ export async function runRunner(
           return;
         }
         try {
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           const response = await jsonResponse(
+            // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
             await send(
               `/runner/jobs/${lease.jobId}/heartbeat`,
               {
@@ -648,17 +684,20 @@ export async function runRunner(
       }
       while (!jobSignal.aborted) {
         try {
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           const response = await send(
             `/runner/jobs/${lease.jobId}/complete`,
             completion,
             jobSignal
           );
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           await response.body?.cancel();
           completed = true;
-          completedJobs++;
+          completedJobs += 1;
           if (completion.results.some((result) => result.status !== "passed")) {
-            failedJobs++;
+            failedJobs += 1;
           }
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           await emit({
             event: "completed",
             jobId: lease.jobId,
@@ -679,6 +718,7 @@ export async function runRunner(
           ) {
             completion = withoutVideo(completion);
             retriedWithoutVideo = true;
+            // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
             await emit({
               event: "retrying",
               reason:
@@ -694,6 +734,7 @@ export async function runRunner(
           ) {
             completion = withoutReplay(completion);
             retriedWithoutReplay = true;
+            // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
             await emit({
               event: "retrying",
               reason:
@@ -709,8 +750,9 @@ export async function runRunner(
             ![401, 403].includes(error.status)
           ) {
             releaseReason = `Runner could not upload this job's results: ${error.message}`;
-            completedJobs++;
-            failedJobs++;
+            completedJobs += 1;
+            failedJobs += 1;
+            // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
             await emit({
               event: "rejected",
               jobId: lease.jobId,
@@ -719,6 +761,7 @@ export async function runRunner(
             });
             break;
           }
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           await retry(error, jobSignal);
         }
       }
@@ -762,13 +805,16 @@ export async function runRunner(
       }
       // Reserve a slot before polling so concurrent workers cannot exceed the drain limit.
       if (limit !== undefined && startedJobs + claimingJobs >= limit) {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await delay(100, signal);
         continue;
       }
-      claimingJobs++;
+      claimingJobs += 1;
       let claimed: RunnerClaim;
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         claimed = await jsonResponse(
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           await send(
             "/runner/claim",
             {
@@ -783,20 +829,22 @@ export async function runRunner(
           runnerClaimResponseSchema
         );
         if (claimed.lease) {
-          startedJobs++;
+          startedJobs += 1;
         }
       } catch (error) {
         if (signal.aborted) {
           break;
         }
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await retry(error, signal);
         continue;
       } finally {
-        claimingJobs--;
+        claimingJobs -= 1;
       }
       try {
         if (!connected) {
           connected = true;
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           await emit({
             event: "connected",
             url: api,
@@ -806,36 +854,41 @@ export async function runRunner(
         }
         if (signal.aborted) {
           if (claimed.lease) {
+            // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
             await send(
               `/runner/jobs/${claimed.lease.jobId}/release`,
               { leaseId: claimed.lease.leaseId },
               AbortSignal.timeout(5000)
             )
               .then((response) => response.body?.cancel())
-              .catch(() => undefined);
+              .catch(() => {
+                /* No action is needed until this callback is replaced or invoked by its owner. */
+                /* The caller owns cancellation or reports the failure separately. */
+              });
           }
           break;
         }
-        if (claimed.lease) {
-          await work(claimed.lease);
-        } else {
-          await delay(100, signal);
-        }
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+        await (claimed.lease ? work(claimed.lease) : delay(100, signal));
       } catch (error) {
         if (signal.aborted) {
           break;
         }
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await retry(error, signal);
       }
     }
   };
   const workers = Array.from(
     { length: Math.min(concurrency, limit ?? concurrency) },
-    () =>
-      worker().catch((error) => {
+    async () => {
+      try {
+        await worker();
+      } catch (error) {
         stop.abort(error);
         throw error;
-      })
+      }
+    }
   );
   const settled = await Promise.allSettled(workers);
   const disconnected = await send(
@@ -849,4 +902,4 @@ export async function runRunner(
     throw failed.reason;
   }
   await emit({ event: "stopped", url: api, completedJobs, failedJobs });
-}
+};

@@ -3,15 +3,19 @@ import { settingsRepository } from "../../infra/repositories/settings";
 import { stewardRepository } from "../../infra/repositories/steward";
 import { runTriggerForIntent } from "../steward/signals";
 
-export async function isAgentPaused(projectId: string): Promise<boolean> {
+export const isAgentPaused = async function isAgentPaused(
+  projectId: string
+): Promise<boolean> {
   const [globallyPaused, project] = await Promise.all([
     settingsRepository.getAgentPaused(),
     stewardRepository.get(projectId),
   ]);
   return globallyPaused || project.paused;
-}
+};
 
-export async function canRunAgentJob(job: Job): Promise<boolean> {
+export const canRunAgentJob = async function canRunAgentJob(
+  job: Job
+): Promise<boolean> {
   const [globallyPaused, project] = await Promise.all([
     settingsRepository.getAgentPaused(),
     stewardRepository.get(job.projectId),
@@ -40,4 +44,4 @@ export async function canRunAgentJob(job: Job): Promise<boolean> {
       ) === "schedule"
     )
   );
-}
+};

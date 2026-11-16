@@ -12,7 +12,7 @@ import { schedulesRepository } from "../../repositories/schedules";
 import { access } from "../access";
 import { loadProject } from "../load-project";
 
-export function createSchedulesRouter(): Hono {
+export const createSchedulesRouter = function createSchedulesRouter(): Hono {
   const router = new Hono();
   router.get("/projects/:id/automation", access("editor"), async (c) => {
     const id = c.req.param("id");
@@ -47,4 +47,4 @@ export function createSchedulesRouter(): Hono {
     }
   );
   return router;
-}
+};

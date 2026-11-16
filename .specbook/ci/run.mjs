@@ -7,10 +7,10 @@ import path from "node:path";
 
 const tester = (
   process.env.SPECBOOK_TESTER_URL ?? "http://127.0.0.1:4001"
-).replace(/\/$/, "");
+).replace(/\/$/u, "");
 const target = (
   process.env.SPECBOOK_TARGET_URL ?? "http://127.0.0.1:5001"
-).replace(/\/$/, "");
+).replace(/\/$/u, "");
 // The workspace holds the Specs; this harness lives in its ci/ folder.
 const book = path.join(import.meta.dirname, "..");
 const fixtureAdmin = {
@@ -20,7 +20,7 @@ const fixtureAdmin = {
 
 let cookie = "";
 
-async function api(method, route, body) {
+const api = async function api(method, route, body) {
   const response = await fetch(`${tester}/api${route}`, {
     method,
     headers: {
@@ -40,25 +40,33 @@ async function api(method, route, body) {
     throw new Error(`${method} ${route} returned ${response.status}: ${text}`);
   }
   return text ? JSON.parse(text) : {};
-}
+};
 
-async function waitFor(url) {
-  for (let attempt = 0; attempt < 90; attempt++) {
+const waitFor = async function waitFor(url) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
     try {
-      if ((await fetch(url)).ok) {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
+      const response = await fetch(url);
+      if (response.ok) {
         return;
       }
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    } catch {
+      /* Cleanup is best effort; preserve the original result. */
+      /* Cleanup is best effort; preserve the original result. */
+    }
+    // oxlint-disable-next-line no-await-in-loop, promise/avoid-new -- Each operation depends on the preceding attempt or updates ordered browser/evidence state. Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2000);
+    });
   }
   throw new Error(`${url} did not become ready`);
-}
+};
 
-function specCount(directory) {
+const specCount = function specCount(directory) {
   return fs
     .readdirSync(directory, { recursive: true })
     .filter((entry) => path.basename(String(entry)) === "spec.yml").length;
-}
+};
 
 await waitFor(`${tester}/api/health`);
 await waitFor(`${target}/login`);
@@ -114,10 +122,15 @@ git("push", "origin", `HEAD:${remote.branch}`);
 
 const expected = specCount(path.join(book, "specs"));
 let indexed = 0;
-for (let attempt = 0; attempt < 30 && indexed < expected; attempt++) {
-  indexed = (await api("GET", `/projects/${project.id}/tree`)).specs.length;
+for (let attempt = 0; attempt < 30 && indexed < expected; attempt += 1) {
+  // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
+  const tree = await api("GET", `/projects/${project.id}/tree`);
+  indexed = tree.specs.length;
   if (indexed < expected) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // oxlint-disable-next-line no-await-in-loop, promise/avoid-new -- Each operation depends on the preceding attempt or updates ordered browser/evidence state. Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2000);
+    });
   }
 }
 if (indexed !== expected) {

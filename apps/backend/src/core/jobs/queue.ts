@@ -2,25 +2,30 @@ import { chatsRepository } from "../../infra/repositories/chats";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import type { Job } from "../../infra/repositories/jobs";
 import { createChat } from "../chat/session-store";
+import { requireValue } from "../utils/require-value";
 import { isAgentPaused } from "./pause";
 import { createJobSchema } from "./schemas";
 import { prepareTriageGoal } from "./triage";
 
-let wakeup = () => {};
-
-export function setJobQueueWakeup(callback: () => void): void {
+export const setJobQueueWakeup = function setJobQueueWakeup(
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+  callback: () => void
+): void {
   wakeup = callback;
-}
-export function requestJobDrain(): void {
-  wakeup();
-}
+};
 
-export async function enqueueJob(
+export const requestJobDrain = function requestJobDrain(): void {
+  wakeup();
+};
+
+export const enqueueJob = async function enqueueJob(
   projectId: string,
   input: unknown = {},
   id?: string,
-  options: { sourceChatId?: string | null } = {}
+  optionsInput: { sourceChatId?: string | null } = {}
 ): Promise<Job> {
+  let options = optionsInput;
+
   if (id) {
     const existing = await jobsRepository.get(id);
     if (existing) {
@@ -39,14 +44,14 @@ export async function enqueueJob(
   const parsed = createJobSchema.parse(input);
   let pendingMessage = parsed.goal;
   if (parsed.kind === "failure_triage") {
-    const input = await prepareTriageGoal(projectId, parsed.runId);
-    const existing = await jobsRepository.forRun(input.runId);
+    const inputValue = await prepareTriageGoal(projectId, parsed.runId);
+    const existing = await jobsRepository.forRun(inputValue.runId);
     if (existing) {
       return existing;
     }
-    parsed.specId = input.specId;
-    parsed.goal = input.goal;
-    pendingMessage = input.message;
+    parsed.specId = inputValue.specId;
+    parsed.goal = inputValue.goal;
+    pendingMessage = inputValue.message;
   }
   const chat = await createChat(projectId);
   const job = await jobsRepository.create({
@@ -62,5 +67,9 @@ export async function enqueueJob(
   }
   await jobsRepository.log(job.id, "queued", parsed.trigger);
   requestJobDrain();
-  return (await jobsRepository.get(job.id))!;
-}
+  return requireValue(await jobsRepository.get(job.id));
+};
+
+let wakeup = () => {
+  /* No action is needed until this callback is replaced or invoked by its owner. */
+};

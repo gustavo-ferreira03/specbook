@@ -2,7 +2,6 @@
 
 import type { ReplayController } from "@specbook/runtime/replay-player";
 import {
-  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -23,25 +22,25 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useMemo, useEffect, useRef, useState } from "react";
 
-import { useAuth } from "@/components/AuthProvider";
-import { Dot } from "@/components/Dot";
-import { EmptyState } from "@/components/EmptyState";
-import { EnvironmentSelect } from "@/components/EnvironmentSelect";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
-import type { Crumb } from "@/components/PageHeader";
-import { RawFileEditor } from "@/components/RawFileEditor";
-import { RelativeTime } from "@/components/RelativeTime";
-import { RunDiagnostics } from "@/components/RunDiagnostics";
-import { RunnerQueueNotice } from "@/components/RunnerQueueNotice";
-import { RunStateAnnouncement } from "@/components/RunStateAnnouncement";
-import { SectionHeader } from "@/components/SectionHeader";
-import { SessionReplay } from "@/components/SessionReplay";
-import { SpecFolio } from "@/components/SpecFolio";
-import { SpecHistoryDialog } from "@/components/SpecHistoryDialog";
-import { ApiRunEvidence } from "@/components/SpecRunDialog";
-import { StatusPill } from "@/components/StatusPill";
+import { useAuth } from "@/components/auth-provider";
+import { Dot } from "@/components/dot";
+import { EmptyState } from "@/components/empty-state";
+import { EnvironmentSelect } from "@/components/environment-select";
+import { PageContainer, PageHeader } from "@/components/page-header";
+import type { Crumb } from "@/components/page-header";
+import { RawFileEditor } from "@/components/raw-file-editor";
+import { RelativeTime } from "@/components/relative-time";
+import { RunDiagnostics } from "@/components/run-diagnostics";
+import { RunStateAnnouncement } from "@/components/run-state-announcement";
+import { RunnerQueueNotice } from "@/components/runner-queue-notice";
+import { SectionHeader } from "@/components/section-header";
+import { SessionReplay } from "@/components/session-replay";
+import { SpecFolio } from "@/components/spec-folio";
+import { SpecHistoryDialog } from "@/components/spec-history-dialog";
+import { ApiRunEvidence } from "@/components/spec-run-dialog";
+import { StatusPill } from "@/components/status-pill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,28 +77,32 @@ import {
   environmentLabel,
   evidenceStepLabel,
 } from "@/lib/format";
-import { useDisplayStatus } from "@/lib/projectOverview";
+import { useDisplayStatus } from "@/lib/project-overview";
+import { requiredValue } from "@/lib/required-value";
 import { statusMeta } from "@/lib/status";
 import type { HumanSpec, Run, RunEvidence, SpecDetail } from "@/lib/types";
-import { useRunEnvironment } from "@/lib/useRunEnvironment";
+import { useRunEnvironment } from "@/lib/use-run-environment";
 import { cn } from "@/lib/utils";
 
-function splitLines(raw: string): string[] {
+const splitLines = function splitLines(raw: string): string[] {
   return raw
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-}
+};
 
 interface LoadedRunEvidence {
   data: RunEvidence | null;
   error: string;
 }
 
-function parseSourceLocation(
+const parseSourceLocation = function parseSourceLocation(
   reason: string
 ): { line: number; column: number; message: string } | null {
-  const match = /^Line (\d+), column (\d+): ([\s\S]*)$/.exec(reason);
+  const match =
+    /^Line (?<capture1>\d+), column (?<capture2>\d+): (?<capture3>[\s\S]*)$/u.exec(
+      reason
+    );
   if (!match) {
     return null;
   }
@@ -108,21 +111,21 @@ function parseSourceLocation(
     column: Number(match[2]),
     message: match[3],
   };
-}
+};
 
 interface EvidenceSelection {
   runId: string;
   step: RunEvidence["steps"][number];
 }
 
-function artifactUrl(runId: string, file: string) {
+const artifactUrl = function artifactUrl(runId: string, file: string) {
   const path = file.split("/").map(encodeURIComponent).join("/");
   return `${API_URL}/runs/${encodeURIComponent(runId)}/artifacts/${path}`;
-}
+};
 
 const RUN_HISTORY_LIMIT = 20;
 
-async function loadRunEvidence(
+const loadRunEvidence = async function loadRunEvidence(
   runId: string,
   signal?: AbortSignal
 ): Promise<LoadedRunEvidence> {
@@ -135,9 +138,9 @@ async function loadRunEvidence(
     }
     return { data: null, error: errorMessage(error) };
   }
-}
+};
 
-function FailureReason({
+const FailureReason = function FailureReason({
   reason,
   tone = "danger",
 }: {
@@ -148,19 +151,29 @@ function FailureReason({
     <pre
       className={cn(
         "text-meta mt-3 max-h-48 overflow-auto rounded-lg px-3 py-2.5 font-mono break-words whitespace-pre-wrap",
-        tone === "invalid"
-          ? "bg-invalid-soft text-invalid"
-          : tone === "neutral"
-            ? "bg-neutral-soft text-ink-muted"
-            : "bg-danger-soft text-danger"
+        (() => {
+          if (tone === "invalid") {
+            return "bg-invalid-soft text-invalid";
+          }
+          if (tone === "neutral") {
+            return "bg-neutral-soft text-ink-muted";
+          }
+          return "bg-danger-soft text-danger";
+        })()
       )}
     >
       {reason}
     </pre>
   );
-}
+};
 
-function SourceExcerpt({ source, line }: { source: string; line: number }) {
+const SourceExcerpt = function SourceExcerpt({
+  source,
+  line,
+}: {
+  source: string;
+  line: number;
+}) {
   const lines = source.split("\n");
   if (line < 1 || line > lines.length) {
     return null;
@@ -199,9 +212,9 @@ function SourceExcerpt({ source, line }: { source: string; line: number }) {
       </span>
     </pre>
   );
-}
+};
 
-function InvalidReason({
+const InvalidReason = function InvalidReason({
   reason,
   testSource,
 }: {
@@ -223,7 +236,7 @@ function InvalidReason({
       {testSource && <SourceExcerpt source={testSource} line={location.line} />}
     </div>
   );
-}
+};
 
 const sealColor: Record<string, string> = {
   passed:
@@ -244,233 +257,240 @@ const sealFill: Record<string, string> = {
   unverified: "bg-ink-subtle",
 };
 
-function VerificationBanner({
-  projectId,
-  detail: specDetail,
-  spec,
-  latestRun,
-  latestEvidence,
-  running,
-  environment,
-  actions,
-}: {
-  projectId: string;
-  detail: SpecDetail;
-  spec: SpecDetail["spec"];
-  latestRun: Run | undefined;
-  latestEvidence: LoadedRunEvidence | undefined;
-  running: boolean;
-  environment: string;
-  actions?: React.ReactNode;
-}) {
-  const { canEdit } = useAuth();
-  const displayStatus = useDisplayStatus(spec);
-  let status: string;
-  let headline: string;
-  let detail: React.ReactNode = null;
-  let body: React.ReactNode = null;
+const VerificationBanner =
+  /* oxlint-disable eslint/complexity -- Keep the existing render states and their coordinated actions together during the lint migration. */
+  function VerificationBanner({
+    projectId,
+    detail: specDetail,
+    spec,
+    latestRun,
+    latestEvidence,
+    running,
+    environment,
+    actions,
+  }: {
+    projectId: string;
+    detail: SpecDetail;
+    spec: SpecDetail["spec"];
+    latestRun: Run | undefined;
+    latestEvidence: LoadedRunEvidence | undefined;
+    running: boolean;
+    environment: string;
+    actions?: React.ReactNode;
+  }) {
+    const { canEdit } = useAuth();
+    const displayStatus = useDisplayStatus(spec);
+    let status: string;
+    let headline: string;
+    let detail: React.ReactNode = null;
+    let body: React.ReactNode = null;
 
-  const queued = latestRun?.status === "running" && Boolean(latestRun.queue);
-  if (queued) {
-    status = "queued";
-    headline = "Waiting to run";
-    detail = `${latestRun.environment?.name ?? environment}${latestRun.environment?.runnerGroup ? ` · Group: ${latestRun.environment.runnerGroup}` : ""}`;
-    body = <RunnerQueueNotice queue={latestRun.queue} className="mt-2" />;
-  } else if (running || latestRun?.status === "running") {
-    status = "running";
-    headline = "Verifying now";
-    detail = `Running this Spec against ${environment}. Results appear here when it finishes.`;
-  } else if (displayStatus === "repairing") {
-    status = "repairing";
-    headline = "Specbook is repairing this Spec";
-    detail =
-      "Its executable source is being rewritten to match the steps above. The repair is saved once it passes a run.";
-  } else if (spec.status === "invalid") {
-    status = "invalid";
-    headline = "This Spec can't run";
-    detail =
-      "Its saved steps or executable source need attention. Ask the agent to repair it, then verify the result.";
-    body = (
-      <>
-        <InvalidReason
-          reason={
-            spec.invalidReason ??
-            "The spec.yml or spec.ts file could not be validated."
-          }
-          testSource={specDetail.content?.testSource ?? null}
-        />
-        {canEdit && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button asChild size="sm" variant="outline">
-              <Link
-                href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}&intent=repair`}
+    const queued = latestRun?.status === "running" && Boolean(latestRun.queue);
+    if (queued) {
+      status = "queued";
+      headline = "Waiting to run";
+      detail = `${latestRun.environment?.name ?? environment}${latestRun.environment?.runnerGroup ? ` · Group: ${latestRun.environment.runnerGroup}` : ""}`;
+      body = <RunnerQueueNotice queue={latestRun.queue} className="mt-2" />;
+    } else if (running || latestRun?.status === "running") {
+      status = "running";
+      headline = "Verifying now";
+      detail = `Running this Spec against ${environment}. Results appear here when it finishes.`;
+    } else if (displayStatus === "repairing") {
+      status = "repairing";
+      headline = "Specbook is repairing this Spec";
+      detail =
+        "Its executable source is being rewritten to match the steps above. The repair is saved once it passes a run.";
+    } else if (spec.status === "invalid") {
+      status = "invalid";
+      headline = "This Spec can't run";
+      detail =
+        "Its saved steps or executable source need attention. Ask the agent to repair it, then verify the result.";
+      body = (
+        <>
+          <InvalidReason
+            reason={
+              spec.invalidReason ??
+              "The spec.yml or spec.ts file could not be validated."
+            }
+            testSource={specDetail.content?.testSource ?? null}
+          />
+          {canEdit && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}&intent=repair`}
+                >
+                  <PencilLine size={13} /> Repair in chat
+                </Link>
+              </Button>
+            </div>
+          )}
+        </>
+      );
+    } else if (spec.status === "awaiting_deploy") {
+      status = "awaiting_deploy";
+      headline = "Waiting for deploy";
+      const targets = specDetail.environmentStates
+        .filter((state) => state.status === "awaiting_deploy" && state.name)
+        .map((state) => state.name)
+        .join(", ");
+      detail = `This Spec passed locally${targets ? ` and was published to ${targets}` : ""}. Server runs keep their evidence while it waits for the deployment. Its first passing run enables normal acceptance checks.`;
+      if (
+        latestRun?.awaitingDeploy &&
+        latestRun.status !== "passed" &&
+        latestRun.failReason
+      ) {
+        body = <FailureReason reason={latestRun.failReason} tone="neutral" />;
+      }
+    } else if (!latestRun) {
+      status = "unverified";
+      headline = "Not verified yet";
+      detail = "Run this Spec to verify the behavior against the app.";
+    } else if (spec.status === "unverified") {
+      status = "unverified";
+      headline = "Not verified since the last change";
+      detail = (
+        <>
+          Last run {statusMeta(latestRun.status).runLabel.toLowerCase()}{" "}
+          <RelativeTime value={latestRun.startedAt} />. Run it again to confirm
+          the current version.
+        </>
+      );
+    } else {
+      ({ status } = latestRun);
+      const passed = latestRun.status === "passed";
+      headline = (() => {
+        if (passed) {
+          return "Last run passed";
+        }
+        if (latestRun.status === "error") {
+          return "Last run could not complete";
+        }
+        return "Last run failed";
+      })();
+      const steps = latestEvidence?.data?.steps ?? [];
+      const failedStep = passed
+        ? null
+        : (latestEvidence?.data?.failedStep ?? null);
+      const lastStep =
+        !passed && !failedStep && steps.length > 0 ? steps.at(-1) : null;
+      detail = (
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          <RelativeTime value={latestRun.startedAt} />
+          {environmentLabel(latestRun.environment?.name) && (
+            <>
+              <Dot />
+              <span title={latestRun.baseUrl ?? undefined}>
+                {requiredValue(latestRun.environment).name}
+              </span>
+            </>
+          )}
+          {latestRun.environment?.executor === "runner" && (
+            <>
+              <Dot />
+              <span
+                className="inline-flex items-center gap-1"
+                title={
+                  latestRun.environment.runnerGroup
+                    ? `Runner group: ${latestRun.environment.runnerGroup}`
+                    : undefined
+                }
               >
-                <PencilLine size={13} /> Repair in chat
-              </Link>
-            </Button>
-          </div>
-        )}
-      </>
-    );
-  } else if (spec.status === "awaiting_deploy") {
-    status = "awaiting_deploy";
-    headline = "Waiting for deploy";
-    const targets = specDetail.environmentStates
-      .filter((state) => state.status === "awaiting_deploy" && state.name)
-      .map((state) => state.name)
-      .join(", ");
-    detail = `This Spec passed locally${targets ? ` and was published to ${targets}` : ""}. Server runs keep their evidence while it waits for the deployment. Its first passing run enables normal acceptance checks.`;
-    if (
-      latestRun?.awaitingDeploy &&
-      latestRun.status !== "passed" &&
-      latestRun.failReason
-    ) {
-      body = <FailureReason reason={latestRun.failReason} tone="neutral" />;
+                <HardDrive size={12} aria-hidden="true" />
+                Runner
+              </span>
+            </>
+          )}
+          {latestRun.environment?.executor === "tunnel" && (
+            <>
+              <Dot />
+              <span
+                className="inline-flex items-center gap-1"
+                title={`Tunnel group: ${latestRun.environment.runnerGroup}`}
+              >
+                <Network size={12} aria-hidden="true" />
+                Tunnel
+              </span>
+            </>
+          )}
+          {latestRun.durationMs !== null && (
+            <>
+              <Dot />
+              <span className="tabular">
+                took {formatDuration(latestRun.durationMs)}
+              </span>
+            </>
+          )}
+          {failedStep && (
+            <>
+              <Dot />
+              <span>stopped at “{failedStep}”</span>
+            </>
+          )}
+          {lastStep && (
+            <>
+              <Dot />
+              <span>
+                last captured step {lastStep.number}: {lastStep.label}
+              </span>
+            </>
+          )}
+        </span>
+      );
+      if (!passed && latestRun.failReason) {
+        body = <FailureReason reason={latestRun.failReason} />;
+      }
     }
-  } else if (!latestRun) {
-    status = "unverified";
-    headline = "Not verified yet";
-    detail = "Run this Spec to verify the behavior against the app.";
-  } else if (spec.status === "unverified") {
-    status = "unverified";
-    headline = "Not verified since the last change";
-    detail = (
-      <>
-        Last run {statusMeta(latestRun.status).runLabel.toLowerCase()}{" "}
-        <RelativeTime value={latestRun.startedAt} />. Run it again to confirm
-        the current version.
-      </>
-    );
-  } else {
-    status = latestRun.status;
-    const passed = latestRun.status === "passed";
-    headline = passed
-      ? "Last run passed"
-      : latestRun.status === "error"
-        ? "Last run could not complete"
-        : "Last run failed";
-    const steps = latestEvidence?.data?.steps ?? [];
-    const failedStep = passed
-      ? null
-      : (latestEvidence?.data?.failedStep ?? null);
-    const lastStep =
-      !passed && !failedStep && steps.length > 0 ? steps.at(-1) : null;
-    detail = (
-      <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-        <RelativeTime value={latestRun.startedAt} />
-        {environmentLabel(latestRun.environment?.name) && (
-          <>
-            <Dot />
-            <span title={latestRun.baseUrl ?? undefined}>
-              {latestRun.environment!.name}
-            </span>
-          </>
-        )}
-        {latestRun.environment?.executor === "runner" && (
-          <>
-            <Dot />
-            <span
-              className="inline-flex items-center gap-1"
-              title={
-                latestRun.environment.runnerGroup
-                  ? `Runner group: ${latestRun.environment.runnerGroup}`
-                  : undefined
-              }
-            >
-              <HardDrive size={12} aria-hidden="true" />
-              Runner
-            </span>
-          </>
-        )}
-        {latestRun.environment?.executor === "tunnel" && (
-          <>
-            <Dot />
-            <span
-              className="inline-flex items-center gap-1"
-              title={`Tunnel group: ${latestRun.environment.runnerGroup}`}
-            >
-              <Network size={12} aria-hidden="true" />
-              Tunnel
-            </span>
-          </>
-        )}
-        {latestRun.durationMs !== null && (
-          <>
-            <Dot />
-            <span className="tabular">
-              took {formatDuration(latestRun.durationMs)}
-            </span>
-          </>
-        )}
-        {failedStep && (
-          <>
-            <Dot />
-            <span>stopped at “{failedStep}”</span>
-          </>
-        )}
-        {lastStep && (
-          <>
-            <Dot />
-            <span>
-              last captured step {lastStep.number}: {lastStep.label}
-            </span>
-          </>
-        )}
-      </span>
-    );
-    if (!passed && latestRun.failReason) {
-      body = <FailureReason reason={latestRun.failReason} />;
-    }
-  }
 
-  const meta = statusMeta(status);
-  const Icon = queued ? Clock3 : meta.icon;
-  return (
-    <section
-      aria-label="Run status"
-      className={cn(
-        "slab bg-surface flex flex-wrap gap-4 rounded-xl p-4 sm:flex-nowrap",
-        body ? "items-start" : "items-center",
-        sealColor[status]
-      )}
-    >
-      <RunStateAnnouncement
-        message={`${headline}${queued && latestRun?.queue?.reason ? `. ${latestRun.queue.reason}` : ""}`}
-      />
-      <span
+    const meta = statusMeta(status);
+    const Icon = queued ? Clock3 : meta.icon;
+    return (
+      <section
+        aria-label="Run status"
         className={cn(
-          "text-surface flex size-10 shrink-0 items-center justify-center rounded-md",
-          sealFill[status] ?? "bg-ink-subtle"
+          "slab bg-surface flex flex-wrap gap-4 rounded-xl p-4 sm:flex-nowrap",
+          body ? "items-start" : "items-center",
+          sealColor[status]
         )}
       >
-        <Icon
-          size={19}
-          strokeWidth={2.5}
-          aria-hidden="true"
-          className={
-            status === "running"
-              ? "animate-spin motion-reduce:animate-none"
-              : undefined
-          }
+        <RunStateAnnouncement
+          message={`${headline}${queued && latestRun?.queue?.reason ? `. ${latestRun.queue.reason}` : ""}`}
         />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-section text-ink">{headline}</p>
-        {detail && (
-          <div className="text-control text-ink-muted mt-0.5">{detail}</div>
-        )}
-        {body}
-      </div>
-      {actions && (
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          {actions}
+        <span
+          className={cn(
+            "text-surface flex size-10 shrink-0 items-center justify-center rounded-md",
+            sealFill[status] ?? "bg-ink-subtle"
+          )}
+        >
+          <Icon
+            size={19}
+            strokeWidth={2.5}
+            aria-hidden="true"
+            className={
+              status === "running"
+                ? "animate-spin motion-reduce:animate-none"
+                : undefined
+            }
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-section text-ink">{headline}</p>
+          {detail && (
+            <div className="text-control text-ink-muted mt-0.5">{detail}</div>
+          )}
+          {body}
         </div>
-      )}
-    </section>
-  );
-}
+        {actions && (
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            {actions}
+          </div>
+        )}
+      </section>
+    );
+  };
+/* oxlint-enable eslint/complexity */
 
-function BulletList({ items }: { items: string[] }) {
+const BulletList = function BulletList({ items }: { items: string[] }) {
   return (
     <ul className="mt-2 space-y-1.5">
       {items.map((item, index) => (
@@ -484,9 +504,9 @@ function BulletList({ items }: { items: string[] }) {
       ))}
     </ul>
   );
-}
+};
 
-function SpecSection({
+const SpecSection = function SpecSection({
   title,
   count,
   children,
@@ -506,9 +526,13 @@ function SpecSection({
       {children}
     </section>
   );
-}
+};
 
-function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
+const SpecificationView = function SpecificationView({
+  humanSpec,
+}: {
+  humanSpec: HumanSpec;
+}) {
   return (
     <div className="spec-sheet">
       <div className="border-line-strong bg-surface relative space-y-7 rounded-xl border p-5 sm:p-6">
@@ -582,9 +606,9 @@ function SpecificationView({ humanSpec }: { humanSpec: HumanSpec }) {
       </div>
     </div>
   );
-}
+};
 
-function EvidenceGallery({
+const EvidenceGallery = function EvidenceGallery({
   runId,
   passed,
   evidence,
@@ -632,12 +656,14 @@ function EvidenceGallery({
                     "is-current border-primary border-2"
                 )}
               >
+                {/* oxlint-disable next/no-img-element -- Evidence URLs and CSS-sized SVG icons must load directly without an image optimization proxy. */}
                 <img
                   src={artifactUrl(runId, step.file)}
                   alt={`${evidenceStepLabel(step)}: ${step.label}`}
                   loading="lazy"
                   className="bg-surface-soft aspect-video w-full object-cover object-top"
                 />
+                {/* oxlint-enable next/no-img-element */}
               </button>
               <figcaption className="text-meta text-ink-muted mt-1.5 leading-5 break-words">
                 <b
@@ -656,9 +682,9 @@ function EvidenceGallery({
       </ScrollArea>
     </section>
   );
-}
+};
 
-function RunEvidencePanel({
+const RunEvidencePanel = function RunEvidencePanel({
   run,
   loaded,
   onSelect,
@@ -680,9 +706,9 @@ function RunEvidencePanel({
   const evidence = loaded?.data;
   if (run.status === "running") {
     return (
-      <p role="status" className="text-body text-ink-muted">
+      <output className="text-body text-ink-muted block">
         This run is in progress. Evidence appears when it finishes.
-      </p>
+      </output>
     );
   }
   if (!loaded) {
@@ -749,12 +775,14 @@ function RunEvidencePanel({
           >
             <Video size={13} aria-hidden="true" /> Recording
           </h4>
+          {/* oxlint-disable jsx-a11y/media-has-caption -- This muted browser recording contains visual test evidence without a speech track. */}
           <video
             controls
             preload="metadata"
             className="border-line bg-browser mt-2 aspect-video w-full rounded-lg border"
             src={artifactUrl(run.id, evidence.video)}
           />
+          {/* oxlint-enable jsx-a11y/media-has-caption */}
         </section>
       )}
       <ApiRunEvidence evidence={evidence} />
@@ -766,207 +794,210 @@ function RunEvidencePanel({
       )}
     </div>
   );
-}
+};
 
-function RunEntry({
-  run,
-  latest,
-  last,
-  loaded,
-  onExpand,
-  onSelect,
-}: {
-  run: Run;
-  latest: boolean;
-  last: boolean;
-  loaded: LoadedRunEvidence | undefined;
-  onExpand: (runId: string) => void;
-  onSelect: (selection: EvidenceSelection) => void;
-}) {
-  const [open, setOpen] = useState(latest);
-  const waiting =
-    run.awaitingDeploy && run.status !== "passed" && run.status !== "running";
-  const queued = run.status === "running" && Boolean(run.queue);
-  const meta = statusMeta(waiting || queued ? "awaiting_deploy" : run.status);
-  useEffect(() => {
-    if (open && !loaded && run.status !== "running") {
-      onExpand(run.id);
-    }
-  }, [loaded, onExpand, open, run.id, run.status]);
-  const reportUrl = loaded?.data?.reportUrl;
-  return (
-    <li
-      id={`run-${run.id}`}
-      className="relative scroll-mt-4 pb-6 pl-8 last:pb-0"
-    >
-      {!last && (
-        <span
-          aria-hidden="true"
-          className="bg-line absolute top-5 bottom-0 left-[0.6875rem] w-px"
-        />
-      )}
-      <span
-        aria-hidden="true"
-        className={cn(
-          "ring-surface absolute top-1.5 left-1.5 size-3 rounded-full ring-4",
-          meta.chart
-        )}
-      />
-      <Collapsible
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          if (next && run.status !== "running") {
-            onExpand(run.id);
-          }
-        }}
+const RunEntry =
+  /* oxlint-disable eslint/complexity -- Keep the existing render states and their coordinated actions together during the lint migration. */
+  function RunEntry({
+    run,
+    latest,
+    last,
+    loaded,
+    onExpand,
+    onSelect,
+  }: {
+    run: Run;
+    latest: boolean;
+    last: boolean;
+    loaded: LoadedRunEvidence | undefined;
+    onExpand: (runId: string) => void;
+    onSelect: (selection: EvidenceSelection) => void;
+  }) {
+    const [open, setOpen] = useState(latest);
+    const waiting =
+      run.awaitingDeploy && run.status !== "passed" && run.status !== "running";
+    const queued = run.status === "running" && Boolean(run.queue);
+    const meta = statusMeta(waiting || queued ? "awaiting_deploy" : run.status);
+    useEffect(() => {
+      if (open && !loaded && run.status !== "running") {
+        onExpand(run.id);
+      }
+    }, [loaded, onExpand, open, run.id, run.status]);
+    const reportUrl = loaded?.data?.reportUrl;
+    return (
+      <li
+        id={`run-${run.id}`}
+        className="relative scroll-mt-4 pb-6 pl-8 last:pb-0"
       >
-        <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
-          {queued ? (
-            <StatusPill status="queued" kind="run" size="sm" />
-          ) : (
-            <StatusPill
-              status={waiting ? "awaiting_deploy" : run.status}
-              kind="run"
-              size="sm"
-            />
-          )}
-          {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
-          <span className="text-meta text-ink-muted flex flex-wrap items-center gap-x-1.5">
-            <span title={formatDateTime(run.startedAt)}>
-              <RelativeTime value={run.startedAt} />
-            </span>
-            {environmentLabel(run.environment?.name) && (
-              <>
-                <Dot />
-                <span title={run.baseUrl ?? undefined}>
-                  {run.environment!.name}
-                </span>
-              </>
-            )}
-            {run.environment?.executor === "runner" && (
-              <>
-                <Dot />
-                <span
-                  className="inline-flex items-center gap-1"
-                  title={
-                    run.environment.runnerGroup
-                      ? `Runner group: ${run.environment.runnerGroup}`
-                      : undefined
-                  }
-                >
-                  <HardDrive size={12} aria-hidden="true" />
-                  Runner
-                </span>
-              </>
-            )}
-            {run.environment?.executor === "tunnel" && (
-              <>
-                <Dot />
-                <span
-                  className="inline-flex items-center gap-1"
-                  title={`Tunnel group: ${run.environment.runnerGroup}`}
-                >
-                  <Network size={12} aria-hidden="true" />
-                  Tunnel
-                </span>
-              </>
-            )}
-            {run.durationMs !== null && (
-              <>
-                <Dot />
-                <span className="tabular">
-                  {formatDuration(run.durationMs)}
-                </span>
-              </>
-            )}
-            {run.commitSha && (
-              <>
-                <Dot />
-                <span className="font-mono" title="Commit">
-                  {run.commitSha.slice(0, 7)}
-                </span>
-              </>
-            )}
-          </span>
-          <span className="ml-auto flex items-center gap-1">
-            {reportUrl && (
-              <Button asChild variant="ghost" size="sm" className="h-7 px-2">
-                <a
-                  href={`${API_URL}${reportUrl}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  View report <ExternalLink size={12} aria-hidden="true" />
-                </a>
-              </Button>
-            )}
-            {reportUrl && (
-              <Button asChild variant="ghost" size="sm" className="h-7 px-2">
-                <a
-                  href={`${API_URL}${reportUrl}?download`}
-                  download
-                  aria-label={`Download the report for the run ${formatDateTime(run.startedAt)}`}
-                >
-                  <Download size={12} aria-hidden="true" />
-                </a>
-              </Button>
-            )}
-            <CollapsibleTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="group/toggle h-7 px-2"
-                aria-label={`${open ? "Hide" : "Show"} evidence for the run ${formatDateTime(run.startedAt)}`}
-              >
-                Evidence{" "}
-                <ChevronDown
-                  size={13}
-                  aria-hidden="true"
-                  className="transition-transform group-data-[state=open]/toggle:rotate-180 motion-reduce:transition-none"
-                />
-              </Button>
-            </CollapsibleTrigger>
-          </span>
-        </div>
-        {run.retryOf && (
-          <p className="text-meta text-ink-muted mt-2">
-            {run.flaky
-              ? "Passed on the automatic retry. "
-              : "Automatic retry. "}
-            <a
-              href={`#run-${run.retryOf}`}
-              className="hover:text-ink focus-visible:ring-ring rounded-sm font-medium underline underline-offset-2 focus-visible:ring-2 focus-visible:outline-none"
-            >
-              View first attempt
-            </a>
-          </p>
-        )}
-        {queued && <RunnerQueueNotice queue={run.queue} className="mt-2" />}
-        {run.status !== "passed" && loaded?.data?.failedStep && (
-          <p className="text-control text-ink-muted mt-2">
-            <span className="text-ink font-medium">Failed at step:</span>{" "}
-            {loaded.data.failedStep}
-          </p>
-        )}
-        {run.status !== "passed" && run.failReason && (
-          <FailureReason
-            reason={run.failReason}
-            tone={waiting ? "neutral" : "danger"}
+        {!last && (
+          <span
+            aria-hidden="true"
+            className="bg-line absolute top-5 bottom-0 left-[0.6875rem] w-px"
           />
         )}
-        <CollapsibleContent className="pt-3">
-          {open && (
-            <RunEvidencePanel run={run} loaded={loaded} onSelect={onSelect} />
+        <span
+          aria-hidden="true"
+          className={cn(
+            "ring-surface absolute top-1.5 left-1.5 size-3 rounded-full ring-4",
+            meta.chart
           )}
-        </CollapsibleContent>
-      </Collapsible>
-    </li>
-  );
-}
+        />
+        <Collapsible
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (next && run.status !== "running") {
+              onExpand(run.id);
+            }
+          }}
+        >
+          <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
+            {queued ? (
+              <StatusPill status="queued" kind="run" size="sm" />
+            ) : (
+              <StatusPill
+                status={waiting ? "awaiting_deploy" : run.status}
+                kind="run"
+                size="sm"
+              />
+            )}
+            {run.flaky && <StatusPill status="flaky" kind="run" size="sm" />}
+            <span className="text-meta text-ink-muted flex flex-wrap items-center gap-x-1.5">
+              <span title={formatDateTime(run.startedAt)}>
+                <RelativeTime value={run.startedAt} />
+              </span>
+              {environmentLabel(run.environment?.name) && (
+                <>
+                  <Dot />
+                  <span title={run.baseUrl ?? undefined}>
+                    {requiredValue(run.environment).name}
+                  </span>
+                </>
+              )}
+              {run.environment?.executor === "runner" && (
+                <>
+                  <Dot />
+                  <span
+                    className="inline-flex items-center gap-1"
+                    title={
+                      run.environment.runnerGroup
+                        ? `Runner group: ${run.environment.runnerGroup}`
+                        : undefined
+                    }
+                  >
+                    <HardDrive size={12} aria-hidden="true" />
+                    Runner
+                  </span>
+                </>
+              )}
+              {run.environment?.executor === "tunnel" && (
+                <>
+                  <Dot />
+                  <span
+                    className="inline-flex items-center gap-1"
+                    title={`Tunnel group: ${run.environment.runnerGroup}`}
+                  >
+                    <Network size={12} aria-hidden="true" />
+                    Tunnel
+                  </span>
+                </>
+              )}
+              {run.durationMs !== null && (
+                <>
+                  <Dot />
+                  <span className="tabular">
+                    {formatDuration(run.durationMs)}
+                  </span>
+                </>
+              )}
+              {run.commitSha && (
+                <>
+                  <Dot />
+                  <span className="font-mono" title="Commit">
+                    {run.commitSha.slice(0, 7)}
+                  </span>
+                </>
+              )}
+            </span>
+            <span className="ml-auto flex items-center gap-1">
+              {reportUrl && (
+                <Button asChild variant="ghost" size="sm" className="h-7 px-2">
+                  <a
+                    href={`${API_URL}${reportUrl}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    View report <ExternalLink size={12} aria-hidden="true" />
+                  </a>
+                </Button>
+              )}
+              {reportUrl && (
+                <Button asChild variant="ghost" size="sm" className="h-7 px-2">
+                  <a
+                    href={`${API_URL}${reportUrl}?download`}
+                    download
+                    aria-label={`Download the report for the run ${formatDateTime(run.startedAt)}`}
+                  >
+                    <Download size={12} aria-hidden="true" />
+                  </a>
+                </Button>
+              )}
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="group/toggle h-7 px-2"
+                  aria-label={`${open ? "Hide" : "Show"} evidence for the run ${formatDateTime(run.startedAt)}`}
+                >
+                  Evidence{" "}
+                  <ChevronDown
+                    size={13}
+                    aria-hidden="true"
+                    className="transition-transform group-data-[state=open]/toggle:rotate-180 motion-reduce:transition-none"
+                  />
+                </Button>
+              </CollapsibleTrigger>
+            </span>
+          </div>
+          {run.retryOf && (
+            <p className="text-meta text-ink-muted mt-2">
+              {run.flaky
+                ? "Passed on the automatic retry. "
+                : "Automatic retry. "}
+              <a
+                href={`#run-${run.retryOf}`}
+                className="hover:text-ink focus-visible:ring-ring rounded-sm font-medium underline underline-offset-2 focus-visible:ring-2 focus-visible:outline-none"
+              >
+                View first attempt
+              </a>
+            </p>
+          )}
+          {queued && <RunnerQueueNotice queue={run.queue} className="mt-2" />}
+          {run.status !== "passed" && loaded?.data?.failedStep && (
+            <p className="text-control text-ink-muted mt-2">
+              <span className="text-ink font-medium">Failed at step:</span>{" "}
+              {loaded.data.failedStep}
+            </p>
+          )}
+          {run.status !== "passed" && run.failReason && (
+            <FailureReason
+              reason={run.failReason}
+              tone={waiting ? "neutral" : "danger"}
+            />
+          )}
+          <CollapsibleContent className="pt-3">
+            {open && (
+              <RunEvidencePanel run={run} loaded={loaded} onSelect={onSelect} />
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      </li>
+    );
+  };
+/* oxlint-enable eslint/complexity */
 
-function Field({
+const Field = function Field({
   id,
   label,
   hint,
@@ -988,878 +1019,935 @@ function Field({
       )}
     </div>
   );
-}
+};
 
-export default function SpecPage({
-  params,
-}: {
-  params: Promise<{ projectId: string; specId: string }>;
-}) {
-  const { canEdit } = useAuth();
-  const { projectId, specId } = use(params);
-  const router = useRouter();
-  const [detail, setDetail] = useState<SpecDetail | null>(null);
-  const [evidence, setEvidence] = useState<Record<string, LoadedRunEvidence>>(
-    {}
-  );
-  const [selectedEvidence, setSelectedEvidence] = useState<{
-    runId: string;
-    step: RunEvidence["steps"][number];
-  } | null>(null);
-  const [loadError, setLoadError] = useState("");
-  const [actionError, setActionError] = useState("");
-  const [runRefreshError, setRunRefreshError] = useState("");
-  const [running, setRunning] = useState(false);
-  const [environment, setEnvironment] = useRunEnvironment(projectId);
-  const [retryKey, setRetryKey] = useState(0);
-  const [editing, setEditing] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const [descriptionDraft, setDescriptionDraft] = useState("");
-  const [preconditionsDraft, setPreconditionsDraft] = useState("");
-  const [stepsDraft, setStepsDraft] = useState("");
-  const [expectedResultDraft, setExpectedResultDraft] = useState("");
-  const [postconditionsDraft, setPostconditionsDraft] = useState("");
-  const [rawYamlDraft, setRawYamlDraft] = useState("");
-  const [testSourceDraft, setTestSourceDraft] = useState("");
-  const [sourceOpen, setSourceOpen] = useState(false);
-  const [savedInvalid, setSavedInvalid] = useState(false);
-  const bannerRef = useRef<HTMLDivElement>(null);
-  const [saving, setSaving] = useState(false);
+const SpecPage =
+  /* oxlint-disable eslint/complexity -- Keep the existing render states and their coordinated actions together during the lint migration. */
+  function SpecPage({
+    params,
+  }: {
+    params: Promise<{ projectId: string; specId: string }>;
+  }) {
+    const { canEdit } = useAuth();
+    const { projectId, specId } = use(params);
+    const router = useRouter();
+    const [detail, setDetail] = useState<SpecDetail | null>(null);
+    const [evidence, setEvidence] = useState<Record<string, LoadedRunEvidence>>(
+      {}
+    );
+    const [selectedEvidence, setSelectedEvidence] = useState<{
+      runId: string;
+      step: RunEvidence["steps"][number];
+    } | null>(null);
+    const [loadError, setLoadError] = useState("");
+    const [actionError, setActionError] = useState("");
+    const [runRefreshError, setRunRefreshError] = useState("");
+    const [running, setRunning] = useState(false);
+    const [environment, setEnvironment] = useRunEnvironment(projectId);
+    const [retryKey, setRetryKey] = useState(0);
+    const [editing, setEditing] = useState(false);
+    const [titleDraft, setTitleDraft] = useState("");
+    const [descriptionDraft, setDescriptionDraft] = useState("");
+    const [preconditionsDraft, setPreconditionsDraft] = useState("");
+    const [stepsDraft, setStepsDraft] = useState("");
+    const [expectedResultDraft, setExpectedResultDraft] = useState("");
+    const [postconditionsDraft, setPostconditionsDraft] = useState("");
+    const [rawYamlDraft, setRawYamlDraft] = useState("");
+    const [testSourceDraft, setTestSourceDraft] = useState("");
+    const [sourceOpen, setSourceOpen] = useState(false);
+    const [savedInvalid, setSavedInvalid] = useState(false);
+    const bannerRef = useRef<HTMLDivElement>(null);
+    const [saving, setSaving] = useState(false);
 
-  const evidenceRequestsRef = useRef(new Set<string>());
+    const evidenceRequestsRef = useRef(new Set<string>());
 
-  const ensureEvidence = useCallback((runId: string) => {
-    if (evidenceRequestsRef.current.has(runId)) {
-      return;
-    }
-    evidenceRequestsRef.current.add(runId);
-    void loadRunEvidence(runId)
-      .then((loaded) => {
-        setEvidence((current) => ({ ...current, [runId]: loaded }));
-        if (loaded.error) {
-          evidenceRequestsRef.current.delete(runId);
-        }
-      })
-      .catch(() => evidenceRequestsRef.current.delete(runId));
-  }, []);
-
-  const showDetail = useCallback(
-    (nextDetail: SpecDetail) => {
-      evidenceRequestsRef.current = new Set();
-      setEvidence({});
-      setDetail(nextDetail);
-      if (nextDetail.runs[0] && nextDetail.runs[0].status !== "running") {
-        ensureEvidence(nextDetail.runs[0].id);
-      }
-    },
-    [ensureEvidence]
-  );
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setDetail(null);
-    setEvidence({});
-    setLoadError("");
-    async function load() {
-      try {
-        const nextDetail = await getSpec(specId, {
-          limit: RUN_HISTORY_LIMIT,
-          signal: controller.signal,
-        });
-        if (nextDetail.spec.projectId !== projectId) {
-          throw new Error("This Spec does not belong to this project.");
-        }
-        if (controller.signal.aborted) {
-          return;
-        }
-        showDetail(nextDetail);
-      } catch (error) {
-        if (!controller.signal.aborted && !isAbortError(error)) {
-          setLoadError(errorMessage(error));
-        }
-      }
-    }
-    void load();
-    return () => controller.abort();
-  }, [projectId, retryKey, showDetail, specId]);
-
-  const pendingRun = Boolean(
-    detail?.runs.some(
-      (run) => run.status === "running" || run.automationPending
-    )
-  );
-  useEffect(() => {
-    if (!pendingRun) {
-      return;
-    }
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    async function refreshRun() {
-      try {
-        const nextDetail = await getSpec(specId, {
-          limit: RUN_HISTORY_LIMIT,
-          signal: controller.signal,
-        });
-        if (nextDetail.spec.projectId !== projectId) {
-          throw new Error("This Spec does not belong to this project.");
-        }
-        setDetail(nextDetail);
-        setRunRefreshError("");
-      } catch (error) {
-        if (!isAbortError(error)) {
-          setRunRefreshError(errorMessage(error));
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          timer = setTimeout(() => void refreshRun(), 1500);
-        }
-      }
-    }
-    timer = setTimeout(() => void refreshRun(), 1500);
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [pendingRun, projectId, specId]);
-
-  async function reloadDetail(): Promise<SpecDetail | null> {
-    try {
-      const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT });
-      if (nextDetail.spec.projectId !== projectId) {
-        throw new Error("This Spec does not belong to this project.");
-      }
-      return nextDetail;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        router.replace(`/p/${projectId}/specs`);
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  const selectedSteps = selectedEvidence
-    ? (evidence[selectedEvidence.runId]?.data?.steps ?? [])
-    : [];
-  const selectedIndex = selectedEvidence
-    ? selectedSteps.findIndex(
-        (step) => step.file === selectedEvidence.step.file
-      )
-    : -1;
-  const hasPrev = selectedIndex > 0;
-  const hasNext =
-    selectedIndex >= 0 && selectedIndex < selectedSteps.length - 1;
-
-  const stepBy = useCallback(
-    (delta: number) => {
-      if (!selectedEvidence || selectedIndex < 0) {
+    const ensureEvidence = useCallback((runId: string) => {
+      if (evidenceRequestsRef.current.has(runId)) {
         return;
       }
-      const nextStep = selectedSteps[selectedIndex + delta];
-      if (nextStep) {
-        setSelectedEvidence({ runId: selectedEvidence.runId, step: nextStep });
-      }
-    },
-    [selectedEvidence, selectedIndex, selectedSteps]
-  );
-
-  useEffect(() => {
-    if (!selectedEvidence) {
-      return;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "ArrowLeft") {
-        stepBy(-1);
-      }
-      if (event.key === "ArrowRight") {
-        stepBy(1);
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedEvidence, stepBy]);
-
-  async function runNow() {
-    setRunning(true);
-    setActionError("");
-    try {
-      await runSpec(specId, environment);
-      const nextDetail = await reloadDetail();
-      if (nextDetail) {
-        showDetail(nextDetail);
-      }
-    } catch (error) {
-      setActionError(errorMessage(error));
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  function startEditing() {
-    if (!detail?.content) {
-      return;
-    }
-    const { humanSpec } = detail.content;
-    setTitleDraft(detail.spec.title);
-    setDescriptionDraft(detail.spec.description);
-    setPreconditionsDraft(humanSpec ? humanSpec.preconditions.join("\n") : "");
-    setStepsDraft(humanSpec ? humanSpec.steps.join("\n") : "");
-    setExpectedResultDraft(humanSpec ? humanSpec.expectedResult : "");
-    setPostconditionsDraft(
-      humanSpec ? humanSpec.postconditions.join("\n") : ""
-    );
-    setRawYamlDraft(detail.content.yamlSource);
-    setTestSourceDraft(detail.content.testSource);
-    setSourceOpen(false);
-    setEditing(true);
-    setActionError("");
-    setSavedInvalid(false);
-  }
-
-  async function saveFiles() {
-    if (!detail?.content) {
-      return;
-    }
-    setSaving(true);
-    setActionError("");
-    try {
-      let current = detail;
-      if (current.content?.humanSpec) {
-        const patch: {
-          title?: string;
-          description?: string;
-          humanSpec?: typeof current.content.humanSpec;
-        } = {};
-        if (titleDraft.trim() !== current.spec.title) {
-          patch.title = titleDraft.trim();
-        }
-        if (descriptionDraft !== current.spec.description) {
-          patch.description = descriptionDraft;
-        }
-        const nextHumanSpec = {
-          preconditions: splitLines(preconditionsDraft),
-          steps: splitLines(stepsDraft),
-          expectedResult: expectedResultDraft.trim(),
-          postconditions: splitLines(postconditionsDraft),
-        };
-        if (
-          JSON.stringify(nextHumanSpec) !==
-          JSON.stringify(current.content.humanSpec)
-        ) {
-          patch.humanSpec = nextHumanSpec;
-        }
-        if (Object.keys(patch).length > 0) {
-          current = await updateSpec(specId, patch);
-        }
-      } else if (rawYamlDraft !== current.content?.yamlSource) {
-        current = await updateSpecFiles(specId, { yaml: rawYamlDraft });
-      }
-      if (current.content && testSourceDraft !== current.content.testSource) {
-        current = await updateSpecFiles(specId, {
-          testSource: testSourceDraft,
-        });
-      }
-      setDetail(current);
-      setEditing(false);
-      const nowInvalid = current.spec.status === "invalid";
-      setSavedInvalid(nowInvalid);
-      if (nowInvalid) {
-        requestAnimationFrame(() =>
-          bannerRef.current?.scrollIntoView({
-            block: "start",
-            behavior: "smooth",
-          })
-        );
-      }
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const specsCrumb: Crumb = { label: "Specs", href: `/p/${projectId}/specs` };
-
-  if (loadError && !detail) {
-    return (
-      <div className="bg-surface flex min-h-full flex-col">
-        <PageHeader title="Spec" breadcrumbs={[specsCrumb]} width="reading" />
-        <EmptyState
-          role="alert"
-          tone="danger"
-          icon={FileX2}
-          title="This Spec could not load"
-          description={loadError}
-          action={
-            <Button type="button" onClick={() => setRetryKey((key) => key + 1)}>
-              <RefreshCw size={14} /> Try again
-            </Button>
+      evidenceRequestsRef.current.add(runId);
+      (async () => {
+        try {
+          const resolvedValue = await loadRunEvidence(runId);
+          const loaded = resolvedValue;
+          setEvidence((current) => ({ ...current, [runId]: loaded }));
+          if (loaded.error) {
+            evidenceRequestsRef.current.delete(runId);
           }
-        />
-      </div>
+        } catch {
+          return evidenceRequestsRef.current.delete(runId);
+        }
+      })();
+    }, []);
+
+    const showDetail = useCallback(
+      (nextDetail: SpecDetail) => {
+        evidenceRequestsRef.current = new Set();
+        setEvidence({});
+        setDetail(nextDetail);
+        if (nextDetail.runs[0] && nextDetail.runs[0].status !== "running") {
+          ensureEvidence(nextDetail.runs[0].id);
+        }
+      },
+      [ensureEvidence]
     );
-  }
 
-  if (!detail) {
-    return (
-      <div
-        className="bg-surface min-h-full"
-        aria-label="Loading Spec"
-        aria-busy="true"
-        role="status"
-      >
-        <PageHeader
-          title={<Skeleton className="h-6 w-72 max-w-full" />}
-          breadcrumbs={[specsCrumb]}
-          width="reading"
-        />
-        <PageContainer width="reading" innerClassName="space-y-8">
-          <Skeleton className="h-[4.5rem] rounded-xl" />
-          <div className="space-y-3">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-4 w-2/3" />
-            <Skeleton className="h-4 w-1/2" />
-          </div>
-          <div className="space-y-3">
-            <Skeleton className="h-4 w-20" />
-            {Array.from({ length: 4 }).map((_, index) => (
-              <Skeleton key={index} className="h-5 w-3/4" />
-            ))}
-          </div>
-          <Skeleton className="h-20 rounded-xl" />
-        </PageContainer>
-      </div>
+    useEffect(() => {
+      const controller = new AbortController();
+      // oxlint-disable-next-line react/set-state-in-effect -- Reset the previous request or selection when its external key changes before loading fresh state.
+      setDetail(null);
+      setEvidence({});
+      setLoadError("");
+      const load = async function load() {
+        try {
+          const nextDetail = await getSpec(specId, {
+            limit: RUN_HISTORY_LIMIT,
+            signal: controller.signal,
+          });
+          if (nextDetail.spec.projectId !== projectId) {
+            // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+            throw new Error("This Spec does not belong to this project.");
+          }
+          if (controller.signal.aborted) {
+            return;
+          }
+          showDetail(nextDetail);
+        } catch (error) {
+          if (!controller.signal.aborted && !isAbortError(error)) {
+            setLoadError(errorMessage(error));
+          }
+        }
+      };
+      load();
+      return () => controller.abort();
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
+    }, [projectId, retryKey, showDetail, specId]);
+
+    const pendingRun = Boolean(
+      detail?.runs.some(
+        (run) => run.status === "running" || run.automationPending
+      )
     );
-  }
+    useEffect(() => {
+      if (!pendingRun) {
+        return;
+      }
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout>;
+      const refreshRun = async function refreshRun() {
+        try {
+          const nextDetail = await getSpec(specId, {
+            limit: RUN_HISTORY_LIMIT,
+            signal: controller.signal,
+          });
+          if (nextDetail.spec.projectId !== projectId) {
+            // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+            throw new Error("This Spec does not belong to this project.");
+          }
+          setDetail(nextDetail);
+          setRunRefreshError("");
+        } catch (error) {
+          if (!isAbortError(error)) {
+            setRunRefreshError(errorMessage(error));
+          }
+          // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+        } finally {
+          if (!controller.signal.aborted) {
+            timer = setTimeout(() => refreshRun(), 1500);
+          }
+        }
+      };
+      timer = setTimeout(() => refreshRun(), 1500);
+      return () => {
+        controller.abort();
+        clearTimeout(timer);
+      };
+    }, [pendingRun, projectId, specId]);
 
-  const { spec, feature, content, runs } = detail;
-  const latestRun = runs[0];
-  const crumbs: Crumb[] = [
-    specsCrumb,
-    ...(feature
-      ? [
-          {
-            label: feature.title,
-            href: `/p/${projectId}/specs#feature-${feature.id}`,
-          },
-        ]
-      : []),
-  ];
-  const sourceEdited = Boolean(
-    content && testSourceDraft !== content.testSource
-  );
-  const changedFields = {
-    preconditions: Boolean(
-      editing &&
-      content?.humanSpec &&
-      JSON.stringify(splitLines(preconditionsDraft)) !==
-        JSON.stringify(
-          content.humanSpec.preconditions.map((title) => title.trim())
+    const reloadDetail =
+      async function reloadDetail(): Promise<SpecDetail | null> {
+        try {
+          const nextDetail = await getSpec(specId, {
+            limit: RUN_HISTORY_LIMIT,
+          });
+          if (nextDetail.spec.projectId !== projectId) {
+            // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+            throw new Error("This Spec does not belong to this project.");
+          }
+          return nextDetail;
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) {
+            router.replace(`/p/${projectId}/specs`);
+            return null;
+          }
+          throw error;
+        }
+      };
+
+    const selectedSteps = useMemo(
+      () =>
+        selectedEvidence
+          ? (evidence[selectedEvidence.runId]?.data?.steps ?? [])
+          : [],
+      [selectedEvidence, evidence]
+    );
+    const selectedIndex = selectedEvidence
+      ? selectedSteps.findIndex(
+          (step) => step.file === selectedEvidence.step.file
         )
-    ),
-    steps: Boolean(
-      editing &&
-      content?.humanSpec &&
-      JSON.stringify(splitLines(stepsDraft)) !==
-        JSON.stringify(content.humanSpec.steps.map((title) => title.trim()))
-    ),
-    expectedResult: Boolean(
-      editing &&
-      content?.humanSpec &&
-      expectedResultDraft.trim() !== content.humanSpec.expectedResult.trim()
-    ),
-    postconditions: Boolean(
-      editing &&
-      content?.humanSpec &&
-      JSON.stringify(splitLines(postconditionsDraft)) !==
-        JSON.stringify(
-          content.humanSpec.postconditions.map((title) => title.trim())
-        )
-    ),
-  };
-  const behaviorChanged = Object.values(changedFields).some(Boolean);
+      : -1;
+    const hasPrev = selectedIndex > 0;
+    const hasNext =
+      selectedIndex >= 0 && selectedIndex < selectedSteps.length - 1;
 
-  return (
-    <div className="bg-surface min-h-full">
-      <PageHeader
-        title={spec.title}
-        breadcrumbs={crumbs}
-        kicker={spec.path ? `${spec.path}/spec.yml` : undefined}
-        size="document"
-        width="reading"
-        titleAdornment={latestRun?.flaky && <StatusPill status="flaky" />}
-        description={spec.description || undefined}
-      />
-      <PageContainer
-        width="reading"
-        className="min-w-0 [overflow-wrap:anywhere] lg:pb-14"
-        innerClassName="space-y-9"
-      >
-        {actionError && (
-          <Alert variant="danger" role="alert">
-            <AlertDescription>
-              {actionError}
-              {/pending file edits/.test(actionError) && (
-                <Link
-                  href={`/p/${projectId}/settings?tab=git`}
-                  className="mt-2 block font-medium underline underline-offset-2"
-                >
-                  Review pending edits
-                </Link>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
-        {runRefreshError && (
-          <Alert variant="warning" role="status">
-            <AlertDescription>
-              Run updates are delayed: {runRefreshError} Retrying…
-            </AlertDescription>
-          </Alert>
-        )}
+    const stepBy = useCallback(
+      (delta: number) => {
+        if (!selectedEvidence || selectedIndex < 0) {
+          return;
+        }
+        const nextStep = selectedSteps[selectedIndex + delta];
+        if (nextStep) {
+          setSelectedEvidence({
+            runId: selectedEvidence.runId,
+            step: nextStep,
+          });
+        }
+      },
+      [selectedEvidence, selectedIndex, selectedSteps]
+    );
 
-        <div ref={bannerRef} className="scroll-mt-4 space-y-3">
-          {savedInvalid && spec.status === "invalid" && (
-            <Alert variant="warning" role="alert">
-              <AlertDescription>
-                Your changes were saved, but the Spec is now invalid and
-                can&apos;t run. The reason is shown below.
-              </AlertDescription>
-            </Alert>
-          )}
-          <VerificationBanner
-            projectId={projectId}
-            detail={detail}
-            spec={spec}
-            latestRun={latestRun}
-            latestEvidence={latestRun ? evidence[latestRun.id] : undefined}
-            running={running}
-            environment={environment}
-            actions={
-              canEdit &&
-              spec.status !== "invalid" && (
-                <>
-                  <EnvironmentSelect
-                    projectId={projectId}
-                    value={environment}
-                    onValueChange={setEnvironment}
-                    disabled={running}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={runNow}
-                    disabled={running || !content}
-                  >
-                    <Play size={12} fill="currentColor" />{" "}
-                    {running ? "Running…" : latestRun ? "Run again" : "Run"}
-                  </Button>
-                </>
-              )
+    useEffect(() => {
+      if (!selectedEvidence) {
+        return;
+      }
+      const handleKeyDown = function handleKeyDown(event: KeyboardEvent) {
+        if (event.key === "ArrowLeft") {
+          stepBy(-1);
+        }
+        if (event.key === "ArrowRight") {
+          stepBy(1);
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [selectedEvidence, stepBy]);
+
+    const runNow = async function runNow() {
+      setRunning(true);
+      setActionError("");
+      try {
+        await runSpec(specId, environment);
+        const nextDetail = await reloadDetail();
+        if (nextDetail) {
+          showDetail(nextDetail);
+        }
+      } catch (error) {
+        setActionError(errorMessage(error));
+        // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+      } finally {
+        setRunning(false);
+      }
+    };
+
+    const startEditing = function startEditing() {
+      if (!detail?.content) {
+        return;
+      }
+      const { humanSpec } = detail.content;
+      setTitleDraft(detail.spec.title);
+      setDescriptionDraft(detail.spec.description);
+      setPreconditionsDraft(
+        humanSpec ? humanSpec.preconditions.join("\n") : ""
+      );
+      setStepsDraft(humanSpec ? humanSpec.steps.join("\n") : "");
+      setExpectedResultDraft(humanSpec ? humanSpec.expectedResult : "");
+      setPostconditionsDraft(
+        humanSpec ? humanSpec.postconditions.join("\n") : ""
+      );
+      setRawYamlDraft(detail.content.yamlSource);
+      setTestSourceDraft(detail.content.testSource);
+      setSourceOpen(false);
+      setEditing(true);
+      setActionError("");
+      setSavedInvalid(false);
+    };
+
+    const saveFiles = async function saveFiles() {
+      if (!detail?.content) {
+        return;
+      }
+      setSaving(true);
+      setActionError("");
+      try {
+        let current = detail;
+        if (current.content?.humanSpec) {
+          const patch: {
+            title?: string;
+            description?: string;
+            humanSpec?: typeof current.content.humanSpec;
+          } = {};
+          if (titleDraft.trim() !== current.spec.title) {
+            patch.title = titleDraft.trim();
+          }
+          if (descriptionDraft !== current.spec.description) {
+            patch.description = descriptionDraft;
+          }
+          const nextHumanSpec = {
+            preconditions: splitLines(preconditionsDraft),
+            steps: splitLines(stepsDraft),
+            expectedResult: expectedResultDraft.trim(),
+            postconditions: splitLines(postconditionsDraft),
+          };
+          if (
+            JSON.stringify(nextHumanSpec) !==
+            JSON.stringify(current.content.humanSpec)
+          ) {
+            patch.humanSpec = nextHumanSpec;
+          }
+          if (Object.keys(patch).length > 0) {
+            current = await updateSpec(specId, patch);
+          }
+        } else if (rawYamlDraft !== current.content?.yamlSource) {
+          current = await updateSpecFiles(specId, { yaml: rawYamlDraft });
+        }
+        if (current.content && testSourceDraft !== current.content.testSource) {
+          current = await updateSpecFiles(specId, {
+            testSource: testSourceDraft,
+          });
+        }
+        setDetail(current);
+        setEditing(false);
+        const nowInvalid = current.spec.status === "invalid";
+        setSavedInvalid(nowInvalid);
+        if (nowInvalid) {
+          requestAnimationFrame(() =>
+            bannerRef.current?.scrollIntoView({
+              block: "start",
+              behavior: "smooth",
+            })
+          );
+        }
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : String(error));
+        // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const specsCrumb: Crumb = { label: "Specs", href: `/p/${projectId}/specs` };
+
+    if (loadError && !detail) {
+      return (
+        <div className="bg-surface flex min-h-full flex-col">
+          <PageHeader title="Spec" breadcrumbs={[specsCrumb]} width="reading" />
+          <EmptyState
+            role="alert"
+            tone="danger"
+            icon={FileX2}
+            title="This Spec could not load"
+            description={loadError}
+            action={
+              <Button
+                type="button"
+                onClick={() => setRetryKey((key) => key + 1)}
+              >
+                <RefreshCw size={14} /> Try again
+              </Button>
             }
           />
         </div>
+      );
+    }
 
-        <section aria-labelledby="specification-heading">
-          <SectionHeader
-            id="specification-heading"
-            title={editing ? "Edit specification" : "Specification"}
-            className="mb-4"
-            actions={
-              <>
-                <SpecHistoryDialog specId={specId} />
-                {canEdit && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={editing ? () => setEditing(false) : startEditing}
-                    disabled={!content || saving}
-                  >
-                    <PencilLine size={13} />{" "}
-                    {editing ? "Cancel editing" : "Edit"}
-                  </Button>
-                )}
-              </>
-            }
+    if (!detail) {
+      return (
+        <output
+          className="bg-surface block min-h-full"
+          aria-label="Loading Spec"
+          aria-busy="true"
+        >
+          <PageHeader
+            title={<Skeleton className="h-6 w-72 max-w-full" />}
+            breadcrumbs={[specsCrumb]}
+            width="reading"
           />
-          {editing && content ? (
-            <form
-              className="space-y-6"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveFiles();
-              }}
-            >
-              <div className="border-line bg-surface-soft flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5">
-                <p className="text-control text-ink-muted">
-                  Prefer to describe the change instead?
-                </p>
-                <Button asChild variant="outline" size="sm">
-                  <Link
-                    href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}
-                  >
-                    <PencilLine size={13} /> Edit with AI
-                  </Link>
-                </Button>
-              </div>
-              {content.humanSpec ? (
-                <div className="space-y-5">
-                  <Field id="spec-title" label="Title">
-                    <Input
-                      id="spec-title"
-                      value={titleDraft}
-                      onChange={(event) => setTitleDraft(event.target.value)}
-                      disabled={saving}
-                      aria-invalid={!titleDraft.trim() || undefined}
-                    />
-                  </Field>
-                  <Field id="spec-description" label="Description">
-                    <Textarea
-                      id="spec-description"
-                      value={descriptionDraft}
-                      onChange={(event) =>
-                        setDescriptionDraft(event.target.value)
-                      }
-                      disabled={saving}
-                      rows={2}
-                    />
-                  </Field>
-                  <Field
-                    id="spec-preconditions"
-                    label="Preconditions"
-                    hint="One per line. Who is signed in and what state the app is in before the steps. The automation sets up and checks each one."
-                  >
-                    <Textarea
-                      id="spec-preconditions"
-                      aria-describedby={
-                        changedFields.preconditions
-                          ? "spec-preconditions-hint spec-behavior-note"
-                          : "spec-preconditions-hint"
-                      }
-                      value={preconditionsDraft}
-                      onChange={(event) =>
-                        setPreconditionsDraft(event.target.value)
-                      }
-                      disabled={saving}
-                      rows={3}
-                      placeholder="Signed in as the shopper"
-                    />
-                  </Field>
-                  <Field
-                    id="spec-steps"
-                    label="Steps"
-                    hint="One per line, in order. Each line becomes a numbered step."
-                  >
-                    <Textarea
-                      id="spec-steps"
-                      aria-describedby={
-                        changedFields.steps
-                          ? "spec-steps-hint spec-behavior-note"
-                          : "spec-steps-hint"
-                      }
-                      value={stepsDraft}
-                      onChange={(event) => setStepsDraft(event.target.value)}
-                      disabled={saving}
-                      rows={6}
-                      placeholder="Open the store home page"
-                    />
-                  </Field>
-                  <Field
-                    id="spec-expected-result"
-                    label="Expected result"
-                    hint="One sentence the user can see on screen. The automation proves it right after the steps and keeps that screenshot as evidence."
-                  >
-                    <Textarea
-                      id="spec-expected-result"
-                      aria-describedby={
-                        changedFields.expectedResult
-                          ? "spec-expected-result-hint spec-behavior-note"
-                          : "spec-expected-result-hint"
-                      }
-                      value={expectedResultDraft}
-                      onChange={(event) =>
-                        setExpectedResultDraft(event.target.value)
-                      }
-                      disabled={saving}
-                      rows={3}
-                    />
-                  </Field>
-                  <Field
-                    id="spec-postconditions"
-                    label="Postconditions"
-                    hint="One per line. Side effects checked after the expected result. Optional; most Specs have none."
-                  >
-                    <Textarea
-                      id="spec-postconditions"
-                      aria-describedby={
-                        changedFields.postconditions
-                          ? "spec-postconditions-hint spec-behavior-note"
-                          : "spec-postconditions-hint"
-                      }
-                      value={postconditionsDraft}
-                      onChange={(event) =>
-                        setPostconditionsDraft(event.target.value)
-                      }
-                      disabled={saving}
-                      rows={2}
-                    />
-                  </Field>
-                  {behaviorChanged && (
-                    <p
-                      id="spec-behavior-note"
-                      role="status"
-                      className="bg-warning-soft text-meta text-ink flex items-start gap-2 rounded-md px-3 py-2"
-                    >
-                      <TriangleAlert
-                        size={13}
-                        aria-hidden="true"
-                        className="text-warning-icon mt-0.5 shrink-0"
-                      />
-                      <span>
-                        {sourceEdited ? (
-                          "Check that the step() titles in the automation source match the preconditions, steps, expected result and postconditions, in that order, or the Spec becomes invalid."
-                        ) : (
-                          <>
-                            The automation must be updated to match these
-                            preconditions, steps, expected result and
-                            postconditions, or the Spec becomes invalid when you
-                            save. Use{" "}
-                            <Link
-                              href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}
-                              className="font-medium underline underline-offset-2"
-                            >
-                              Edit with AI
-                            </Link>
-                            , or change the step() titles in the automation
-                            source below.
-                          </>
-                        )}
-                      </span>
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <Alert variant="warning" role="alert">
-                    <AlertDescription>
-                      The Spec file could not be read as fields. Fix the source
-                      below, then save.
-                    </AlertDescription>
-                  </Alert>
-                  <RawFileEditor
-                    id="spec-yaml"
-                    label="spec.yml"
-                    language="yaml"
-                    value={rawYamlDraft}
-                    onChange={setRawYamlDraft}
-                    disabled={saving}
-                  />
-                </div>
-              )}
-              <Collapsible
-                open={sourceOpen}
-                onOpenChange={setSourceOpen}
-                className="group/source sheet overflow-hidden rounded-xl"
-              >
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className="hover:bg-surface-soft focus-visible:ring-ring flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
-                  >
-                    <span className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-lg border">
-                      <FileCode2 size={15} aria-hidden="true" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="text-control text-ink flex items-center gap-2 font-semibold">
-                        Advanced: automation source
-                        {sourceEdited && (
-                          <span className="bg-warning-soft text-meta text-ink rounded-full px-1.5 font-medium">
-                            Edited
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-meta text-ink-subtle mt-0.5 block">
-                        {sourceEdited
-                          ? "The generated automation will be replaced when you save."
-                          : "Generated Playwright test (spec.ts) for this Spec. Most edits only need the fields above."}
-                      </span>
-                    </span>
-                    <ChevronDown
-                      size={15}
-                      className="text-ink-subtle shrink-0 transition-transform group-data-[state=open]/source:rotate-180 motion-reduce:transition-none"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="border-line bg-surface-soft/60 border-t p-3.5">
-                  <RawFileEditor
-                    id="spec-test-source"
-                    label="spec.ts"
-                    language="typescript"
-                    value={testSourceDraft}
-                    onChange={setTestSourceDraft}
-                    disabled={saving}
-                    rows={16}
-                  />
-                  <p className="text-meta text-ink-subtle mt-2">
-                    Each step(&quot;…&quot;) title must match a step above, in
-                    order. Invalid source is still saved, and the Spec is marked
-                    for correction.
-                  </p>
-                </CollapsibleContent>
-              </Collapsible>
-              <div className="border-line bg-surface/95 sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t px-4 py-3 backdrop-blur-sm sm:mx-0 sm:flex-row sm:items-center sm:justify-between sm:rounded-b-none sm:px-0">
-                <p className="text-meta text-ink-subtle">
-                  Saving commits the changes to the repository.
-                </p>
-                <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setEditing(false)}
-                    disabled={saving}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={
-                      saving ||
-                      (Boolean(content.humanSpec) && !titleDraft.trim())
-                    }
-                  >
-                    {saving ? "Saving…" : "Save changes"}
-                  </Button>
-                </div>
-              </div>
-            </form>
-          ) : content && content.humanSpec ? (
-            <SpecificationView humanSpec={content.humanSpec} />
-          ) : content ? (
-            <div className="sheet rounded-xl">
-              <EmptyState
-                size="compact"
-                tone="warning"
-                icon={FileX2}
-                title="The Spec file could not be read"
-                description="Use Edit to fix the source by hand."
-              />
+          <PageContainer width="reading" innerClassName="space-y-8">
+            <Skeleton className="h-[4.5rem] rounded-xl" />
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/2" />
             </div>
-          ) : (
-            <div className="sheet rounded-xl">
-              <EmptyState
-                size="compact"
-                tone="warning"
-                icon={FileX2}
-                title="Spec files unavailable"
-                description="Restore or fix the spec.yml and spec.ts files to continue."
-              />
-            </div>
-          )}
-          {!editing && detail && (
-            <SpecFolio
-              projectId={projectId}
-              specId={specId}
-              featureId={detail.spec.featureId}
-            />
-          )}
-        </section>
-
-        <section aria-labelledby="verification-heading">
-          <SectionHeader
-            id="verification-heading"
-            title="Run history"
-            count={runs.length || undefined}
-            description={
-              runs.length >= RUN_HISTORY_LIMIT
-                ? `Showing the latest ${RUN_HISTORY_LIMIT} runs.`
-                : undefined
-            }
-            className="mb-4"
-          />
-          {runs.length === 0 ? (
-            <p className="border-line-strong text-control text-ink-subtle rounded-xl border border-dashed px-4 py-5 text-center">
-              No runs yet. Screenshots, API responses and recordings from each
-              run appear here.
-            </p>
-          ) : (
-            <ol aria-label="Runs, newest first">
-              {runs.map((run, index) => (
-                <RunEntry
-                  key={run.id}
-                  run={run}
-                  latest={index === 0}
-                  last={index === runs.length - 1}
-                  loaded={evidence[run.id]}
-                  onExpand={ensureEvidence}
-                  onSelect={setSelectedEvidence}
-                />
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-20" />
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-5 w-3/4" />
               ))}
-            </ol>
-          )}
-        </section>
-      </PageContainer>
-      <Dialog
-        open={selectedEvidence !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedEvidence(null);
-          }
-        }}
-      >
-        <DialogContent className="max-h-[calc(100dvh-24px)] max-w-[960px] overflow-y-auto p-4 sm:p-5">
-          <DialogHeader>
-            <DialogTitle className="flex items-baseline gap-2">
-              {selectedEvidence ? evidenceStepLabel(selectedEvidence.step) : ""}
-              {selectedSteps.length > 1 && (
-                <span className="text-control text-ink-subtle tabular font-normal">
-                  {selectedIndex + 1} of {selectedSteps.length}
-                </span>
-              )}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedEvidence?.step.label}
-            </DialogDescription>
-          </DialogHeader>
-          {selectedEvidence && (
-            <div className="relative mt-4">
-              <img
-                src={artifactUrl(
-                  selectedEvidence.runId,
-                  selectedEvidence.step.file
-                )}
-                alt={`${evidenceStepLabel(selectedEvidence.step)}: ${selectedEvidence.step.label}`}
-                className="border-line bg-surface-soft max-h-[calc(100dvh-150px)] w-full rounded-lg border object-contain"
-              />
-              {hasPrev && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => stepBy(-1)}
-                  className="bg-surface/90 shadow-popover absolute top-1/2 left-2 -translate-y-1/2 rounded-full backdrop-blur-sm"
-                  aria-label="Previous step"
-                >
-                  <ChevronLeft size={16} />
-                </Button>
-              )}
-              {hasNext && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => stepBy(1)}
-                  className="bg-surface/90 shadow-popover absolute top-1/2 right-2 -translate-y-1/2 rounded-full backdrop-blur-sm"
-                  aria-label="Next step"
-                >
-                  <ChevronRight size={16} />
-                </Button>
-              )}
             </div>
+            <Skeleton className="h-20 rounded-xl" />
+          </PageContainer>
+        </output>
+      );
+    }
+
+    const { spec, feature, content, runs } = detail;
+    const [latestRun] = runs;
+    const crumbs: Crumb[] = [
+      specsCrumb,
+      ...(feature
+        ? [
+            {
+              label: feature.title,
+              href: `/p/${projectId}/specs#feature-${feature.id}`,
+            },
+          ]
+        : []),
+    ];
+    const sourceEdited = Boolean(
+      content && testSourceDraft !== content.testSource
+    );
+    const changedFields = {
+      preconditions: Boolean(
+        editing &&
+        content?.humanSpec &&
+        JSON.stringify(splitLines(preconditionsDraft)) !==
+          JSON.stringify(
+            content.humanSpec.preconditions.map((title) => title.trim())
+          )
+      ),
+      steps: Boolean(
+        editing &&
+        content?.humanSpec &&
+        JSON.stringify(splitLines(stepsDraft)) !==
+          JSON.stringify(content.humanSpec.steps.map((title) => title.trim()))
+      ),
+      expectedResult: Boolean(
+        editing &&
+        content?.humanSpec &&
+        expectedResultDraft.trim() !== content.humanSpec.expectedResult.trim()
+      ),
+      postconditions: Boolean(
+        editing &&
+        content?.humanSpec &&
+        JSON.stringify(splitLines(postconditionsDraft)) !==
+          JSON.stringify(
+            content.humanSpec.postconditions.map((title) => title.trim())
+          )
+      ),
+    };
+    const behaviorChanged = Object.values(changedFields).some(Boolean);
+
+    return (
+      <div className="bg-surface min-h-full">
+        <PageHeader
+          title={spec.title}
+          breadcrumbs={crumbs}
+          kicker={spec.path ? `${spec.path}/spec.yml` : undefined}
+          size="document"
+          width="reading"
+          titleAdornment={latestRun?.flaky && <StatusPill status="flaky" />}
+          description={spec.description || undefined}
+        />
+        <PageContainer
+          width="reading"
+          className="min-w-0 [overflow-wrap:anywhere] lg:pb-14"
+          innerClassName="space-y-9"
+        >
+          {actionError && (
+            <Alert variant="danger" role="alert">
+              <AlertDescription>
+                {actionError}
+                {/pending file edits/u.test(actionError) && (
+                  <Link
+                    href={`/p/${projectId}/settings?tab=git`}
+                    className="mt-2 block font-medium underline underline-offset-2"
+                  >
+                    Review pending edits
+                  </Link>
+                )}
+              </AlertDescription>
+            </Alert>
           )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
+          {runRefreshError && (
+            /* oxlint-disable jsx-a11y/prefer-tag-over-role -- Alert forwards live-region semantics to its shared native wrapper; preserve the component structure. */
+            <Alert variant="warning" role="status">
+              <AlertDescription>
+                Run updates are delayed: {runRefreshError} Retrying…
+              </AlertDescription>
+            </Alert>
+            /* oxlint-enable jsx-a11y/prefer-tag-over-role */
+          )}
+
+          <div ref={bannerRef} className="scroll-mt-4 space-y-3">
+            {savedInvalid && spec.status === "invalid" && (
+              <Alert variant="warning" role="alert">
+                <AlertDescription>
+                  Your changes were saved, but the Spec is now invalid and
+                  can&apos;t run. The reason is shown below.
+                </AlertDescription>
+              </Alert>
+            )}
+            <VerificationBanner
+              projectId={projectId}
+              detail={detail}
+              spec={spec}
+              latestRun={latestRun}
+              latestEvidence={latestRun ? evidence[latestRun.id] : undefined}
+              running={running}
+              environment={environment}
+              actions={
+                canEdit &&
+                spec.status !== "invalid" && (
+                  <>
+                    <EnvironmentSelect
+                      projectId={projectId}
+                      value={environment}
+                      onValueChange={setEnvironment}
+                      disabled={running}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={runNow}
+                      disabled={running || !content}
+                    >
+                      <Play size={12} fill="currentColor" />{" "}
+                      {(() => {
+                        if (running) {
+                          return "Running…";
+                        }
+                        if (latestRun) {
+                          return "Run again";
+                        }
+                        return "Run";
+                      })()}
+                    </Button>
+                  </>
+                )
+              }
+            />
+          </div>
+
+          <section aria-labelledby="specification-heading">
+            <SectionHeader
+              id="specification-heading"
+              title={editing ? "Edit specification" : "Specification"}
+              className="mb-4"
+              actions={
+                <>
+                  <SpecHistoryDialog specId={specId} />
+                  {canEdit && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={editing ? () => setEditing(false) : startEditing}
+                      disabled={!content || saving}
+                    >
+                      <PencilLine size={13} />{" "}
+                      {editing ? "Cancel editing" : "Edit"}
+                    </Button>
+                  )}
+                </>
+              }
+            />
+            {(() => {
+              if (editing && content) {
+                return (
+                  <form
+                    className="space-y-6"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      saveFiles();
+                    }}
+                  >
+                    <div className="border-line bg-surface-soft flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5">
+                      <p className="text-control text-ink-muted">
+                        Prefer to describe the change instead?
+                      </p>
+                      <Button asChild variant="outline" size="sm">
+                        <Link
+                          href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}
+                        >
+                          <PencilLine size={13} /> Edit with AI
+                        </Link>
+                      </Button>
+                    </div>
+                    {content.humanSpec ? (
+                      <div className="space-y-5">
+                        <Field id="spec-title" label="Title">
+                          <Input
+                            id="spec-title"
+                            value={titleDraft}
+                            onChange={(event) =>
+                              setTitleDraft(event.target.value)
+                            }
+                            disabled={saving}
+                            aria-invalid={!titleDraft.trim() || undefined}
+                          />
+                        </Field>
+                        <Field id="spec-description" label="Description">
+                          <Textarea
+                            id="spec-description"
+                            value={descriptionDraft}
+                            onChange={(event) =>
+                              setDescriptionDraft(event.target.value)
+                            }
+                            disabled={saving}
+                            rows={2}
+                          />
+                        </Field>
+                        <Field
+                          id="spec-preconditions"
+                          label="Preconditions"
+                          hint="One per line. Who is signed in and what state the app is in before the steps. The automation sets up and checks each one."
+                        >
+                          <Textarea
+                            id="spec-preconditions"
+                            aria-describedby={
+                              changedFields.preconditions
+                                ? "spec-preconditions-hint spec-behavior-note"
+                                : "spec-preconditions-hint"
+                            }
+                            value={preconditionsDraft}
+                            onChange={(event) =>
+                              setPreconditionsDraft(event.target.value)
+                            }
+                            disabled={saving}
+                            rows={3}
+                            placeholder="Signed in as the shopper"
+                          />
+                        </Field>
+                        <Field
+                          id="spec-steps"
+                          label="Steps"
+                          hint="One per line, in order. Each line becomes a numbered step."
+                        >
+                          <Textarea
+                            id="spec-steps"
+                            aria-describedby={
+                              changedFields.steps
+                                ? "spec-steps-hint spec-behavior-note"
+                                : "spec-steps-hint"
+                            }
+                            value={stepsDraft}
+                            onChange={(event) =>
+                              setStepsDraft(event.target.value)
+                            }
+                            disabled={saving}
+                            rows={6}
+                            placeholder="Open the store home page"
+                          />
+                        </Field>
+                        <Field
+                          id="spec-expected-result"
+                          label="Expected result"
+                          hint="One sentence the user can see on screen. The automation proves it right after the steps and keeps that screenshot as evidence."
+                        >
+                          <Textarea
+                            id="spec-expected-result"
+                            aria-describedby={
+                              changedFields.expectedResult
+                                ? "spec-expected-result-hint spec-behavior-note"
+                                : "spec-expected-result-hint"
+                            }
+                            value={expectedResultDraft}
+                            onChange={(event) =>
+                              setExpectedResultDraft(event.target.value)
+                            }
+                            disabled={saving}
+                            rows={3}
+                          />
+                        </Field>
+                        <Field
+                          id="spec-postconditions"
+                          label="Postconditions"
+                          hint="One per line. Side effects checked after the expected result. Optional; most Specs have none."
+                        >
+                          <Textarea
+                            id="spec-postconditions"
+                            aria-describedby={
+                              changedFields.postconditions
+                                ? "spec-postconditions-hint spec-behavior-note"
+                                : "spec-postconditions-hint"
+                            }
+                            value={postconditionsDraft}
+                            onChange={(event) =>
+                              setPostconditionsDraft(event.target.value)
+                            }
+                            disabled={saving}
+                            rows={2}
+                          />
+                        </Field>
+                        {behaviorChanged && (
+                          <output
+                            id="spec-behavior-note"
+
+                            className="bg-warning-soft text-meta text-ink flex items-start gap-2 rounded-md px-3 py-2"
+                          >
+                            <TriangleAlert
+                              size={13}
+                              aria-hidden="true"
+                              className="text-warning-icon mt-0.5 shrink-0"
+                            />
+                            <span>
+                              {sourceEdited ? (
+                                "Check that the step() titles in the automation source match the preconditions, steps, expected result and postconditions, in that order, or the Spec becomes invalid."
+                              ) : (
+                                <>
+                                  The automation must be updated to match these
+                                  preconditions, steps, expected result and
+                                  postconditions, or the Spec becomes invalid
+                                  when you save. Use{" "}
+                                  <Link
+                                    href={`/p/${projectId}/chats/new?specId=${encodeURIComponent(spec.id)}`}
+                                    className="font-medium underline underline-offset-2"
+                                  >
+                                    Edit with AI
+                                  </Link>
+                                  , or change the step() titles in the
+                                  automation source below.
+                                </>
+                              )}
+                            </span>
+                          </output>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <Alert variant="warning" role="alert">
+                          <AlertDescription>
+                            The Spec file could not be read as fields. Fix the
+                            source below, then save.
+                          </AlertDescription>
+                        </Alert>
+                        <RawFileEditor
+                          id="spec-yaml"
+                          label="spec.yml"
+                          language="yaml"
+                          value={rawYamlDraft}
+                          onChange={setRawYamlDraft}
+                          disabled={saving}
+                        />
+                      </div>
+                    )}
+                    <Collapsible
+                      open={sourceOpen}
+                      onOpenChange={setSourceOpen}
+                      className="group/source sheet overflow-hidden rounded-xl"
+                    >
+                      <CollapsibleTrigger asChild>
+                        <button
+                          type="button"
+                          className="hover:bg-surface-soft focus-visible:ring-ring flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                        >
+                          <span className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-lg border">
+                            <FileCode2 size={15} aria-hidden="true" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="text-control text-ink flex items-center gap-2 font-semibold">
+                              Advanced: automation source
+                              {sourceEdited && (
+                                <span className="bg-warning-soft text-meta text-ink rounded-full px-1.5 font-medium">
+                                  Edited
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-meta text-ink-subtle mt-0.5 block">
+                              {sourceEdited
+                                ? "The generated automation will be replaced when you save."
+                                : "Generated Playwright test (spec.ts) for this Spec. Most edits only need the fields above."}
+                            </span>
+                          </span>
+                          <ChevronDown
+                            size={15}
+                            className="text-ink-subtle shrink-0 transition-transform group-data-[state=open]/source:rotate-180 motion-reduce:transition-none"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="border-line bg-surface-soft/60 border-t p-3.5">
+                        <RawFileEditor
+                          id="spec-test-source"
+                          label="spec.ts"
+                          language="typescript"
+                          value={testSourceDraft}
+                          onChange={setTestSourceDraft}
+                          disabled={saving}
+                          rows={16}
+                        />
+                        <p className="text-meta text-ink-subtle mt-2">
+                          Each step(&quot;…&quot;) title must match a step
+                          above, in order. Invalid source is still saved, and
+                          the Spec is marked for correction.
+                        </p>
+                      </CollapsibleContent>
+                    </Collapsible>
+                    <div className="border-line bg-surface/95 sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t px-4 py-3 backdrop-blur-sm sm:mx-0 sm:flex-row sm:items-center sm:justify-between sm:rounded-b-none sm:px-0">
+                      <p className="text-meta text-ink-subtle">
+                        Saving commits the changes to the repository.
+                      </p>
+                      <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setEditing(false)}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="submit"
+                          disabled={
+                            saving ||
+                            (Boolean(content.humanSpec) && !titleDraft.trim())
+                          }
+                        >
+                          {saving ? "Saving…" : "Save changes"}
+                        </Button>
+                      </div>
+                    </div>
+                  </form>
+                );
+              }
+              if (content && content.humanSpec) {
+                return <SpecificationView humanSpec={content.humanSpec} />;
+              }
+              if (content) {
+                return (
+                  <div className="sheet rounded-xl">
+                    <EmptyState
+                      size="compact"
+                      tone="warning"
+                      icon={FileX2}
+                      title="The Spec file could not be read"
+                      description="Use Edit to fix the source by hand."
+                    />
+                  </div>
+                );
+              }
+              return (
+                <div className="sheet rounded-xl">
+                  <EmptyState
+                    size="compact"
+                    tone="warning"
+                    icon={FileX2}
+                    title="Spec files unavailable"
+                    description="Restore or fix the spec.yml and spec.ts files to continue."
+                  />
+                </div>
+              );
+            })()}
+            {!editing && detail && (
+              <SpecFolio
+                projectId={projectId}
+                specId={specId}
+                featureId={detail.spec.featureId}
+              />
+            )}
+          </section>
+
+          <section aria-labelledby="verification-heading">
+            <SectionHeader
+              id="verification-heading"
+              title="Run history"
+              count={runs.length || undefined}
+              description={
+                runs.length >= RUN_HISTORY_LIMIT
+                  ? `Showing the latest ${RUN_HISTORY_LIMIT} runs.`
+                  : undefined
+              }
+              className="mb-4"
+            />
+            {runs.length === 0 ? (
+              <p className="border-line-strong text-control text-ink-subtle rounded-xl border border-dashed px-4 py-5 text-center">
+                No runs yet. Screenshots, API responses and recordings from each
+                run appear here.
+              </p>
+            ) : (
+              <ol aria-label="Runs, newest first">
+                {runs.map((run, index) => (
+                  <RunEntry
+                    key={run.id}
+                    run={run}
+                    latest={index === 0}
+                    last={index === runs.length - 1}
+                    loaded={evidence[run.id]}
+                    onExpand={ensureEvidence}
+                    onSelect={setSelectedEvidence}
+                  />
+                ))}
+              </ol>
+            )}
+          </section>
+        </PageContainer>
+        <Dialog
+          open={selectedEvidence !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedEvidence(null);
+            }
+          }}
+        >
+          <DialogContent className="max-h-[calc(100dvh-24px)] max-w-[960px] overflow-y-auto p-4 sm:p-5">
+            <DialogHeader>
+              <DialogTitle className="flex items-baseline gap-2">
+                {selectedEvidence
+                  ? evidenceStepLabel(selectedEvidence.step)
+                  : ""}
+                {selectedSteps.length > 1 && (
+                  <span className="text-control text-ink-subtle tabular font-normal">
+                    {selectedIndex + 1} of {selectedSteps.length}
+                  </span>
+                )}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedEvidence?.step.label}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedEvidence && (
+              <div className="relative mt-4">
+                {/* oxlint-disable next/no-img-element -- Evidence URLs and CSS-sized SVG icons must load directly without an image optimization proxy. */}
+                <img
+                  src={artifactUrl(
+                    selectedEvidence.runId,
+                    selectedEvidence.step.file
+                  )}
+                  alt={`${evidenceStepLabel(selectedEvidence.step)}: ${selectedEvidence.step.label}`}
+                  className="border-line bg-surface-soft max-h-[calc(100dvh-150px)] w-full rounded-lg border object-contain"
+                />
+                {/* oxlint-enable next/no-img-element */}
+                {hasPrev && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => stepBy(-1)}
+                    className="bg-surface/90 shadow-popover absolute top-1/2 left-2 -translate-y-1/2 rounded-full backdrop-blur-sm"
+                    aria-label="Previous step"
+                  >
+                    <ChevronLeft size={16} />
+                  </Button>
+                )}
+                {hasNext && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => stepBy(1)}
+                    className="bg-surface/90 shadow-popover absolute top-1/2 right-2 -translate-y-1/2 rounded-full backdrop-blur-sm"
+                    aria-label="Next step"
+                  >
+                    <ChevronRight size={16} />
+                  </Button>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  };
+/* oxlint-enable eslint/complexity */
+export default SpecPage;

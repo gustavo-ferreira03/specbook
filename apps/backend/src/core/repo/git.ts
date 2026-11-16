@@ -10,18 +10,11 @@ import { createKeyedLock } from "../operations/keyed-lock";
 import { reposDir } from "../paths";
 import { repoBare } from "./bare";
 
-const STALE_CHECKOUT_LOCKS = [
-  "index.lock",
-  "HEAD.lock",
-  "config.lock",
-  "packed-refs.lock",
-  path.join("refs", "heads", "main.lock"),
-];
-
 class RepoGit {
   private locks = createKeyedLock();
   private hardenedCheckouts = new Set<string>();
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   getRepoDir(projectId: string): string {
     const absoluteRoot = path.resolve(reposDir);
     const dir = path.resolve(absoluteRoot, projectId);
@@ -40,7 +33,7 @@ class RepoGit {
   }
 
   async withRepoLock<T>(projectId: string, work: () => Promise<T>): Promise<T> {
-    return this.locks.run(projectId, work);
+    return await this.locks.run(projectId, work);
   }
 
   async ensureProjectRepo(
@@ -93,7 +86,12 @@ class RepoGit {
   }
 
   async getHeadSha(projectId: string): Promise<string> {
-    return (await this.getProjectGit(projectId).revparse(["HEAD"])).trim();
+    return await (async () => {
+      const awaitedValue3028 = await this.getProjectGit(projectId).revparse([
+        "HEAD",
+      ]);
+      return awaitedValue3028.trim();
+    })();
   }
 
   async commitAll(projectId: string, message: string): Promise<string> {
@@ -157,7 +155,10 @@ class RepoGit {
     runId: string,
     commitSha: string
   ): Promise<void> {
-    if (!/^[0-9a-f-]{36}$/i.test(runId) || !/^[0-9a-f]{40}$/i.test(commitSha)) {
+    if (
+      !/^[0-9a-f-]{36}$/iu.test(runId) ||
+      !/^[0-9a-f]{40}$/iu.test(commitSha)
+    ) {
       throw new Error("Invalid run commit reference");
     }
     await this.getProjectGit(projectId).raw([
@@ -172,9 +173,10 @@ class RepoGit {
     runIds: string[]
   ): Promise<void> {
     for (const runId of runIds) {
-      if (!/^[0-9a-f-]{36}$/i.test(runId)) {
+      if (!/^[0-9a-f-]{36}$/iu.test(runId)) {
         continue;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await this.getProjectGit(projectId).raw([
         "update-ref",
         "-d",
@@ -202,12 +204,14 @@ class RepoGit {
     for (const lock of STALE_CHECKOUT_LOCKS) {
       const target = path.join(gitDir, lock);
       if (
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs
           .stat(target)
           .then(() => true)
           .catch(() => false)
       ) {
         console.warn(`[specbook] removing stale lock ${target}`);
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs.rm(target, { force: true });
       }
     }
@@ -215,6 +219,7 @@ class RepoGit {
     for (const name of ["rebase-merge", "rebase-apply"]) {
       const target = path.join(gitDir, name);
       if (
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         !(await fs
           .stat(target)
           .then(() => true)
@@ -224,12 +229,14 @@ class RepoGit {
       }
       console.warn(`[specbook] aborting an interrupted rebase in ${projectId}`);
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await git.rebase(["--abort"]);
       } catch (error) {
         console.error(
           `[specbook] rebase --abort failed for ${projectId}, falling back to --quit:`,
           error
         );
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await git
           .rebase(["--quit"])
           .catch(() => fs.rm(target, { recursive: true, force: true }));
@@ -243,6 +250,7 @@ class RepoGit {
 
   async recoverAllInterruptedState(): Promise<void> {
     for (const project of await projectsRepository.listProjects()) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await this.recoverInterruptedState(project.id).catch((error: unknown) => {
         console.error(
           `[specbook] recovering the repository of ${project.id} failed:`,
@@ -252,5 +260,13 @@ class RepoGit {
     }
   }
 }
+
+const STALE_CHECKOUT_LOCKS = [
+  "index.lock",
+  "HEAD.lock",
+  "config.lock",
+  "packed-refs.lock",
+  path.join("refs", "heads", "main.lock"),
+];
 
 export const repoGit = new RepoGit();

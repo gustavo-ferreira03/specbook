@@ -180,30 +180,32 @@ const TOOL_COPY: Record<string, ToolCopy> = {
   },
 };
 
-function fallbackLabel(toolName: string): string {
+const fallbackLabel = function fallbackLabel(toolName: string): string {
   const words = toolName
-    .replace(/^browser_/, "")
-    .replaceAll(/[_-]+/g, " ")
+    .replace(/^browser_/u, "")
+    .replaceAll(/[_-]+/gu, " ")
     .trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Tool";
-}
+};
 
-export function toolCopy(toolName: string): ToolCopy {
+export const toolCopy = function toolCopy(toolName: string): ToolCopy {
   const known = TOOL_COPY[toolName];
   if (known) {
     return known;
   }
   const label = fallbackLabel(toolName);
   return { done: label, active: `Using ${label.toLowerCase()}`, icon: Wrench };
-}
+};
 
-export function activeToolLabel(toolName: string): string {
+export const activeToolLabel = function activeToolLabel(
+  toolName: string
+): string {
   return toolCopy(toolName).active;
-}
+};
 
 const VISIBLE_STEPS = 4;
 
-export function TurnActivity({
+export const TurnActivity = function TurnActivity({
   steps,
   busy,
 }: {
@@ -262,26 +264,32 @@ export function TurnActivity({
               >
                 {running ? copy.active : copy.done}
               </span>
-              {running ? (
-                <span className="sr-only">in progress</span>
-              ) : step.endedAt === null ? (
-                <span className="text-meta text-ink-subtle shrink-0">
-                  Stopped
-                </span>
-              ) : (
-                <span className="text-meta text-ink-subtle tabular shrink-0">
-                  {formatDuration(
-                    Math.max(
-                      0,
-                      (step.endedAt ?? step.startedAt) - step.startedAt
-                    )
-                  )}
-                </span>
-              )}
+              {(() => {
+                if (running) {
+                  return <span className="sr-only">in progress</span>;
+                }
+                if (step.endedAt === null) {
+                  return (
+                    <span className="text-meta text-ink-subtle shrink-0">
+                      Stopped
+                    </span>
+                  );
+                }
+                return (
+                  <span className="text-meta text-ink-subtle tabular shrink-0">
+                    {formatDuration(
+                      Math.max(
+                        0,
+                        (step.endedAt ?? step.startedAt) - step.startedAt
+                      )
+                    )}
+                  </span>
+                );
+              })()}
             </li>
           );
         })}
       </ol>
     </div>
   );
-}
+};

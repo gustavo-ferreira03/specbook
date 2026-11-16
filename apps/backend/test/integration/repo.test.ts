@@ -9,12 +9,79 @@ import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 
+import type { BrowserMcp } from "../../src/core/browser/mcp";
+import type { RunBatch } from "../../src/core/runner/batch";
+import { requireValue } from "../../src/core/utils/require-value";
 import {
   HUMAN_SPEC,
   tempDir,
   useTempStorage,
   VALID_SPEC,
 } from "../helpers/storage";
+
+const api = function api(
+  method: string,
+  url: string,
+  body?: unknown
+): Promise<Response> {
+  try {
+    return Promise.resolve(
+      app.request(url, {
+        method,
+        headers: { [REQUEST_HEADER]: "1", "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+    );
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
+
+const createProject = async function createProject(
+  name = "Loja"
+): Promise<string> {
+  const response = await api("POST", "/projects", {
+    name,
+    baseUrl: "https://app.example.com",
+  });
+  assert.equal(response.status, 200);
+  return ((await response.json()) as { project: { id: string } }).project.id;
+};
+
+const createSpec = function createSpec(
+  projectId: string,
+  featureId: string,
+  title: string,
+  testSource = VALID_SPEC
+) {
+  try {
+    return Promise.resolve(
+      writer.createSpecInRepo({
+        projectId,
+        featureId,
+        title,
+        description: "",
+        humanSpec: HUMAN_SPEC,
+        testSource,
+      })
+    );
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
+
+const commitCount = async function commitCount(
+  projectId: string
+): Promise<number> {
+  return Number(
+    await (async () => {
+      const awaitedValue1480 = await repoGit
+        .getProjectGit(projectId)
+        .raw(["rev-list", "--count", "HEAD"]);
+      return awaitedValue1480.trim();
+    })()
+  );
+};
 
 useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
@@ -38,6 +105,7 @@ const { runsRepository } = await import("../../src/infra/repositories/runs");
 
 const app = new Hono();
 app.use("*", csrfGuard());
+// oxlint-disable-next-line promise/prefer-await-to-callbacks -- This handler models the callback interface exercised by the test.
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
     return c.json({ error: err.message }, err.status);
@@ -50,53 +118,6 @@ app.onError((err, c) => {
 app.route("/", createProjectsRouter());
 app.route("/", createFeaturesRouter());
 app.route("/", createSpecsRouter());
-
-async function api(
-  method: string,
-  url: string,
-  body?: unknown
-): Promise<Response> {
-  return app.request(url, {
-    method,
-    headers: { [REQUEST_HEADER]: "1", "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-}
-
-async function createProject(name = "Loja"): Promise<string> {
-  const response = await api("POST", "/projects", {
-    name,
-    baseUrl: "https://app.example.com",
-  });
-  assert.equal(response.status, 200);
-  return ((await response.json()) as { project: { id: string } }).project.id;
-}
-
-async function createSpec(
-  projectId: string,
-  featureId: string,
-  title: string,
-  testSource = VALID_SPEC
-) {
-  return writer.createSpecInRepo({
-    projectId,
-    featureId,
-    title,
-    description: "",
-    humanSpec: HUMAN_SPEC,
-    testSource,
-  });
-}
-
-async function commitCount(projectId: string): Promise<number> {
-  return Number(
-    (
-      await repoGit
-        .getProjectGit(projectId)
-        .raw(["rev-list", "--count", "HEAD"])
-    ).trim()
-  );
-}
 
 before(async () => {
   await runMigrations();
@@ -132,9 +153,9 @@ describe("project, feature and spec through the writer", () => {
     );
     const snapshot = await writer.readProjectSpecFiles(projectId);
     const input = {
-      ...snapshot.specs[0]!,
-      baseRevision: snapshot.specs[0]!.revision,
-      feature: snapshot.features[0]!,
+      ...requireValue(snapshot.specs[0]),
+      baseRevision: requireValue(snapshot.specs[0]).revision,
+      feature: requireValue(snapshot.features[0]),
     };
     await writer.publishSpecsInRepo(projectId, environment.id, [input]);
     const run = await runsRepository.createRun({
@@ -156,28 +177,46 @@ describe("project, feature and spec through the writer", () => {
       "Deployment is unavailable"
     );
     assert.equal(
-      (await projectOverview(projectId)).specHealth[spec.id]?.status,
+      await (async () => {
+        const awaitedResult5248 = await (async () => {
+          const awaitedValue5064 = await projectOverview(projectId);
+          return awaitedValue5064.specHealth[spec.id];
+        })();
+        return awaitedResult5248?.status;
+      })(),
       "awaiting_deploy"
     );
     await environmentsRepository.delete(environment.id);
     assert.equal(
-      (await specsRepository.getSpec(spec.id))?.status,
+      await (async () => {
+        const awaitedResult5545 = await specsRepository.getSpec(spec.id);
+        return awaitedResult5545?.status;
+      })(),
       "unverified"
     );
     assert.equal(
-      (await projectOverview(projectId)).specHealth[spec.id]?.status,
+      await (async () => {
+        const awaitedResult5645 = await (async () => {
+          const awaitedValue5340 = await projectOverview(projectId);
+          return awaitedValue5340.specHealth[spec.id];
+        })();
+        return awaitedResult5645?.status;
+      })(),
       "not_checked"
     );
     await specEnvironmentsRepository.set(spec, environment.id, "passed");
     assert.deepEqual(await specEnvironmentsRepository.list(spec), []);
     assert.equal(
-      (await specsRepository.getSpec(spec.id))?.status,
+      await (async () => {
+        const awaitedResult6026 = await specsRepository.getSpec(spec.id);
+        return awaitedResult6026?.status;
+      })(),
       "unverified"
     );
     const head = await repoGit.getHeadSha(projectId);
     await assert.rejects(
       () => writer.publishSpecsInRepo(projectId, environment.id, [input]),
-      /environment was removed/
+      /environment was removed/u
     );
     assert.equal(await repoGit.getHeadSha(projectId), head);
   });
@@ -205,9 +244,9 @@ describe("project, feature and spec through the writer", () => {
     const pathAfterMove = "specs/store/moved-application";
     const input = {
       path: pathAfterMove,
-      baseRevision: snapshot.specs[0]!.revision,
-      files: snapshot.specs[0]!.files,
-      feature: snapshot.features[0]!,
+      baseRevision: requireValue(snapshot.specs[0]).revision,
+      files: requireValue(snapshot.specs[0]).files,
+      feature: requireValue(snapshot.features[0]),
     };
     const list = specsRepository.listSpecs;
     let moved = false;
@@ -226,14 +265,22 @@ describe("project, feature and spec through the writer", () => {
       }
       return rows;
     };
-    const environment = (await environmentsRepository.list(projectId))[0]!;
+    const environment = requireValue(
+      await (async () => {
+        const awaitedValue7562 = await environmentsRepository.list(projectId);
+        return awaitedValue7562[0];
+      })()
+    );
     try {
       await assert.rejects(
         () => writer.publishSpecsInRepo(projectId, environment.id, [input]),
         ResourceBusyError
       );
       assert.equal(
-        (await specsRepository.getSpec(spec.id))?.status,
+        await (async () => {
+          const awaitedResult8379 = await specsRepository.getSpec(spec.id);
+          return awaitedResult8379?.status;
+        })(),
         "unverified"
       );
     } finally {
@@ -254,7 +301,12 @@ describe("project, feature and spec through the writer", () => {
     const { withActor } = await import("../../src/core/accounts/audit");
     const { serializeSpecYaml } = await import("@specbook/runtime/yaml");
     const projectId = await createProject("CLI publishing");
-    const environment = (await environmentsRepository.list(projectId))[0]!;
+    const environment = requireValue(
+      await (async () => {
+        const awaitedValue8705 = await environmentsRepository.list(projectId);
+        return awaitedValue8705[0];
+      })()
+    );
     const source = serializeSpecYaml({
       title: "Open application",
       description: "",
@@ -294,19 +346,27 @@ describe("project, feature and spec through the writer", () => {
     assert.deepEqual(snapshot.specs, [
       {
         path: input.path,
-        revision: published.specs[0]!.revision,
+        revision: requireValue(published.specs[0]).revision,
         files: input.files,
       },
     ]);
-    const spec = (await specsRepository.getSpec(published.specs[0]!.id))!;
+    const spec = requireValue(
+      await specsRepository.getSpec(requireValue(published.specs[0]).id)
+    );
     assert.equal(
-      (await specEnvironmentsRepository.list(spec))[0]?.environmentId,
+      await (async () => {
+        const awaitedResult10925 = await (async () => {
+          const awaitedValue10167 = await specEnvironmentsRepository.list(spec);
+          return awaitedValue10167[0];
+        })();
+        return awaitedResult10925?.environmentId;
+      })(),
       environment.id
     );
     const unchanged = await writer.publishSpecsInRepo(
       projectId,
       environment.id,
-      [{ ...input, baseRevision: published.specs[0]!.revision }]
+      [{ ...input, baseRevision: requireValue(published.specs[0]).revision }]
     );
     assert.equal(
       unchanged.commitSha,
@@ -321,7 +381,7 @@ describe("project, feature and spec through the writer", () => {
     await assert.rejects(
       () =>
         writer.publishSpecsInRepo(projectId, environment.id, [
-          { ...input, baseRevision: published.specs[0]!.revision },
+          { ...input, baseRevision: requireValue(published.specs[0]).revision },
           fresh,
         ]),
       writer.SpecRevisionConflict
@@ -331,8 +391,20 @@ describe("project, feature and spec through the writer", () => {
       await specsRepository.getSpecByPath(projectId, fresh.path),
       null
     );
-    assert.ok((await repoGit.getProjectGit(projectId).status()).isClean());
-    const current = (await writer.readProjectSpecFiles(projectId)).specs[0]!;
+    assert.ok(
+      await (async () => {
+        const awaitedValue11187 = await repoGit
+          .getProjectGit(projectId)
+          .status();
+        return awaitedValue11187.isClean();
+      })()
+    );
+    const current = requireValue(
+      await (async () => {
+        const awaitedValue11269 = await writer.readProjectSpecFiles(projectId);
+        return awaitedValue11269.specs[0];
+      })()
+    );
     const replacement = await writer.publishSpecsInRepo(
       projectId,
       environment.id,
@@ -346,7 +418,7 @@ describe("project, feature and spec through the writer", () => {
     };
     await assert.rejects(
       () => writer.publishSpecsInRepo(projectId, environment.id, [invalid]),
-      /must import|import|test/i
+      /must import|import|test/iu
     );
     assert.equal(
       await specsRepository.getSpecByPath(projectId, fresh.path),
@@ -409,7 +481,14 @@ describe("project, feature and spec through the writer", () => {
     );
     assert.equal(commitSha, await repoGit.getHeadSha(projectId));
     assert.equal(await repoBare.getBareHeadSha(projectId), commitSha);
-    assert.ok((await repoGit.getProjectGit(projectId).status()).isClean());
+    assert.ok(
+      await (async () => {
+        const awaitedValue14073 = await repoGit
+          .getProjectGit(projectId)
+          .status();
+        return awaitedValue14073.isClean();
+      })()
+    );
   });
 
   test("an invalid spec.ts is stored as an invalid Spec", async () => {
@@ -426,7 +505,10 @@ describe("project, feature and spec through the writer", () => {
       evaluate
     );
     assert.equal(spec.status, "invalid");
-    assert.match(spec.invalidReason ?? "", /page\.evaluate\(\) is not allowed/);
+    assert.match(
+      spec.invalidReason ?? "",
+      /page\.evaluate\(\) is not allowed/u
+    );
   });
 
   test("step() titles that differ from spec.yml make the Spec invalid", async () => {
@@ -441,7 +523,7 @@ describe("project, feature and spec through the writer", () => {
     assert.equal(spec.status, "invalid");
     assert.match(
       spec.invalidReason ?? "",
-      /same titles and order as spec\.yml/
+      /same titles and order as spec\.yml/u
     );
   });
 
@@ -459,7 +541,7 @@ describe("project, feature and spec through the writer", () => {
       path.join(repoGit.getRepoDir(projectId), spec.path, "spec.ts"),
       "utf-8"
     );
-    assert.match(source, /^import \{ test, expect \} from "specbook";/);
+    assert.match(source, /^import \{ test, expect \} from "specbook";/u);
   });
 
   test("a Spec without spec.ts is invalid and can be repaired", async () => {
@@ -483,9 +565,12 @@ describe("project, feature and spec through the writer", () => {
       invalid?.invalidReason,
       "This check is incomplete: spec.ts is missing. Repair it in chat."
     );
-    const { spec: repaired } = await writer.updateSpecInRepo(invalid!, {
-      testSource: VALID_SPEC,
-    });
+    const { spec: repaired } = await writer.updateSpecInRepo(
+      requireValue(invalid),
+      {
+        testSource: VALID_SPEC,
+      }
+    );
     assert.equal(repaired.status, "unverified");
   });
 
@@ -531,18 +616,35 @@ describe("project, feature and spec through the writer", () => {
     assert.equal(moved?.status, "passed");
     assert.equal(moved?.featureId, parent.id);
     assert.deepEqual(
-      (await runsRepository.listRuns(spec.id)).map((item) => item.id),
+      await (async () => {
+        const awaitedValue18165 = await runsRepository.listRuns(spec.id);
+        return awaitedValue18165.map((item) => item.id);
+      })(),
       [run.id]
     );
     assert.equal(
-      (await specsRepository.getSpec(nested.id))?.path,
+      await (async () => {
+        const awaitedResult19725 = await specsRepository.getSpec(nested.id);
+        return awaitedResult19725?.path;
+      })(),
       "specs/login-e-sessao/senha/recuperar-senha"
     );
     assert.equal(
-      (await featuresRepository.getFeature(child.id))?.path,
+      await (async () => {
+        const awaitedResult19857 = await featuresRepository.getFeature(
+          child.id
+        );
+        return awaitedResult19857?.path;
+      })(),
       "specs/login-e-sessao/senha"
     );
-    assert.equal((await specsRepository.listSpecs(projectId)).length, 2);
+    assert.equal(
+      await (async () => {
+        const awaitedValue18522 = await specsRepository.listSpecs(projectId);
+        return awaitedValue18522.length;
+      })(),
+      2
+    );
 
     const root = repoGit.getRepoDir(projectId);
     assert.ok(!existsSync(path.join(root, "specs", "autenticacao")));
@@ -551,7 +653,14 @@ describe("project, feature and spec through the writer", () => {
         path.join(root, "specs", "login-e-sessao", "login-valido", "spec.yml")
       )
     );
-    assert.ok((await repoGit.getProjectGit(projectId).status()).isClean());
+    assert.ok(
+      await (async () => {
+        const awaitedValue18839 = await repoGit
+          .getProjectGit(projectId)
+          .status();
+        return awaitedValue18839.isClean();
+      })()
+    );
   });
 
   test("a spec directory moved by an external commit keeps its id on reindex", async () => {
@@ -589,7 +698,13 @@ describe("project, feature and spec through the writer", () => {
     );
     assert.equal(moved?.featureId, newFeature?.id);
     assert.equal(newFeature?.title, "Checkout");
-    assert.equal((await specsRepository.listSpecs(projectId)).length, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedValue20132 = await specsRepository.listSpecs(projectId);
+        return awaitedValue20132.length;
+      })(),
+      1
+    );
   });
 
   test("a spec.yml that is a symbolic link makes the spec invalid on reindex", async () => {
@@ -610,11 +725,14 @@ describe("project, feature and spec through the writer", () => {
     assert.deepEqual(result.invalidSpecs, [spec.id]);
     const invalid = await specsRepository.getSpec(spec.id);
     assert.equal(invalid?.status, "invalid");
-    assert.match(invalid?.invalidReason ?? "", /symbolic link/);
+    assert.match(invalid?.invalidReason ?? "", /symbolic link/u);
     assert.notEqual(invalid?.title, "segredo", "the link target is never read");
     const detail = await api("GET", `/specs/${spec.id}`);
     assert.ok(
-      !(await detail.text()).includes("segredo"),
+      !(await (async () => {
+        const awaitedValue21236 = await detail.text();
+        return awaitedValue21236.includes("segredo");
+      })()),
       "the API never serves the link target"
     );
   });
@@ -630,14 +748,21 @@ describe("project, feature and spec through the writer", () => {
     const originals = {
       commitAll: repoGit.commitAll,
     };
-    repoGit.commitAll = async (...args) => {
-      calls.push("commitAll");
-      return originals.commitAll.apply(repoGit, args);
+    repoGit.commitAll = (...args) => {
+      try {
+        calls.push("commitAll");
+        return Promise.resolve(originals.commitAll.apply(repoGit, args));
+      } catch (error) {
+        return Promise.reject(error);
+      }
     };
     try {
       const response = await api("DELETE", `/projects/${projectId}`);
       assert.equal(response.status, 204);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
     } finally {
       Object.assign(repoGit, { commitAll: originals.commitAll });
     }
@@ -647,7 +772,13 @@ describe("project, feature and spec through the writer", () => {
     assert.deepEqual(await featuresRepository.listFeatures(projectId), []);
     assert.ok(!existsSync(checkoutDir));
     assert.ok(!existsSync(bareDir));
-    assert.equal((await api("DELETE", `/projects/${projectId}`)).status, 404);
+    assert.equal(
+      await (async () => {
+        const awaitedValue22581 = await api("DELETE", `/projects/${projectId}`);
+        return awaitedValue22581.status;
+      })(),
+      404
+    );
   });
 });
 
@@ -683,25 +814,49 @@ describe(
           return response.json();
         };
         try {
-          assert.equal((await view()).vncSessionId, null);
+          assert.equal(
+            await (async () => {
+              const awaitedValue23994 = await view();
+              return awaitedValue23994.vncSessionId;
+            })(),
+            null
+          );
           assert.equal(tryReserveChatTurn(chat.id), true);
           const browser = await getOrCreateChatBrowser(chat.id, [
             "https://app.example.com",
           ]);
           await browser.mcp.ensureBrowser();
           beginChatBrowserTool(chat.id, "browser_snapshot");
-          assert.equal((await view()).vncSessionId, browser.vnc.id);
+          assert.equal(
+            await (async () => {
+              const awaitedValue24337 = await view();
+              return awaitedValue24337.vncSessionId;
+            })(),
+            browser.vnc.id
+          );
           await readBrowserSnapshot(browser.mcp);
           endChatBrowserTool(chat.id, "browser_snapshot");
           assert.equal(
-            (await view()).vncSessionId,
+            await (async () => {
+              const awaitedValue24528 = await view();
+              return awaitedValue24528.vncSessionId;
+            })(),
             browser.vnc.id,
             "ending a tool does not remove the live browser"
           );
           releaseChatTurn(chat.id);
-          assert.equal((await view()).busy, false);
           assert.equal(
-            (await view()).vncSessionId,
+            await (async () => {
+              const awaitedValue24718 = await view();
+              return awaitedValue24718.busy;
+            })(),
+            false
+          );
+          assert.equal(
+            await (async () => {
+              const awaitedValue24783 = await view();
+              return awaitedValue24783.vncSessionId;
+            })(),
             browser.vnc.id,
             "the browser remains visible after the reply"
           );
@@ -719,7 +874,10 @@ describe(
           await closeChatBrowser(chat.id);
           assert.equal(getVncSession(browser.vnc.id), null);
           assert.equal(
-            (await view()).vncSessionId,
+            await (async () => {
+              const awaitedValue25467 = await view();
+              return awaitedValue25467.vncSessionId;
+            })(),
             null,
             "explicit cleanup releases the session"
           );
@@ -750,9 +908,10 @@ describe(
           await import("../../src/infra/repositories/environments");
         const listen = async (handler: Parameters<typeof createServer>[1]) => {
           const server = createServer(handler);
-          await new Promise<void>((resolve) =>
-            server.listen(0, "127.0.0.1", resolve)
-          );
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise<void>((resolve) => {
+            server.listen(0, "127.0.0.1", resolve);
+          });
           return {
             server,
             origin: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
@@ -772,7 +931,13 @@ describe(
         const chat = await createChat(projectId);
         try {
           const startUrl = `${application.origin}/`;
-          const production = (await environmentsRepository.list(projectId))[0]!;
+          const production = requireValue(
+            await (async () => {
+              const awaitedValue27631 =
+                await environmentsRepository.list(projectId);
+              return awaitedValue27631[0];
+            })()
+          );
           const untrusted = chatNavigationOrigins(
             startUrl,
             await resolveRunEnvironment(projectId),
@@ -781,10 +946,12 @@ describe(
           assert.ok(!untrusted.includes(provider.origin));
           const blocked = await getOrCreateChatBrowser(chat.id, untrusted);
           await blocked.mcp.ensureBrowser();
-          await blocked.mcp.navigate(startUrl).catch(() => undefined);
+          await blocked.mcp.navigate(startUrl).catch(() => {
+            /* Intentionally ignore this best-effort operation. */
+          });
           assert.doesNotMatch(
             await readBrowserSnapshot(blocked.mcp),
-            /Identity provider sign in/
+            /Identity provider sign in/u
           );
 
           await environmentsRepository.update(production, {
@@ -801,12 +968,12 @@ describe(
           await browser.mcp.ensureBrowser();
           await browser.mcp.navigate(startUrl);
           assert.equal(
-            new URL((await getActiveTabUrl(browser.mcp))!).origin,
+            new URL(requireValue(await getActiveTabUrl(browser.mcp))).origin,
             provider.origin
           );
           assert.match(
             await readBrowserSnapshot(browser.mcp),
-            /Identity provider sign in/
+            /Identity provider sign in/u
           );
         } finally {
           await closeChatBrowser(chat.id);
@@ -820,7 +987,8 @@ describe(
 );
 
 describe("first-run setup", () => {
-  async function setupApp() {
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
+  const setupApp = async function setupApp() {
     const { createSetupRouter } =
       await import("../../src/infra/web/routes/setup");
     const { createSettingsRouter } =
@@ -840,6 +1008,7 @@ describe("first-run setup", () => {
         createdAt: "",
         updatedAt: "",
       });
+      // oxlint-disable-next-line node/callback-return -- The awaited Hono middleware or HTTP helper is not a Node error-first callback.
       await next();
     });
     setup.onError(handleRequestError);
@@ -847,7 +1016,7 @@ describe("first-run setup", () => {
     setup.route("/", createSettingsRouter());
     setup.route("/", createProjectContextsRouter());
     return setup;
-  }
+  };
 
   test("demo creates an ordinary project with public credentials and discovery requires a connected model", async () => {
     const setup = await setupApp();
@@ -860,7 +1029,10 @@ describe("first-run setup", () => {
     const { chatsRepository } =
       await import("../../src/infra/repositories/chats");
     await settingsRepository.updateLlmSettings({ provider: "", model: "" });
-    const status = await (await setup.request("/setup/status")).json();
+    const status = await (async () => {
+      const awaitedValue30911 = await setup.request("/setup/status");
+      return awaitedValue30911.json();
+    })();
     assert.equal(status.needsAdmin, true);
     assert.equal(status.modelReady, false);
     assert.equal(status.completed, false);
@@ -870,17 +1042,23 @@ describe("first-run setup", () => {
     assert.equal(project.baseUrl, "https://www.saucedemo.com");
     assert.equal(await repoBare.bareExists(project.id), true);
     assert.deepEqual(
-      (await listCredentialValues(project.id)).map(({ field, value }) => ({
-        field,
-        value,
-      })),
+      await (async () => {
+        const awaitedValue31407 = await listCredentialValues(project.id);
+        return awaitedValue31407.map(({ field, value }) => ({
+          field,
+          value,
+        }));
+      })(),
       [
         { field: "username", value: "standard_user" },
         { field: "password", value: "secret_sauce" },
       ]
     );
     assert.deepEqual(
-      (await listSecretValues(project.id)).map(({ field }) => field),
+      await (async () => {
+        const awaitedValue31678 = await listSecretValues(project.id);
+        return awaitedValue31678.map(({ field }) => field);
+      })(),
       ["password"]
     );
     assert.deepEqual(await chatsRepository.listChatRows(project.id), []);
@@ -894,8 +1072,11 @@ describe("first-run setup", () => {
     );
     assert.equal(discovery.status, 409);
     assert.match(
-      (await discovery.json()).error,
-      /Connect a model in global Settings/
+      await (async () => {
+        const awaitedValue32127 = await discovery.json();
+        return awaitedValue32127.error;
+      })(),
+      /Connect a model in global Settings/u
     );
     assert.equal(
       await projectContextsRepository.getActiveProjectContextDraft(project.id),
@@ -922,7 +1103,7 @@ describe("first-run setup", () => {
     assert.equal(new Set(ids).size, 1);
     assert.match(
       ids[0],
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
     );
     const [stored] = await db
       .select({ deviceId: appSettings.llmDeviceId })
@@ -964,26 +1145,32 @@ describe("first-run setup", () => {
     const login = t.mock.method(
       runtime,
       "login",
-      async (
+      (
         provider: string,
         type: string,
         interaction: Parameters<typeof runtime.login>[2],
         options: Parameters<typeof runtime.login>[3]
       ) => {
-        assert.equal(provider, "openai");
-        assert.equal(type, "oauth");
-        assert.ok(interaction.signal instanceof AbortSignal);
-        assert.ok(options?.getDeviceId);
-        const deviceId = options.getDeviceId();
-        assert.match(
-          deviceId,
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-        );
-        assert.equal(options.getDeviceId(), deviceId);
-        interaction.notify({
-          type: "auth_url",
-          url: "https://auth.example.com/sign-in",
-        });
+        try {
+          assert.equal(provider, "openai");
+          assert.equal(type, "oauth");
+          assert.ok(interaction.signal instanceof AbortSignal);
+          assert.ok(options?.getDeviceId);
+          const deviceId = options.getDeviceId();
+          assert.match(
+            deviceId,
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
+          );
+          assert.equal(options.getDeviceId(), deviceId);
+          interaction.notify({
+            type: "auth_url",
+            url: "https://auth.example.com/sign-in",
+          });
+
+          return Promise.resolve();
+        } catch (error) {
+          return Promise.reject(error);
+        }
       }
     );
     const started = await setup.request(
@@ -992,9 +1179,10 @@ describe("first-run setup", () => {
     );
     assert.equal(started.status, 200);
     const { sessionId } = (await started.json()) as { sessionId: string };
-    assert.match(sessionId, /^[0-9a-f-]{36}$/);
+    assert.match(sessionId, /^[0-9a-f-]{36}$/u);
     let result: { status: string; url?: string } | undefined;
-    for (let attempt = 0; attempt < 100; attempt++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let attempt = 0; attempt < 100; attempt += 1) {
       const polled = await setup.request(
         `/settings/llm/providers/openai/oauth/poll?sessionId=${sessionId}`
       );
@@ -1003,8 +1191,12 @@ describe("first-run setup", () => {
       if (result.status !== "pending") {
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
     }
+    /* oxlint-enable no-await-in-loop */
     assert.deepEqual(result, {
       status: "done",
       url: "https://auth.example.com/sign-in",
@@ -1022,7 +1214,13 @@ describe("first-run setup", () => {
       { method: "POST" }
     );
     assert.equal(unsupported.status, 400);
-    assert.match((await unsupported.json()).error, /OAuth is not supported/);
+    assert.match(
+      await (async () => {
+        const awaitedValue36956 = await unsupported.json();
+        return awaitedValue36956.error;
+      })(),
+      /OAuth is not supported/u
+    );
     assert.equal(login.mock.callCount(), 1);
   });
 
@@ -1030,26 +1228,12 @@ describe("first-run setup", () => {
     "OpenAI's real subscription SDK opens sign-in with a persistent installation ID without token requests",
     { timeout: 15_000 },
     async (t) => {
-      const setup = await setupApp();
-      const { settingsRepository } =
-        await import("../../src/infra/repositories/settings");
-      const deviceId = await settingsRepository.getLlmDeviceId();
-      const fetch = t.mock.method(globalThis, "fetch", async () => {
-        throw new Error(
-          "The sign-in startup test must not make token requests"
-        );
-      });
-      interface OAuthResult {
-        status: "pending" | "done" | "error";
-        url?: string;
-        prompt?: { type: string; placeholder?: string };
-        error?: string;
-      }
-      async function pollUntil(
+      const pollUntil = async function pollUntil(
         sessionId: string,
         ready: (result: OAuthResult) => boolean
       ): Promise<OAuthResult> {
         const deadline = Date.now() + 3000;
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
         while (Date.now() < deadline) {
           const response = await setup.request(
             `/settings/llm/providers/openai/oauth/poll?sessionId=${sessionId}`
@@ -1064,14 +1248,40 @@ describe("first-run setup", () => {
             "pending",
             result.error ?? "Sign-in ended before the expected event"
           );
-          await new Promise((resolve) => setTimeout(resolve, 10));
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 10);
+          });
         }
+        /* oxlint-enable no-await-in-loop */
         assert.fail(
           "OpenAI sign-in did not produce the expected event in time"
         );
+      };
+
+      const setup = await setupApp();
+      const { settingsRepository } =
+        await import("../../src/infra/repositories/settings");
+      const deviceId = await settingsRepository.getLlmDeviceId();
+      const fetch = t.mock.method(globalThis, "fetch", () => {
+        try {
+          throw new Error(
+            "The sign-in startup test must not make token requests"
+          );
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      });
+      interface OAuthResult {
+        status: "pending" | "done" | "error";
+        url?: string;
+        prompt?: { type: string; placeholder?: string };
+        error?: string;
       }
+
       try {
-        for (let attempt = 0; attempt < 2; attempt++) {
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+        for (let attempt = 0; attempt < 2; attempt += 1) {
           const started = await setup.request(
             "/settings/llm/providers/openai/oauth/start",
             { method: "POST" }
@@ -1087,7 +1297,7 @@ describe("first-run setup", () => {
             pending.prompt?.placeholder,
             "http://127.0.0.1:1455/auth/callback"
           );
-          const url = new URL(pending.url!);
+          const url = new URL(requireValue(pending.url));
           assert.equal(url.origin, "https://auth.openai.com");
           assert.equal(
             url.searchParams.get("ext_agent_host_id"),
@@ -1120,6 +1330,7 @@ describe("first-run setup", () => {
           );
           assert.equal(await settingsRepository.getLlmDeviceId(), deviceId);
         }
+        /* oxlint-enable no-await-in-loop */
         assert.equal(fetch.mock.callCount(), 0);
       } finally {
         await setup.request("/settings/llm/providers/openai", {
@@ -1139,10 +1350,16 @@ describe("first-run setup", () => {
       method: "POST",
     });
     assert.equal(missing.status, 400);
-    assert.equal((await missing.json()).code, "model_not_configured");
+    assert.equal(
+      await (async () => {
+        const awaitedValue41335 = await missing.json();
+        return awaitedValue41335.code;
+      })(),
+      "model_not_configured"
+    );
     const registry = await modelRegistryPromise;
     const runtime = await modelRuntimePromise;
-    const model = registry.getAll()[0];
+    const [model] = registry.getAll();
     assert.ok(model);
     await settingsRepository.updateLlmSettings({
       provider: model.provider,
@@ -1153,19 +1370,23 @@ describe("first-run setup", () => {
     t.mock.method(
       runtime,
       "completeSimple",
-      async (
+      (
         _model: unknown,
         context: Parameters<typeof runtime.completeSimple>[1],
         options: Parameters<typeof runtime.completeSimple>[2]
       ) => {
-        called++;
-        assert.equal(context.messages[0].content, "Reply with OK.");
-        assert.equal(options?.maxTokens, 16);
-        assert.ok(options?.signal instanceof AbortSignal);
-        if (called === 1) {
-          throw new Error("401 invalid API key sk-never-expose");
+        try {
+          called += 1;
+          assert.equal(context.messages[0].content, "Reply with OK.");
+          assert.equal(options?.maxTokens, 16);
+          assert.ok(options?.signal instanceof AbortSignal);
+          if (called === 1) {
+            throw new Error("401 invalid API key sk-never-expose");
+          }
+          return Promise.resolve({ stopReason: "stop" });
+        } catch (error) {
+          return Promise.reject(error);
         }
-        return { stopReason: "stop" };
       }
     );
     try {
@@ -1175,15 +1396,27 @@ describe("first-run setup", () => {
       assert.equal(failed.status, 400);
       const body = await failed.json();
       assert.equal(body.code, "provider_auth");
-      assert.match(body.nextStep, /reconnect/);
-      assert.doesNotMatch(JSON.stringify(body), /sk-never-expose/);
+      assert.match(body.nextStep, /reconnect/u);
+      assert.doesNotMatch(JSON.stringify(body), /sk-never-expose/u);
       const passed = await setup.request("/settings/llm/test", {
         method: "POST",
       });
       assert.equal(passed.status, 200);
-      assert.equal((await passed.json()).ok, true);
       assert.equal(
-        (await (await setup.request("/setup/status")).json()).modelReady,
+        await (async () => {
+          const awaitedValue42842 = await passed.json();
+          return awaitedValue42842.ok;
+        })(),
+        true
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedValue42903 = await (async () => {
+            const awaitedValue45355 = await setup.request("/setup/status");
+            return awaitedValue45355.json();
+          })();
+          return awaitedValue42903.modelReady;
+        })(),
         true
       );
     } finally {
@@ -1197,14 +1430,18 @@ describe("first-run setup", () => {
     t.mock.method(
       fs,
       "access",
-      async (
+      (
         file: Parameters<typeof fs.access>[0],
         mode: Parameters<typeof fs.access>[1]
       ) => {
-        if (/chrome|chromium|Xvfb|x11vnc/.test(String(file))) {
-          throw new Error("ENOENT /home/server/private");
+        try {
+          if (/chrome|chromium|Xvfb|x11vnc/u.test(String(file))) {
+            throw new Error("ENOENT /home/server/private");
+          }
+          return Promise.resolve(access(file, mode));
+        } catch (error) {
+          return Promise.reject(error);
         }
-        return access(file, mode);
       }
     );
     const response = await setup.request("/ready");
@@ -1220,12 +1457,13 @@ describe("first-run setup", () => {
     assert.equal(status.checks[2].ok, false);
     assert.equal(status.checks[3].ok, false);
     assert.ok(status.checks[4].nextStep);
-    assert.doesNotMatch(JSON.stringify(status), /private|ENOENT/);
+    assert.doesNotMatch(JSON.stringify(status), /private|ENOENT/u);
     const { storageRoot } = await import("../../src/core/paths");
     assert.equal(
-      (await fs.readdir(storageRoot)).some((name) =>
-        name.startsWith(".ready-")
-      ),
+      await (async () => {
+        const awaitedValue44364 = await fs.readdir(storageRoot);
+        return awaitedValue44364.some((name) => name.startsWith(".ready-"));
+      })(),
       false
     );
   });
@@ -1239,21 +1477,27 @@ describe("autonomous job proposals", () => {
       const { jobsRepository } =
         await import("../../src/infra/repositories/jobs");
       const { drainJobs } = await import("../../src/core/jobs/worker");
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
       let release = () => {};
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
       let entered = () => {};
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
       let rerun = () => {};
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       const firstRead = new Promise<void>((resolve) => {
         entered = resolve;
       });
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       const secondRead = new Promise<void>((resolve) => {
         rerun = resolve;
       });
       let reads = 0;
       t.mock.method(jobsRepository, "queued", async () => {
-        reads++;
+        reads += 1;
         if (reads === 1) {
           entered();
           await gate;
@@ -1271,7 +1515,10 @@ describe("autonomous job proposals", () => {
       }
       await draining;
       await secondRead;
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
       assert.equal(reads, 2);
     }
   );
@@ -1283,9 +1530,10 @@ describe("autonomous job proposals", () => {
     const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
     const { Type } = await import("@earendil-works/pi-ai");
     const projectId = await createProject("Typed job policy");
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const [kind, name, message] of [
-      ["coverage", "create_spec", /propose_spec_batch/],
-      ["generate_spec", "update_spec", /selected Spec/],
+      ["coverage", "create_spec", /propose_spec_batch/u],
+      ["generate_spec", "update_spec", /selected Spec/u],
     ] as const) {
       const row = await jobsRepository.create({
         projectId,
@@ -1295,25 +1543,39 @@ describe("autonomous job proposals", () => {
         goal: "Scoped work",
         limits: jobLimitsSchema.parse({}),
       });
-      const job = (await jobsRepository.claim(row.id))!;
-      const tool = createJobPolicy(job, () => {}).tools([
-        {
-          name,
-          label: name,
-          description: "test",
-          parameters: Type.Object({}),
-          async execute() {
-            throw new Error("Original mutation must not run");
+      const job = requireValue(await jobsRepository.claim(row.id));
+      const tool = requireValue(
+        createJobPolicy(job, () => {}).tools([
+          {
+            name,
+            label: name,
+            description: "test",
+            parameters: Type.Object({}),
+            execute() {
+              try {
+                throw new Error("Original mutation must not run");
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            },
           },
-        },
-      ])[0]!;
+        ])[0]
+      );
       await assert.rejects(
         () => tool.execute("call", {}, undefined, undefined, {} as never),
         message
       );
-      assert.equal((await jobsRepository.get(job.id))?.actionsUsed, 1);
+      assert.equal(
+        await (async () => {
+          const awaitedResult51319 = await jobsRepository.get(job.id);
+          return awaitedResult51319?.actionsUsed;
+        })(),
+        1
+      );
       await jobsRepository.update(job.id, { status: "cancelled" });
     }
+    /* oxlint-enable no-await-in-loop */
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const code of ["environment", "infrastructure"] as const) {
       const row = await jobsRepository.create({
         projectId,
@@ -1322,36 +1584,42 @@ describe("autonomous job proposals", () => {
         goal: "Confirm access",
         limits: jobLimitsSchema.parse({}),
       });
-      const job = (await jobsRepository.claim(row.id))!;
+      const job = requireValue(await jobsRepository.claim(row.id));
       let aborted = false;
-      const tool = createJobPolicy(job, () => {
-        aborted = true;
-      }).tools([
-        {
-          name: "toString",
-          label: "toString",
-          description: "test",
-          parameters: Type.Object({}),
-          async execute() {
-            return {
-              isError: true,
-              errorCode: code,
-              content: [
-                {
-                  type: "text" as const,
-                  text:
-                    code === "environment"
-                      ? "No LLM model; Xvfb failed"
-                      : "Access needed",
-                },
-              ],
-              details: undefined,
-            };
+      const tool = requireValue(
+        createJobPolicy(job, () => {
+          aborted = true;
+        }).tools([
+          {
+            name: "toString",
+            label: "toString",
+            description: "test",
+            parameters: Type.Object({}),
+            execute() {
+              try {
+                return Promise.resolve({
+                  isError: true,
+                  errorCode: code,
+                  content: [
+                    {
+                      type: "text" as const,
+                      text:
+                        code === "environment"
+                          ? "No LLM model; Xvfb failed"
+                          : "Access needed",
+                    },
+                  ],
+                  details: undefined,
+                });
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            },
           },
-        },
-      ])[0]!;
+        ])[0]
+      );
       await tool.execute("call", {}, undefined, undefined, {} as never);
-      const changed = (await jobsRepository.get(job.id))!;
+      const changed = requireValue(await jobsRepository.get(job.id));
       assert.equal(changed.errorCode, code);
       assert.equal(aborted, code === "infrastructure");
       assert.equal(
@@ -1360,6 +1628,7 @@ describe("autonomous job proposals", () => {
       );
       await jobsRepository.update(job.id, { status: "cancelled" });
     }
+    /* oxlint-enable no-await-in-loop */
   });
 
   test("Inbox queries isolate jobs, kinds and statuses", async () => {
@@ -1404,51 +1673,78 @@ describe("autonomous job proposals", () => {
     });
     await jobsRepository.updateItem(question.id, { status: "answered" });
     assert.deepEqual(
-      (
-        await jobsRepository.itemsForJob(first.id, {
+      await (async () => {
+        const awaitedValue49998 = await jobsRepository.itemsForJob(first.id, {
           kind: "question",
           statuses: ["answered"],
-        })
-      ).map((item) => item.id),
+        });
+        return awaitedValue49998.map((item) => item.id);
+      })(),
       [question.id]
     );
     assert.deepEqual(
-      (
-        await jobsRepository.itemsForJobs(projectId, [first.id], {
-          kind: "note",
-        })
-      ).map((item) => item.id),
+      await (async () => {
+        const awaitedValue50213 = await jobsRepository.itemsForJobs(
+          projectId,
+          [first.id],
+          {
+            kind: "note",
+          }
+        );
+        return awaitedValue50213.map((item) => item.id);
+      })(),
       [note.id]
     );
     assert.equal(
-      (await jobsRepository.itemsByKind(projectId, "question", ["pending"]))
-        .length,
+      await (async () => {
+        const awaitedValue50396 = await jobsRepository.itemsByKind(
+          projectId,
+          "question",
+          ["pending"]
+        );
+        return awaitedValue50396.length;
+      })(),
       1
     );
-    assert.equal((await jobsRepository.itemsForJob(second.id)).length, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedValue50516 = await jobsRepository.itemsForJob(second.id);
+        return awaitedValue50516.length;
+      })(),
+      1
+    );
     assert.deepEqual(await jobsRepository.itemsForJobs(projectId, []), []);
     const sourceChatId = crypto.randomUUID();
     await jobsRepository.updateItem(note.id, { payload: { sourceChatId } });
     assert.deepEqual(
-      (await jobsRepository.itemsForChat(projectId, sourceChatId, [], [])).map(
-        (item) => item.id
-      ),
+      await (async () => {
+        const awaitedValue50801 = await jobsRepository.itemsForChat(
+          projectId,
+          sourceChatId,
+          [],
+          []
+        );
+        return awaitedValue50801.map((item) => item.id);
+      })(),
       [note.id]
     );
     assert.deepEqual(
-      (
-        await jobsRepository.itemsForChat(
+      await (async () => {
+        const awaitedValue50961 = await jobsRepository.itemsForChat(
           projectId,
           crypto.randomUUID(),
           [],
           [question.id]
-        )
-      ).map((item) => item.id),
+        );
+        return awaitedValue50961.map((item) => item.id);
+      })(),
       [question.id]
     );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const job of [first, second]) {
       await jobsRepository.update(job.id, { status: "cancelled" });
     }
+    /* oxlint-enable no-await-in-loop */
   });
 
   test("Inbox file previews match the committed bytes for additions and behavior changes", async () => {
@@ -1479,7 +1775,7 @@ describe("autonomous job proposals", () => {
           };
         }[];
       };
-      return items.find((item) => item.id === id)!.payload.files;
+      return requireValue(items.find((item) => item.id === id)).payload.files;
     };
     const featureProposal = await proposeMutation(job, "create_feature", {
       title: "Checkout",
@@ -1488,7 +1784,13 @@ describe("autonomous job proposals", () => {
     const featureFiles = await preview(featureProposal.id);
     assert.equal(featureFiles[0]?.before, null);
     await applyProposal(featureProposal);
-    const feature = (await featuresRepository.listFeatures(projectId))[0]!;
+    const feature = requireValue(
+      await (async () => {
+        const awaitedValue52840 =
+          await featuresRepository.listFeatures(projectId);
+        return awaitedValue52840[0];
+      })()
+    );
     assert.equal(
       await fs.readFile(
         path.join(repoGit.getRepoDir(projectId), feature.path, "feature.yml"),
@@ -1507,7 +1809,13 @@ describe("autonomous job proposals", () => {
     assert.equal(added.length, 2);
     assert.ok(added.every((file) => file.before === null));
     await applyProposal(proposal);
-    const spec = (await specsRepository.listSpecs(projectId))[0]!;
+    const spec = requireValue(
+      await (async () => {
+        const awaitedValue53481 = await specsRepository.listSpecs(projectId);
+        return awaitedValue53481[0];
+      })()
+    );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const file of added) {
       assert.equal(
         await fs.readFile(
@@ -1517,6 +1825,7 @@ describe("autonomous job proposals", () => {
         file.after
       );
     }
+    /* oxlint-enable no-await-in-loop */
     const yamlFile = path.join(
       repoGit.getRepoDir(projectId),
       spec.path,
@@ -1604,12 +1913,13 @@ describe("autonomous job proposals", () => {
     assert.equal(await repoGit.getHeadSha(projectId), head);
     assert.equal(await fs.readFile(yamlFile, "utf-8"), original);
     assert.equal(
-      (
-        await proposeMutation(job, "update_spec", {
+      await (async () => {
+        const awaitedValue57000 = await proposeMutation(job, "update_spec", {
           specId: spec.id,
           testSource: source,
-        })
-      ).id,
+        });
+        return awaitedValue57000.id;
+      })(),
       proposal.id
     );
     const commit = await applyProposal(proposal);
@@ -1624,7 +1934,7 @@ describe("autonomous job proposals", () => {
     await writer.updateSpecWithLock(spec.id, {
       testSource: source.replace("/login", "/other"),
     });
-    await assert.rejects(() => applyProposal(stale), /Spec changed/);
+    await assert.rejects(() => applyProposal(stale), /Spec changed/u);
     const other = await createProject("Other project");
     const otherFeature = await writer.createFeatureInRepo(
       other,
@@ -1643,7 +1953,7 @@ describe("autonomous job proposals", () => {
           specId: otherSpec.id,
           testSource: source,
         }),
-      /not found/
+      /not found/u
     );
   });
 
@@ -1660,7 +1970,7 @@ describe("autonomous job proposals", () => {
       goal: "Inspect",
       limits: jobLimitsSchema.parse({ maxActions: 1 }),
     });
-    const job = (await jobsRepository.claim(row.id))!;
+    const job = requireValue(await jobsRepository.claim(row.id));
     let executed = 0;
     let aborted = false;
     const { Type } = await import("@earendil-works/pi-ai");
@@ -1672,22 +1982,32 @@ describe("autonomous job proposals", () => {
         label: "test_tool",
         description: "test",
         parameters: Type.Object({}),
-        async execute() {
-          executed++;
-          return { content: [], details: undefined };
+        execute() {
+          try {
+            executed += 1;
+            return Promise.resolve({ content: [], details: undefined });
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       },
     ]);
-    const tool = tools[0]!;
+    const tool = requireValue(tools[0]);
     await tool.execute("1", {}, undefined, undefined, {} as never);
     assert.equal(executed, 1);
     await assert.rejects(
       () => tool.execute("2", {}, undefined, undefined, {} as never),
-      /did not reach a confirmed result/i
+      /did not reach a confirmed result/iu
     );
     assert.equal(executed, 1);
     assert.ok(aborted);
-    assert.equal((await jobsRepository.get(job.id))?.status, "stalled");
+    assert.equal(
+      await (async () => {
+        const awaitedResult65047 = await jobsRepository.get(job.id);
+        return awaitedResult65047?.status;
+      })(),
+      "stalled"
+    );
     const row2 = await jobsRepository.create({
       projectId,
       chatId: crypto.randomUUID(),
@@ -1695,38 +2015,65 @@ describe("autonomous job proposals", () => {
       goal: "Credentials",
       limits: jobLimitsSchema.parse({}),
     });
-    const job2 = (await jobsRepository.claim(row2.id))!;
+    const job2 = requireValue(await jobsRepository.claim(row2.id));
     let paused = false;
-    const credential = createJobPolicy(job2, () => {
-      paused = true;
-    }).tools([
-      {
-        name: "request_credential",
-        label: "request",
-        description: "test",
-        parameters: Type.Object({}),
-        async execute() {
-          throw new Error("must be intercepted");
+    const credential = requireValue(
+      createJobPolicy(job2, () => {
+        paused = true;
+      }).tools([
+        {
+          name: "request_credential",
+          label: "request",
+          description: "test",
+          parameters: Type.Object({}),
+          execute() {
+            try {
+              throw new Error("must be intercepted");
+            } catch (error) {
+              return Promise.reject(error);
+            }
+          },
         },
-      },
-    ])[0]!;
+      ])[0]
+    );
     await credential.execute("1", {}, undefined, undefined, {} as never);
     assert.ok(
       paused,
       "a question aborts the turn even when other tool calls were batched"
     );
-    assert.equal((await jobsRepository.get(job2.id))?.status, "blocked");
-    assert.equal((await jobsRepository.inbox(projectId))[0]?.kind, "question");
+    assert.equal(
+      await (async () => {
+        const awaitedResult65979 = await jobsRepository.get(job2.id);
+        return awaitedResult65979?.status;
+      })(),
+      "blocked"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult66060 = await (async () => {
+          const awaitedValue60598 = await jobsRepository.inbox(projectId);
+          return awaitedValue60598[0];
+        })();
+        return awaitedResult66060?.kind;
+      })(),
+      "question"
+    );
     await assert.rejects(
       () => credential.execute("2", {}, undefined, undefined, {} as never),
-      /paused/
+      /paused/u
     );
     await jobsRepository.update(job2.id, {
       status: "running",
       startedAt: new Date().toISOString(),
     });
     await jobsRepository.recover();
-    assert.equal((await jobsRepository.get(job2.id))?.status, "queued");
+    assert.equal(
+      await (async () => {
+        const awaitedResult66554 = await jobsRepository.get(job2.id);
+        return awaitedResult66554?.status;
+      })(),
+      "queued"
+    );
   });
 
   test("session restore confirms browser success and cleans up after runtime failures", async () => {
@@ -1766,7 +2113,7 @@ describe("autonomous job proposals", () => {
             assert.deepEqual(
               JSON.parse(
                 await fs.readFile(
-                  path.join(workDir, input.arguments.filename!),
+                  path.join(workDir, requireValue(input.arguments.filename)),
                   "utf-8"
                 )
               ),
@@ -1797,22 +2144,30 @@ describe("autonomous job proposals", () => {
           };
         },
       },
-      async navigate(url: string) {
-        navigations++;
-        assert.equal(url, "https://app.example.com");
-        if (navigateError) {
-          throw new Error(
-            "browser tool failed: Browser is already in use for /tmp/profile"
-          );
+      navigate(url: string) {
+        try {
+          navigations += 1;
+          assert.equal(url, "https://app.example.com");
+          if (navigateError) {
+            throw new Error(
+              "browser tool failed: Browser is already in use for /tmp/profile"
+            );
+          }
+
+          return Promise.resolve();
+        } catch (error) {
+          return Promise.reject(error);
         }
       },
-    } as unknown as import("../../src/core/browser/mcp").BrowserMcp;
-    const tool = createSessionTools({
-      projectId,
-      baseUrl: "https://app.example.com",
-      mcp,
-      workDir,
-    }).find((tool) => tool.name === "resume_session")!;
+    } as unknown as BrowserMcp;
+    const tool = requireValue(
+      createSessionTools({
+        projectId,
+        baseUrl: "https://app.example.com",
+        mcp,
+        workDir,
+      }).find((toolInTest) => toolInTest.name === "resume_session")
+    );
     const restore = () =>
       tool.execute(
         "restore",
@@ -1824,14 +2179,14 @@ describe("autonomous job proposals", () => {
     const rejected = await restore();
     assert.equal((rejected as { isError?: boolean }).isError, true);
     assert.equal(navigations, 0);
-    assert.doesNotMatch(JSON.stringify(rejected), /Session restored/);
-    assert.match(JSON.stringify(rejected), /EROFS/);
+    assert.doesNotMatch(JSON.stringify(rejected), /Session restored/u);
+    assert.match(JSON.stringify(rejected), /EROFS/u);
     assert.equal(isInfrastructureFailure(JSON.stringify(rejected)), true);
     restoreError = false;
     navigateError = true;
     const navigationFailure = await restore();
     assert.equal((navigationFailure as { isError?: boolean }).isError, true);
-    assert.doesNotMatch(JSON.stringify(navigationFailure), /Session restored/);
+    assert.doesNotMatch(JSON.stringify(navigationFailure), /Session restored/u);
     assert.equal(
       isInfrastructureFailure(JSON.stringify(navigationFailure)),
       true
@@ -1842,17 +2197,17 @@ describe("autonomous job proposals", () => {
     assert.equal((unconfirmed as { isError?: boolean }).isError, true);
     assert.match(
       JSON.stringify(unconfirmed),
-      /could not confirm the current page address/
+      /could not confirm the current page address/u
     );
     activeUrl = "https://other.example.com/";
     assert.match(
       JSON.stringify(await restore()),
-      /restored page origin is not allowed/
+      /restored page origin is not allowed/u
     );
     activeUrl = "https://app.example.com/";
     const restored = await restore();
     assert.notEqual((restored as { isError?: boolean }).isError, true);
-    assert.match(JSON.stringify(restored), /Session restored/);
+    assert.match(JSON.stringify(restored), /Session restored/u);
     assert.equal(navigations, 4);
     assert.deepEqual(
       await fs.readdir(workDir),
@@ -1869,6 +2224,7 @@ describe("autonomous job proposals", () => {
     const { bridgeBrowserTools } = await import("../../src/core/browser/mcp");
     const { Type } = await import("@earendil-works/pi-ai");
     const projectId = await createProject("Browser infrastructure retry");
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const name of ["browser_navigate", "resume_session"]) {
       const row = await jobsRepository.create({
         projectId,
@@ -1877,7 +2233,7 @@ describe("autonomous job proposals", () => {
         goal: "Confirm inventory order",
         limits: jobLimitsSchema.parse({}),
       });
-      const job = (await jobsRepository.claim(row.id))!;
+      const job = requireValue(await jobsRepository.claim(row.id));
       let aborted = false;
       const mcp = {
         tools: [
@@ -1887,43 +2243,53 @@ describe("autonomous job proposals", () => {
           },
         ],
         client: {
-          async callTool() {
-            return {
-              isError: true,
-              errorCode: "infrastructure",
-              content: [
-                {
-                  type: "text",
-                  text: "Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'",
-                },
-              ],
-            };
+          callTool() {
+            try {
+              return Promise.resolve({
+                isError: true,
+                errorCode: "infrastructure",
+                content: [
+                  {
+                    type: "text",
+                    text: "Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'",
+                  },
+                ],
+              });
+            } catch (error) {
+              return Promise.reject(error);
+            }
           },
         },
-      } as unknown as import("../../src/core/browser/mcp").BrowserMcp;
-      const browser = bridgeBrowserTools(mcp, "/tmp")[0]!;
+      } as unknown as BrowserMcp;
+      const browser = requireValue(bridgeBrowserTools(mcp, "/tmp")[0]);
       const session = {
         name,
         label: name,
         description: "Restore",
         parameters: Type.Object({}),
-        async execute() {
-          return {
-            isError: true,
-            errorCode: "infrastructure",
-            content: [
-              {
-                type: "text" as const,
-                text: "resume_session failed: The browser could not confirm the current page address.",
-              },
-            ],
-            details: undefined,
-          };
+        execute() {
+          try {
+            return Promise.resolve({
+              isError: true,
+              errorCode: "infrastructure",
+              content: [
+                {
+                  type: "text" as const,
+                  text: "resume_session failed: The browser could not confirm the current page address.",
+                },
+              ],
+              details: undefined,
+            });
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       };
-      const tool = createJobPolicy(job, () => {
-        aborted = true;
-      }).tools([name === "browser_navigate" ? browser : session])[0]!;
+      const tool = requireValue(
+        createJobPolicy(job, () => {
+          aborted = true;
+        }).tools([name === "browser_navigate" ? browser : session])[0]
+      );
       const output = await tool.execute(
         "call",
         {},
@@ -1933,13 +2299,14 @@ describe("autonomous job proposals", () => {
       );
       assert.equal((output as { isError?: boolean }).isError, true);
       assert.equal(aborted, true);
-      const retry = (await jobsRepository.get(job.id))!;
+      const retry = requireValue(await jobsRepository.get(job.id));
       assert.equal(retry.status, "queued");
       assert.equal(retry.infrastructureRetries, 1);
       assert.ok(retry.retryAt);
       assert.equal(retry.safetyRetries, 0);
       assert.deepEqual(await jobsRepository.inbox(projectId), []);
     }
+    /* oxlint-enable no-await-in-loop */
   });
 
   test("startup retires existing browser-fault questions while preserving genuine access questions and an explicit pause", async () => {
@@ -1984,7 +2351,7 @@ describe("autonomous job proposals", () => {
     await settingsRepository.setAgentPaused(true);
     try {
       await startJobWorker();
-      const recovered = (await jobsRepository.get(internal.job.id))!;
+      const recovered = requireValue(await jobsRepository.get(internal.job.id));
       assert.equal(
         recovered.status,
         "paused",
@@ -1992,20 +2359,39 @@ describe("autonomous job proposals", () => {
       );
       assert.equal(recovered.infrastructureRetries, 1);
       assert.equal(
-        (await jobsRepository.item(internal.question.id))?.status,
+        await (async () => {
+          const awaitedResult76589 = await jobsRepository.item(
+            internal.question.id
+          );
+          return awaitedResult76589?.status;
+        })(),
         "dismissed"
       );
       assert.equal(
-        (await jobsRepository.item(internal.question.id))?.payload
-          .internalRecovery,
+        await (async () => {
+          const awaitedResult76705 = await jobsRepository.item(
+            internal.question.id
+          );
+          return awaitedResult76705?.payload.internalRecovery;
+        })(),
         true
       );
       assert.equal(
-        (await jobsRepository.get(credentials.job.id))?.status,
+        await (async () => {
+          const awaitedResult76843 = await jobsRepository.get(
+            credentials.job.id
+          );
+          return awaitedResult76843?.status;
+        })(),
         "blocked"
       );
       assert.equal(
-        (await jobsRepository.item(credentials.question.id))?.status,
+        await (async () => {
+          const awaitedResult76954 = await jobsRepository.item(
+            credentials.question.id
+          );
+          return awaitedResult76954?.status;
+        })(),
         "pending"
       );
     } finally {
@@ -2047,27 +2433,36 @@ describe("autonomous job proposals", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "approve" }),
       });
-    const before = await commitCount(projectId);
+    const beforeInTest = await commitCount(projectId);
     const responses = await Promise.all([approve(), approve()]);
     assert.deepEqual(
-      responses.map((response) => response.status).sort(),
+      responses.map((response) => response.status).toSorted(),
       [200, 409]
     );
     const approved = await jobsRepository.item(proposal.id);
     assert.equal(approved?.status, "approved");
     assert.ok(approved?.commitSha);
-    assert.equal(await commitCount(projectId), before + 1);
+    assert.equal(await commitCount(projectId), beforeInTest + 1);
     await jobsRepository.updateItem(proposal.id, {
       status: "applying",
       commitSha: null,
     });
     await jobsRepository.recover();
-    assert.equal((await approve()).status, 200);
     assert.equal(
-      (await jobsRepository.item(proposal.id))?.commitSha,
+      await (async () => {
+        const awaitedValue73367 = await approve();
+        return awaitedValue73367.status;
+      })(),
+      200
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult79263 = await jobsRepository.item(proposal.id);
+        return awaitedResult79263?.commitSha;
+      })(),
       approved.commitSha
     );
-    assert.equal(await commitCount(projectId), before + 1);
+    assert.equal(await commitCount(projectId), beforeInTest + 1);
   });
 
   test("answering a question resumes a paused job without reviving a cancelled job", async () => {
@@ -2092,10 +2487,25 @@ describe("autonomous job proposals", () => {
     });
     assert.ok(await jobsRepository.claimItem(question.id));
     await jobsRepository.answer(question, "Configured");
-    assert.equal((await jobsRepository.get(job.id))?.status, "queued");
-    assert.equal((await jobsRepository.item(question.id))?.status, "answered");
     assert.equal(
-      (await jobsRepository.item(question.id))?.answer,
+      await (async () => {
+        const awaitedResult80306 = await jobsRepository.get(job.id);
+        return awaitedResult80306?.status;
+      })(),
+      "queued"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult80378 = await jobsRepository.item(question.id);
+        return awaitedResult80378?.status;
+      })(),
+      "answered"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult80465 = await jobsRepository.item(question.id);
+        return awaitedResult80465?.answer;
+      })(),
       "Configured"
     );
 
@@ -2111,11 +2521,29 @@ describe("autonomous job proposals", () => {
     await jobsRepository.update(job.id, { status: "cancelled" });
     await assert.rejects(
       () => jobsRepository.answer(next, "Restored"),
-      /no longer paused/
+      /no longer paused/u
     );
-    assert.equal((await jobsRepository.get(job.id))?.status, "cancelled");
-    assert.equal((await jobsRepository.item(next.id))?.status, "applying");
-    assert.equal((await jobsRepository.item(next.id))?.answer, null);
+    assert.equal(
+      await (async () => {
+        const awaitedResult81030 = await jobsRepository.get(job.id);
+        return awaitedResult81030?.status;
+      })(),
+      "cancelled"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult81105 = await jobsRepository.item(next.id);
+        return awaitedResult81105?.status;
+      })(),
+      "applying"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult81181 = await jobsRepository.item(next.id);
+        return awaitedResult81181?.answer;
+      })(),
+      null
+    );
   });
 });
 
@@ -2135,22 +2563,44 @@ describe("project steward", () => {
     const { createJobSchema, jobLimitsSchema } =
       await import("../../src/core/jobs/schemas");
     await stopJobWorker();
-    t.mock.method(
-      globalThis,
-      "fetch",
-      async () => new Response('<script src="/unchanged.js"></script>')
-    );
+    t.mock.method(globalThis, "fetch", () => {
+      try {
+        return Promise.resolve(
+          new Response('<script src="/unchanged.js"></script>')
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    });
     const projectId = await createProject("Event decisions");
-    for (let i = 0; i < 3; i++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let i = 0; i < 3; i += 1) {
       await processProjectSteward(projectId);
     }
+    /* oxlint-enable no-await-in-loop */
     assert.equal(
-      (await stewardRepository.intents(projectId)).length,
+      await (async () => {
+        const awaitedValue76579 = await stewardRepository.intents(projectId);
+        return awaitedValue76579.length;
+      })(),
       0,
       "an empty project does not schedule exploration or planning"
     );
-    assert.equal((await jobsRepository.list(projectId)).length, 0);
-    assert.equal((await stewardRepository.signals(projectId)).length, 0);
+    assert.equal(
+      await (async () => {
+        const awaitedValue76732 = await jobsRepository.list(projectId);
+        return awaitedValue76732.length;
+      })(),
+      0
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue76800 = await stewardRepository.signals(projectId);
+        return awaitedValue76800.length;
+      })(),
+      0
+    );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const kind of [
       "empty_project",
       "context_changed",
@@ -2165,9 +2615,13 @@ describe("project steward", () => {
         body: "Inspect this change",
       });
     }
+    /* oxlint-enable no-await-in-loop */
     await processProjectSteward(projectId, false);
     assert.equal(
-      (await stewardRepository.intents(projectId)).length,
+      await (async () => {
+        const awaitedValue77229 = await stewardRepository.intents(projectId);
+        return awaitedValue77229.length;
+      })(),
       0,
       "these observations are not automatic work triggers"
     );
@@ -2178,7 +2632,7 @@ describe("project steward", () => {
           { kind: "coverage", goal: "Find gaps", reason: "No checks" },
           "automatic:gaps"
         ),
-      /explicit human request/
+      /explicit human request/u
     );
     await assert.rejects(
       () =>
@@ -2187,7 +2641,7 @@ describe("project steward", () => {
           { kind: "explore", goal: "Explore", reason: "No checks" },
           "automatic:explore"
         ),
-      /explicit human request/
+      /explicit human request/u
     );
     assert.equal(createJobSchema.safeParse({ kind: "planner" }).success, false);
     await stewardRepository.update(projectId, { autonomy: "observe" });
@@ -2233,11 +2687,15 @@ describe("project steward", () => {
       one.id,
       "dispatch recovery keeps the original identity"
     );
-    assert.equal(await canRunAgentJob(jobs[0]!), true);
+    assert.equal(await canRunAgentJob(requireValue(jobs[0])), true);
     assert.equal(
-      (await stewardRepository.intents(projectId)).find(
-        (item) => item.id === event.id
-      )?.status,
+      await (async () => {
+        const awaitedResult85468 = await (async () => {
+          const awaitedValue79183 = await stewardRepository.intents(projectId);
+          return awaitedValue79183.find((item) => item.id === event.id);
+        })();
+        return awaitedResult85468?.status;
+      })(),
       "pending",
       "observation mode records event work without dispatching it"
     );
@@ -2254,9 +2712,9 @@ describe("project steward", () => {
       false,
       "worker dispatch respects observation mode too"
     );
-    const tools = createJobPolicy(jobs[0]!, () => undefined).tools([
-      createBackgroundTaskTool(projectId, "chat:policy-check"),
-    ]);
+    const tools = createJobPolicy(requireValue(jobs[0]), () => {
+      /* Intentionally ignore this best-effort operation. */
+    }).tools([createBackgroundTaskTool(projectId, "chat:policy-check")]);
     assert.equal(
       tools.some((tool) =>
         ["start_background_task", "propose_intents"].includes(tool.name)
@@ -2268,18 +2726,22 @@ describe("project steward", () => {
     const again = await enqueueIntent(projectId, requested, "chat:two", "user");
     await processProjectSteward(projectId, false);
     assert.equal(
-      (await jobsRepository.get(again.id))?.status,
+      await (async () => {
+        const awaitedResult86707 = await jobsRepository.get(again.id);
+        return awaitedResult86707?.status;
+      })(),
       "queued",
       "a fresh explicit request does not wait for a six-hour cooldown"
     );
     await stewardRepository.update(projectId, { paused: true });
     assert.equal(
-      await canRunAgentJob(jobs[0]!),
+      await canRunAgentJob(requireValue(jobs[0])),
       false,
       "pause still applies to explicit requests"
     );
     const failedRuns = [];
-    for (let i = 0; i < 2; i++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let i = 0; i < 2; i += 1) {
       const run = await runsRepository.createRun({
         specId: spec.id,
         sourceHash: spec.sourceHash,
@@ -2293,27 +2755,28 @@ describe("project steward", () => {
       );
       failedRuns.push(run);
     }
+    /* oxlint-enable no-await-in-loop */
     const firstFailure = {
       kind: "triage",
       goal: "Investigate sign in",
       reason: "The latest check failed",
       specIds: [spec.id],
-      runId: failedRuns[0]!.id,
+      runId: requireValue(failedRuns[0]).id,
     };
     const firstTriage = await enqueueIntent(
       projectId,
       firstFailure,
-      `failure:${failedRuns[0]!.id}`
+      `failure:${requireValue(failedRuns[0]).id}`
     );
     const replay = await enqueueIntent(
       projectId,
       firstFailure,
-      `failure:${failedRuns[0]!.id}`
+      `failure:${requireValue(failedRuns[0]).id}`
     );
     const nextTriage = await enqueueIntent(
       projectId,
-      { ...firstFailure, runId: failedRuns[1]!.id },
-      `failure:${failedRuns[1]!.id}`
+      { ...firstFailure, runId: requireValue(failedRuns[1]).id },
+      `failure:${requireValue(failedRuns[1]).id}`
     );
     assert.equal(
       firstTriage.id,
@@ -2366,7 +2829,10 @@ describe("project steward", () => {
     };
     const first = await snapshot("failed");
     assert.equal(
-      (await prepareTriageGoal(projectId, first.id)).runId,
+      await (async () => {
+        const awaitedValue83398 = await prepareTriageGoal(projectId, first.id);
+        return awaitedValue83398.runId;
+      })(),
       first.id
     );
     const queued = await enqueueJob(projectId, {
@@ -2378,12 +2844,21 @@ describe("project steward", () => {
     await snapshot("passed");
     await assert.rejects(
       () => prepareTriageGoal(projectId, first.id),
-      /no longer the current result/
+      /no longer the current result/u
     );
     assert.equal(await cancelStaleTriage(queued), true);
-    assert.equal((await jobsRepository.get(queued.id))?.status, "cancelled");
     assert.equal(
-      (await jobsRepository.get(queued.id))?.actionsUsed,
+      await (async () => {
+        const awaitedResult90450 = await jobsRepository.get(queued.id);
+        return awaitedResult90450?.status;
+      })(),
+      "cancelled"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult90535 = await jobsRepository.get(queued.id);
+        return awaitedResult90535?.actionsUsed;
+      })(),
       0,
       "superseded queued work never starts an agent turn"
     );
@@ -2393,7 +2868,7 @@ describe("project steward", () => {
     });
     await assert.rejects(
       () => prepareTriageGoal(projectId, latest.id),
-      /no longer the current result/
+      /no longer the current result/u
     );
     await specsRepository.updateSpecRecord(spec.id, {
       markdownHash: spec.markdownHash,
@@ -2401,7 +2876,7 @@ describe("project steward", () => {
     });
     await assert.rejects(
       () => prepareTriageGoal(projectId, latest.id),
-      /no longer the current result/
+      /no longer the current result/u
     );
   });
 
@@ -2427,6 +2902,7 @@ describe("project steward", () => {
     );
     const ids: string[] = [];
     let currentRunId = "";
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const state of ["fixed", "current", "changed", "no-healing"]) {
       const { spec } = await createSpec(projectId, feature.id, state);
       ids.push(spec.id);
@@ -2459,7 +2935,9 @@ describe("project steward", () => {
         currentRunId = run.id;
       }
     }
-    for (let i = 0; i < 10; i++) {
+    /* oxlint-enable no-await-in-loop */
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let i = 0; i < 10; i += 1) {
       await stewardRepository.signal({
         projectId,
         key: `old-change:${i}`,
@@ -2473,17 +2951,28 @@ describe("project steward", () => {
         },
       });
     }
+    /* oxlint-enable no-await-in-loop */
     await processProjectSteward(projectId, false);
-    assert.equal((await stewardRepository.intents(projectId)).length, 0);
+    assert.equal(
+      await (async () => {
+        const awaitedValue87311 = await stewardRepository.intents(projectId);
+        return awaitedValue87311.length;
+      })(),
+      0
+    );
     const router = createStewardRouter();
     assert.equal(
-      (
-        await router.request(`/projects/${projectId}/steward`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ autonomy: "propose" }),
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue87434 = await router.request(
+          `/projects/${projectId}/steward`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ autonomy: "propose" }),
+          }
+        );
+        return awaitedValue87434.status;
+      })(),
       200
     );
     const pending = await stewardRepository.pendingSignals(projectId);
@@ -2495,7 +2984,13 @@ describe("project steward", () => {
     const jobs = await jobsRepository.list(projectId);
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0]?.runId, currentRunId);
-    assert.equal((await stewardRepository.intents(projectId)).length, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedValue88065 = await stewardRepository.intents(projectId);
+        return awaitedValue88065.length;
+      })(),
+      1
+    );
   });
 
   test("automatic investigations remember cooldowns and rejections across repeated runs", async () => {
@@ -2550,17 +3045,27 @@ describe("project steward", () => {
     };
     const first = await failed();
     await processProjectSteward(projectId, false);
-    const job = (await jobsRepository.get(first.id))!;
+    const job = requireValue(await jobsRepository.get(first.id));
     await jobsRepository.update(job.id, { status: "completed" });
     const second = await failed();
     await processProjectSteward(projectId, false);
     assert.equal(
-      (await stewardRepository.intents(projectId)).find(
-        (row) => row.id === second.id
-      )?.status,
+      await (async () => {
+        const awaitedResult97151 = await (async () => {
+          const awaitedValue90204 = await stewardRepository.intents(projectId);
+          return awaitedValue90204.find((row) => row.id === second.id);
+        })();
+        return awaitedResult97151?.status;
+      })(),
       "ignored"
     );
-    assert.equal((await jobsRepository.list(projectId)).length, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedValue90350 = await jobsRepository.list(projectId);
+        return awaitedValue90350.length;
+      })(),
+      1
+    );
     const suggestion = await jobsRepository.addItem({
       projectId,
       jobId: job.id,
@@ -2572,10 +3077,14 @@ describe("project steward", () => {
     const third = await failed();
     await processProjectSteward(projectId, false);
     assert.match(
-      (await stewardRepository.intents(projectId)).find(
-        (row) => row.id === third.id
-      )?.reason ?? "",
-      /rejected/
+      (await (async () => {
+        const awaitedResult97936 = await (async () => {
+          const awaitedValue90765 = await stewardRepository.intents(projectId);
+          return awaitedValue90765.find((row) => row.id === third.id);
+        })();
+        return awaitedResult97936?.reason;
+      })()) ?? "",
+      /rejected/u
     );
     const different = await failed("error");
     assert.notEqual(
@@ -2584,7 +3093,13 @@ describe("project steward", () => {
       "a different failure category remains actionable"
     );
     await processProjectSteward(projectId, false);
-    assert.equal((await jobsRepository.get(different.id))?.status, "queued");
+    assert.equal(
+      await (async () => {
+        const awaitedResult98430 = await jobsRepository.get(different.id);
+        return awaitedResult98430?.status;
+      })(),
+      "queued"
+    );
   });
 
   test("trusted automatic fixes preserve assertion targets, action kinds, aliases and input values", async () => {
@@ -2605,7 +3120,7 @@ describe("project steward", () => {
       'await page.goto("/");',
       'await page.goto("/");\n        await page.locator("button.new").click();'
     );
-    const before = source.replace("button.new", "button.old");
+    const beforeInTest = source.replace("button.new", "button.old");
     const item = await jobsRepository.addItem({
       projectId,
       jobId: job.id,
@@ -2614,7 +3129,7 @@ describe("project steward", () => {
       body: "Fix",
       payload: {
         requiresVerification: true,
-        before: { testSource: before },
+        before: { testSource: beforeInTest },
         params: { specId: crypto.randomUUID(), testSource: source },
       },
     });
@@ -2626,7 +3141,7 @@ describe("project steward", () => {
       "getByPlaceholder",
     ]) {
       item.payload.before = {
-        testSource: before.replace(".locator", `.${method}`),
+        testSource: beforeInTest.replace(".locator", `.${method}`),
       };
       item.payload.params = {
         specId: crypto.randomUUID(),
@@ -2656,7 +3171,7 @@ describe("project steward", () => {
         `${method} cannot weaken an assertion target`
       );
     }
-    item.payload.before = { testSource: before };
+    item.payload.before = { testSource: beforeInTest };
     item.payload.params = {
       specId: crypto.randomUUID(),
       testSource: source.replace(".click()", ".hover()"),
@@ -2694,7 +3209,7 @@ describe("project steward", () => {
         "actions nested inside assertions cannot change their selectors"
       );
     }
-    item.payload.before = { testSource: before };
+    item.payload.before = { testSource: beforeInTest };
     item.payload.params = {
       specId: crypto.randomUUID(),
       testSource: source.replace("toBeVisible()", "toBeAttached()"),
@@ -2748,7 +3263,9 @@ describe("project steward", () => {
     const { stewardRepository } =
       await import("../../src/infra/repositories/steward");
     const projectId = await createProject("Observation recovery");
-    const project = (await projectsRepository.getProject(projectId))!;
+    const project = requireValue(
+      await projectsRepository.getProject(projectId)
+    );
     const feature = await writer.createFeatureInRepo(
       projectId,
       null,
@@ -2757,22 +3274,30 @@ describe("project steward", () => {
     );
     const { spec } = await createSpec(projectId, feature.id, "Store");
     let build = "a";
-    t.mock.method(
-      globalThis,
-      "fetch",
-      async () => new Response(`<script src="/${build}.js"></script>`)
-    );
+    t.mock.method(globalThis, "fetch", () => {
+      try {
+        return Promise.resolve(
+          new Response(`<script src="/${build}.js"></script>`)
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    });
     let at = Date.now();
     let observation = await collectProjectSignals(project, {}, at);
     await stewardRepository.update(projectId, { observation });
     const originalHash = spec.sourceHash;
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const [index, version] of ["b", "a", "b"].entries()) {
       at += 300_001;
       build = version;
       await specsRepository.updateSpecRecord(spec.id, {
         sourceHash: version === "a" ? originalHash : "changed-source",
       });
-      const persisted = (await stewardRepository.get(projectId)).observation;
+      const persisted = await (async () => {
+        const awaitedValue97607 = await stewardRepository.get(projectId);
+        return awaitedValue97607.observation;
+      })();
       observation = await collectProjectSignals(project, persisted, at);
       const replay = await collectProjectSignals(project, persisted, at + 1000);
       assert.deepEqual(replay.specGenerations, observation.specGenerations);
@@ -2792,6 +3317,7 @@ describe("project steward", () => {
       assert.equal(observation.specGenerations?.[spec.id], index + 1);
       await stewardRepository.update(projectId, { observation });
     }
+    /* oxlint-enable no-await-in-loop */
     await stewardRepository.signal({
       projectId,
       key: "preview:first",
@@ -2804,7 +3330,10 @@ describe("project steward", () => {
         commitSha: "one",
       },
     });
-    await new Promise((resolve) => setTimeout(resolve, 2));
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2);
+    });
     await stewardRepository.signal({
       projectId,
       key: "preview:latest",
@@ -2817,9 +3346,11 @@ describe("project steward", () => {
         commitSha: "two",
       },
     });
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const signal of await stewardRepository.signals(projectId)) {
       await stewardRepository.acknowledge(signal.id, "observed");
     }
+    /* oxlint-enable no-await-in-loop */
     const { resumeCurrentSignals } =
       await import("../../src/core/steward/engine");
     await resumeCurrentSignals(projectId);
@@ -2860,7 +3391,12 @@ describe("project steward", () => {
     const projectId = await createProject("Missing run access");
     const { environmentsRepository } =
       await import("../../src/infra/repositories/environments");
-    const production = (await environmentsRepository.list(projectId))[0]!;
+    const production = requireValue(
+      await (async () => {
+        const awaitedValue100915 = await environmentsRepository.list(projectId);
+        return awaitedValue100915[0];
+      })()
+    );
     await environmentsRepository.update(production, {
       ...production,
       allowedOrigins: ["https://preview.example.com"],
@@ -2895,26 +3431,48 @@ describe("project steward", () => {
       { sourceChatId: chat.id }
     );
     await processProjectSteward(projectId, false);
-    const waiting = (await stewardRepository.intents(projectId)).find(
-      (item) => item.id === intent.id
-    )!;
+    const waiting = requireValue(
+      await (async () => {
+        const awaitedValue102103 = await stewardRepository.intents(projectId);
+        return awaitedValue102103.find((item) => item.id === intent.id);
+      })()
+    );
     assert.equal(waiting.status, "running");
-    const job = (await jobsRepository.get(intent.id))!;
+    const job = requireValue(await jobsRepository.get(intent.id));
     assert.equal(job.status, "blocked");
     assert.equal(job.kind, "review");
     assert.equal(job.tokensUsed, 0);
     assert.equal(job.sourceChatId, chat.id);
-    assert.match(job.stopReason ?? "", /credentials.*not configured/);
-    const question = (await jobsRepository.inbox(projectId))[0]!;
+    assert.match(job.stopReason ?? "", /credentials.*not configured/u);
+    const question = requireValue(
+      await (async () => {
+        const awaitedValue102555 = await jobsRepository.inbox(projectId);
+        return awaitedValue102555[0];
+      })()
+    );
     assert.equal(question.kind, "question");
     assert.equal(question.payload.waitingFor, "credentials");
     assert.equal(question.payload.runIntentId, intent.id);
     assert.equal(question.payload.sourceChatId, chat.id);
-    for (let i = 0; i < 3; i++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let i = 0; i < 3; i += 1) {
       await processProjectSteward(projectId, false);
     }
-    assert.equal((await jobsRepository.inbox(projectId)).length, 1);
-    assert.equal((await stewardRepository.intents(projectId)).length, 1);
+    /* oxlint-enable no-await-in-loop */
+    assert.equal(
+      await (async () => {
+        const awaitedValue102937 = await jobsRepository.inbox(projectId);
+        return awaitedValue102937.length;
+      })(),
+      1
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue103006 = await stewardRepository.intents(projectId);
+        return awaitedValue103006.length;
+      })(),
+      1
+    );
     await stewardRepository.signal({
       projectId,
       kind: "credentials_changed",
@@ -2924,14 +3482,28 @@ describe("project steward", () => {
     });
     await processProjectSteward(projectId, false);
     assert.equal(
-      (await jobsRepository.get(job.id))?.status,
+      await (async () => {
+        const awaitedResult111357 = await jobsRepository.get(job.id);
+        return awaitedResult111357?.status;
+      })(),
       "completed",
       "answering a run prerequisite never starts an LLM turn"
     );
-    assert.equal((await jobsRepository.item(question.id))?.status, "answered");
-    const resumed = (await stewardRepository.intents(projectId)).find(
-      (item) => item.key === `resume-run:${intent.id}:${question.id}`
-    )!;
+    assert.equal(
+      await (async () => {
+        const awaitedResult111506 = await jobsRepository.item(question.id);
+        return awaitedResult111506?.status;
+      })(),
+      "answered"
+    );
+    const resumed = requireValue(
+      await (async () => {
+        const awaitedValue103559 = await stewardRepository.intents(projectId);
+        return awaitedValue103559.find(
+          (item) => item.key === `resume-run:${intent.id}:${question.id}`
+        );
+      })()
+    );
     assert.ok(resumed);
     assert.equal(resumed.source, "user");
     assert.equal(
@@ -2941,21 +3513,40 @@ describe("project steward", () => {
     );
     assert.equal(resumed.intent.baseUrl, "https://preview.example.com");
     assert.deepEqual(resumed.intent.specIds, [spec.id]);
-    for (let i = 0; i < 3; i++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let i = 0; i < 3; i += 1) {
       await processProjectSteward(projectId, false);
     }
-    assert.equal((await jobsRepository.get(resumed.id))?.status, "blocked");
-    assert.equal((await jobsRepository.list(projectId)).length, 2);
+    /* oxlint-enable no-await-in-loop */
     assert.equal(
-      (await jobsRepository.inbox(projectId)).filter(
-        (item) => item.status === "pending"
-      ).length,
+      await (async () => {
+        const awaitedResult112300 = await jobsRepository.get(resumed.id);
+        return awaitedResult112300?.status;
+      })(),
+      "blocked"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue104213 = await jobsRepository.list(projectId);
+        return awaitedValue104213.length;
+      })(),
+      2
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue104288 = await jobsRepository.inbox(projectId);
+        return awaitedValue104288.filter((item) => item.status === "pending")
+          .length;
+      })(),
       1
     );
     assert.equal(
-      (await stewardRepository.intents(projectId)).some((item) =>
-        ["explore", "coverage"].includes(item.intent.kind)
-      ),
+      await (async () => {
+        const awaitedValue104435 = await stewardRepository.intents(projectId);
+        return awaitedValue104435.some((item) =>
+          ["explore", "coverage"].includes(item.intent.kind)
+        );
+      })(),
       false
     );
   });
@@ -3048,25 +3639,56 @@ describe("project steward", () => {
     const response = await promote(projectId, bug.id);
     assert.equal(response.status, 202);
     const { intentId } = (await response.json()) as { intentId: string };
-    assert.deepEqual(await (await promote(projectId, bug.id)).json(), {
-      intentId,
-    });
-    assert.equal((await promote(crypto.randomUUID(), bug.id)).status, 404);
-    assert.equal((await promote(projectId, question.id)).status, 400);
+    assert.deepEqual(
+      await (async () => {
+        const awaitedValue107929 = await promote(projectId, bug.id);
+        return awaitedValue107929.json();
+      })(),
+      {
+        intentId,
+      }
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue108015 = await promote(crypto.randomUUID(), bug.id);
+        return awaitedValue108015.status;
+      })(),
+      404
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue108091 = await promote(projectId, question.id);
+        return awaitedValue108091.status;
+      })(),
+      400
+    );
     const intents = await stewardRepository.intents(projectId);
     assert.equal(intents.length, 1);
     assert.equal(intents[0]?.intent.kind, "coverage");
     assert.equal(intents[0]?.sourceChatId, chat.id);
-    assert.match(intents[0]?.intent.goal ?? "", /total ignores it/);
+    assert.match(intents[0]?.intent.goal ?? "", /total ignores it/u);
     assert.equal(
-      (await jobsRepository.item(bug.id))?.payload.regressionIntentId,
+      await (async () => {
+        const awaitedResult117293 = await jobsRepository.item(bug.id);
+        return awaitedResult117293?.payload.regressionIntentId;
+      })(),
       intentId
     );
     assert.equal(await repoGit.getHeadSha(projectId), head);
-    assert.ok((await repoGit.getProjectGit(projectId).status()).isClean());
+    assert.ok(
+      await (async () => {
+        const awaitedValue108610 = await repoGit
+          .getProjectGit(projectId)
+          .status();
+        return awaitedValue108610.isClean();
+      })()
+    );
     await chatsRepository.deleteChatRow(chat.id);
     assert.equal(
-      (await jobsRepository.get(job.id))?.sourceChatId,
+      await (async () => {
+        const awaitedResult117726 = await jobsRepository.get(job.id);
+        return awaitedResult117726?.sourceChatId;
+      })(),
       null,
       "deleting a conversation retains the investigation audit"
     );
@@ -3079,7 +3701,10 @@ describe("project steward", () => {
       payload: { sourceChatId: chat.id },
     });
     assert.equal(
-      (await promote(projectId, later.id)).status,
+      await (async () => {
+        const awaitedValue109154 = await promote(projectId, later.id);
+        return awaitedValue109154.status;
+      })(),
       202,
       "a deleted source conversation cannot block promoting the report from Overview"
     );
@@ -3110,9 +3735,15 @@ describe("project steward", () => {
           description: params.description,
           title: params.title,
         }),
-      /human rejected/
+      /human rejected/u
     );
-    assert.equal((await jobsRepository.inbox(projectId)).length, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedValue110453 = await jobsRepository.inbox(projectId);
+        return awaitedValue110453.length;
+      })(),
+      1
+    );
     const different = await proposeMutation(next, "create_feature", {
       title: "Login",
       description: "Access and account sessions",
@@ -3122,11 +3753,12 @@ describe("project steward", () => {
 });
 
 describe("plain-language autonomous presentation", () => {
-  async function createOverviewRun(
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
+  const createOverviewRun = async function createOverviewRun(
     input: Parameters<typeof runsRepository.createRun>[0]
   ) {
     const { runsDir } = await import("../../src/core/paths");
-    const spec = (await specsRepository.getSpec(input.specId))!;
+    const spec = requireValue(await specsRepository.getSpec(input.specId));
     const run = await runsRepository.createRun(input);
     await fs.mkdir(path.join(runsDir, run.id), { recursive: true });
     await fs.copyFile(
@@ -3134,7 +3766,7 @@ describe("plain-language autonomous presentation", () => {
       path.join(runsDir, run.id, "spec.yml")
     );
     return run;
-  }
+  };
 
   test("unfinished updates stay out of Inbox, stopped attempts offer help, and stale updates disappear", async () => {
     const { projectPresentation } =
@@ -3177,14 +3809,20 @@ describe("plain-language autonomous presentation", () => {
         verification: { status: "failed", failReason: error, screenshots: [] },
       },
     });
-    assert.equal((await projectPresentation(projectId)).items.length, 0);
+    assert.equal(
+      await (async () => {
+        const awaitedValue113024 = await projectPresentation(projectId);
+        return awaitedValue113024.items.length;
+      })(),
+      0
+    );
     await jobsRepository.update(job.id, { status: "stalled" });
     const paused = await projectPresentation(projectId);
     assert.equal(paused.items.length, 1);
     assert.equal(paused.items[0]?.presentation.type, "help");
     assert.match(
       paused.items[0]?.presentation.title ?? "",
-      /Look at it together\?/
+      /Look at it together\?/u
     );
     assert.ok(
       !paused.activity.some((story) => story.status === "paused"),
@@ -3193,11 +3831,14 @@ describe("plain-language autonomous presentation", () => {
     assert.equal(paused.summary.paused, false);
     assert.doesNotMatch(
       JSON.stringify(paused),
-      /\/home\/gus|\/tmp\/specbook|src\/core\/runner|Object\.click|279 \|/
+      /\/home\/gus|\/tmp\/specbook|src\/core\/runner|Object\.click|279 \|/u
     );
     await writer.updateSpecWithLock(spec.id, { testSource: source });
     assert.equal(
-      (await projectPresentation(projectId)).items.length,
+      await (async () => {
+        const awaitedValue113840 = await projectPresentation(projectId);
+        return awaitedValue113840.items.length;
+      })(),
       0,
       "an outdated failed suggestion is not a new decision"
     );
@@ -3212,12 +3853,13 @@ describe("plain-language autonomous presentation", () => {
     );
     assert.equal(observing.summary.paused, false);
     assert.equal(observing.activity[0]?.status, "stopped");
-    assert.match(observing.activity[0]?.nextStep ?? "", /Discuss the Spec/);
+    assert.match(observing.activity[0]?.nextStep ?? "", /Discuss the Spec/u);
     await jobsRepository.update(job.id, { status: "running" });
     const working = await projectPresentation(projectId);
     assert.equal(working.activity[0]?.status, "working");
   });
 
+  // oxlint-disable-next-line complexity -- Keep the complete protocol scenario and its assertions together in this test.
   test("groups repeated observations and investigations around one check and pairs the same screenshot step", async () => {
     const { projectPresentation } =
       await import("../../src/core/jobs/presentation");
@@ -3287,6 +3929,7 @@ describe("plain-language autonomous presentation", () => {
       "Captured the page"
     );
     await jobsRepository.log(job.id, "proposal:verified", `${item.id}: passed`);
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const key of ["changed:one", "changed:two"]) {
       await stewardRepository.signal({
         projectId,
@@ -3297,6 +3940,7 @@ describe("plain-language autonomous presentation", () => {
         payload: { specIds: [spec.id] },
       });
     }
+    /* oxlint-enable no-await-in-loop */
     const view = await projectPresentation(projectId);
     assert.equal(view.activity.length, 1);
     assert.equal(view.activity[0]?.subject.id, spec.id);
@@ -3304,15 +3948,17 @@ describe("plain-language autonomous presentation", () => {
       new Set(view.activity[0]?.timeline.map((entry) => entry.label)),
       new Set(["Noticed", "Tested update", "Your decision"])
     );
-    const times = view.activity[0]!.timeline.map((entry) => entry.createdAt);
+    const times = requireValue(view.activity[0]).timeline.map(
+      (entry) => entry.createdAt
+    );
     assert.deepEqual(
       times,
-      [...times].sort(),
+      [...times].toSorted(),
       "decision and evidence dates are chronological even when investigation ends later"
     );
     assert.doesNotMatch(
       JSON.stringify(view.activity),
-      /Reviewed the check and the available application evidence/
+      /Reviewed the check and the available application evidence/u
     );
     assert.notEqual(
       view.activity[0]?.timeline[0]?.detail,
@@ -3320,26 +3966,27 @@ describe("plain-language autonomous presentation", () => {
     );
     assert.match(
       view.items[0]?.presentation.screenshots.before?.url ?? "",
-      /step-01\.png$/
+      /step-01\.png$/u
     );
     assert.match(
       view.items[0]?.presentation.screenshots.after?.url ?? "",
-      /step-01\.png$/
+      /step-01\.png$/u
     );
     assert.equal(view.items[0]?.presentation.type, "update");
     assert.equal(
       view.items[0]?.presentation.summary,
       "Missing results. The expected behavior stays the same."
     );
-    assert.doesNotMatch(view.items[0]?.presentation.summary ?? "", /passed/);
-    assert.match(view.items[0]?.presentation.workDone ?? "", /passed/);
+    assert.doesNotMatch(view.items[0]?.presentation.summary ?? "", /passed/u);
+    assert.match(view.items[0]?.presentation.workDone ?? "", /passed/u);
     assert.match(
       view.activity[0]?.title ?? "",
-      /needs an update before it can run/
+      /needs an update before it can run/u
     );
     assert.equal(
       view.items.filter(
-        (item) => item.status === "pending" && item.kind !== "bug_report"
+        (itemInTest) =>
+          itemInTest.status === "pending" && itemInTest.kind !== "bug_report"
       ).length,
       1
     );
@@ -3355,6 +4002,7 @@ describe("plain-language autonomous presentation", () => {
       await import("../../src/infra/repositories/jobs");
     const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
     const projectId = await createProject("Service recovery");
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const display of [118, 119]) {
       const job = await jobsRepository.create({
         projectId,
@@ -3372,10 +4020,11 @@ describe("plain-language autonomous presentation", () => {
         body: `O navegador não iniciou devido ao conflito do servidor X (display ${display}).`,
       });
     }
+    /* oxlint-enable no-await-in-loop */
     const view = await projectPresentation(projectId);
     assert.deepEqual(view.items, []);
     assert.ok(view.summary.systemHealth);
-    assert.match(view.summary.systemHealth.message, /resume automatically/);
+    assert.match(view.summary.systemHealth.message, /resume automatically/u);
     assert.equal(
       view.activity.length,
       0,
@@ -3384,11 +4033,11 @@ describe("plain-language autonomous presentation", () => {
     const technical = sanitizeTechnicalDetails(
       "TimeoutError: missing button\n    at Object.click (/home/gus/app/src/core/runner/guard.ts:279)\n> 279 | await locator.click()\n    ^\nC:\\Users\\gus\\specbook\\error.log\nSee /var/log/specbook/errors.txt\nURL: https://app.example.com/results"
     );
-    assert.match(technical, /TimeoutError: missing button/);
-    assert.match(technical, /https:\/\/app.example.com\/results/);
+    assert.match(technical, /TimeoutError: missing button/u);
+    assert.match(technical, /https:\/\/app.example.com\/results/u);
     assert.doesNotMatch(
       technical,
-      /\/home|C:\\Users|\/var\/log|guard\.ts|locator\.click|\bat Object/
+      /\/home|C:\\Users|\/var\/log|guard\.ts|locator\.click|\bat Object/u
     );
     assert.equal(
       isInfrastructureFailure("The application returned HTTP 503"),
@@ -3437,13 +4086,26 @@ describe("plain-language autonomous presentation", () => {
         "Unchecked",
         "Invalid",
       ].map(
-        async (title) => (await createSpec(projectId, feature.id, title)).spec
+        async (title) =>
+          await (async () => {
+            const awaitedValue122850 = await createSpec(
+              projectId,
+              feature.id,
+              title
+            );
+            return awaitedValue122850.spec;
+          })()
       )
     );
     const [passing, failing, flaky, pausedOne, pausedTwo, unchecked, invalid] =
       checks;
-    for (const spec of [passing!, failing!, flaky!]) {
-      const status = spec.id === failing!.id ? "failed" : "passed";
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (const spec of [
+      requireValue(passing),
+      requireValue(failing),
+      requireValue(flaky),
+    ]) {
+      const status = spec.id === requireValue(failing).id ? "failed" : "passed";
       const run = await createOverviewRun({
         specId: spec.id,
         sourceHash: spec.sourceHash,
@@ -3456,18 +4118,19 @@ describe("plain-language autonomous presentation", () => {
         status === "failed" ? "Result did not appear" : null
       );
       await specsRepository.updateSpecStatus(spec.id, status);
-      if (spec.id === flaky!.id) {
+      if (spec.id === requireValue(flaky).id) {
         await runsRepository.markFlaky(run.id, run.id);
       }
     }
+    /* oxlint-enable no-await-in-loop */
     await specsRepository.updateSpecStatus(
-      invalid!.id,
+      requireValue(invalid).id,
       "invalid",
       "spec.ts is missing"
     );
     const previous = await jobsRepository.create({
       projectId,
-      specId: pausedOne!.id,
+      specId: requireValue(pausedOne).id,
       kind: "explore",
       chatId: crypto.randomUUID(),
       trigger: "steward",
@@ -3475,7 +4138,8 @@ describe("plain-language autonomous presentation", () => {
       limits: jobLimitsSchema.parse({}),
     });
     await jobsRepository.update(previous.id, { status: "completed" });
-    for (const spec of [pausedOne!, pausedTwo!]) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (const spec of [requireValue(pausedOne), requireValue(pausedTwo)]) {
       const job = await jobsRepository.create({
         projectId,
         specId: spec.id,
@@ -3487,6 +4151,7 @@ describe("plain-language autonomous presentation", () => {
       });
       await jobsRepository.update(job.id, { status: "stalled" });
     }
+    /* oxlint-enable no-await-in-loop */
     const questionJob = await jobsRepository.create({
       projectId,
       chatId: crypto.randomUUID(),
@@ -3513,18 +4178,25 @@ describe("plain-language autonomous presentation", () => {
       .update(inboxItems)
       .set({ createdAt: "2024-01-01T00:00:00.000Z" })
       .where(eq(inboxItems.id, older.id));
-    const failedRun = (await runsRepository.listRuns(failing!.id))[0]!;
+    const failedRun = requireValue(
+      await (async () => {
+        const awaitedValue125385 = await runsRepository.listRuns(
+          requireValue(failing).id
+        );
+        return awaitedValue125385[0];
+      })()
+    );
     const bug = await jobsRepository.addItem({
       projectId,
       jobId: questionJob.id,
       kind: "bug_report",
       title: "Deleting a survey shows an error",
       body: "Deleting the survey leaves it in the list.",
-      payload: { specId: failing!.id, runId: failedRun.id },
+      payload: { specId: requireValue(failing).id, runId: failedRun.id },
     });
     const regeneration = await jobsRepository.create({
       projectId,
-      specId: invalid!.id,
+      specId: requireValue(invalid).id,
       kind: "regenerate",
       chatId: crypto.randomUUID(),
       trigger: "steward",
@@ -3550,11 +4222,12 @@ describe("plain-language autonomous presentation", () => {
     assert.equal(view.summary.attentionCount, 3);
     assert.equal(view.failing.length, 1);
     assert.equal(
-      view.failing.find((item) => item.specId === failing!.id)?.triageStatus,
+      view.failing.find((item) => item.specId === requireValue(failing).id)
+        ?.triageStatus,
       "App bug reported"
     );
     assert.equal(
-      view.failing.some((item) => item.specId === invalid!.id),
+      view.failing.some((item) => item.specId === requireValue(invalid).id),
       false,
       "an invalid implementation is not a failing application check"
     );
@@ -3576,11 +4249,20 @@ describe("plain-language autonomous presentation", () => {
       repairing: 0,
       invalid: 1,
     });
-    assert.equal(view.specHealth[pausedOne!.id]?.status, "not_checked");
-    assert.equal(view.specHealth[unchecked!.id]?.status, "not_checked");
-    assert.equal(view.specHealth[invalid!.id]?.status, "invalid");
-    assert.equal(view.specHealth[invalid!.id]?.label, "Needs repair");
-    assert.equal(view.specHealth[flaky!.id]?.status, "flaky");
+    assert.equal(
+      view.specHealth[requireValue(pausedOne).id]?.status,
+      "not_checked"
+    );
+    assert.equal(
+      view.specHealth[requireValue(unchecked).id]?.status,
+      "not_checked"
+    );
+    assert.equal(view.specHealth[requireValue(invalid).id]?.status, "invalid");
+    assert.equal(
+      view.specHealth[requireValue(invalid).id]?.label,
+      "Needs repair"
+    );
+    assert.equal(view.specHealth[requireValue(flaky).id]?.status, "flaky");
     assert.equal(
       view.recentRuns.length,
       3,
@@ -3604,7 +4286,7 @@ describe("plain-language autonomous presentation", () => {
     );
     assert.match(
       decision?.presentation.title ?? "",
-      /^Add a regression Spec.*\?$/
+      /^Add a regression Spec.*\?$/u
     );
     assert.equal(
       withFinding.items.find((item) => item.id === finding.id)?.presentation
@@ -3612,11 +4294,11 @@ describe("plain-language autonomous presentation", () => {
       decision?.presentation.title
     );
     assert.equal(withFinding.summary.attentionCount, 4);
-    assert.match(view.summary.nextCheck, /Resume Specbook/);
+    assert.match(view.summary.nextCheck, /Resume Specbook/u);
     await stewardRepository.update(projectId, { paused: false });
     const oldTriage = await jobsRepository.create({
       projectId,
-      specId: failing!.id,
+      specId: requireValue(failing).id,
       runId: failedRun.id,
       kind: "failure_triage",
       chatId: crypto.randomUUID(),
@@ -3629,14 +4311,14 @@ describe("plain-language autonomous presentation", () => {
       classification: "application_bug",
     });
     const passingRun = await createOverviewRun({
-      specId: failing!.id,
-      sourceHash: failing!.sourceHash,
+      specId: requireValue(failing).id,
+      sourceHash: requireValue(failing).sourceHash,
       commitSha: await repoGit.getHeadSha(projectId),
     });
     await runsRepository.finishRun(passingRun.id, "passed", 1, null);
     const newFailure = await createOverviewRun({
-      specId: failing!.id,
-      sourceHash: failing!.sourceHash,
+      specId: requireValue(failing).id,
+      sourceHash: requireValue(failing).sourceHash,
       commitSha: await repoGit.getHeadSha(projectId),
     });
     await runsRepository.finishRun(
@@ -3646,9 +4328,11 @@ describe("plain-language autonomous presentation", () => {
       "A different element is missing"
     );
     const uncheckedFailure = await projectOverview(projectId);
-    const currentFailure = uncheckedFailure.failing.find(
-      (entry) => entry.specId === failing!.id
-    )!;
+    const currentFailure = requireValue(
+      uncheckedFailure.failing.find(
+        (entry) => entry.specId === requireValue(failing).id
+      )
+    );
     assert.equal(currentFailure.triageStatus, "Latest run failed");
     assert.equal(
       currentFailure.storyId,
@@ -3657,8 +4341,8 @@ describe("plain-language autonomous presentation", () => {
     );
     assert.ok(!currentFailure.inboxIds.includes(bug.id));
     const retry = await createOverviewRun({
-      specId: failing!.id,
-      sourceHash: failing!.sourceHash,
+      specId: requireValue(failing).id,
+      sourceHash: requireValue(failing).sourceHash,
       commitSha: await repoGit.getHeadSha(projectId),
       retryOf: newFailure.id,
     });
@@ -3670,7 +4354,7 @@ describe("plain-language autonomous presentation", () => {
     );
     const currentTriage = await jobsRepository.create({
       projectId,
-      specId: failing!.id,
+      specId: requireValue(failing).id,
       runId: newFailure.id,
       kind: "failure_triage",
       chatId: crypto.randomUUID(),
@@ -3680,9 +4364,15 @@ describe("plain-language autonomous presentation", () => {
     });
     await jobsRepository.update(currentTriage.id, { status: "running" });
     assert.equal(
-      (await projectOverview(projectId)).failing.find(
-        (entry) => entry.specId === failing!.id
-      )?.triageStatus,
+      await (async () => {
+        const awaitedResult141313 = await (async () => {
+          const awaitedValue131053 = await projectOverview(projectId);
+          return awaitedValue131053.failing.find(
+            (entry) => entry.specId === requireValue(failing).id
+          );
+        })();
+        return awaitedResult141313?.triageStatus;
+      })(),
       "Investigating…",
       "the original and retry belong to the same investigation"
     );
@@ -3750,7 +4440,10 @@ describe("plain-language autonomous presentation", () => {
       humanSpec: { ...HUMAN_SPEC, expectedResult: "The page is shown." },
     });
     assert.equal(
-      (await specsRepository.getSpec(spec.id))?.sourceHash,
+      await (async () => {
+        const awaitedResult143862 = await specsRepository.getSpec(spec.id);
+        return awaitedResult143862?.sourceHash;
+      })(),
       spec.sourceHash
     );
     const changedBehavior = await projectOverview(projectId);
@@ -3794,7 +4487,8 @@ describe("plain-language autonomous presentation", () => {
     const { spec } = await createSpec(projectId, feature.id, "View surveys");
     const commitSha = await repoGit.getHeadSha(projectId);
     const runIds: string[] = [];
-    for (let minute = 0; minute < 3; minute++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let minute = 0; minute < 3; minute += 1) {
       const run = await createOverviewRun({
         specId: spec.id,
         sourceHash: spec.sourceHash,
@@ -3807,11 +4501,12 @@ describe("plain-language autonomous presentation", () => {
         .where(eq(runs.id, run.id));
       await runsRepository.finishRun(run.id, "passed", 100, null);
     }
+    /* oxlint-enable no-await-in-loop */
     const grouped = await projectOverview(projectId);
     assert.equal(grouped.recentRuns.length, 1);
     assert.equal(grouped.recentRuns[0]?.occurrences, 3);
     assert.equal(grouped.recentRuns[0]?.counts.passed, 3);
-    assert.match(grouped.recentRuns[0]?.title ?? "", /3 runs/);
+    assert.match(grouped.recentRuns[0]?.title ?? "", /3 runs/u);
     assert.deepEqual(
       grouped.recentRuns[0]?.timeline.map((event) => event.runId),
       runIds
@@ -3894,7 +4589,7 @@ describe("plain-language autonomous presentation", () => {
           failReason: "Login button was not visible",
         },
       ],
-    } satisfies import("../../src/core/runner/batch").RunBatch;
+    } satisfies RunBatch;
     await fs.writeFile(
       path.join(runBatchesDir, batchId, "batch.json"),
       JSON.stringify(batch)
@@ -3906,7 +4601,12 @@ describe("plain-language autonomous presentation", () => {
       title: "Preview deployed",
       body: "Check the preview",
     });
-    const signal = (await stewardRepository.signals(projectId))[0]!;
+    const signal = requireValue(
+      await (async () => {
+        const awaitedValue139070 = await stewardRepository.signals(projectId);
+        return awaitedValue139070[0];
+      })()
+    );
     const runIntent = {
       kind: "run_specs" as const,
       goal: "Check login",
@@ -3949,7 +4649,13 @@ describe("plain-language autonomous presentation", () => {
     );
     await runsRepository.finishRun(original.id, "passed", 10, null);
     assert.deepEqual(
-      (await projectOverview(projectId)).recentRuns[0]?.counts,
+      await (async () => {
+        const awaitedResult151015 = await (async () => {
+          const awaitedValue140483 = await projectOverview(projectId);
+          return awaitedValue140483.recentRuns[0];
+        })();
+        return awaitedResult151015?.counts;
+      })(),
       {
         total: 1,
         passed: 0,
@@ -3975,7 +4681,13 @@ describe("plain-language autonomous presentation", () => {
     await runsRepository.finishRun(retry.id, "passed", 20, null);
     await runsRepository.markFlaky(original.id, retry.id);
     assert.deepEqual(
-      (await projectOverview(projectId)).recentRuns[0]?.counts,
+      await (async () => {
+        const awaitedResult151848 = await (async () => {
+          const awaitedValue141191 = await projectOverview(projectId);
+          return awaitedValue141191.recentRuns[0];
+        })();
+        return awaitedResult151848?.counts;
+      })(),
       {
         total: 1,
         passed: 0,
@@ -4000,7 +4712,7 @@ describe("plain-language autonomous presentation", () => {
       1,
       "batch runs and retries are not repeated as standalone history rows"
     );
-    assert.match(view.recentRuns[0]?.title ?? "", /1 passed on retry/);
+    assert.match(view.recentRuns[0]?.title ?? "", /1 passed on retry/u);
     assert.equal(view.recentRuns[0]?.outcome, "flaky");
     assert.equal(view.recentRuns[0]?.timeline[0]?.specId, spec.id);
     assert.equal(view.recentRuns[0]?.timeline[0]?.runId, retry.id);
@@ -4010,8 +4722,12 @@ describe("plain-language autonomous presentation", () => {
     );
     assert.equal(view.specHealth[spec.id]?.status, "flaky");
     assert.equal(
-      (await router.request(`/projects/${crypto.randomUUID()}/overview`))
-        .status,
+      await (async () => {
+        const awaitedValue142551 = await router.request(
+          `/projects/${crypto.randomUUID()}/overview`
+        );
+        return awaitedValue142551.status;
+      })(),
       404
     );
     await fs.writeFile(
@@ -4095,17 +4811,20 @@ test("agent evaluation records outcomes and decisions without prompts or credent
   });
   await jobsRepository.log(job.id, "proposal:verified", `${item.id}: passed`);
   await jobsRepository.log(job.id, "inbox:reject", item.id);
-  const current = (await jobsRepository.get(job.id))!;
+  const current = requireValue(await jobsRepository.get(job.id));
   await recordAgentMetric(current, "decision", {
     itemId: item.id,
     decision: "approve",
     actor: "agent",
   });
-  const records = (await fs.readFile(jobMetricsPath, "utf-8"))
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line))
-    .filter((event) => event.jobId === job.id);
+  const records = await (async () => {
+    const awaitedValue145431 = await fs.readFile(jobMetricsPath, "utf-8");
+    return awaitedValue145431
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.jobId === job.id);
+  })();
   assert.deepEqual(
     records.map((event) => event.event),
     [
@@ -4123,15 +4842,15 @@ test("agent evaluation records outcomes and decisions without prompts or credent
   assert.equal(records[5].actor, "human");
   assert.equal(records[6].actor, "agent");
   assert.equal(records[6].tokensUsed, 123);
-  assert.doesNotMatch(JSON.stringify(records), new RegExp(secret));
+  assert.doesNotMatch(JSON.stringify(records), new RegExp(secret, "u"));
   const csv = execFileSync(
     process.execPath,
     ["scripts/export-metrics.mjs", jobMetricsPath, "--agent"],
     { encoding: "utf-8" }
   );
-  assert.match(csv, /classification,tokensUsed,actionsUsed,elapsedMs/);
-  assert.match(csv, new RegExp(`${item.id},,reject,human`));
-  assert.doesNotMatch(csv, new RegExp(secret));
+  assert.match(csv, /classification,tokensUsed,actionsUsed,elapsedMs/u);
+  assert.match(csv, new RegExp(`${item.id},,reject,human`, "u"));
+  assert.doesNotMatch(csv, new RegExp(secret, "u"));
 });
 
 describe("existing checks baseline", () => {
@@ -4144,11 +4863,16 @@ describe("existing checks baseline", () => {
       await import("../../src/core/steward/engine");
     const { stopJobWorker } = await import("../../src/core/jobs/worker");
     await stopJobWorker();
-    t.mock.method(
-      globalThis,
-      "fetch",
-      async () => new Response('<script src="/stable-build.js"></script>')
-    );
+    t.mock.method(globalThis, "fetch", () => {
+      try {
+        return Promise.resolve(
+          new Response('<script src="/stable-build.js"></script>')
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    });
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const invalid of [false, true]) {
       const projectId = await createProject(`Imported checks ${invalid}`);
       const feature = await writer.createFeatureInRepo(
@@ -4157,7 +4881,7 @@ describe("existing checks baseline", () => {
         "Imported",
         ""
       );
-      for (let i = 0; i < 80; i++) {
+      for (let i = 0; i < 80; i += 1) {
         await specsRepository.createSpecRecord({
           projectId,
           featureId: feature.id,
@@ -4176,7 +4900,10 @@ describe("existing checks baseline", () => {
       await processProjectSteward(projectId);
       assert.equal(
         Object.keys(
-          (await stewardRepository.get(projectId)).observation.specs ?? {}
+          (await (async () => {
+            const awaitedValue148052 = await stewardRepository.get(projectId);
+            return awaitedValue148052.observation.specs;
+          })()) ?? {}
         ).length,
         80
       );
@@ -4194,6 +4921,7 @@ describe("existing checks baseline", () => {
       const inbox = await jobsRepository.inbox(projectId);
       assert.equal(inbox.length, 0);
     }
+    /* oxlint-enable no-await-in-loop */
   });
 });
 
@@ -4213,13 +4941,19 @@ describe("repository recovery", () => {
     const { spec } = await createSpec(projectId, feature.id, "Sign in");
     const root = repoGit.getRepoDir(projectId);
     const target = path.join(root, spec.path, "spec.yml");
-    const before = await fs.readFile(target, "utf-8");
-    const after = before.replace("title: Sign in", "title: Reviewed sign in");
+    const beforeInTest = await fs.readFile(target, "utf-8");
+    const after = beforeInTest.replace(
+      "title: Sign in",
+      "title: Reviewed sign in"
+    );
     await fs.writeFile(target, after);
     await fs.writeFile(path.join(root, "notes.md"), "Keep these notes.\n");
     const head = await repoGit.getHeadSha(projectId);
     const endpoint = `/projects/${projectId}/repository/recovery`;
-    const preview = (await (await recoveryApp.request(endpoint)).json()) as {
+    const preview = (await (async () => {
+      const awaitedValue149929 = await recoveryApp.request(endpoint);
+      return awaitedValue149929.json();
+    })()) as {
       dirty: boolean;
       canSave: boolean;
       fingerprint: string;
@@ -4229,7 +4963,7 @@ describe("repository recovery", () => {
     assert.equal(preview.files.length, 2);
     assert.equal(
       preview.files.find((file) => file.path.endsWith("spec.yml"))?.before,
-      before
+      beforeInTest
     );
     assert.equal(
       preview.files.find((file) => file.path.endsWith("spec.yml"))?.after,
@@ -4250,12 +4984,25 @@ describe("repository recovery", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ fingerprint }),
       });
-    assert.equal((await save(preview.fingerprint)).status, 409);
+    assert.equal(
+      await (async () => {
+        const awaitedValue150905 = await save(preview.fingerprint);
+        return awaitedValue150905.status;
+      })(),
+      409
+    );
     assert.equal(await repoGit.getHeadSha(projectId), head);
-    const fresh = (await (
-      await recoveryApp.request(endpoint)
-    ).json()) as typeof preview;
-    assert.equal((await save(fresh.fingerprint)).status, 200);
+    const fresh = (await (async () => {
+      const awaitedValue151039 = await recoveryApp.request(endpoint);
+      return awaitedValue151039.json();
+    })()) as typeof preview;
+    assert.equal(
+      await (async () => {
+        const awaitedValue151133 = await save(fresh.fingerprint);
+        return awaitedValue151133.status;
+      })(),
+      200
+    );
     assert.notEqual(await repoGit.getHeadSha(projectId), head);
     assert.equal(
       await fs.readFile(target, "utf-8"),
@@ -4263,15 +5010,26 @@ describe("repository recovery", () => {
       "explicit review preserves the exact behavior edit"
     );
     assert.equal(
-      (await specsRepository.getSpec(spec.id))?.title,
+      await (async () => {
+        const awaitedResult162938 = await specsRepository.getSpec(spec.id);
+        return awaitedResult162938?.title;
+      })(),
       "Reviewed sign in"
     );
     assert.equal(
-      (await repoGit.getProjectGit(projectId).status()).isClean(),
+      await (async () => {
+        const awaitedValue151510 = await repoGit
+          .getProjectGit(projectId)
+          .status();
+        return awaitedValue151510.isClean();
+      })(),
       true
     );
     assert.equal(
-      (await save(fresh.fingerprint)).status,
+      await (async () => {
+        const awaitedValue151613 = await save(fresh.fingerprint);
+        return awaitedValue151613.status;
+      })(),
       409,
       "a consumed review cannot commit again"
     );
@@ -4292,7 +5050,7 @@ describe("repository recovery", () => {
     assert.deepEqual(preview.files, []);
     assert.doesNotMatch(
       JSON.stringify(preview),
-      /do not expose|recovery-outside/
+      /do not expose|recovery-outside/u
     );
     await fs.unlink(path.join(root, "pending.md"));
     await fs.writeFile(
@@ -4304,7 +5062,7 @@ describe("repository recovery", () => {
         repoGit.withRepoLock(projectId, () =>
           prepareRunRepositoryUnlocked(projectId)
         ),
-      /files are being updated/
+      /files are being updated/u
     );
     assert.equal(
       await fs.readFile(path.join(root, ".git", "index.lock"), "utf-8"),
@@ -4335,8 +5093,10 @@ describe("encrypted credentials and operations", () => {
         createdAt: "",
         updatedAt: "",
       });
+      // oxlint-disable-next-line node/callback-return -- The awaited Hono middleware or HTTP helper is not a Node error-first callback.
       await next();
     });
+    // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This handler models the callback interface exercised by the test.
     credentials.onError((error, c) =>
       error instanceof HTTPException
         ? c.json({ error: error.message }, error.status)
@@ -4369,11 +5129,13 @@ describe("encrypted credentials and operations", () => {
       { key: "password", sensitive: true, hasValue: true },
       { key: "token", sensitive: false, value: "visible-token" },
     ]);
-    const stored = (await credentialsRepository.getProfile(profile.id))!;
+    const stored = requireValue(
+      await credentialsRepository.getProfile(profile.id)
+    );
     assert.ok(stored.fields.every((field) => field.value.startsWith("v1:")));
     assert.doesNotMatch(
       JSON.stringify(stored),
-      /visible-user|hidden-password|visible-token/
+      /visible-user|hidden-password|visible-token/u
     );
     const changed = await request("PUT", `/credentials/${profile.id}`, {
       fields: [
@@ -4388,14 +5150,21 @@ describe("encrypted credentials and operations", () => {
       ],
     });
     assert.equal(changed.status, 200);
-    assert.deepEqual((await changed.json()).profile.fields, [
-      { key: "email", sensitive: false, value: "edited@example.com" },
-      { key: "api-password", sensitive: true, hasValue: true },
-      { key: "token", sensitive: true, hasValue: true },
-    ]);
+    assert.deepEqual(
+      await (async () => {
+        const awaitedValue155944 = await changed.json();
+        return awaitedValue155944.profile.fields;
+      })(),
+      [
+        { key: "email", sensitive: false, value: "edited@example.com" },
+        { key: "api-password", sensitive: true, hasValue: true },
+        { key: "token", sensitive: true, hasValue: true },
+      ]
+    );
     assert.equal(
       decryptSecret(
-        (await credentialsRepository.getProfile(profile.id))!.fields[1].value
+        requireValue(await credentialsRepository.getProfile(profile.id))
+          .fields[1].value
       ),
       "hidden-password"
     );
@@ -4411,24 +5180,34 @@ describe("encrypted credentials and operations", () => {
       "edited@example.com"
     );
     assert.equal(
-      (
-        await request("POST", `/projects/${projectId}/credentials`, {
-          name: "duplicate",
-          fields: [
-            { key: "password", value: "one" },
-            { key: "password", value: "two" },
-          ],
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue156728 = await request(
+          "POST",
+          `/projects/${projectId}/credentials`,
+          {
+            name: "duplicate",
+            fields: [
+              { key: "password", value: "one" },
+              { key: "password", value: "two" },
+            ],
+          }
+        );
+        return awaitedValue156728.status;
+      })(),
       400
     );
     assert.equal(
-      (
-        await request("POST", `/projects/${projectId}/credentials`, {
-          name: "empty",
-          fields: [],
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue157024 = await request(
+          "POST",
+          `/projects/${projectId}/credentials`,
+          {
+            name: "empty",
+            fields: [],
+          }
+        );
+        return awaitedValue157024.status;
+      })(),
       400
     );
     const visible = await request("PUT", `/credentials/${profile.id}`, {
@@ -4437,9 +5216,13 @@ describe("encrypted credentials and operations", () => {
       ],
     });
     assert.equal(visible.status, 200);
-    assert.deepEqual((await visible.json()).profile.fields, [
-      { key: "password", sensitive: false, value: "hidden-password" },
-    ]);
+    assert.deepEqual(
+      await (async () => {
+        const awaitedValue157429 = await visible.json();
+        return awaitedValue157429.profile.fields;
+      })(),
+      [{ key: "password", sensitive: false, value: "hidden-password" }]
+    );
   });
 
   test(
@@ -4558,7 +5341,14 @@ describe("encrypted credentials and operations", () => {
       await exec(process.execPath, [...cli, "backup", archive], {
         env: keyedEnv,
       });
-      assert.equal((await fs.stat(archive)).mode & 0o777, 0o600);
+      assert.equal(
+        // oxlint-disable-next-line no-bitwise -- Compare only the Unix permission bits of the generated backup file.
+        (await (async () => {
+          const awaitedValue165691 = await fs.stat(archive);
+          return awaitedValue165691.mode;
+        })()) & 0o777,
+        0o600
+      );
       await exec(
         process.execPath,
         [...cli, "restore", archive, "--storage", restored],
@@ -4579,7 +5369,7 @@ describe("encrypted credentials and operations", () => {
           [...cli, "restore", archive, "--storage", restored],
           { env: keyedEnv }
         ),
-        /empty storage directory/
+        /empty storage directory/u
       );
       const wrong = path.join(root, "wrong-key");
       await fs.writeFile(wrong, crypto.randomBytes(32));
@@ -4590,12 +5380,15 @@ describe("encrypted credentials and operations", () => {
           [...cli, "restore", archive, "--storage", rejected],
           { env: { ...env, SPECBOOK_ENCRYPTION_KEY_FILE: wrong } }
         ),
-        /matching encryption key/
+        /matching encryption key/u
       );
       assert.deepEqual(
-        (await fs.readdir(rejected)).filter(
-          (name) => name !== ".operations.lock"
-        ),
+        await (async () => {
+          const awaitedValue166923 = await fs.readdir(rejected);
+          return awaitedValue166923.filter(
+            (name) => name !== ".operations.lock"
+          );
+        })(),
         []
       );
     }
@@ -4624,10 +5417,11 @@ describe("encrypted credentials and operations", () => {
     );
     const old = new Date(Date.now() - 200 * 86_400_000);
     const ids: string[] = [];
-    for (let index = 0; index < 4; index++) {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let index = 0; index < 4; index += 1) {
       const run = await runsRepository.createRun({
         specId: spec.id,
-        sourceHash: spec.sourceHash!,
+        sourceHash: requireValue(spec.sourceHash),
         commitSha: "sha",
       });
       await runsRepository.finishRun(run.id, "passed", 1, null);
@@ -4644,6 +5438,7 @@ describe("encrypted credentials and operations", () => {
       );
       ids.push(run.id);
     }
+    /* oxlint-enable no-await-in-loop */
     const batchId = crypto.randomUUID();
     const batchDirectory = path.join(runsDir, "batches", batchId);
     await fs.mkdir(batchDirectory, { recursive: true });
@@ -4704,7 +5499,10 @@ describe("encrypted credentials and operations", () => {
       "last run survives regardless of age"
     );
     assert.equal(
-      (await fs.readFile(metrics, "utf-8")).trim().split("\n").length,
+      await (async () => {
+        const awaitedValue170534 = await fs.readFile(metrics, "utf-8");
+        return awaitedValue170534.trim().split("\n").length;
+      })(),
       1
     );
     assert.ok(result.removedMetrics >= 1);
@@ -4724,6 +5522,7 @@ describe("accounts, roles and session security", () => {
   let adminCookie = "";
   let admin: { id: string; name: string; email: string; role: string };
   const password = "Specbook-test-password-42";
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
   const cookieOf = (response: Response, name = "specbook_session") =>
     response.headers
       .getSetCookie()
@@ -4748,14 +5547,25 @@ describe("accounts, roles and session security", () => {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   before(async () => {
-    secured = (await import("../../src/infra/web/app")).createApp();
+    secured = await (async () => {
+      const awaitedValue171796 = await import("../../src/infra/web/app");
+      return awaitedValue171796.createApp();
+    })();
   });
 
   test("bootstrap is exclusive, credentials are hashed and sessions carry secure cookie attributes", async () => {
     const { accountsRepository } =
       await import("../../src/infra/repositories/accounts");
     assert.deepEqual(
-      await (await call("GET", "/setup/status", undefined, "")).json(),
+      await (async () => {
+        const awaitedValue172103 = await call(
+          "GET",
+          "/setup/status",
+          undefined,
+          ""
+        );
+        return awaitedValue172103.json();
+      })(),
       { needsAdmin: true, authenticated: false }
     );
     const responses = await Promise.all(
@@ -4769,45 +5579,73 @@ describe("accounts, roles and session security", () => {
       )
     );
     assert.deepEqual(
-      responses.map((response) => response.status).sort(),
+      responses.map((response) => response.status).toSorted(),
       [201, 409]
     );
-    const response = responses.find((result) => result.status === 201)!;
-    admin = (await response.json()).user;
+    const response = requireValue(
+      responses.find((result) => result.status === 201)
+    );
+    admin = await (async () => {
+      const awaitedValue172646 = await response.json();
+      return awaitedValue172646.user;
+    })();
     adminCookie = cookieOf(response);
     assert.ok(adminCookie);
-    assert.match(response.headers.get("set-cookie")!, /HttpOnly/);
-    assert.match(response.headers.get("set-cookie")!, /SameSite=Lax/i);
-    assert.equal((await accountsRepository.listUsers()).length, 1);
-    const stored = (await accountsRepository.getUser(admin.id))!;
-    assert.match(stored.passwordHash!, /^scrypt-v1:/);
-    assert.notEqual(stored.passwordHash, password);
-    assert.equal((await call("GET", "/auth/me")).status, 200);
+    assert.match(requireValue(response.headers.get("set-cookie")), /HttpOnly/u);
+    assert.match(
+      requireValue(response.headers.get("set-cookie")),
+      /SameSite=Lax/iu
+    );
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue172900 = await accountsRepository.listUsers();
+        return awaitedValue172900.length;
+      })(),
+      1
+    );
+    const stored = requireValue(await accountsRepository.getUser(admin.id));
+    assert.match(requireValue(stored.passwordHash), /^scrypt-v1:/u);
+    assert.notEqual(stored.passwordHash, password);
+    assert.equal(
+      await (async () => {
+        const awaitedValue173142 = await call("GET", "/auth/me");
+        return awaitedValue173142.status;
+      })(),
+      200
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue173212 = await call(
           "POST",
           "/setup/admin",
           { name: "Third", email: "third@example.com", password },
           ""
-        )
-      ).status,
+        );
+        return awaitedValue173212.status;
+      })(),
       409
     );
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue173425 = await call(
           "POST",
           "/auth/login",
           { email: admin.email, password: "wrong" },
           ""
-        )
-      ).status,
+        );
+        return awaitedValue173425.status;
+      })(),
       401
     );
-    const status = await (
-      await call("GET", "/setup/status", undefined, "")
-    ).json();
+    const status = await (async () => {
+      const awaitedValue173624 = await call(
+        "GET",
+        "/setup/status",
+        undefined,
+        ""
+      );
+      return awaitedValue173624.json();
+    })();
     assert.deepEqual(status, { needsAdmin: false, authenticated: false });
   });
 
@@ -4820,9 +5658,11 @@ describe("accounts, roles and session security", () => {
       assert.equal(response.status, 201, await response.clone().text());
       const result = await response.json();
       assert.ok(new URL(result.inviteUrl).hash.startsWith("#token="));
-      const token = new URLSearchParams(
-        new URL(result.inviteUrl).hash.slice(1)
-      ).get("token")!;
+      const token = requireValue(
+        new URLSearchParams(new URL(result.inviteUrl).hash.slice(1)).get(
+          "token"
+        )
+      );
       const accepted = await call(
         "POST",
         "/auth/invitations/accept",
@@ -4831,30 +5671,64 @@ describe("accounts, roles and session security", () => {
       );
       assert.equal(accepted.status, 201, await accepted.clone().text());
       assert.equal(
-        (await call("POST", "/auth/invitations/inspect", { token }, "")).status,
+        await (async () => {
+          const awaitedValue174634 = await call(
+            "POST",
+            "/auth/invitations/inspect",
+            { token },
+            ""
+          );
+          return awaitedValue174634.status;
+        })(),
         410
       );
       assert.equal(
-        (
-          await call(
+        await (async () => {
+          const awaitedValue174756 = await call(
             "POST",
             "/auth/invitations/accept",
             { token, name: role, password },
             ""
-          )
-        ).status,
+          );
+          return awaitedValue174756.status;
+        })(),
         410
       );
-      return { user: (await accepted.json()).user, cookie: cookieOf(accepted) };
+      return {
+        user: await (async () => {
+          const awaitedValue174972 = await accepted.json();
+          return awaitedValue174972.user;
+        })(),
+        cookie: cookieOf(accepted),
+      };
     };
     const viewer = await invite("viewer");
     const editor = await invite("editor");
     assert.equal(
-      (await call("GET", "/projects", undefined, viewer.cookie)).status,
+      await (async () => {
+        const awaitedValue175149 = await call(
+          "GET",
+          "/projects",
+          undefined,
+          viewer.cookie
+        );
+        return awaitedValue175149.status;
+      })(),
       200
     );
     const missingReplay = "/runs/00000000-0000-4000-8000-000000000000/replay";
-    assert.equal((await call("GET", missingReplay, undefined, "")).status, 401);
+    assert.equal(
+      await (async () => {
+        const awaitedValue175329 = await call(
+          "GET",
+          missingReplay,
+          undefined,
+          ""
+        );
+        return awaitedValue175329.status;
+      })(),
+      401
+    );
     const viewerReplay = await call(
       "GET",
       missingReplay,
@@ -4866,29 +5740,59 @@ describe("accounts, roles and session security", () => {
       404,
       "viewers reach the replay artifact handler"
     );
-    assert.equal((await viewerReplay.json()).error, "Run not found");
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue175638 = await viewerReplay.json();
+        return awaitedValue175638.error;
+      })(),
+      "Run not found"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue175715 = await call(
           "POST",
           "/projects",
           { name: "Forbidden", baseUrl: "https://example.com" },
           viewer.cookie
-        )
-      ).status,
+        );
+        return awaitedValue175715.status;
+      })(),
       403
     );
     assert.equal(
-      (await call("GET", "/settings/members", undefined, viewer.cookie)).status,
+      await (async () => {
+        const awaitedValue175934 = await call(
+          "GET",
+          "/settings/members",
+          undefined,
+          viewer.cookie
+        );
+        return awaitedValue175934.status;
+      })(),
       403
     );
     assert.equal(
-      (await call("GET", "/settings/llm", undefined, editor.cookie)).status,
+      await (async () => {
+        const awaitedValue176050 = await call(
+          "GET",
+          "/settings/llm",
+          undefined,
+          editor.cookie
+        );
+        return awaitedValue176050.status;
+      })(),
       403
     );
     assert.equal(
-      (await call("GET", "/settings/llm/status", undefined, editor.cookie))
-        .status,
+      await (async () => {
+        const awaitedValue176162 = await call(
+          "GET",
+          "/settings/llm/status",
+          undefined,
+          editor.cookie
+        );
+        return awaitedValue176162.status;
+      })(),
       200
     );
     const created = await call(
@@ -4914,11 +5818,16 @@ describe("accounts, roles and session security", () => {
       .getProjectGit(project.id)
       .raw(["log", "-1", "--format=%an <%ae>"]);
     assert.equal(author.trim(), "editor <editor@example.com>");
-    const gitToken = (
-      await (
-        await call("POST", `/projects/${project.id}/git/remote/token`)
-      ).json()
-    ).token;
+    const gitToken = await (async () => {
+      const awaitedValue177027 = await (async () => {
+        const awaitedValue186483 = await call(
+          "POST",
+          `/projects/${project.id}/git/remote/token`
+        );
+        return awaitedValue186483.json();
+      })();
+      return awaitedValue177027.token;
+    })();
     const git = await call(
       "GET",
       `/git/${project.id}.git/info/refs?service=git-upload-pack`,
@@ -4929,22 +5838,47 @@ describe("accounts, roles and session security", () => {
       }
     );
     assert.equal(git.status, 200, await git.clone().text());
-    const ciToken = (
-      await (await call("POST", `/projects/${project.id}/ci/token`)).json()
-    ).token;
+    const ciToken = await (async () => {
+      const awaitedValue177465 = await (async () => {
+        const awaitedValue187006 = await call(
+          "POST",
+          `/projects/${project.id}/ci/token`
+        );
+        return awaitedValue187006.json();
+      })();
+      return awaitedValue177465.token;
+    })();
     assert.equal(
-      (
-        await call("POST", `/ci/projects/${project.id}/deploy`, {}, "", {
-          authorization: `Bearer ${ciToken}`,
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue177580 = await call(
+          "POST",
+          `/ci/projects/${project.id}/deploy`,
+          {},
+          "",
+          {
+            authorization: `Bearer ${ciToken}`,
+          }
+        );
+        return awaitedValue177580.status;
+      })(),
       202
     );
     assert.equal(
-      (await call("POST", `/ci/projects/${project.id}/deploy`, {}, "")).status,
+      await (async () => {
+        const awaitedValue177770 = await call(
+          "POST",
+          `/ci/projects/${project.id}/deploy`,
+          {},
+          ""
+        );
+        return awaitedValue177770.status;
+      })(),
       401
     );
-    const audit = await (await call("GET", "/settings/audit?limit=100")).json();
+    const audit = await (async () => {
+      const awaitedValue177885 = await call("GET", "/settings/audit?limit=100");
+      return awaitedValue177885.json();
+    })();
     assert.ok(
       audit.events.some(
         (event: { actorId: string; action: string }) =>
@@ -4952,18 +5886,31 @@ describe("accounts, roles and session security", () => {
           event.action === "repository.commit"
       )
     );
-    assert.doesNotMatch(JSON.stringify(audit), new RegExp(password));
-    assert.doesNotMatch(JSON.stringify(audit), new RegExp(ciToken));
+    assert.doesNotMatch(JSON.stringify(audit), new RegExp(password, "u"));
+    assert.doesNotMatch(JSON.stringify(audit), new RegExp(ciToken, "u"));
     assert.equal(
-      (
-        await call("PATCH", `/settings/members/${viewer.user.id}`, {
-          disabled: true,
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue178309 = await call(
+          "PATCH",
+          `/settings/members/${viewer.user.id}`,
+          {
+            disabled: true,
+          }
+        );
+        return awaitedValue178309.status;
+      })(),
       200
     );
     assert.equal(
-      (await call("GET", "/projects", undefined, viewer.cookie)).status,
+      await (async () => {
+        const awaitedValue178474 = await call(
+          "GET",
+          "/projects",
+          undefined,
+          viewer.cookie
+        );
+        return awaitedValue178474.status;
+      })(),
       401
     );
   });
@@ -4989,7 +5936,15 @@ describe("accounts, roles and session security", () => {
     );
     const cookie = `specbook_session=${session}`;
     assert.equal(
-      (await call("POST", "/auth/access-tokens", { name: " " }, cookie)).status,
+      await (async () => {
+        const awaitedValue179440 = await call(
+          "POST",
+          "/auth/access-tokens",
+          { name: " " },
+          cookie
+        );
+        return awaitedValue179440.status;
+      })(),
       400
     );
     const created = await call(
@@ -5001,44 +5956,80 @@ describe("accounts, roles and session security", () => {
     assert.equal(created.status, 201);
     assert.equal(created.headers.get("cache-control"), "no-store");
     const { token, accessToken } = await created.json();
-    assert.match(token, /^sb_pat_[a-f0-9]{64}$/);
+    assert.match(token, /^sb_pat_[a-f0-9]{64}$/u);
     assert.equal(accessToken.name, "Work laptop");
     assert.equal(accessToken.lastUsedAt, null);
     assert.equal(accessToken.expiresAt, null);
-    const stored = (await db.select().from(personalAccessTokens)).find(
-      (row) => row.id === accessToken.id
-    )!;
+    const stored = requireValue(
+      await (async () => {
+        const awaitedValue180038 = await db.select().from(personalAccessTokens);
+        return awaitedValue180038.find((row) => row.id === accessToken.id);
+      })()
+    );
     assert.equal(stored.tokenHash, tokenHash(token));
     assert.ok(!JSON.stringify(stored).includes(token));
     const headers = { authorization: `Bearer ${token}` };
     assert.equal(
-      (await (await call("GET", "/auth/me", undefined, "", headers)).json())
-        .user.id,
+      await (async () => {
+        const awaitedValue180332 = await (async () => {
+          const awaitedValue190553 = await call(
+            "GET",
+            "/auth/me",
+            undefined,
+            "",
+            headers
+          );
+          return awaitedValue190553.json();
+        })();
+        return awaitedValue180332.user.id;
+      })(),
       member.id
     );
-    const list = await (
-      await call("GET", "/auth/access-tokens", undefined, cookie)
-    ).json();
+    const list = await (async () => {
+      const awaitedValue180467 = await call(
+        "GET",
+        "/auth/access-tokens",
+        undefined,
+        cookie
+      );
+      return awaitedValue180467.json();
+    })();
     assert.ok(list.tokens[0].lastUsedAt);
     assert.ok(!JSON.stringify(list).includes(token));
     assert.equal(
-      (await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status,
+      await (async () => {
+        const awaitedValue180669 = await call(
+          "DELETE",
+          `/auth/access-tokens/${accessToken.id}`
+        );
+        return awaitedValue180669.status;
+      })(),
       404
     );
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue180782 = await call(
           "POST",
           "/auth/access-tokens",
           { name: "More tokens" },
           "",
           headers
-        )
-      ).status,
+        );
+        return awaitedValue180782.status;
+      })(),
       403
     );
     assert.equal(
-      (await call("GET", "/auth/access-tokens", undefined, "", headers)).status,
+      await (async () => {
+        const awaitedValue180989 = await call(
+          "GET",
+          "/auth/access-tokens",
+          undefined,
+          "",
+          headers
+        );
+        return awaitedValue180989.status;
+      })(),
       403
     );
     const bearerWrite = await secured.request(
@@ -5058,51 +6049,83 @@ describe("accounts, roles and session security", () => {
     );
     assert.equal(bearerWrite.status, 200, await bearerWrite.clone().text());
     assert.equal(
-      (
-        await call("PATCH", `/settings/members/${member.id}`, {
-          role: "viewer",
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue181567 = await call(
+          "PATCH",
+          `/settings/members/${member.id}`,
+          {
+            role: "viewer",
+          }
+        );
+        return awaitedValue181567.status;
+      })(),
       200
     );
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue181727 = await call(
           "POST",
           "/projects",
           { name: "Forbidden", baseUrl: "https://example.com" },
           "",
           headers
-        )
-      ).status,
+        );
+        return awaitedValue181727.status;
+      })(),
       401
     );
     assert.equal(
-      (
-        await call("PATCH", `/settings/members/${member.id}`, {
-          disabled: true,
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue181954 = await call(
+          "PATCH",
+          `/settings/members/${member.id}`,
+          {
+            disabled: true,
+          }
+        );
+        return awaitedValue181954.status;
+      })(),
       200
     );
     assert.equal(
-      (await call("GET", "/auth/me", undefined, "", headers)).status,
+      await (async () => {
+        const awaitedValue182114 = await call(
+          "GET",
+          "/auth/me",
+          undefined,
+          "",
+          headers
+        );
+        return awaitedValue182114.status;
+      })(),
       401
     );
     assert.equal(
-      (
-        await call("PATCH", `/settings/members/${member.id}`, {
-          disabled: false,
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue182219 = await call(
+          "PATCH",
+          `/settings/members/${member.id}`,
+          {
+            disabled: false,
+          }
+        );
+        return awaitedValue182219.status;
+      })(),
       200
     );
     assert.equal(
-      (
-        await call("GET", "/auth/me", undefined, adminCookie, {
-          authorization: "Bearer invalid",
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue182380 = await call(
+          "GET",
+          "/auth/me",
+          undefined,
+          adminCookie,
+          {
+            authorization: "Bearer invalid",
+          }
+        );
+        return awaitedValue182380.status;
+      })(),
       401
     );
     await accountsRepository.createSession(
@@ -5111,21 +6134,34 @@ describe("accounts, roles and session security", () => {
       new Date(Date.now() + 60_000).toISOString()
     );
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue182701 = await call(
           "DELETE",
           `/auth/access-tokens/${accessToken.id}`,
           undefined,
           cookie
-        )
-      ).status,
+        );
+        return awaitedValue182701.status;
+      })(),
       404
     );
     assert.equal(
-      (await call("GET", "/auth/me", undefined, "", headers)).status,
+      await (async () => {
+        const awaitedValue182899 = await call(
+          "GET",
+          "/auth/me",
+          undefined,
+          "",
+          headers
+        );
+        return awaitedValue182899.status;
+      })(),
       401
     );
-    const audit = await (await call("GET", "/settings/audit?limit=100")).json();
+    const audit = await (async () => {
+      const awaitedValue183004 = await call("GET", "/settings/audit?limit=100");
+      return awaitedValue183004.json();
+    })();
     assert.ok(!JSON.stringify(audit).includes(token));
     assert.ok(
       audit.events.some(
@@ -5143,14 +6179,15 @@ describe("accounts, roles and session security", () => {
     const projectId = await createProject("Browser-only management");
     const expiresAt = new Date(Date.now() + 60_000)
       .toISOString()
-      .replace(/\.\d+Z$/, "Z");
+      .replace(/\.\d+Z$/u, "Z");
     assert.equal(
-      (
-        await call("POST", "/auth/access-tokens", {
+      await (async () => {
+        const awaitedValue183815 = await call("POST", "/auth/access-tokens", {
           name: "Expired",
           expiresAt: "2000-01-01T00:00:00.000Z",
-        })
-      ).status,
+        });
+        return awaitedValue183815.status;
+      })(),
       400
     );
     const created = await call("POST", "/auth/access-tokens", {
@@ -5162,7 +6199,16 @@ describe("accounts, roles and session security", () => {
     assert.equal(accessToken.expiresAt, new Date(expiresAt).toISOString());
     const headers = { authorization: `Bearer ${token}` };
     assert.equal(
-      (await call("GET", "/projects", undefined, "", headers)).status,
+      await (async () => {
+        const awaitedValue184369 = await call(
+          "GET",
+          "/projects",
+          undefined,
+          "",
+          headers
+        );
+        return awaitedValue184369.status;
+      })(),
       200
     );
     const routes: [string, string, unknown?][] = [
@@ -5183,6 +6229,7 @@ describe("accounts, roles and session security", () => {
       ["POST", "/auth/logout"],
       ["POST", "/auth/oidc/start", { link: true }],
     ];
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const [method, url, body] of routes) {
       const response = await call(method, url, body, "", headers);
       assert.equal(
@@ -5191,16 +6238,32 @@ describe("accounts, roles and session security", () => {
         `${method} ${url}: ${await response.text()}`
       );
     }
+    /* oxlint-enable no-await-in-loop */
     await db
       .update(personalAccessTokens)
       .set({ expiresAt: "2000-01-01T00:00:00.000Z" })
       .where(eq(personalAccessTokens.id, accessToken.id));
     assert.equal(
-      (await call("GET", "/auth/me", undefined, "", headers)).status,
+      await (async () => {
+        const awaitedValue185583 = await call(
+          "GET",
+          "/auth/me",
+          undefined,
+          "",
+          headers
+        );
+        return awaitedValue185583.status;
+      })(),
       401
     );
     assert.equal(
-      (await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status,
+      await (async () => {
+        const awaitedValue185688 = await call(
+          "DELETE",
+          `/auth/access-tokens/${accessToken.id}`
+        );
+        return awaitedValue185688.status;
+      })(),
       200
     );
   });
@@ -5236,14 +6299,15 @@ describe("accounts, roles and session security", () => {
     });
     try {
       assert.equal(
-        (
-          await call(
+        await (async () => {
+          const awaitedValue186941 = await call(
             "POST",
             "/auth/access-tokens",
             { name: "Revoked session" },
             `specbook_session=${token}`
-          )
-        ).status,
+          );
+          return awaitedValue186941.status;
+        })(),
         401
       );
       assert.deepEqual(await accountsRepository.accessTokens(member.id), []);
@@ -5271,9 +6335,13 @@ describe("accounts, roles and session security", () => {
     );
     const cookie = `specbook_session=${session}`;
     const projectId = await createProject("Protected runner destinations");
-    const { environments } = await (
-      await call("GET", `/projects/${projectId}/environments`)
-    ).json();
+    const { environments } = await (async () => {
+      const awaitedValue188125 = await call(
+        "GET",
+        `/projects/${projectId}/environments`
+      );
+      return awaitedValue188125.json();
+    })();
     const environment = environments.find(
       (entry: { name: string }) => entry.name === "Production"
     );
@@ -5286,22 +6354,48 @@ describe("accounts, roles and session security", () => {
       executor: "server",
       runnerGroup: null,
     };
-    assert.equal((await call("PUT", url, input, cookie)).status, 200);
-    const privateInput = { ...input, executor: "runner", runnerGroup: "lab" };
-    assert.equal((await call("PUT", url, privateInput, cookie)).status, 403);
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue188610 = await call("PUT", url, input, cookie);
+        return awaitedValue188610.status;
+      })(),
+      200
+    );
+    const privateInput = { ...input, executor: "runner", runnerGroup: "lab" };
+    assert.equal(
+      await (async () => {
+        const awaitedValue188760 = await call("PUT", url, privateInput, cookie);
+        return awaitedValue188760.status;
+      })(),
+      403
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue188845 = await call(
           "POST",
           `/projects/${projectId}/environments`,
           { ...privateInput, name: "Private" },
           cookie
-        )
-      ).status,
+        );
+        return awaitedValue188845.status;
+      })(),
       403
     );
-    assert.equal((await call("PUT", url, privateInput)).status, 200);
-    assert.equal((await call("PUT", url, privateInput, cookie)).status, 200);
+    assert.equal(
+      await (async () => {
+        const awaitedValue189059 = await call("PUT", url, privateInput);
+        return awaitedValue189059.status;
+      })(),
+      200
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue189129 = await call("PUT", url, privateInput, cookie);
+        return awaitedValue189129.status;
+      })(),
+      200
+    );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const change of [
       { baseUrl: "https://other.example.com" },
       { allowedOrigins: ["https://other.example.com"] },
@@ -5310,58 +6404,77 @@ describe("accounts, roles and session security", () => {
       { executor: "tunnel" },
     ]) {
       assert.equal(
-        (await call("PUT", url, { ...privateInput, ...change }, cookie)).status,
+        await (async () => {
+          const awaitedValue189470 = await call(
+            "PUT",
+            url,
+            { ...privateInput, ...change },
+            cookie
+          );
+          return awaitedValue189470.status;
+        })(),
         403
       );
     }
+    /* oxlint-enable no-await-in-loop */
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue189594 = await call(
           "PATCH",
           `/projects/${projectId}`,
           { baseUrl: "https://other.example.com" },
           cookie
-        )
-      ).status,
+        );
+        return awaitedValue189594.status;
+      })(),
       403
     );
-    const { token, accessToken } = await (
-      await call("POST", "/auth/access-tokens", {
+    const { token, accessToken } = await (async () => {
+      const awaitedValue189824 = await call("POST", "/auth/access-tokens", {
         name: "Admin destination test",
-      })
-    ).json();
+      });
+      return awaitedValue189824.json();
+    })();
     const headers = { authorization: `Bearer ${token}` };
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue190021 = await call(
           "PUT",
           url,
           { ...privateInput, baseUrl: "https://other.example.com" },
           "",
           headers
-        )
-      ).status,
+        );
+        return awaitedValue190021.status;
+      })(),
       403
     );
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue190243 = await call(
           "PATCH",
           `/projects/${projectId}`,
           { baseUrl: "https://other.example.com" },
           "",
           headers
-        )
-      ).status,
+        );
+        return awaitedValue190243.status;
+      })(),
       403
     );
     assert.equal(
-      (await call("PUT", url, { ...privateInput, executor: "tunnel" })).status,
+      await (async () => {
+        const awaitedValue190471 = await call("PUT", url, {
+          ...privateInput,
+          executor: "tunnel",
+        });
+        return awaitedValue190471.status;
+      })(),
       200
     );
     assert.equal(
-      (
-        await call(
+      await (async () => {
+        const awaitedValue190586 = await call(
           "PUT",
           url,
           {
@@ -5370,20 +6483,32 @@ describe("accounts, roles and session security", () => {
             baseUrl: "https://other.example.com",
           },
           cookie
-        )
-      ).status,
+        );
+        return awaitedValue190586.status;
+      })(),
       403
     );
     assert.equal(
-      (
-        await call("PATCH", `/projects/${projectId}`, {
-          baseUrl: "https://other.example.com",
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue190860 = await call(
+          "PATCH",
+          `/projects/${projectId}`,
+          {
+            baseUrl: "https://other.example.com",
+          }
+        );
+        return awaitedValue190860.status;
+      })(),
       200
     );
     assert.equal(
-      (await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status,
+      await (async () => {
+        const awaitedValue191034 = await call(
+          "DELETE",
+          `/auth/access-tokens/${accessToken.id}`
+        );
+        return awaitedValue191034.status;
+      })(),
       200
     );
   });
@@ -5421,15 +6546,19 @@ describe("accounts, roles and session security", () => {
     });
     assert.equal(invalid.status, 400, await invalid.clone().text());
     const original = specsRepository.listSpecs;
-    specsRepository.listSpecs = async () => {
-      throw new Error("private filesystem marker");
+    specsRepository.listSpecs = () => {
+      try {
+        throw new Error("private filesystem marker");
+      } catch (error) {
+        return Promise.reject(error);
+      }
     };
     try {
       const response = await call("POST", url, { specs: [input] });
       assert.equal(response.status, 500, await response.clone().text());
       const body = await response.json();
       assert.ok(body.errorId);
-      assert.doesNotMatch(JSON.stringify(body), /private filesystem marker/);
+      assert.doesNotMatch(JSON.stringify(body), /private filesystem marker/u);
     } finally {
       specsRepository.listSpecs = original;
     }
@@ -5447,13 +6576,25 @@ describe("accounts, roles and session security", () => {
       "subject"
     );
     assert.equal(
-      (await call("PATCH", `/settings/members/${admin.id}`, { role: "viewer" }))
-        .status,
+      await (async () => {
+        const awaitedValue193164 = await call(
+          "PATCH",
+          `/settings/members/${admin.id}`,
+          { role: "viewer" }
+        );
+        return awaitedValue193164.status;
+      })(),
       409
     );
     assert.equal(
-      (await call("PATCH", `/settings/members/${admin.id}`, { disabled: true }))
-        .status,
+      await (async () => {
+        const awaitedValue193297 = await call(
+          "PATCH",
+          `/settings/members/${admin.id}`,
+          { disabled: true }
+        );
+        return awaitedValue193297.status;
+      })(),
       409
     );
     const signedIn = await call(
@@ -5464,14 +6605,15 @@ describe("accounts, roles and session security", () => {
     );
     assert.equal(signedIn.status, 200);
     const cookie = cookieOf(signedIn);
-    const { token } = await (
-      await call(
+    const { token } = await (async () => {
+      const awaitedValue193637 = await call(
         "POST",
         "/auth/access-tokens",
         { name: "Logout revocation" },
         cookie
-      )
-    ).json();
+      );
+      return awaitedValue193637.json();
+    })();
     const projectId = await createProject("Authenticated stream");
     const { createChat } = await import("../../src/core/chat/session-store");
     const chat = await createChat(projectId);
@@ -5481,10 +6623,15 @@ describe("accounts, roles and session security", () => {
       undefined,
       cookie
     );
-    const reader = stream.body!.getReader();
+    const reader = requireValue(stream.body).getReader();
     assert.match(
-      new TextDecoder().decode((await reader.read()).value),
-      /event: connected/
+      new TextDecoder().decode(
+        await (async () => {
+          const awaitedValue194180 = await reader.read();
+          return awaitedValue194180.value;
+        })()
+      ),
+      /event: connected/u
     );
     let closed = false;
     const stop = await watchSession(new Headers({ cookie }), () => {
@@ -5493,25 +6640,51 @@ describe("accounts, roles and session security", () => {
     try {
       assert.equal(closed, false);
       assert.equal(
-        (await call("POST", "/auth/logout", undefined, cookie)).status,
+        await (async () => {
+          const awaitedValue194438 = await call(
+            "POST",
+            "/auth/logout",
+            undefined,
+            cookie
+          );
+          return awaitedValue194438.status;
+        })(),
         200
       );
       assert.equal(closed, true);
       assert.equal(
-        (await reader.read()).done,
+        await (async () => {
+          const awaitedValue194585 = await reader.read();
+          return awaitedValue194585.done;
+        })(),
         true,
         "logout closes the live SSE response"
       );
       assert.equal(
-        (await call("GET", "/auth/me", undefined, cookie)).status,
+        await (async () => {
+          const awaitedValue194710 = await call(
+            "GET",
+            "/auth/me",
+            undefined,
+            cookie
+          );
+          return awaitedValue194710.status;
+        })(),
         401
       );
       assert.equal(
-        (
-          await call("GET", "/auth/me", undefined, "", {
-            authorization: `Bearer ${token}`,
-          })
-        ).status,
+        await (async () => {
+          const awaitedValue194818 = await call(
+            "GET",
+            "/auth/me",
+            undefined,
+            "",
+            {
+              authorization: `Bearer ${token}`,
+            }
+          );
+          return awaitedValue194818.status;
+        })(),
         401
       );
     } finally {
@@ -5555,76 +6728,91 @@ describe("accounts, roles and session security", () => {
     t.mock.method(
       globalThis,
       "fetch",
-      async (input: string | URL | Request, options?: RequestInit) => {
-        const url = new URL(
-          input instanceof Request ? input.url : input.toString()
-        );
-        if (url.origin !== issuer) {
-          return originalFetch(input, options);
-        }
-        if (url.pathname === "/.well-known/openid-configuration") {
-          return Response.json({
-            issuer,
-            authorization_endpoint: `${issuer}/authorize`,
-            token_endpoint: `${issuer}/token`,
-            jwks_uri: `${issuer}/jwks`,
-            response_types_supported: ["code"],
-            subject_types_supported: ["public"],
-            id_token_signing_alg_values_supported: ["RS256"],
-            code_challenge_methods_supported: ["S256"],
-          });
-        }
-        if (url.pathname === "/jwks") {
-          return Response.json({
-            keys: [
-              {
-                ...keys.publicKey.export({ format: "jwk" }),
-                alg: "RS256",
-                kid: "test-key",
-                use: "sig",
-              },
-            ],
-          });
-        }
-        if (url.pathname === "/token") {
-          exchanges++;
-          const body = new URLSearchParams(options?.body?.toString());
-          assert.equal(body.get("client_secret"), config.clientSecret);
-          assert.equal(
-            crypto
-              .createHash("sha256")
-              .update(body.get("code_verifier")!)
-              .digest("base64url"),
-            authorization.searchParams.get("code_challenge")
+      (input: string | URL | Request, options?: RequestInit) => {
+        try {
+          const url = new URL(
+            input instanceof Request ? input.url : input.toString()
           );
-          const now = Math.floor(Date.now() / 1000);
-          return Response.json({
-            token_type: "Bearer",
-            access_token: "fake-access-token",
-            expires_in: 300,
-            id_token: jwt(
-              {
-                iss: issuer,
-                sub: "local-admin",
-                aud: "specbook",
-                iat: now,
-                exp: now + 300,
-                nonce: authorization.searchParams.get("nonce"),
-                email: admin.email,
-                email_verified: true,
-                ...overrides,
-              },
-              invalidSignature
-            ),
-          });
+          if (url.origin !== issuer) {
+            return Promise.resolve(originalFetch(input, options));
+          }
+          if (url.pathname === "/.well-known/openid-configuration") {
+            return Promise.resolve(
+              Response.json({
+                issuer,
+                authorization_endpoint: `${issuer}/authorize`,
+                token_endpoint: `${issuer}/token`,
+                jwks_uri: `${issuer}/jwks`,
+                response_types_supported: ["code"],
+                subject_types_supported: ["public"],
+                id_token_signing_alg_values_supported: ["RS256"],
+                code_challenge_methods_supported: ["S256"],
+              })
+            );
+          }
+          if (url.pathname === "/jwks") {
+            return Promise.resolve(
+              Response.json({
+                keys: [
+                  {
+                    ...keys.publicKey.export({ format: "jwk" }),
+                    alg: "RS256",
+                    kid: "test-key",
+                    use: "sig",
+                  },
+                ],
+              })
+            );
+          }
+          if (url.pathname === "/token") {
+            exchanges += 1;
+            const body = new URLSearchParams(options?.body?.toString());
+            assert.equal(body.get("client_secret"), config.clientSecret);
+            assert.equal(
+              crypto
+                .createHash("sha256")
+                .update(requireValue(body.get("code_verifier")))
+                .digest("base64url"),
+              authorization.searchParams.get("code_challenge")
+            );
+            const now = Math.floor(Date.now() / 1000);
+            return Promise.resolve(
+              Response.json({
+                token_type: "Bearer",
+                access_token: "fake-access-token",
+                expires_in: 300,
+                id_token: jwt(
+                  {
+                    iss: issuer,
+                    sub: "local-admin",
+                    aud: "specbook",
+                    iat: now,
+                    exp: now + 300,
+                    nonce: authorization.searchParams.get("nonce"),
+                    email: admin.email,
+                    email_verified: true,
+                    ...overrides,
+                  },
+                  invalidSignature
+                ),
+              })
+            );
+          }
+          throw new Error(`Unexpected identity request: ${url}`);
+        } catch (error) {
+          return Promise.reject(error);
         }
-        throw new Error(`Unexpected identity request: ${url}`);
       }
     );
     const begin = async (link = false, cookie = adminCookie) => {
       const response = await call("POST", "/auth/oidc/start", { link }, cookie);
       assert.equal(response.status, 200, await response.clone().text());
-      authorization = new URL((await response.json()).url);
+      authorization = new URL(
+        await (async () => {
+          const awaitedValue198963 = await response.json();
+          return awaitedValue198963.url;
+        })()
+      );
       assert.equal(
         authorization.searchParams.get("code_challenge_method"),
         "S256"
@@ -5636,23 +6824,32 @@ describe("accounts, roles and session security", () => {
           .join("; "),
       };
     };
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
     const callback = (pending: { path: string; cookie: string }) =>
       call("GET", pending.path, undefined, pending.cookie);
     const failed = async (pending: { path: string; cookie: string }) => {
+      // oxlint-disable-next-line node/callback-return, promise/prefer-await-to-callbacks -- The awaited Hono middleware or HTTP helper is not a Node error-first callback. This handler models the callback interface exercised by the test.
       const response = await callback(pending);
       assert.match(
-        response.headers.get("location")!,
-        /\/login\?error=sso_failed$/
+        requireValue(response.headers.get("location")),
+        /\/login\?error=sso_failed$/u
       );
       assert.equal(cookieOf(response), "");
     };
-    assert.equal((await call("PUT", "/settings/sso", config)).status, 200);
+    assert.equal(
+      await (async () => {
+        const awaitedValue199783 = await call("PUT", "/settings/sso", config);
+        return awaitedValue199783.status;
+      })(),
+      200
+    );
     try {
-      const { token: ssoToken, accessToken } = await (
-        await call("POST", "/auth/access-tokens", {
+      const { token: ssoToken, accessToken } = await (async () => {
+        const awaitedValue199905 = await call("POST", "/auth/access-tokens", {
           name: "SSO requires a browser",
-        })
-      ).json();
+        });
+        return awaitedValue199905.json();
+      })();
       const linkedWithToken = await begin(true);
       const rejected = await call(
         "GET",
@@ -5662,8 +6859,8 @@ describe("accounts, roles and session security", () => {
         { authorization: `Bearer ${ssoToken}` }
       );
       assert.match(
-        rejected.headers.get("location")!,
-        /\/login\?error=sso_failed$/
+        requireValue(rejected.headers.get("location")),
+        /\/login\?error=sso_failed$/u
       );
       assert.equal(
         exchanges,
@@ -5671,7 +6868,13 @@ describe("accounts, roles and session security", () => {
         "personal tokens cannot complete account linking"
       );
       assert.equal(
-        (await call("DELETE", `/auth/access-tokens/${accessToken.id}`)).status,
+        await (async () => {
+          const awaitedValue200520 = await call(
+            "DELETE",
+            `/auth/access-tokens/${accessToken.id}`
+          );
+          return awaitedValue200520.status;
+        })(),
         200
       );
       const bound = await begin();
@@ -5700,6 +6903,7 @@ describe("accounts, roles and session security", () => {
       overrides = { email: "outside@other.example" };
       await failed(await begin(true));
       overrides = {};
+      // oxlint-disable-next-line node/callback-return, promise/prefer-await-to-callbacks -- The awaited Hono middleware or HTTP helper is not a Node error-first callback. This handler models the callback interface exercised by the test.
       const linked = await callback(await begin(true));
       assert.equal(
         linked.headers.get("location"),
@@ -5708,60 +6912,76 @@ describe("accounts, roles and session security", () => {
       adminCookie = cookieOf(linked);
       assert.ok(adminCookie);
       assert.equal(
-        (await (await call("GET", "/settings/sso")).json()).linked,
+        await (async () => {
+          const awaitedValue201768 = await (async () => {
+            const awaitedValue215899 = await call("GET", "/settings/sso");
+            return awaitedValue215899.json();
+          })();
+          return awaitedValue201768.linked;
+        })(),
         true
       );
-      const hidden = await (await call("GET", "/settings/sso")).text();
-      assert.doesNotMatch(hidden, /test-oidc-secret|verifiedUsers/);
-      const invitation = await (
-        await call("POST", "/settings/invitations", {
+      const hidden = await (async () => {
+        const awaitedValue201877 = await call("GET", "/settings/sso");
+        return awaitedValue201877.text();
+      })();
+      assert.doesNotMatch(hidden, /test-oidc-secret|verifiedUsers/u);
+      const invitation = await (async () => {
+        const awaitedValue202023 = await call("POST", "/settings/invitations", {
           email: "pending@example.com",
           role: "viewer",
-        })
-      ).json();
-      const token = new URLSearchParams(
-        new URL(invitation.inviteUrl).hash.slice(1)
-      ).get("token")!;
+        });
+        return awaitedValue202023.json();
+      })();
+      const token = requireValue(
+        new URLSearchParams(new URL(invitation.inviteUrl).hash.slice(1)).get(
+          "token"
+        )
+      );
       const { clientSecret: _secret, ...unchanged } = config;
       assert.equal(
-        (
-          await call("PUT", "/settings/sso", {
+        await (async () => {
+          const awaitedValue202378 = await call("PUT", "/settings/sso", {
             ...unchanged,
             passwordLoginEnabled: false,
-          })
-        ).status,
+          });
+          return awaitedValue202378.status;
+        })(),
         200
       );
       assert.equal(
-        (
-          await call(
+        await (async () => {
+          const awaitedValue202574 = await call(
             "POST",
             "/auth/login",
             { email: admin.email, password },
             ""
-          )
-        ).status,
+          );
+          return awaitedValue202574.status;
+        })(),
         403
       );
       assert.equal(
-        (
-          await call(
+        await (async () => {
+          const awaitedValue202785 = await call(
             "POST",
             "/auth/invitations/accept",
             { token, name: "Pending", password },
             ""
-          )
-        ).status,
+          );
+          return awaitedValue202785.status;
+        })(),
         403
       );
       assert.equal(
-        (
-          await call("PUT", "/settings/sso", {
+        await (async () => {
+          const awaitedValue203013 = await call("PUT", "/settings/sso", {
             ...config,
             clientSecret: "changed",
             passwordLoginEnabled: false,
-          })
-        ).status,
+          });
+          return awaitedValue203013.status;
+        })(),
         409,
         "changed provider credentials need a new successful link before disabling local login"
       );
@@ -5770,42 +6990,57 @@ describe("accounts, roles and session security", () => {
         email: "sso-member@example.com",
         name: "New member",
       };
+      // oxlint-disable-next-line node/callback-return, promise/prefer-await-to-callbacks -- The awaited Hono middleware or HTTP helper is not a Node error-first callback. This handler models the callback interface exercised by the test.
       const created = await callback(await begin(false, ""));
       assert.equal(created.headers.get("location"), "http://localhost:4000/");
       assert.equal(
-        (
-          await (
-            await call("GET", "/auth/me", undefined, cookieOf(created))
-          ).json()
-        ).user.role,
+        await (async () => {
+          const awaitedValue203605 = await (async () => {
+            const awaitedValue218331 = await call(
+              "GET",
+              "/auth/me",
+              undefined,
+              cookieOf(created)
+            );
+            return awaitedValue218331.json();
+          })();
+          return awaitedValue203605.user.role;
+        })(),
         "viewer"
       );
       assert.equal(
-        (
-          await call("PATCH", `/settings/members/${admin.id}`, {
-            disabled: true,
-          })
-        ).status,
+        await (async () => {
+          const awaitedValue203791 = await call(
+            "PATCH",
+            `/settings/members/${admin.id}`,
+            {
+              disabled: true,
+            }
+          );
+          return awaitedValue203791.status;
+        })(),
         409
       );
       const { db } = await import("../../src/infra/db/client");
       const { users } = await import("../../src/infra/db/schema");
       const { eq } = await import("drizzle-orm");
-      const localHash = (await accountsRepository.getUser(admin.id))!
-        .passwordHash;
+      const localHash = requireValue(
+        await accountsRepository.getUser(admin.id)
+      ).passwordHash;
       await db
         .update(users)
         .set({ passwordHash: null })
         .where(eq(users.id, admin.id));
       try {
         assert.equal(
-          (
-            await call("PUT", "/settings/sso", {
+          await (async () => {
+            const awaitedValue204371 = await call("PUT", "/settings/sso", {
               ...config,
               clientId: "another-client",
               passwordLoginEnabled: true,
-            })
-          ).status,
+            });
+            return awaitedValue204371.status;
+          })(),
           409,
           "enabling passwords cannot protect a provider change when no administrator has a local password"
         );
@@ -5839,13 +7074,14 @@ describe("accounts, roles and session security", () => {
     } finally {
       const { clientSecret: _secret, ...unchanged } = config;
       assert.equal(
-        (
-          await call("PUT", "/settings/sso", {
+        await (async () => {
+          const awaitedValue205549 = await call("PUT", "/settings/sso", {
             ...unchanged,
             enabled: false,
             passwordLoginEnabled: true,
-          })
-        ).status,
+          });
+          return awaitedValue205549.status;
+        })(),
         200
       );
     }
@@ -5876,6 +7112,7 @@ describe("selected batch suggestions", () => {
         return row?.status === "queued" ? [row] : [];
       });
       await stopJobWorker();
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const outcome of [
         "missing_spec",
         "missing_run",
@@ -5903,15 +7140,17 @@ describe("selected batch suggestions", () => {
         });
         const initial = await presentSpecBatch(item);
         const selected = await selectSpecBatch(item, [
-          initial.candidates[0]!.id,
+          requireValue(initial.candidates[0]).id,
         ]);
-        const candidate = (
-          selected.payload.specBatch as {
-            candidates: { jobId: string; specId: string }[];
-          }
-        ).candidates[0]!;
+        const candidate = requireValue(
+          (
+            selected.payload.specBatch as {
+              candidates: { jobId: string; specId: string }[];
+            }
+          ).candidates[0]
+        );
         targetId = candidate.jobId;
-        const job = (await read(targetId))!;
+        const job = requireValue(await read(targetId));
         if (outcome !== "missing_spec") {
           const { spec } = await writer.createSpecInRepo({
             projectId,
@@ -5937,7 +7176,7 @@ describe("selected batch suggestions", () => {
             );
           }
         }
-        const session = (await openSession(job.chatId))!;
+        const session = requireValue(await openSession(job.chatId));
         session.appendCustomMessageEntry(
           "result",
           "The selected Spec is ready.",
@@ -5948,7 +7187,7 @@ describe("selected batch suggestions", () => {
           assert.ok(
             await jobsRepository.transition(job.id, "queued", "running")
           );
-          await concludeJobTurn((await read(job.id))!, {
+          await concludeJobTurn(requireValue(await read(job.id)), {
             status: "completed",
           } as Parameters<typeof concludeJobTurn>[1]);
         };
@@ -5957,84 +7196,146 @@ describe("selected batch suggestions", () => {
           await jobsRepository.transition(job.id, "paused", "queued");
           await executeAttempt();
           assert.equal(
-            (await jobsRepository.inbox(projectId)).some(
-              (entry) => entry.jobId === job.id && entry.kind === "note"
-            ),
+            await (async () => {
+              const awaitedValue209695 = await jobsRepository.inbox(projectId);
+              return awaitedValue209695.some(
+                (entry) => entry.jobId === job.id && entry.kind === "note"
+              );
+            })(),
             false
           );
           if (outcome === "failed") {
-            while ((await read(job.id))?.status === "queued") {
+            while (
+              (await (async () => {
+                const awaitedResult233619 = await read(job.id);
+                return awaitedResult233619?.status;
+              })()) === "queued"
+            ) {
               await executeAttempt();
             }
-            assert.equal((await read(job.id))?.status, "completed");
             assert.equal(
-              (await presentSpecBatch((await jobsRepository.item(item.id))!))
-                .candidates[0]!.state,
+              await (async () => {
+                const awaitedResult233741 = await read(job.id);
+                return awaitedResult233741?.status;
+              })(),
+              "completed"
+            );
+            assert.equal(
+              requireValue(
+                await (async () => {
+                  const awaitedValue210123 = await presentSpecBatch(
+                    requireValue(await jobsRepository.item(item.id))
+                  );
+                  return awaitedValue210123.candidates[0];
+                })()
+              ).state,
               "failed"
             );
             assert.equal(
-              (await jobsRepository.inbox(projectId)).filter(
-                (entry) => entry.jobId === job.id && entry.kind === "question"
-              ).length,
+              await (async () => {
+                const awaitedValue210304 =
+                  await jobsRepository.inbox(projectId);
+                return awaitedValue210304.filter(
+                  (entry) => entry.jobId === job.id && entry.kind === "question"
+                ).length;
+              })(),
               0
             );
           } else {
-            for (let attempt = 0; attempt < MAX_SAFETY_RETRIES; attempt++) {
-              const stalled = (await read(job.id))!;
+            for (let attempt = 0; attempt < MAX_SAFETY_RETRIES; attempt += 1) {
+              const stalled = requireValue(await read(job.id));
               assert.equal(stalled.status, "stalled");
               assert.ok(
                 stalled.retryAt && Date.parse(stalled.retryAt) > Date.now()
               );
               assert.equal(
-                (await presentSpecBatch((await jobsRepository.item(item.id))!))
-                  .candidates[0]!.state,
+                requireValue(
+                  await (async () => {
+                    const awaitedValue210855 = await presentSpecBatch(
+                      requireValue(await jobsRepository.item(item.id))
+                    );
+                    return awaitedValue210855.candidates[0];
+                  })()
+                ).state,
                 "queued"
               );
               assert.equal(
-                (await jobsRepository.inbox(projectId)).filter(
-                  (entry) => entry.jobId === job.id && entry.kind === "question"
-                ).length,
+                await (async () => {
+                  const awaitedValue211046 =
+                    await jobsRepository.inbox(projectId);
+                  return awaitedValue211046.filter(
+                    (entry) =>
+                      entry.jobId === job.id && entry.kind === "question"
+                  ).length;
+                })(),
                 0,
                 "an unfinished model response must retry before asking the human"
               );
               await retryStalledJob(stalled);
               assert.equal(
-                (await read(job.id))?.status,
+                await (async () => {
+                  const awaitedResult235878 = await read(job.id);
+                  return awaitedResult235878?.status;
+                })(),
                 "stalled",
                 "backoff is respected"
               );
               await jobsRepository.update(job.id, {
                 retryAt: new Date(Date.now() - 1000).toISOString(),
               });
-              await retryStalledJob((await read(job.id))!);
-              assert.equal((await read(job.id))?.status, "queued");
-              assert.equal((await read(job.id))?.safetyRetries, attempt + 1);
+              await retryStalledJob(requireValue(await read(job.id)));
+              assert.equal(
+                await (async () => {
+                  const awaitedResult236227 = await read(job.id);
+                  return awaitedResult236227?.status;
+                })(),
+                "queued"
+              );
+              assert.equal(
+                await (async () => {
+                  const awaitedResult236295 = await read(job.id);
+                  return awaitedResult236295?.safetyRetries;
+                })(),
+                attempt + 1
+              );
               await executeAttempt();
             }
-            const exhausted = (await read(job.id))!;
+            const exhausted = requireValue(await read(job.id));
             assert.equal(exhausted.status, "stalled");
             assert.equal(exhausted.retryAt, null);
             await retryStalledJob(exhausted);
             const progress = await presentSpecBatch(
-              (await jobsRepository.item(item.id))!
+              requireValue(await jobsRepository.item(item.id))
             );
-            const questions = (await jobsRepository.inbox(projectId)).filter(
-              (entry) => entry.jobId === job.id && entry.kind === "question"
+            const questions = await (async () => {
+              const awaitedValue212273 = await jobsRepository.inbox(projectId);
+              return awaitedValue212273.filter(
+                (entry) => entry.jobId === job.id && entry.kind === "question"
+              );
+            })();
+            assert.equal(
+              await (async () => {
+                const awaitedResult237063 = await read(job.id);
+                return awaitedResult237063?.status;
+              })(),
+              "blocked"
             );
-            assert.equal((await read(job.id))?.status, "blocked");
-            assert.equal(progress.candidates[0]!.state, "needs_answer");
+            assert.equal(
+              requireValue(progress.candidates[0]).state,
+              "needs_answer"
+            );
             assert.equal(questions.length, 1);
-            const question = questions[0]!;
-            assert.match(question.title, /Sign-in form/);
+            const question = requireValue(questions[0]);
+            assert.match(question.title, /Sign-in form/u);
             assert.match(
               question.body,
               outcome === "missing_spec"
-                ? /has not been saved/
-                : /first result is missing/
+                ? /has not been saved/u
+                : /first result is missing/u
             );
             assert.doesNotMatch(
               question.body,
-              /missing access|credentials/i,
+              /missing access|credentials/iu,
               "a model ending early does not prove an access problem"
             );
             assert.equal(question.payload.sourceItemId, item.id);
@@ -6043,13 +7344,24 @@ describe("selected batch suggestions", () => {
               question,
               "Open the homepage and inspect the sign-in form."
             );
-            assert.equal((await read(job.id))?.status, "queued");
+            assert.equal(
+              await (async () => {
+                const awaitedResult238088 = await read(job.id);
+                return awaitedResult238088?.status;
+              })(),
+              "queued"
+            );
             assert.match(
-              (await read(job.id))!.pendingMessage,
-              /Open the homepage/
+              requireValue(await read(job.id)).pendingMessage,
+              /Open the homepage/u
             );
             assert.equal(
-              (await jobsRepository.item(question.id))?.status,
+              await (async () => {
+                const awaitedResult238308 = await jobsRepository.item(
+                  question.id
+                );
+                return awaitedResult238308?.status;
+              })(),
               "answered"
             );
           }
@@ -6057,6 +7369,7 @@ describe("selected batch suggestions", () => {
           await stopJobWorker();
         }
       }
+      /* oxlint-enable no-await-in-loop */
     }
   );
 
@@ -6093,7 +7406,10 @@ describe("selected batch suggestions", () => {
       "Project discovery"
     );
     assert.deepEqual(
-      (await listChats(projectId)).map((chat) => chat.id),
+      await (async () => {
+        const awaitedValue215076 = await listChats(projectId);
+        return awaitedValue215076.map((chat) => chat.id);
+      })(),
       [chatId]
     );
     const input = {
@@ -6116,42 +7432,58 @@ describe("selected batch suggestions", () => {
       contextRevisionId: revision.id,
     });
     assert.deepEqual(
-      (await listChats(projectId)).map((chat) => chat.id),
+      await (async () => {
+        const awaitedValue215718 = await listChats(projectId);
+        return awaitedValue215718.map((chat) => chat.id);
+      })(),
       [chatId],
       "a discovery conversation stays visible while its internal review stays hidden"
     );
     assert.equal(
-      (
-        await proposeSpecBatch(projectId, chatId, input, {
-          contextRevisionId: revision.id,
-        })
-      ).id,
+      await (async () => {
+        const awaitedValue215904 = await proposeSpecBatch(
+          projectId,
+          chatId,
+          input,
+          {
+            contextRevisionId: revision.id,
+          }
+        );
+        return awaitedValue215904.id;
+      })(),
       item.id
     );
     const view = await presentSpecBatch(item);
     assert.equal(view.contextReviewRequired, true);
     await assert.rejects(
-      () => selectSpecBatch(item, [view.candidates[0]!.id]),
-      /confirm the discovery context/
+      () => selectSpecBatch(item, [requireValue(view.candidates[0]).id]),
+      /confirm the discovery context/u
     );
     await projectContextsRepository.confirmProjectContextRevision(revision.id);
     await assert.rejects(
       () => selectSpecBatch(item, [crypto.randomUUID()]),
-      /Choose at least one/
+      /Choose at least one/u
     );
     await assert.rejects(
       () =>
-        selectSpecBatch(item, [view.candidates[0]!.id, view.candidates[0]!.id]),
-      /without duplicates/
+        selectSpecBatch(item, [
+          requireValue(view.candidates[0]).id,
+          requireValue(view.candidates[0]).id,
+        ]),
+      /without duplicates/u
     );
-    const selected = await selectSpecBatch(item, [view.candidates[0]!.id]);
+    const selected = await selectSpecBatch(item, [
+      requireValue(view.candidates[0]).id,
+    ]);
     const progress = await presentSpecBatch(selected);
     assert.equal(progress.contextReviewRequired, false);
-    assert.equal(progress.candidates[0]!.selected, true);
-    assert.equal(progress.candidates[0]!.state, "queued");
-    assert.equal(progress.candidates[1]!.selected, undefined);
-    assert.equal(progress.candidates[1]!.jobId, undefined);
-    const child = await jobsRepository.get(progress.candidates[0]!.jobId!);
+    assert.equal(requireValue(progress.candidates[0]).selected, true);
+    assert.equal(requireValue(progress.candidates[0]).state, "queued");
+    assert.equal(requireValue(progress.candidates[1]).selected, undefined);
+    assert.equal(requireValue(progress.candidates[1]).jobId, undefined);
+    const child = await jobsRepository.get(
+      requireValue(requireValue(progress.candidates[0]).jobId)
+    );
     assert.equal(child?.kind, "generate_spec");
     assert.equal(
       child?.sourceChatId,
@@ -6159,28 +7491,46 @@ describe("selected batch suggestions", () => {
       "selected Specs keep the originating human conversation"
     );
     assert.equal(child?.status, "paused");
-    assert.equal((await specsRepository.listSpecs(projectId)).length, 0);
-    const chatCount = (await chatsRepository.listChatRows(projectId)).length;
-    await selectSpecBatch(item, [view.candidates[0]!.id]);
+    assert.equal(
+      await (async () => {
+        const awaitedValue217378 = await specsRepository.listSpecs(projectId);
+        return awaitedValue217378.length;
+      })(),
+      0
+    );
+    const chatCount = await (async () => {
+      const awaitedValue217457 = await chatsRepository.listChatRows(projectId);
+      return awaitedValue217457.length;
+    })();
+    await selectSpecBatch(item, [requireValue(view.candidates[0]).id]);
     await recoverSpecBatches();
     assert.deepEqual(
-      (await listChats(projectId)).map((chat) => chat.id),
+      await (async () => {
+        const awaitedValue217632 = await listChats(projectId);
+        return awaitedValue217632.map((chat) => chat.id);
+      })(),
       [chatId],
       "selected generation and restart recovery do not expose internal chats"
     );
     assert.equal(
-      (await chatsRepository.listChatRows(projectId)).length,
+      await (async () => {
+        const awaitedValue217810 =
+          await chatsRepository.listChatRows(projectId);
+        return awaitedValue217810.length;
+      })(),
       chatCount
     );
     assert.equal(
-      (await jobsRepository.list(projectId)).filter(
-        (job) => job.kind === "generate_spec"
-      ).length,
+      await (async () => {
+        const awaitedValue217913 = await jobsRepository.list(projectId);
+        return awaitedValue217913.filter((job) => job.kind === "generate_spec")
+          .length;
+      })(),
       1
     );
     await assert.rejects(
-      () => selectSpecBatch(item, [view.candidates[1]!.id]),
-      /already been selected/
+      () => selectSpecBatch(item, [requireValue(view.candidates[1]).id]),
+      /already been selected/u
     );
   });
 
@@ -6216,7 +7566,10 @@ describe("selected batch suggestions", () => {
     );
     const { id: chatId } = await createChat(projectId, {}, "Sign-in form");
     assert.deepEqual(
-      (await listChats(projectId)).map((chat) => chat.id),
+      await (async () => {
+        const awaitedValue219315 = await listChats(projectId);
+        return awaitedValue219315.map((chat) => chat.id);
+      })(),
       [chatId]
     );
     const candidate = {
@@ -6228,31 +7581,47 @@ describe("selected batch suggestions", () => {
     };
     await assert.rejects(
       () => proposeSpecBatch(otherId, chatId, { candidates: [candidate] }),
-      /conversation belongs/
+      /conversation belongs/u
     );
     await assert.rejects(
       () =>
         proposeSpecBatch(projectId, chatId, {
           candidates: [{ ...candidate, featureId: otherFeature.id }],
         }),
-      /another project/
+      /another project/u
     );
     const item = await proposeSpecBatch(projectId, chatId, {
       candidates: [candidate],
     });
-    assert.notEqual((await jobsRepository.get(item.jobId))!.chatId, chatId);
+    assert.notEqual(
+      requireValue(await jobsRepository.get(item.jobId)).chatId,
+      chatId
+    );
     assert.deepEqual(
-      (await listChats(projectId)).map((chat) => chat.id),
+      await (async () => {
+        const awaitedValue220127 = await listChats(projectId);
+        return awaitedValue220127.map((chat) => chat.id);
+      })(),
       [chatId],
       "human conversations remain in chat history after proposing a batch"
     );
     const initial = await presentSpecBatch(item);
-    const selected = await selectSpecBatch(item, [initial.candidates[0]!.id]);
-    const choice = (await presentSpecBatch(selected)).candidates[0]!;
-    const { specId } = (
-      selected.payload.specBatch as { candidates: { specId: string }[] }
-    ).candidates[0]!;
-    const job = (await jobsRepository.get(choice.jobId!))!;
+    const selected = await selectSpecBatch(item, [
+      requireValue(initial.candidates[0]).id,
+    ]);
+    const choice = requireValue(
+      await (async () => {
+        const awaitedValue220426 = await presentSpecBatch(selected);
+        return awaitedValue220426.candidates[0];
+      })()
+    );
+    const { specId } = requireValue(
+      (selected.payload.specBatch as { candidates: { specId: string }[] })
+        .candidates[0]
+    );
+    const job = requireValue(
+      await jobsRepository.get(requireValue(choice.jobId))
+    );
     await selectedSpecInstructions(job);
     const input = {
       featureId: feature.id,
@@ -6263,18 +7632,24 @@ describe("selected batch suggestions", () => {
     };
     await assert.rejects(
       () => createSelectedSpec(job, { ...input, title: "Unexpected check" }),
-      /only the selected Spec/
+      /only the selected Spec/u
     );
     await assert.rejects(
       () => createSelectedSpec(job, { ...input, featureId: otherFeature.id }),
-      /only the selected Spec/
+      /only the selected Spec/u
     );
     await assert.rejects(
       () =>
         createSelectedSpec(job, { ...input, testSource: "process.exit(0)" }),
-      /Import|test|allowed|top-level/
+      /Import|test|allowed|top-level/u
     );
-    assert.equal((await specsRepository.listSpecs(projectId)).length, 0);
+    assert.equal(
+      await (async () => {
+        const awaitedValue221344 = await specsRepository.listSpecs(projectId);
+        return awaitedValue221344.length;
+      })(),
+      0
+    );
     const { spec } = await writer.createSpecInRepo({
       ...input,
       projectId,
@@ -6293,13 +7668,31 @@ describe("selected batch suggestions", () => {
     assert.equal(result.specId, spec.id);
     assert.equal(result.runId, run.id);
     assert.equal(result.status, "passed");
-    assert.equal((await selectedSpecResult(job)).runId, run.id);
+    assert.equal(
+      await (async () => {
+        const awaitedValue222058 = await selectedSpecResult(job);
+        return awaitedValue222058.runId;
+      })(),
+      run.id
+    );
     await createSelectedSpec(job, input);
     assert.equal(await commitCount(projectId), count);
-    assert.equal((await runsRepository.listRuns(spec.id)).length, 1);
     assert.equal(
-      (await presentSpecBatch((await jobsRepository.item(item.id))!))
-        .candidates[0]!.state,
+      await (async () => {
+        const awaitedValue222220 = await runsRepository.listRuns(spec.id);
+        return awaitedValue222220.length;
+      })(),
+      1
+    );
+    assert.equal(
+      requireValue(
+        await (async () => {
+          const awaitedValue222297 = await presentSpecBatch(
+            requireValue(await jobsRepository.item(item.id))
+          );
+          return awaitedValue222297.candidates[0];
+        })()
+      ).state,
       "passed"
     );
   });
@@ -6356,7 +7749,7 @@ describe("results requested in chat", () => {
       contextRevisionId: revision.id,
     });
     const other = await createChat(projectId);
-    let manager = (await openSession(chat.id))!;
+    let manager = requireValue(await openSession(chat.id));
     const abandonedUser = manager.appendMessage({
       role: "user",
       content: "Suggest checkout Specs",
@@ -6395,8 +7788,13 @@ describe("results requested in chat", () => {
       timestamp: 300,
     });
     flushSessionFile(manager);
-    manager = (await branchSessionForTurn(chat.id, abandonedUser))
-      .sessionManager;
+    manager = await (async () => {
+      const awaitedValue225619 = await branchSessionForTurn(
+        chat.id,
+        abandonedUser
+      );
+      return awaitedValue225619.sessionManager;
+    })();
     const user = manager.appendMessage({
       role: "user",
       content: "Suggest sign-in Specs",
@@ -6488,20 +7886,23 @@ describe("results requested in chat", () => {
     });
     let updates = 0;
     const unsubscribe = subscribeToChatUpdates(chat.id, () => {
-      updates++;
+      updates += 1;
     });
     try {
-      const initial = (await chatResults(chat.id))!;
+      const initial = requireValue(await chatResults(chat.id));
       assert.deepEqual(
         initial.items.map((result) => result.id),
         [item.id]
       );
       assert.equal(
-        (await jobsRepository.item(abandoned.id))?.status,
+        await (async () => {
+          const awaitedResult255198 = await jobsRepository.item(abandoned.id);
+          return awaitedResult255198?.status;
+        })(),
         "pending",
         "an abandoned suggestion remains in project review history without duplicating the current chat selection"
       );
-      assert.equal(initial.items[0]!.afterMessageId, anchor);
+      assert.equal(requireValue(initial.items[0]).afterMessageId, anchor);
       assert.equal(initial.contextRevision?.id, revision.id);
       assert.equal(initial.tasks[0]?.id, task.id);
       assert.equal(initial.tasks[0]?.afterMessageId, anchor);
@@ -6510,10 +7911,28 @@ describe("results requested in chat", () => {
         revision.id
       );
       const selected = await selectSpecBatch(item, [
-        (await presentSpecBatch(item)).candidates[0]!.id,
+        requireValue(
+          await (async () => {
+            const awaitedValue228986 = await presentSpecBatch(item);
+            return awaitedValue228986.candidates[0];
+          })()
+        ).id,
       ]);
-      const childId = (await presentSpecBatch(selected)).candidates[0]!.jobId!;
-      assert.equal((await jobsRepository.get(childId))?.sourceChatId, chat.id);
+      const childId = requireValue(
+        requireValue(
+          await (async () => {
+            const awaitedValue229068 = await presentSpecBatch(selected);
+            return awaitedValue229068.candidates[0];
+          })()
+        ).jobId
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedResult256352 = await jobsRepository.get(childId);
+          return awaitedResult256352?.sourceChatId;
+        })(),
+        chat.id
+      );
       await jobsRepository.transition(childId, "paused", "blocked");
       const question = await jobsRepository.addItem({
         projectId,
@@ -6531,7 +7950,7 @@ describe("results requested in chat", () => {
       });
       await jobsRepository.recover();
       await recoverSpecBatches();
-      const recovered = (await chatResults(chat.id))!;
+      const recovered = requireValue(await chatResults(chat.id));
       assert.equal(
         recovered.items.find((result) => result.id === question.id)
           ?.afterMessageId,
@@ -6540,7 +7959,7 @@ describe("results requested in chat", () => {
       assert.equal(recovered.notes[0]?.afterMessageId, anchor);
       assert.equal(recovered.notes.length, 1);
       assert.equal(
-        recovered.tasks.find((task) => task.id === childId)?.title,
+        recovered.tasks.find((taskInTest) => taskInTest.id === childId)?.title,
         "Create “Sign-in form”"
       );
       assert.ok(
@@ -6560,7 +7979,7 @@ describe("results requested in chat", () => {
         'page.goto("/login")'
       );
       const proposal = await proposeMutation(
-        (await jobsRepository.get(item.jobId))!,
+        requireValue(await jobsRepository.get(item.jobId)),
         "update_spec",
         { specId: spec.id, testSource: changedSource }
       );
@@ -6576,7 +7995,7 @@ describe("results requested in chat", () => {
           undefined,
           {} as never
         );
-        const content = result.content[0]!;
+        const content = requireValue(result.content[0]);
         assert.equal(content.type, "text");
         return content.text;
       };
@@ -6591,8 +8010,11 @@ describe("results requested in chat", () => {
       assert.equal(full?.contextRevision?.status, "confirmed");
       const chosen = full?.items.find((result) => result.id === item.id);
       assert.equal(
-        (chosen?.payload.specBatch as { candidates: { selected?: boolean }[] })
-          .candidates[0]?.selected,
+        (
+          requireValue(chosen).payload.specBatch as {
+            candidates: { selected?: boolean }[];
+          }
+        ).candidates[0]?.selected,
         true
       );
       const detailed = JSON.parse(
@@ -6612,11 +8034,11 @@ describe("results requested in chat", () => {
         detailed.payload.files.find((file) => file.path === "spec.ts")?.after,
         changedSource
       );
-      const contract = detailed.payload.files.find(
-        (file) => file.path === "spec.yml"
-      )!;
+      const contract = requireValue(
+        detailed.payload.files.find((file) => file.path === "spec.yml")
+      );
       assert.equal(contract.before, contract.after);
-      assert.match(contract.after, /The page is shown/);
+      assert.match(contract.after, /The page is shown/u);
       assert.equal(
         await repoGit.getHeadSha(projectId),
         headBeforeRead,
@@ -6626,22 +8048,23 @@ describe("results requested in chat", () => {
         await readText(createChatResultsTool(projectId, other.id), {
           itemId: proposal.id,
         }),
-        /not available in this conversation/
+        /not available in this conversation/u
       );
-      const before = updates;
+      const beforeInTest = updates;
       await jobsRepository.update(unrelated.id, {
         stopReason: "Still waiting",
       });
       assert.equal(
         updates,
-        before,
+        beforeInTest,
         "unrelated conversations do not receive task updates"
       );
       const router = new Hono();
       router.route("/", createChatsRouter());
-      const view = (await (
-        await router.request(`/chats/${chat.id}`)
-      ).json()) as { mode: string; contextRevision: { status: string } };
+      const view = (await (async () => {
+        const awaitedValue233494 = await router.request(`/chats/${chat.id}`);
+        return awaitedValue233494.json();
+      })()) as { mode: string; contextRevision: { status: string } };
       assert.equal(
         view.mode,
         "standard",
@@ -6649,7 +8072,12 @@ describe("results requested in chat", () => {
       );
       assert.equal(view.contextRevision.status, "confirmed");
       assert.equal(
-        (await router.request(`/chats/${crypto.randomUUID()}/results`)).status,
+        await (async () => {
+          const awaitedValue233844 = await router.request(
+            `/chats/${crypto.randomUUID()}/results`
+          );
+          return awaitedValue233844.status;
+        })(),
         404
       );
       const foreign = await createProject("Foreign chat source");
@@ -6662,13 +8090,13 @@ describe("results requested in chat", () => {
             "user",
             { sourceChatId: chat.id }
           ),
-        /source conversation must belong/
+        /source conversation must belong/u
       );
       assert.match(
         await readText(createChatResultsTool(foreign, chat.id), {
           itemId: proposal.id,
         }),
-        /conversation no longer exists in this project/
+        /conversation no longer exists in this project/u
       );
       const discussed = await proposeSpecBatch(projectId, other.id, {
         candidates: [
@@ -6684,7 +8112,7 @@ describe("results requested in chat", () => {
         payload: { ...discussed.payload, discussionChatId: chat.id },
       });
       assert.ok(
-        (await chatResults(chat.id))!.items.some(
+        requireValue(await chatResults(chat.id)).items.some(
           (result) => result.id === discussed.id
         ),
         "a discussed batch without a direct tool artifact remains reviewable here"
@@ -6705,7 +8133,7 @@ describe("results requested in chat", () => {
       );
       assert.match(
         await readText(read, { itemId: discussedPatch.id }),
-        /not available in this conversation/
+        /not available in this conversation/u
       );
       await jobsRepository.updateItem(discussedPatch.id, {
         payload: { ...discussedPatch.payload, discussionChatId: chat.id },
@@ -6720,7 +8148,7 @@ describe("results requested in chat", () => {
         "discussion exposes the proposed implementation rather than only its title"
       );
       await branchSessionForTurn(chat.id, user);
-      const retried = (await chatResults(chat.id))!;
+      const retried = requireValue(await chatResults(chat.id));
       assert.ok(
         retried.items.some((result) => result.id === item.id),
         "selected Specs remain visible after their originating branch is abandoned"
@@ -6753,9 +8181,10 @@ describe("results requested in chat", () => {
         res.writeHead(200, { "content-type": "text/html" });
         res.end("<h1>Sign in</h1>");
       });
-      await new Promise<void>((resolve) =>
-        server.listen(0, "127.0.0.1", resolve)
-      );
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", resolve);
+      });
       try {
         const address = server.address() as { port: number };
         const projectId = await createProject("Failed chat run");
@@ -6779,7 +8208,7 @@ describe("results requested in chat", () => {
         );
         const chat = await createChat(projectId);
         const other = await createChat(projectId);
-        const manager = (await openSession(chat.id))!;
+        const manager = requireValue(await openSession(chat.id));
         const anchor = manager.appendMessage({
           role: "user",
           content: "Run the sign-in Spec",
@@ -6797,9 +8226,9 @@ describe("results requested in chat", () => {
           ],
           timestamp: Date.now(),
         } as never);
-        const runTool = createDomainTools(projectId).find(
-          (tool) => tool.name === "run_spec"
-        )!;
+        const runTool = requireValue(
+          createDomainTools(projectId).find((tool) => tool.name === "run_spec")
+        );
         const output = await runTool.execute(
           "run",
           { specId: spec.id },
@@ -6807,7 +8236,7 @@ describe("results requested in chat", () => {
           undefined,
           {} as never
         );
-        const content = output.content[0]!;
+        const content = requireValue(output.content[0]);
         assert.equal(content.type, "text");
         const result = JSON.parse(content.text) as {
           runId: string;
@@ -6817,7 +8246,12 @@ describe("results requested in chat", () => {
         assert.equal(result.status, "failed");
         assert.equal(result.persisted, true);
         assert.equal(
-          (await runsRepository.getRun(result.runId))?.status,
+          await (async () => {
+            const awaitedResult267160 = await runsRepository.getRun(
+              result.runId
+            );
+            return awaitedResult267160?.status;
+          })(),
           "failed"
         );
         assert.ok(
@@ -6833,19 +8267,19 @@ describe("results requested in chat", () => {
           timestamp: Date.now(),
         });
         flushSessionFile(manager);
-        const results = (await chatResults(chat.id))!;
+        const results = requireValue(await chatResults(chat.id));
         assert.equal(results.runs.length, 1);
-        assert.equal(results.runs[0]!.id, result.runId);
-        assert.equal(results.runs[0]!.afterMessageId, anchor);
+        assert.equal(requireValue(results.runs[0]).id, result.runId);
+        assert.equal(requireValue(results.runs[0]).afterMessageId, anchor);
         assert.equal(
-          results.runs[0]!.evidenceUrl,
+          requireValue(results.runs[0]).evidenceUrl,
           `/runs/${result.runId}/evidence`
         );
         assert.doesNotMatch(
-          results.runs[0]!.failReason ?? "",
-          /apps\/backend|node_modules|\n\s*at /
+          requireValue(results.runs[0]).failReason ?? "",
+          /apps\/backend|node_modules|\n\s*at /u
         );
-        assert.equal((await chatResults(other.id))!.runs.length, 0);
+        assert.equal(requireValue(await chatResults(other.id)).runs.length, 0);
         const next = await runsRepository.createRun({
           specId: spec.id,
           commitSha: await repoGit.getHeadSha(projectId),
@@ -6883,7 +8317,7 @@ describe("results requested in chat", () => {
           timestamp: Date.now(),
         });
         flushSessionFile(manager);
-        const repeated = (await chatResults(chat.id))!;
+        const repeated = requireValue(await chatResults(chat.id));
         assert.equal(
           repeated.runs.find((run) => run.id === result.runId)?.afterMessageId,
           anchor
@@ -6895,14 +8329,15 @@ describe("results requested in chat", () => {
         );
         await branchSessionForTurn(chat.id, secondAnchor);
         assert.deepEqual(
-          (await chatResults(chat.id))!.runs.map((run) => run.id),
+          requireValue(await chatResults(chat.id)).runs.map((run) => run.id),
           [result.runId],
           "abandoned tool results stay out of the active conversation"
         );
       } finally {
-        await new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve()))
-        );
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
       }
     }
   );

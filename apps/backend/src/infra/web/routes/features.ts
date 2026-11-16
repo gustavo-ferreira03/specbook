@@ -15,27 +15,7 @@ import { featuresRepository } from "../../repositories/features";
 import { projectsRepository } from "../../repositories/projects";
 import { access } from "../access";
 
-const editFileSchema = z.object({ yaml: z.string().min(1) });
-
-const createFeatureSchema = z.object({
-  parentId: z.string().min(1).optional(),
-  title: z.string().min(1),
-  description: z.string().default(""),
-});
-
-const updateFeatureSchema = z
-  .object({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
-  })
-  .refine(
-    (value) => value.title !== undefined || value.description !== undefined,
-    {
-      message: "Provide at least one of title or description",
-    }
-  );
-
-function mapManualError(error: unknown): never {
+const mapManualError = function mapManualError(error: unknown): never {
   if (error instanceof HTTPException) {
     throw error;
   }
@@ -50,14 +30,14 @@ function mapManualError(error: unknown): never {
   }
   if (
     error instanceof Error &&
-    /unfinished rebase|uncommitted changes/.test(error.message)
+    /unfinished rebase|uncommitted changes/u.test(error.message)
   ) {
     throw new HTTPException(409, { message: error.message });
   }
   throw error;
-}
+};
 
-export function createFeaturesRouter(): Hono {
+export const createFeaturesRouter = function createFeaturesRouter(): Hono {
   const router = new Hono();
 
   router.post(
@@ -140,4 +120,24 @@ export function createFeaturesRouter(): Hono {
   });
 
   return router;
-}
+};
+
+const editFileSchema = z.object({ yaml: z.string().min(1) });
+
+const createFeatureSchema = z.object({
+  parentId: z.string().min(1).optional(),
+  title: z.string().min(1),
+  description: z.string().default(""),
+});
+
+const updateFeatureSchema = z
+  .object({
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+  })
+  .refine(
+    (value) => value.title !== undefined || value.description !== undefined,
+    {
+      message: "Provide at least one of title or description",
+    }
+  );

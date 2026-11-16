@@ -1,13 +1,4 @@
-export const encryptedColumns = [
-  { table: "credential_profiles", column: "fields", json: "fields" },
-  { table: "chat_sessions", column: "state" },
-  { table: "project_automations", column: "webhook_url", id: "project_id" },
-  { table: "webhook_notifications", column: "webhook_url" },
-  { table: "app_settings", column: "sso", json: "sso" },
-  { table: "oidc_states", column: "pkce_verifier", id: "state_hash" },
-] as const;
-
-export function transformSecretColumn(
+export const transformSecretColumn = function transformSecretColumn(
   value: string,
   format: string | undefined,
   transform: (secret: string) => string
@@ -28,4 +19,12 @@ export function transformSecretColumn(
     });
   }
   return transform(value);
-}
+};
+export const encryptedColumns = [
+  { table: "credential_profiles", column: "fields", json: "fields" },
+  { table: "chat_sessions", column: "state" },
+  { table: "project_automations", column: "webhook_url", id: "project_id" },
+  { table: "webhook_notifications", column: "webhook_url" },
+  { table: "app_settings", column: "sso", json: "sso" },
+  { table: "oidc_states", column: "pkce_verifier", id: "state_hash" },
+] as const;

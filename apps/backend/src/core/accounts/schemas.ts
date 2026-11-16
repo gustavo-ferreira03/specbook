@@ -8,7 +8,8 @@ const nameSchema = z
   .trim()
   .min(1)
   .max(80)
-  .regex(/^[^\u0000-\u001F<>]+$/);
+  // oxlint-disable-next-line no-control-regex -- Match control characters explicitly at the sanitization boundary.
+  .regex(/^[^\u0000-\u001F<>]+$/u);
 const passwordSchema = z.string().min(12).max(128);
 
 export const adminSchema = z
@@ -21,7 +22,7 @@ export const invitationSchema = z
   .object({ email: emailSchema, role: roleSchema })
   .strict();
 export const tokenSchema = z
-  .object({ token: z.string().regex(/^[a-f0-9]{64}$/) })
+  .object({ token: z.string().regex(/^[a-f0-9]{64}$/u) })
   .strict();
 export const accessTokenSchema = z
   .object({
@@ -61,7 +62,7 @@ export const ssoSchema = z
           .string()
           .trim()
           .toLowerCase()
-          .regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/)
+          .regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/u)
       )
       .max(100),
     passwordLoginEnabled: z.boolean(),

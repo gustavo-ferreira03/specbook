@@ -1,3 +1,5 @@
+import type { Server } from "node:http";
+
 import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
@@ -39,6 +41,47 @@ import {
   isAllowedWebsocketOrigin,
 } from "./infra/web/security";
 
+const shutdown = async function shutdown(
+  signal: NodeJS.Signals
+): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  logger.info("shutting down", { signal });
+  const timer = setTimeout(() => {
+    logger.warn("shutdown timed out; exiting");
+    process.exit(1);
+  }, 10_000);
+  timer.unref();
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
+  const closed = new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
+  for (const client of wss.clients) {
+    client.terminate();
+  }
+  closeTunnels();
+  wss.close();
+  stopFailureMonitor();
+  stopScheduleMonitor();
+  stopRunnerLeaseMonitor();
+  stopSteward();
+  await stopRetentionMonitor();
+  await stopJobWorker();
+  stopActiveRunProcesses();
+  await closeAllChatBrowsers().catch((error: unknown) =>
+    logger.error("closing browsers failed", { error })
+  );
+  if ("closeAllConnections" in server) {
+    server.closeAllConnections();
+  }
+  await closed;
+  await releaseStorage();
+  clearTimeout(timer);
+  process.exit(0);
+};
+
 process.on("unhandledRejection", (reason) => {
   logger.error("unhandled promise rejection", { error: reason });
 });
@@ -73,18 +116,16 @@ const server = serve({ fetch: app.fetch, port, hostname }, () => {
 });
 
 const wss = new WebSocketServer({ noServer: true });
-const closeTunnels = attachTunnelWebSockets(
-  server as import("node:http").Server,
-  hostAllowlist
-);
+const closeTunnels = attachTunnelWebSockets(server as Server, hostAllowlist);
 
 wss.on("connection", (websocket, request) => {
   const url = new URL(request.url ?? "/", "http://localhost");
-  const sessionId = url.pathname.split("/").filter(Boolean)[1];
+  const [, sessionId] = url.pathname.split("/").filter(Boolean);
   if (!sessionId || !getVncSession(sessionId)) {
     websocket.close(1008, "Unknown VNC session");
     return;
   }
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
   proxyVncSession(sessionId, websocket).catch((error: unknown) => {
     logger.warn("VNC proxy handshake failed", { sessionId, error });
   });
@@ -107,7 +148,8 @@ server.on("upgrade", (request, socket, head) => {
     socket.destroy();
     return;
   }
-  void sessionFromHeaders(headers)
+  sessionFromHeaders(headers)
+    // oxlint-disable-next-line promise/always-return -- This continuation performs a side effect; its fulfilled value is intentionally unused.
     .then((authenticated) => {
       if (!authenticated || authenticated.user.role === "viewer") {
         socket.destroy();
@@ -136,7 +178,9 @@ server.on("upgrade", (request, socket, head) => {
           authEvents.off("user", closeUser);
           authEvents.off("session", closeSession);
         });
-        void sessionFromHeaders(headers)
+        // oxlint-disable-next-line promise/no-nesting -- Keep startup and shutdown error handling attached to the operation that owns its resource.
+        sessionFromHeaders(headers)
+          // oxlint-disable-next-line promise/always-return -- This continuation performs a side effect; its fulfilled value is intentionally unused.
           .then((current) => {
             if (!current || current.user.role === "viewer") {
               websocket.close(
@@ -150,6 +194,7 @@ server.on("upgrade", (request, socket, head) => {
           .catch(() => websocket.close(1011, "Could not verify session"));
       });
     })
+    // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
     .catch((error) => {
       logger.warn("VNC authentication failed", { error });
       socket.destroy();
@@ -158,43 +203,7 @@ server.on("upgrade", (request, socket, head) => {
 
 let shuttingDown = false;
 
-async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  if (shuttingDown) {
-    return;
-  }
-  shuttingDown = true;
-  logger.info("shutting down", { signal });
-  const timer = setTimeout(() => {
-    logger.warn("shutdown timed out; exiting");
-    process.exit(1);
-  }, 10_000);
-  timer.unref();
-  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
-  for (const client of wss.clients) {
-    client.terminate();
-  }
-  closeTunnels();
-  wss.close();
-  stopFailureMonitor();
-  stopScheduleMonitor();
-  stopRunnerLeaseMonitor();
-  stopSteward();
-  await stopRetentionMonitor();
-  await stopJobWorker();
-  stopActiveRunProcesses();
-  await closeAllChatBrowsers().catch((error: unknown) =>
-    logger.error("closing browsers failed", { error })
-  );
-  if ("closeAllConnections" in server) {
-    server.closeAllConnections();
-  }
-  await closed;
-  await releaseStorage();
-  clearTimeout(timer);
-  process.exit(0);
-}
-
-process.on("SIGINT", () => void shutdown("SIGINT"));
-process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 export { app, server };

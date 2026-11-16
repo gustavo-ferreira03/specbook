@@ -32,11 +32,14 @@ import { analyzeSpecSource } from "@specbook/runtime/validate";
 import { createSecretScrubber } from "../../src/core/credentials/scrub";
 import { tempDir, VALID_SPEC } from "../helpers/storage";
 
-function report(suites: unknown[], errors: unknown[] = []): string {
+const report = function report(
+  suites: unknown[],
+  errors: unknown[] = []
+): string {
   return JSON.stringify({ config: {}, suites, errors, stats: {} });
-}
+};
 
-function fileSuite(
+const fileSuite = function fileSuite(
   file: string,
   result: Record<string, unknown>,
   annotations: unknown[] = []
@@ -52,7 +55,7 @@ function fileSuite(
       },
     ],
   };
-}
+};
 
 describe("parsePlaywrightReport", () => {
   test("reads structured failure annotations without classifying error prose", () => {
@@ -141,7 +144,7 @@ describe("parsePlaywrightReport", () => {
     assert.equal(b?.failedStep, "See the dashboard");
     assert.match(
       b?.failReason ?? "",
-      /^Error: expect\(locator\)\.toHaveText\(expected\) failed\n\nExpected: "Welcome"$/
+      /^Error: expect\(locator\)\.toHaveText\(expected\) failed\n\nExpected: "Welcome"$/u
     );
   });
 
@@ -198,7 +201,7 @@ describe("parsePlaywrightReport", () => {
     );
     assert.equal(parsed.files.get("z")?.status, "error");
     assert.deepEqual(parsed.errors, ["Error: No tests found"]);
-    assert.throws(() => parsePlaywrightReport("{}"), /no suites/);
+    assert.throws(() => parsePlaywrightReport("{}"), /no suites/u);
     assert.equal(stripAnsi("\u001B[2mdim\u001B[22m"), "dim");
   });
 });
@@ -254,6 +257,7 @@ describe("run evidence", () => {
       assets: ["data:image/png;base64,cG5n"],
       events,
     };
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const invalid of [
       { ...packed, version: 2 },
       { ...packed, assets: ["https://example.com/image.png"] },
@@ -296,8 +300,9 @@ describe("run evidence", () => {
     ]) {
       assert.equal(await decodeReplay(gzipSync(JSON.stringify(invalid))), null);
     }
+    /* oxlint-enable no-await-in-loop */
     let deep: unknown = "leaf";
-    for (let index = 0; index < 257; index++) {
+    for (let index = 0; index < 257; index += 1) {
       deep = { child: deep };
     }
     assert.equal(
@@ -383,6 +388,7 @@ describe("run evidence", () => {
       "scrubbing short secrets preserves numeric event data"
     );
     assert.deepEqual(await readEvidenceManifest(output), manifest);
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const invalid of [
       Buffer.from("not gzip"),
       gzipSync("{}"),
@@ -392,6 +398,7 @@ describe("run evidence", () => {
     ]) {
       assert.equal(await decodeReplay(invalid), null);
     }
+    /* oxlint-enable no-await-in-loop */
     await fs.writeFile(file, "[]");
     const rejected = await writeRunEvidence(
       output,
@@ -545,25 +552,25 @@ describe("run evidence", () => {
       ],
     };
     const html = await renderHtmlReport(data);
-    assert.equal((html.match(/class="replay-data"/g) ?? []).length, 2);
+    assert.equal((html.match(/class="replay-data"/gu) ?? []).length, 2);
     assert.equal(
-      (html.match(/id="specbook-replay-bootstrap"/g) ?? []).length,
+      (html.match(/id="specbook-replay-bootstrap"/gu) ?? []).length,
       1
     );
     assert.ok(html.includes("replay-hit") && html.includes("Replay timeline"));
     const libraries = [
       ...html.matchAll(
-        /<script id="specbook-replay-library" type="application\/octet-stream">([^<]+)<\/script>/g
+        /<script id="specbook-replay-library" type="application\/octet-stream">(?<capture1>[^<]+)<\/script>/gu
       ),
     ];
     assert.equal(libraries.length, 1);
     assert.match(
       gunzipSync(Buffer.from(libraries[0][1], "base64")).toString(),
-      /rrwebPlayer/
+      /rrwebPlayer/u
     );
     assert.ok(!html.includes('function(e,t){"object"==typeof exports'));
-    assert.match(html, /data-replay-step="1"/);
-    assert.match(html, /connect-src 'none'/);
+    assert.match(html, /data-replay-step="1"/u);
+    assert.match(html, /connect-src 'none'/u);
     const waiting = await renderHtmlReport({
       ...data,
       sections: [
@@ -579,8 +586,8 @@ describe("run evidence", () => {
         },
       ],
     });
-    assert.match(waiting, /Waited 5\.0s for 2 elements; saw 1/);
-    assert.match(waiting, /data-wait-ms="5000"/);
+    assert.match(waiting, /Waited 5\.0s for 2 elements; saw 1/u);
+    assert.match(waiting, /data-wait-ms="5000"/u);
     const historical = await renderHtmlReport({
       ...data,
       sections: [{ ...section, replay: null }],
@@ -593,18 +600,20 @@ describe("run evidence", () => {
         { ...section, replay: null, replayUnavailable: REPLAY_LIMIT_NOTE },
       ],
     });
-    assert.match(capped, /Replay omitted because it exceeded/);
+    assert.match(capped, /Replay omitted because it exceeded/u);
   });
 
   test("reports historical execution order by title and normalizes failed step titles", async () => {
     const directory = tempDir();
     await fs.mkdir(path.join(directory, "evidence"));
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const number of [1, 2]) {
       await fs.writeFile(
         path.join(directory, "evidence", `step-0${number}.png`),
         "png"
       );
     }
+    /* oxlint-enable no-await-in-loop */
     await fs.writeFile(
       path.join(directory, "evidence.json"),
       JSON.stringify({
@@ -729,6 +738,7 @@ describe("run evidence", () => {
       video: null,
       failedStep: "Open",
     });
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const invalid of [
       "{",
       JSON.stringify({ steps: "invalid" }),
@@ -740,6 +750,7 @@ describe("run evidence", () => {
       await fs.writeFile(file, invalid);
       assert.deepEqual(await readEvidenceManifest(directory), empty);
     }
+    /* oxlint-enable no-await-in-loop */
     for (const valid of [
       "evidence/step-01.png",
       "evidence/step-100.png",
@@ -863,7 +874,7 @@ describe("run evidence", () => {
     );
     assert.match(
       source,
-      /^import \{ test, expect \} from "\/app\/dist\/specbook-fixtures\.mjs";/
+      /^import \{ test, expect \} from "\/app\/dist\/specbook-fixtures\.mjs";/u
     );
     assert.equal(
       source.split("\n").length,
@@ -913,9 +924,13 @@ describe("run evidence", () => {
     assert.equal(manifest.errorContext?.length, 32_000);
     assert.ok(manifest.errorContext?.startsWith('- heading "••••"'));
     assert.ok(
-      !(
-        await fs.readFile(path.join(output, "evidence.json"), "utf-8")
-      ).includes(secret)
+      !(await (async () => {
+        const awaitedValue26774 = await fs.readFile(
+          path.join(output, "evidence.json"),
+          "utf-8"
+        );
+        return awaitedValue26774.includes(secret);
+      })())
     );
 
     const passed = await writeRunEvidence(

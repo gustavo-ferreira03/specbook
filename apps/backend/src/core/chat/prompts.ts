@@ -5,32 +5,22 @@ import type { Project } from "../../infra/repositories/projects";
 import { projectContextJsonSchema } from "./context-tools";
 import { loadPrompt } from "./prompt-loader";
 
-export function fillTemplate(
+export const fillTemplate = function fillTemplate(
   template: string,
   values: Record<string, string>
 ): string {
-  return template.replaceAll(/\{\{(\w+)\}\}/g, (_match, key: string) => {
-    if (!(key in values)) {
-      throw new Error(`Missing template value: ${key}`);
+  return template.replaceAll(
+    /\{\{(?<capture1>\w+)\}\}/gu,
+    (_match, key: string) => {
+      if (!(key in values)) {
+        throw new Error(`Missing template value: ${key}`);
+      }
+      return values[key];
     }
-    return values[key];
-  });
-}
+  );
+};
 
-const PROJECT_CONTEXT_SCHEMA_TEXT = JSON.stringify(
-  projectContextJsonSchema,
-  null,
-  2
-);
-const STANDARD_SYSTEM_PROMPT_TEMPLATE = loadPrompt(
-  "standard-system-prompt.txt"
-);
-const DISCOVERY_SYSTEM_PROMPT_TEMPLATE = loadPrompt(
-  "discovery-system-prompt.txt"
-);
-const CREDENTIAL_RULES = loadPrompt("credential-rules.txt");
-
-function standardSystemPrompt(
+const standardSystemPrompt = function standardSystemPrompt(
   project: Project,
   confirmedContext: ProjectContextRevisionRow | null
 ): string {
@@ -54,9 +44,9 @@ function standardSystemPrompt(
     "",
     "No confirmed project context exists for this project yet.",
   ].join("\n");
-}
+};
 
-function discoverySystemPrompt(
+const discoverySystemPrompt = function discoverySystemPrompt(
   project: Project,
   revision: ProjectContextRevisionRow
 ): string {
@@ -73,9 +63,9 @@ function discoverySystemPrompt(
     schema: PROJECT_CONTEXT_SCHEMA_TEXT,
     credentialRules: CREDENTIAL_RULES,
   });
-}
+};
 
-export function buildSystemPrompt(
+export const buildSystemPrompt = function buildSystemPrompt(
   project: Project,
   discoveryRevision: ProjectContextRevisionRow | null,
   confirmedContext: ProjectContextRevisionRow | null
@@ -83,4 +73,17 @@ export function buildSystemPrompt(
   return discoveryRevision
     ? discoverySystemPrompt(project, discoveryRevision)
     : standardSystemPrompt(project, confirmedContext);
-}
+};
+
+const PROJECT_CONTEXT_SCHEMA_TEXT = JSON.stringify(
+  projectContextJsonSchema,
+  null,
+  2
+);
+const STANDARD_SYSTEM_PROMPT_TEMPLATE = loadPrompt(
+  "standard-system-prompt.txt"
+);
+const DISCOVERY_SYSTEM_PROMPT_TEMPLATE = loadPrompt(
+  "discovery-system-prompt.txt"
+);
+const CREDENTIAL_RULES = loadPrompt("credential-rules.txt");

@@ -13,39 +13,15 @@ import { specBatchProposalSchema } from "../jobs/schemas";
 import { proposeSpecBatch } from "../jobs/spec-batches";
 import { readApiDocumentation } from "../network/documentation";
 
-export const projectContextSchema = z.object({
-  summary: z.string(),
-  areas: z.array(
-    z.object({
-      name: z.string(),
-      routes: z.array(z.string()),
-      description: z.string(),
-    })
-  ),
-  terminology: z.array(z.object({ term: z.string(), meaning: z.string() })),
-  roles: z.array(
-    z.object({ name: z.string(), capabilities: z.array(z.string()) })
-  ),
-  businessRules: z.array(z.string()),
-  uiPatterns: z.array(z.string()),
-  executionNotes: z.array(z.string()),
-  unknowns: z.array(z.string()),
-  sources: z.array(z.object({ url: z.string(), note: z.string() })),
-});
-
-export const projectContextJsonSchema = projectContextSchema.toJSONSchema();
-
-const proposeProjectContextSchema = z.object({ context: projectContextSchema });
-
-function text(value: string) {
+const text = function text(value: string) {
   return {
     content: [{ type: "text" as const, text: value }],
     details: undefined,
     terminate: false,
   };
-}
+};
 
-export function createSpecBatchTool(
+export const createSpecBatchTool = function createSpecBatchTool(
   projectId: string,
   chatId: string,
   contextRevisionId?: string
@@ -73,13 +49,9 @@ export function createSpecBatchTool(
       );
     },
   });
-}
+};
 
-const apiDocumentationSchema = z
-  .object({ url: z.string().url().max(2000) })
-  .strict();
-
-export function createApiDocumentationTool(
+export const createApiDocumentationTool = function createApiDocumentationTool(
   projectId: string,
   environment?: RunEnvironment
 ) {
@@ -124,9 +96,12 @@ export function createApiDocumentationTool(
       }
     },
   });
-}
+};
 
-export function createChatResultsTool(projectId: string, chatId: string) {
+export const createChatResultsTool = function createChatResultsTool(
+  projectId: string,
+  chatId: string
+) {
   const parameters = z.object({ itemId: z.string().uuid().optional() });
   const scrub = createProjectScrubber(projectId);
   return defineTool({
@@ -156,9 +131,9 @@ export function createChatResultsTool(projectId: string, chatId: string) {
       );
     },
   });
-}
+};
 
-export function createContextTools(
+export const createContextTools = function createContextTools(
   revisionId: string,
   projectId: string,
   chatId: string
@@ -229,4 +204,32 @@ export function createContextTools(
       },
     }),
   ];
-}
+};
+
+export const projectContextSchema = z.object({
+  summary: z.string(),
+  areas: z.array(
+    z.object({
+      name: z.string(),
+      routes: z.array(z.string()),
+      description: z.string(),
+    })
+  ),
+  terminology: z.array(z.object({ term: z.string(), meaning: z.string() })),
+  roles: z.array(
+    z.object({ name: z.string(), capabilities: z.array(z.string()) })
+  ),
+  businessRules: z.array(z.string()),
+  uiPatterns: z.array(z.string()),
+  executionNotes: z.array(z.string()),
+  unknowns: z.array(z.string()),
+  sources: z.array(z.object({ url: z.string(), note: z.string() })),
+});
+
+export const projectContextJsonSchema = projectContextSchema.toJSONSchema();
+
+const proposeProjectContextSchema = z.object({ context: projectContextSchema });
+
+const apiDocumentationSchema = z
+  .object({ url: z.string().url().max(2000) })
+  .strict();

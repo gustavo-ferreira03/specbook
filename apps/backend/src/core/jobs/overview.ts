@@ -7,59 +7,13 @@ import { runnerQueueSnapshot } from "../private-runner/visibility";
 import { listRunBatches } from "../runner/batch";
 import type { RunBatchTrigger } from "../runner/batch";
 import { runTriggerForIntent } from "../steward/signals";
+import { requireValue } from "../utils/require-value";
 import { matchesCurrentSpec } from "./current-run";
 import { loadProjectState, projectPresentation } from "./presentation";
 import type { ActivityStory, PresentedItem } from "./presentation";
 import { finishedAt, oldestFirst } from "./shared";
 
-export type SpecHealthStatus =
-  | "passing"
-  | "failing"
-  | "flaky"
-  | "awaiting_deploy"
-  | "not_checked"
-  | "queued"
-  | "running"
-  | "repairing"
-  | "invalid";
-export interface SpecHealth {
-  status: SpecHealthStatus;
-  label: string;
-  runId?: string;
-  lastCheckedAt: string | null;
-}
-type Outcome = "passed" | "failed" | "flaky" | "running" | "awaiting_deploy";
-export interface RecentRun extends ActivityStory {
-  trigger: RunBatchTrigger;
-  environment?: RunEnvironment;
-  occurrences: number;
-  counts: Record<Outcome | "total", number>;
-}
-
-const newestFirst = (
-  a: { updatedAt: string; id: string },
-  b: { updatedAt: string; id: string }
-) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
-const pending = (item: PresentedItem) =>
-  ["pending", "applying"].includes(item.status);
-const countLabel = (count: number, noun: string) =>
-  `${count} ${noun}${count === 1 ? "" : "s"}`;
-const needsRetry = (run: Run) =>
-  run.automationPending ||
-  run.flaky ||
-  ["failed", "error"].includes(run.status);
-const runOutcome = (status: string, run?: Run | null): Outcome =>
-  status === "running" || run?.automationPending
-    ? "running"
-    : run?.awaitingDeploy && status !== "passed"
-      ? "awaiting_deploy"
-      : run?.flaky
-        ? "flaky"
-        : status === "passed"
-          ? "passed"
-          : "failed";
-
-function tally(outcomes: Outcome[]): RecentRun["counts"] {
+const tally = function tally(outcomes: Outcome[]): RecentRun["counts"] {
   const counts = {
     total: outcomes.length,
     passed: 0,
@@ -69,12 +23,12 @@ function tally(outcomes: Outcome[]): RecentRun["counts"] {
     awaiting_deploy: 0,
   };
   for (const outcome of outcomes) {
-    counts[outcome]++;
+    counts[outcome] += 1;
   }
   return counts;
-}
+};
 
-function runStory(
+const runStory = function runStory(
   running: boolean,
   story: Omit<
     RecentRun,
@@ -88,24 +42,37 @@ function runStory(
     occurrences: 1,
     jobIds: [],
     inboxIds: [],
-    status: running
-      ? "working"
-      : awaiting_deploy && !failed
-        ? "waiting"
-        : "completed",
-    outcome: running
-      ? undefined
-      : failed
-        ? "failed"
-        : flaky
-          ? "flaky"
-          : awaiting_deploy
-            ? undefined
-            : "passed",
+    status: (() => {
+      if (running) {
+        return "working";
+      }
+      if (awaiting_deploy && !failed) {
+        return "waiting";
+      }
+      return "completed";
+    })(),
+    outcome: (() => {
+      if (running) {
+        return;
+      }
+      if (failed) {
+        return "failed";
+      }
+      if (flaky) {
+        return "flaky";
+      }
+      if (awaiting_deploy) {
+        return;
+      }
+      return "passed";
+    })(),
   };
-}
+};
 
-export async function projectOverview(projectId: string) {
+// oxlint-disable-next-line complexity -- Keep the overview decision tree together so state transitions and error ordering remain explicit.
+export const projectOverview = async function projectOverview(
+  projectId: string
+) {
   const state = await loadProjectState(projectId);
   const { jobs, specs, intents, settings, signals } = state;
   const [view, schedule, batches] = await Promise.all([
@@ -130,15 +97,21 @@ export async function projectOverview(projectId: string) {
     [...runLists.values()].flat().map((run) => [run.id, run])
   );
   const retries = new Map<string, Run>();
-  for (const run of [...allRuns.values()].reverse()) {
-    if (run.retryOf && !retries.has(run.retryOf)) retries.set(run.retryOf, run);
+  for (const run of [...allRuns.values()].toReversed()) {
+    if (run.retryOf && !retries.has(run.retryOf)) {
+      retries.set(run.retryOf, run);
+    }
   }
   const retryFor = async (run: Run) =>
-    needsRetry(run)
-      ? allRuns.has(run.id)
-        ? (retries.get(run.id) ?? null)
-        : runsRepository.retryFor(run.id)
-      : null;
+    await (() => {
+      if (needsRetry(run)) {
+        if (allRuns.has(run.id)) {
+          return retries.get(run.id) ?? null;
+        }
+        return runsRepository.retryFor(run.id);
+      }
+      return null;
+    })();
   const currentRuns = new Map(
     await Promise.all(
       specs.map(async (spec) => {
@@ -171,7 +144,10 @@ export async function projectOverview(projectId: string) {
       ["runner", "tunnel"].includes(run.environment?.executor ?? "server")
   );
   const runQueues = runningPrivate
-    ? (await runnerQueueSnapshot()).runQueues
+    ? await (async () => {
+        const awaitedValue3909 = await runnerQueueSnapshot();
+        return awaitedValue3909.runQueues;
+      })()
     : new Map();
   const repairing = new Set(
     jobs
@@ -188,49 +164,64 @@ export async function projectOverview(projectId: string) {
     const waiting =
       current?.awaitingDeploy &&
       current.status !== "passed" &&
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       (await specEnvironmentsRepository.awaiting(
         spec,
         current.environment?.id
       ));
-    const status: SpecHealthStatus =
-      spec.status === "invalid"
-        ? repairing.has(spec.id)
-          ? "repairing"
-          : "invalid"
-        : current?.status === "running"
-          ? runQueues.has(current.id)
-            ? "queued"
-            : "running"
-          : waiting ||
-              (spec.status === "awaiting_deploy" &&
-                (!current || current.status === "passed"))
-            ? "awaiting_deploy"
-            : !current ||
-                (current.awaitingDeploy && current.status !== "passed")
-              ? "not_checked"
-              : current.flaky
-                ? "flaky"
-                : current.status === "passed"
-                  ? "passing"
-                  : "failing";
-    const label =
-      status === "invalid"
-        ? "Needs repair"
-        : status === "repairing"
-          ? "Repairing"
-          : status === "queued"
-            ? "Waiting to run"
-            : status === "running"
-              ? "Running"
-              : status === "awaiting_deploy"
-                ? "Waiting for deploy"
-                : status === "not_checked"
-                  ? "Not run since the last change"
-                  : status === "flaky"
-                    ? "Passed on retry"
-                    : status === "passing"
-                      ? "Passing"
-                      : "Latest run failed";
+    const status: SpecHealthStatus = (() => {
+      if (spec.status === "invalid") {
+        if (repairing.has(spec.id)) {
+          return "repairing";
+        }
+        return "invalid";
+      }
+      if (current?.status === "running") {
+        if (runQueues.has(current.id)) {
+          return "queued";
+        }
+        return "running";
+      }
+      if (
+        waiting ||
+        (spec.status === "awaiting_deploy" &&
+          (!current || current.status === "passed"))
+      ) {
+        return "awaiting_deploy";
+      }
+      if (!current || (current.awaitingDeploy && current.status !== "passed")) {
+        return "not_checked";
+      }
+      if (current.flaky) {
+        return "flaky";
+      }
+      return current.status === "passed" ? "passing" : "failing";
+    })();
+    const label = (() => {
+      if (status === "invalid") {
+        return "Needs repair";
+      }
+      if (status === "repairing") {
+        return "Repairing";
+      }
+      if (status === "queued") {
+        return "Waiting to run";
+      }
+      if (status === "running") {
+        return "Running";
+      }
+      if (status === "awaiting_deploy") {
+        return "Waiting for deploy";
+      }
+      if (status === "not_checked") {
+        return "Not run since the last change";
+      }
+      if (status === "flaky") {
+        return "Passed on retry";
+      }
+
+      return status === "passing" ? "Passing" : "Latest run failed";
+    })();
     specHealth[spec.id] = {
       status,
       label,
@@ -238,7 +229,7 @@ export async function projectOverview(projectId: string) {
       lastCheckedAt:
         current && current.status !== "running" ? finishedAt(current) : null,
     };
-    healthCounts[status]++;
+    healthCounts[status] += 1;
   }
 
   const failingIds = new Set(
@@ -301,7 +292,7 @@ export async function projectOverview(projectId: string) {
           }
         : item
     )
-    .sort(oldestFirst);
+    .toSorted(oldestFirst);
   const agentPaused = view.summary.paused || view.summary.globallyPaused;
   const failing = specs
     .filter((spec) => failingIds.has(spec.id))
@@ -313,45 +304,54 @@ export async function projectOverview(projectId: string) {
       );
       const decisions = related.filter(pending);
       const job = jobs.find(
-        (job) =>
-          job.specId === spec.id &&
-          (job.runId
-            ? runFamilies.get(spec.id)?.has(job.runId)
-            : spec.status === "invalid" && job.kind === "regenerate")
+        (jobValue) =>
+          jobValue.specId === spec.id &&
+          (jobValue.runId
+            ? runFamilies.get(spec.id)?.has(jobValue.runId)
+            : spec.status === "invalid" && jobValue.kind === "regenerate")
       );
       const story = view.activity.find(
-        (story) =>
-          story.specId === spec.id &&
-          ((job && story.jobIds.includes(job.id)) ||
-            decisions.some((item) => story.inboxIds.includes(item.id)))
+        (storyValue) =>
+          storyValue.specId === spec.id &&
+          ((job && storyValue.jobIds.includes(job.id)) ||
+            decisions.some((item) => storyValue.inboxIds.includes(item.id)))
       );
-      const triageStatus = decisions.some(
-        (item) => item.presentation.type === "update"
-      )
-        ? "Fix waiting for you"
-        : decisions.some((item) =>
-              ["question", "help"].includes(item.presentation.type)
-            )
-          ? "Needs your answer"
-          : decisions.some((item) => item.kind === "bug_report") ||
-              job?.classification === "application_bug"
-            ? "App bug reported"
-            : agentPaused
-              ? "Paused by you"
-              : job?.status === "running"
-                ? "Investigating…"
-                : job?.status === "queued" ||
-                    (job?.status === "stalled" && job.retryAt)
-                  ? "Waiting to investigate"
-                  : "Latest run failed";
+      const triageStatus = (() => {
+        if (decisions.some((item) => item.presentation.type === "update")) {
+          return "Fix waiting for you";
+        }
+        if (
+          decisions.some((item) =>
+            ["question", "help"].includes(item.presentation.type)
+          )
+        ) {
+          return "Needs your answer";
+        }
+        if (
+          decisions.some((item) => item.kind === "bug_report") ||
+          job?.classification === "application_bug"
+        ) {
+          return "App bug reported";
+        }
+        if (agentPaused) {
+          return "Paused by you";
+        }
+        if (job?.status === "running") {
+          return "Investigating…";
+        }
+        return job?.status === "queued" ||
+          (job?.status === "stalled" && job.retryAt)
+          ? "Waiting to investigate"
+          : "Latest run failed";
+      })();
       return {
         specId: spec.id,
         title: spec.title,
         triageStatus,
         runId: specHealth[spec.id]?.runId,
         updatedAt:
-          specHealth[spec.id]!.lastCheckedAt ??
-          currentRuns.get(spec.id)!.startedAt,
+          requireValue(specHealth[spec.id]).lastCheckedAt ??
+          requireValue(currentRuns.get(spec.id)).startedAt,
         storyId: story?.id,
         inboxIds: (decisions.length
           ? decisions
@@ -359,15 +359,18 @@ export async function projectOverview(projectId: string) {
         ).map((item) => item.id),
       };
     })
-    .sort(
+    .toSorted(
       (a, b) =>
         a.updatedAt.localeCompare(b.updatedAt) ||
         a.specId.localeCompare(b.specId)
     );
-  const recentRuns: RecentRun[] = [];
+  let recentRuns: RecentRun[] = [];
   const batchRunIds = new Set<string>();
   for (const batch of batches) {
-    batch.specs.forEach((entry) => batchRunIds.add(entry.runId));
+    for (const entry of batch.specs) {
+      batchRunIds.add(entry.runId);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const results = await Promise.all(
       batch.specs.map(async (entry) => {
         const run =
@@ -385,24 +388,35 @@ export async function projectOverview(projectId: string) {
       )
     );
     const { passed, flaky, failed, awaiting_deploy } = counts;
-    const intent = intents.find((intent) => intent.batchId === batch.id);
+    const intent = intents.find(
+      (intentValue) => intentValue.batchId === batch.id
+    );
     const trigger =
       batch.trigger ??
-      (batch.ci
-        ? "ci"
-        : batch.label === "Scheduled run"
-          ? "schedule"
-          : runTriggerForIntent(intent, intents, signals));
-    const prefix =
-      trigger === "deploy"
-        ? "After the deployment"
-        : trigger === "ci"
-          ? "CI run"
-          : trigger === "schedule"
-            ? "Scheduled run"
-            : trigger === "spec_change"
-              ? "After Spec changes"
-              : "Run";
+      (() => {
+        if (batch.ci) {
+          return "ci";
+        }
+        if (batch.label === "Scheduled run") {
+          return "schedule";
+        }
+        return runTriggerForIntent(intent, intents, signals);
+      })();
+    const prefix = (() => {
+      if (trigger === "deploy") {
+        return "After the deployment";
+      }
+      if (trigger === "ci") {
+        return "CI run";
+      }
+      if (trigger === "schedule") {
+        return "Scheduled run";
+      }
+      if (trigger === "spec_change") {
+        return "After Spec changes";
+      }
+      return "Run";
+    })();
     const result =
       failed === 0 && flaky === 0 && awaiting_deploy === 0
         ? "all passed"
@@ -414,14 +428,16 @@ export async function projectOverview(projectId: string) {
           ]
             .filter(Boolean)
             .join(", ");
-    const updatedAt = [
-      finishedAt(batch),
-      ...results.flatMap(({ run, retry }) =>
-        run ? [finishedAt(retry ?? run)] : []
-      ),
-    ]
-      .sort()
-      .at(-1)!;
+    const updatedAt = requireValue(
+      [
+        finishedAt(batch),
+        ...results.flatMap(({ run, retry }) =>
+          run ? [finishedAt(retry ?? run)] : []
+        ),
+      ]
+        .toSorted()
+        .at(-1)
+    );
     recentRuns.push(
       runStory(running, {
         environment: batch.environment,
@@ -436,11 +452,15 @@ export async function projectOverview(projectId: string) {
         title: running
           ? `${prefix}: running ${countLabel(batch.specs.length, "Spec")}`
           : `${prefix}: ${countLabel(batch.specs.length, "Spec")} ran, ${result}`,
-        nextStep: running
-          ? "Results will appear here when the Specs finish."
-          : failed
-            ? "Open a failed Spec to inspect its evidence."
-            : "",
+        nextStep: (() => {
+          if (running) {
+            return "Results will appear here when the Specs finish.";
+          }
+          if (failed) {
+            return "Open a failed Spec to inspect its evidence.";
+          }
+          return "";
+        })(),
         createdAt: batch.startedAt,
         updatedAt,
         timeline: results
@@ -449,19 +469,24 @@ export async function projectOverview(projectId: string) {
             label: entry.title,
             specId: entry.specId,
             runId: retry?.id ?? entry.runId,
-            detail:
-              run?.awaitingDeploy && run.status !== "passed"
-                ? "Waiting for deploy. Run evidence is available."
-                : run?.flaky
-                  ? "Passed on retry."
-                  : run?.automationPending
-                    ? retry?.status === "running"
-                      ? "Running again after a failure."
-                      : "Waiting for the failure retry."
-                    : `${run?.status ?? entry.status}.`,
+            detail: (() => {
+              if (run?.awaitingDeploy && run.status !== "passed") {
+                return "Waiting for deploy. Run evidence is available.";
+              }
+              if (run?.flaky) {
+                return "Passed on retry.";
+              }
+              if (run?.automationPending) {
+                if (retry?.status === "running") {
+                  return "Running again after a failure.";
+                }
+                return "Waiting for the failure retry.";
+              }
+              return `${run?.status ?? entry.status}.`;
+            })(),
             createdAt: run ? finishedAt(retry ?? run) : updatedAt,
           }))
-          .sort(oldestFirst),
+          .toSorted(oldestFirst),
       })
     );
   }
@@ -469,9 +494,12 @@ export async function projectOverview(projectId: string) {
   const repeatedRuns = new Map<string, RecentRun>();
   for (const spec of specs) {
     for (const run of runLists.get(spec.id) ?? []) {
-      if (run.retryOf || batchRunIds.has(run.id)) continue;
+      if (run.retryOf || batchRunIds.has(run.id)) {
+        continue;
+      }
       const outcome = runOutcome(run.status, run);
       const running = outcome === "running";
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const retry = await retryFor(run);
       const story = runStory(running, {
         environment: run.environment ?? undefined,
@@ -483,24 +511,42 @@ export async function projectOverview(projectId: string) {
         counts: tally([outcome]),
         title: running
           ? `Checking “${spec.title}”${run.status === "running" ? "" : " again after a failure"}`
-          : `“${spec.title}” ${outcome === "awaiting_deploy" ? "is waiting for deploy" : run.flaky ? "passed on retry" : run.status === "passed" ? "passed" : "failed its test run"}`,
-        nextStep: running
-          ? "The result will appear here when the run finishes."
-          : run.status === "passed" || run.flaky
-            ? ""
-            : "Open the Spec to inspect its evidence.",
+          : `“${spec.title}” ${(() => {
+              if (outcome === "awaiting_deploy") {
+                return "is waiting for deploy";
+              }
+              if (run.flaky) {
+                return "passed on retry";
+              }
+              if (run.status === "passed") {
+                return "passed";
+              }
+              return "failed its test run";
+            })()}`,
+        nextStep: (() => {
+          if (running) {
+            return "The result will appear here when the run finishes.";
+          }
+          if (run.status === "passed" || run.flaky) {
+            return "";
+          }
+          return "Open the Spec to inspect its evidence.";
+        })(),
         createdAt: run.startedAt,
         updatedAt: finishedAt(retry ?? run),
         timeline: [
           {
             id: `run:${run.id}`,
             label: spec.title,
-            detail:
-              outcome === "awaiting_deploy"
-                ? "Waiting for deploy. Run evidence is available."
-                : run.flaky
-                  ? "Passed on retry."
-                  : `${run.status}.`,
+            detail: (() => {
+              if (outcome === "awaiting_deploy") {
+                return "Waiting for deploy. Run evidence is available.";
+              }
+              if (run.flaky) {
+                return "Passed on retry.";
+              }
+              return `${run.status}.`;
+            })(),
             createdAt: finishedAt(retry ?? run),
             specId: spec.id,
             runId: retry?.id ?? run.id,
@@ -518,34 +564,50 @@ export async function projectOverview(projectId: string) {
       ]);
       const repeated = !running && repeatedRuns.get(key);
       if (repeated) {
-        repeated.occurrences++;
-        for (const outcome of [
+        repeated.occurrences += 1;
+        for (const outcomeValue of [
           "total",
           "passed",
           "failed",
           "flaky",
           "running",
           "awaiting_deploy",
-        ] as const)
-          repeated.counts[outcome] += story.counts[outcome];
+        ] as const) {
+          repeated.counts[outcomeValue] += story.counts[outcomeValue];
+        }
         repeated.timeline.push(...story.timeline);
-        repeated.timeline.sort(oldestFirst);
-        repeated.createdAt = [repeated.createdAt, story.createdAt].sort()[0]!;
-        repeated.updatedAt = [repeated.updatedAt, story.updatedAt]
-          .sort()
-          .at(-1)!;
-        repeated.title = `“${spec.title}” ${outcome === "awaiting_deploy" ? "waited for deploy" : run.flaky ? "passed on retry" : run.status === "passed" ? "passed" : "failed"} in ${countLabel(repeated.occurrences, "run")}`;
+        repeated.timeline = repeated.timeline.toSorted(oldestFirst);
+        repeated.createdAt = requireValue(
+          [repeated.createdAt, story.createdAt].toSorted()[0]
+        );
+        repeated.updatedAt = requireValue(
+          [repeated.updatedAt, story.updatedAt].toSorted().at(-1)
+        );
+        repeated.title = `“${spec.title}” ${(() => {
+          if (outcome === "awaiting_deploy") {
+            return "waited for deploy";
+          }
+          if (run.flaky) {
+            return "passed on retry";
+          }
+          if (run.status === "passed") {
+            return "passed";
+          }
+          return "failed";
+        })()} in ${countLabel(repeated.occurrences, "run")}`;
         continue;
       }
-      if (!running) repeatedRuns.set(key, story);
+      if (!running) {
+        repeatedRuns.set(key, story);
+      }
       recentRuns.push(story);
     }
   }
-  recentRuns.sort(newestFirst);
+  recentRuns = recentRuns.toSorted(newestFirst);
   const lastCheckedAt =
     Object.values(specHealth)
       .flatMap((health) => (health.lastCheckedAt ? [health.lastCheckedAt] : []))
-      .sort()
+      .toSorted()
       .at(-1) ?? null;
   const verdict = [
     specs.length
@@ -568,17 +630,24 @@ export async function projectOverview(projectId: string) {
     recentRuns.filter((run) => run.status === "working").length +
     jobs.filter((job) => job.status === "running").length;
   const nextCheckAt = agentPaused ? null : (schedule?.nextRunAt ?? null);
-  const nextCheck = agentPaused
-    ? "Resume Specbook to continue."
-    : activeCount
-      ? `${countLabel(activeCount, "Spec")} in progress.`
-      : healthCounts.invalid === specs.length && specs.length > 0
-        ? "Repair the incomplete Specs in chat before running them."
-        : settings.autonomy === "observe"
-          ? "Observation mode records changes. Request a coverage review or explore the app when needed."
-          : nextCheckAt
-            ? ""
-            : "Waiting for a deployment, a Spec change or your request.";
+  const nextCheck = (() => {
+    if (agentPaused) {
+      return "Resume Specbook to continue.";
+    }
+    if (activeCount) {
+      return `${countLabel(activeCount, "Spec")} in progress.`;
+    }
+    if (healthCounts.invalid === specs.length && specs.length > 0) {
+      return "Repair the incomplete Specs in chat before running them.";
+    }
+    if (settings.autonomy === "observe") {
+      return "Observation mode records changes. Request a coverage review or explore the app when needed.";
+    }
+    if (nextCheckAt) {
+      return "";
+    }
+    return "Waiting for a deployment, a Spec change or your request.";
+  })();
   const needsYouById = new Map(needsYou.map((item) => [item.id, item]));
   return {
     summary: {
@@ -600,4 +669,57 @@ export async function projectOverview(projectId: string) {
     items: view.items.map((item) => needsYouById.get(item.id) ?? item),
     stories: view.activity,
   };
+};
+
+export type SpecHealthStatus =
+  | "passing"
+  | "failing"
+  | "flaky"
+  | "awaiting_deploy"
+  | "not_checked"
+  | "queued"
+  | "running"
+  | "repairing"
+  | "invalid";
+export interface SpecHealth {
+  status: SpecHealthStatus;
+  label: string;
+  runId?: string;
+  lastCheckedAt: string | null;
 }
+type Outcome = "passed" | "failed" | "flaky" | "running" | "awaiting_deploy";
+export interface RecentRun extends ActivityStory {
+  trigger: RunBatchTrigger;
+  environment?: RunEnvironment;
+  occurrences: number;
+  counts: Record<Outcome | "total", number>;
+}
+
+const newestFirst = (
+  a: { updatedAt: string; id: string },
+  b: { updatedAt: string; id: string }
+) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
+const pending = (item: PresentedItem) =>
+  ["pending", "applying"].includes(item.status);
+const countLabel = (count: number, noun: string) =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;
+const needsRetry = (run: Run) =>
+  run.automationPending ||
+  run.flaky ||
+  ["failed", "error"].includes(run.status);
+const runOutcome = (status: string, run?: Run | null): Outcome =>
+  (() => {
+    if (status === "running" || run?.automationPending) {
+      return "running";
+    }
+    if (run?.awaitingDeploy && status !== "passed") {
+      return "awaiting_deploy";
+    }
+    if (run?.flaky) {
+      return "flaky";
+    }
+    if (status === "passed") {
+      return "passed";
+    }
+    return "failed";
+  })();

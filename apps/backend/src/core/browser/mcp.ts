@@ -13,62 +13,7 @@ import { minimalChildEnv } from "@specbook/runtime/process";
 
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./vnc";
 
-const require = createRequire(import.meta.url);
-const MCP_CLI = path.join(
-  path.dirname(require.resolve("@playwright/mcp/package.json")),
-  "cli.js"
-);
-
-const ALLOWED_TOOLS = new Set([
-  "browser_navigate",
-  "browser_navigate_back",
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_fill_form",
-  "browser_select_option",
-  "browser_hover",
-  "browser_press_key",
-  "browser_wait_for",
-  "browser_handle_dialog",
-  "browser_tabs",
-  "browser_drag",
-  "browser_take_screenshot",
-  "browser_mouse_move_xy",
-  "browser_mouse_click_xy",
-  "browser_mouse_drag_xy",
-  "browser_mouse_down",
-  "browser_mouse_up",
-  "browser_mouse_wheel",
-]);
-
-export interface BrowserToolPolicy {
-  allowedTools?: ReadonlySet<string>;
-  beforeCall?: (
-    toolName: string,
-    args: Record<string, unknown>,
-    signal?: AbortSignal
-  ) => Promise<void>;
-  afterCall?: (
-    toolName: string,
-    args: Record<string, unknown>,
-    result: string,
-    signal?: AbortSignal
-  ) => Promise<void>;
-  sanitizeResult?: (text: string) => Promise<string> | string;
-  sendScreenshots?: () => Promise<boolean>;
-}
-
-export interface BrowserMcp {
-  workDir?: string;
-  client: Client;
-  tools: { name: string; description?: string; inputSchema: unknown }[];
-  ensureBrowser: (signal?: AbortSignal) => Promise<void>;
-  navigate: (url: string, signal?: AbortSignal) => Promise<void>;
-  close: () => Promise<void>;
-}
-
-export async function launchBrowserMcp(opts: {
+export const launchBrowserMcp = async function launchBrowserMcp(opts: {
   workDir: string;
   display: string;
   navigationOrigins?: string[];
@@ -176,7 +121,8 @@ export async function launchBrowserMcp(opts: {
       }
     };
     const navigate = async (url: string, signal?: AbortSignal) => {
-      for (let attempt = 0; ; attempt++) {
+      for (let attempt = 0; ; attempt += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         const result = await client.callTool(
           { name: "browser_navigate", arguments: { url } },
           undefined,
@@ -186,8 +132,11 @@ export async function launchBrowserMcp(opts: {
           return;
         }
         const text = extractMcpText(result as { content?: unknown });
-        if (attempt < 3 && /is interrupted by another navigation/.test(text)) {
-          await new Promise((resolve) => setTimeout(resolve, 300));
+        if (attempt < 3 && /is interrupted by another navigation/u.test(text)) {
+          // oxlint-disable-next-line promise/avoid-new, no-await-in-loop -- Bridge an event or callback API to the asynchronous operation. Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 300);
+          });
           continue;
         }
         throw new CodedError("environment", `browser tool failed: ${text}`);
@@ -200,17 +149,24 @@ export async function launchBrowserMcp(opts: {
       ensureBrowser,
       navigate,
       close: async () => {
-        await client.close().catch(() => undefined);
+        await client.close().catch(() => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+        });
       },
     };
   } catch (error) {
-    await client.close().catch(() => undefined);
+    await client.close().catch(() => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+    });
     throw error;
   }
-}
+};
 
-function inlineSnapshots(text: string, workDir: string): Promise<string> {
-  const refs = [...text.matchAll(/\[Snapshot\]\(([^)]+)\)/g)].map(
+const inlineSnapshots = function inlineSnapshots(
+  text: string,
+  workDir: string
+): Promise<string> {
+  const refs = [...text.matchAll(/\[Snapshot\]\((?<capture1>[^)]+)\)/gu)].map(
     (match) => match[1]
   );
   if (refs.length === 0) {
@@ -241,9 +197,11 @@ function inlineSnapshots(text: string, workDir: string): Promise<string> {
     const body = snapshots.filter(Boolean).join("\n");
     return body ? `${text}\n\nSnapshot:\n${body}` : text;
   });
-}
+};
 
-export function extractMcpText(result: { content?: unknown }): string {
+export const extractMcpText = function extractMcpText(result: {
+  content?: unknown;
+}): string {
   const content = Array.isArray(result.content)
     ? (result.content as { type?: string; text?: string }[])
     : [];
@@ -252,9 +210,9 @@ export function extractMcpText(result: { content?: unknown }): string {
     .map((item) => item.text)
     .join("\n")
     .trim();
-}
+};
 
-function mcpImages(result: {
+const mcpImages = function mcpImages(result: {
   content?: unknown;
 }): { type: "image"; data: string; mimeType: string }[] {
   const content = Array.isArray(result.content)
@@ -276,16 +234,16 @@ function mcpImages(result: {
       data: item.data as string,
       mimeType: item.mimeType as string,
     }));
-}
+};
 
-export async function renderMcpResult(
+export const renderMcpResult = async function renderMcpResult(
   result: { content?: unknown },
   workDir: string
 ): Promise<string> {
-  return inlineSnapshots(extractMcpText(result), workDir);
-}
+  return await inlineSnapshots(extractMcpText(result), workDir);
+};
 
-export async function readBrowserSnapshot(
+export const readBrowserSnapshot = async function readBrowserSnapshot(
   mcp: BrowserMcp,
   signal?: AbortSignal
 ): Promise<string> {
@@ -305,9 +263,9 @@ export async function readBrowserSnapshot(
   return mcp.workDir
     ? renderMcpResult(content, mcp.workDir)
     : extractMcpText(content);
-}
+};
 
-export async function getActiveTabUrl(
+export const getActiveTabUrl = async function getActiveTabUrl(
   mcp: BrowserMcp,
   signal?: AbortSignal
 ): Promise<string | null> {
@@ -333,18 +291,18 @@ export async function getActiveTabUrl(
       `The browser could not inspect its open tabs: ${text}`
     );
   }
-  const pageUrl = text.match(/^- Page URL: (\S+)/m);
+  const pageUrl = text.match(/^- Page URL: (?<capture1>\S+)/mu);
   if (pageUrl) {
     return pageUrl[1];
   }
   const currentTab = text
     .split("\n")
     .find((line) => line.includes("(current)"));
-  const listedUrl = currentTab?.match(/\]\((\S+)\)/);
+  const listedUrl = currentTab?.match(/\]\((?<capture1>\S+)\)/u);
   return listedUrl ? listedUrl[1] : null;
-}
+};
 
-export function bridgeBrowserTools(
+export const bridgeBrowserTools = function bridgeBrowserTools(
   mcp: BrowserMcp,
   workDir: string,
   policy?: BrowserToolPolicy
@@ -362,6 +320,7 @@ export function bridgeBrowserTools(
         parameters: Type.Unsafe<Record<string, unknown>>(
           tool.inputSchema as Parameters<typeof Type.Unsafe>[0]
         ),
+        // oxlint-disable-next-line complexity -- Keep the mcp decision tree together so state transitions and error ordering remain explicit.
         async execute(_id, params, signal) {
           signal?.throwIfAborted();
           const args = (params ?? {}) as Record<string, unknown>;
@@ -453,4 +412,59 @@ export function bridgeBrowserTools(
         },
       })
     );
+};
+
+const require = createRequire(import.meta.url);
+const MCP_CLI = path.join(
+  path.dirname(require.resolve("@playwright/mcp/package.json")),
+  "cli.js"
+);
+
+const ALLOWED_TOOLS = new Set([
+  "browser_navigate",
+  "browser_navigate_back",
+  "browser_snapshot",
+  "browser_click",
+  "browser_type",
+  "browser_fill_form",
+  "browser_select_option",
+  "browser_hover",
+  "browser_press_key",
+  "browser_wait_for",
+  "browser_handle_dialog",
+  "browser_tabs",
+  "browser_drag",
+  "browser_take_screenshot",
+  "browser_mouse_move_xy",
+  "browser_mouse_click_xy",
+  "browser_mouse_drag_xy",
+  "browser_mouse_down",
+  "browser_mouse_up",
+  "browser_mouse_wheel",
+]);
+
+export interface BrowserToolPolicy {
+  allowedTools?: ReadonlySet<string>;
+  beforeCall?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal
+  ) => Promise<void>;
+  afterCall?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    result: string,
+    signal?: AbortSignal
+  ) => Promise<void>;
+  sanitizeResult?: (text: string) => Promise<string> | string;
+  sendScreenshots?: () => Promise<boolean>;
+}
+
+export interface BrowserMcp {
+  workDir?: string;
+  client: Client;
+  tools: { name: string; description?: string; inputSchema: unknown }[];
+  ensureBrowser: (signal?: AbortSignal) => Promise<void>;
+  navigate: (url: string, signal?: AbortSignal) => Promise<void>;
+  close: () => Promise<void>;
 }

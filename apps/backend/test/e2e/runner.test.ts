@@ -20,11 +20,12 @@ import { captureStepScreenshot } from "@specbook/runtime/specbook/screenshot";
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 
 import { createSecretScrubber } from "../../src/core/credentials/scrub";
+import { requireValue } from "../../src/core/utils/require-value";
 import { tempDir } from "../helpers/storage";
 
-const SECRET = "correct-horse-battery";
-
-function recordedInputValues(events: { data?: unknown }[]): string[] {
+const recordedInputValues = function recordedInputValues(
+  events: { data?: unknown }[]
+): string[] {
   const values: unknown[] = [];
   const collect = (node: {
     tagName?: string;
@@ -62,9 +63,9 @@ function recordedInputValues(events: { data?: unknown }[]): string[] {
     }
   }
   return values.filter((value): value is string => typeof value === "string");
-}
+};
 
-async function chromiumAvailable(): Promise<boolean> {
+const chromiumAvailable = async function chromiumAvailable(): Promise<boolean> {
   try {
     const { chromium } = await import("@playwright/test");
     const browser = await chromium.launch({ headless: true });
@@ -73,18 +74,33 @@ async function chromiumAvailable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
+};
 
-function listen(handler: http.RequestListener): Promise<http.Server> {
+const listen = function listen(
+  handler: http.RequestListener
+): Promise<http.Server> {
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
   return new Promise((resolve) => {
     const server = http.createServer(handler);
     server.listen(0, "127.0.0.1", () => resolve(server));
   });
-}
+};
 
-function origin(server: http.Server): string {
+const origin = function origin(server: http.Server): string {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-}
+};
+
+const suiteSpec = function suiteSpec(
+  key: string,
+  source: string,
+  outputDir: string
+): SuiteSpec {
+  const analysis = analyzeSpecSource(source);
+  assert.ok(analysis.ok, analysis.ok ? "" : analysis.error);
+  return { key, source, analysis: analysis.analysis, outputDir };
+};
+
+const SECRET = "correct-horse-battery";
 
 const available = await chromiumAvailable();
 let app: http.Server;
@@ -178,12 +194,6 @@ after(() => {
   evil?.close();
 });
 
-function suiteSpec(key: string, source: string, outputDir: string): SuiteSpec {
-  const analysis = analyzeSpecSource(source);
-  assert.ok(analysis.ok, analysis.ok ? "" : analysis.error);
-  return { key, source, analysis: analysis.analysis, outputDir };
-}
-
 const LOGIN = `import { test, expect } from "specbook";
 test("Sign in", async ({ page, step, secret }) => {
     await step("Open the sign-in page", async () => {
@@ -249,9 +259,15 @@ describe(
             const canvas = document.createElement("canvas");
             canvas.width = 400;
             canvas.height = 200;
-            const context = canvas.getContext("2d")!;
-            context.fillStyle = "#4466aa";
-            context.fillRect(0, 0, 400, 200);
+            const contextInTest = (() => {
+              const existing = canvas.getContext("2d");
+              if (existing === null || existing === undefined) {
+                throw new Error("Expected a browser value");
+              }
+              return existing;
+            })();
+            contextInTest.fillStyle = "#4466aa";
+            contextInTest.fillRect(0, 0, 400, 200);
             const source = canvas.toDataURL();
             await Promise.all(
               [...document.images]
@@ -299,6 +315,7 @@ describe(
               HTMLCanvasElement.prototype.toDataURL,
               CanvasRenderingContext2D.prototype.drawImage,
             ];
+            // oxlint-disable-next-line no-eval -- Recreate the recorder factory in the isolated browser realm under test.
             const images = (0, eval)(`(${factory})`)(
               (event: never) => events.push(event),
               target.rrweb.record.mirror
@@ -316,7 +333,7 @@ describe(
               string,
               { size: number[] | null; id: number }
             > = {};
-            const before: Record<string, number[]> = {};
+            const beforeInTest: Record<string, number[]> = {};
             const inspect = {
               async dimensions(source: string): Promise<number[]> {
                 const image = new Image();
@@ -350,28 +367,55 @@ describe(
               },
             };
             await inspect.visit(
-              events.find((event) => event.type === 2)!.data.node!
+              (() => {
+                const existing = (() => {
+                  const existingInTest = events.find(
+                    (event) => event.type === 2
+                  );
+                  if (existingInTest === null || existingInTest === undefined) {
+                    throw new Error("Expected a browser value");
+                  }
+                  return existingInTest;
+                })().data.node;
+                if (existing === null || existing === undefined) {
+                  throw new Error("Expected a browser value");
+                }
+                return existing;
+              })()
             );
-            document.querySelectorAll("img[id]").forEach((image) => {
-              before[image.id] = inspect.box(image);
-            });
+            for (const image of document.querySelectorAll("img[id]")) {
+              beforeInTest[image.id] = inspect.box(image);
+            }
             const initialEvents = [...events];
             const source = (
               document.querySelector("#small") as HTMLImageElement
             ).src;
-            const small = document.querySelector<HTMLElement>("#small")!;
+            const small = (() => {
+              const existing = document.querySelector<HTMLElement>("#small");
+              if (existing === null || existing === undefined) {
+                throw new Error("Expected a browser value");
+              }
+              return existing;
+            })();
             small.style.width = "120px";
             small.style.height = "60px";
-            document.querySelector<HTMLElement>("#hidden")!.style.display =
-              "inline";
+            (() => {
+              const existing = document.querySelector<HTMLElement>("#hidden");
+              if (existing === null || existing === undefined) {
+                throw new Error("Expected a browser value");
+              }
+              return existing;
+            })().style.display = "inline";
             const late = document.querySelector("#late") as HTMLImageElement;
             late.src = source;
             await late.decode();
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(resolve));
+            });
             const updates: Record<string, number[]> = {};
             for (const event of events) {
+              /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
               for (const change of event.data.attributes ?? []) {
                 if (!change.attributes.rr_dataURL) {
                   continue;
@@ -387,14 +431,16 @@ describe(
                   );
                 }
               }
+              /* oxlint-enable no-await-in-loop */
             }
             images.stop();
             stop();
             const count = events.length;
             small.style.width = "160px";
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(resolve));
+            });
             const root = document.createElement("div");
             root.style.position = "fixed";
             root.style.left = "-10000px";
@@ -404,33 +450,56 @@ describe(
               showWarning: false,
             });
             player.pause(
-              initialEvents.at(-1)!.timestamp - initialEvents[0].timestamp + 1
+              (() => {
+                const existing = initialEvents.at(-1);
+                if (existing === null || existing === undefined) {
+                  throw new Error("Expected a browser value");
+                }
+                return existing;
+              })().timestamp -
+                initialEvents[0].timestamp +
+                1
             );
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(resolve));
+            });
             const replayBoxes: Record<string, number[]> = {};
+            /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
             for (const [name, image] of Object.entries(initial)) {
               const element = player
                 .getMirror()
                 .getNode(image.id) as HTMLImageElement;
               if (element.src) {
-                await element.decode().catch(() => undefined);
+                await element.decode().catch(() => {
+                  /* Intentionally ignore this best-effort operation. */
+                });
               }
               replayBoxes[name] = inspect.box(element);
             }
+            /* oxlint-enable no-await-in-loop */
             player.destroy();
             const updatedPlayer = new target.rrweb.Replayer(events, {
               root,
               showWarning: false,
             });
             updatedPlayer.pause(
-              events.at(-1)!.timestamp - events[0].timestamp + 1
+              (() => {
+                const existing = events.at(-1);
+                if (existing === null || existing === undefined) {
+                  throw new Error("Expected a browser value");
+                }
+                return existing;
+              })().timestamp -
+                events[0].timestamp +
+                1
             );
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(resolve));
+            });
             const updatedSources: Record<string, number[]> = {};
+            /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
             for (const name of ["small", "hidden", "late"]) {
               const element = updatedPlayer
                 .getMirror()
@@ -441,6 +510,7 @@ describe(
                 element.naturalHeight,
               ];
             }
+            /* oxlint-enable no-await-in-loop */
             updatedPlayer.destroy();
             return {
               initial,
@@ -453,7 +523,7 @@ describe(
                 prototypes[0] === HTMLCanvasElement.prototype.toDataURL &&
                 prototypes[1] === CanvasRenderingContext2D.prototype.drawImage,
               stopped: count === events.length,
-              before,
+              before: beforeInTest,
               replayBoxes,
               updatedSources,
             };
@@ -569,8 +639,14 @@ describe(
                 const canvas = document.createElement("canvas");
                 canvas.width = image.width;
                 canvas.height = image.height;
-                const context = canvas.getContext("2d")!;
-                context.drawImage(image, 0, 0);
+                const contextInTest = (() => {
+                  const existing = canvas.getContext("2d");
+                  if (existing === null || existing === undefined) {
+                    throw new Error("Expected a browser value");
+                  }
+                  return existing;
+                })();
+                contextInTest.drawImage(image, 0, 0);
                 // Mean channel difference from a password field with the same value; WebP is lossy, so identical renders differ slightly.
                 const pairs: Record<string, number[]> = {
                   password: [10, 10, 400, 10],
@@ -582,10 +658,10 @@ describe(
                 };
                 const differences: Record<string, number> = {};
                 for (const [name, [ax, ay, bx, by]] of Object.entries(pairs)) {
-                  const a = context.getImageData(ax, ay, 140, 30).data;
-                  const b = context.getImageData(bx, by, 140, 30).data;
+                  const a = contextInTest.getImageData(ax, ay, 140, 30).data;
+                  const b = contextInTest.getImageData(bx, by, 140, 30).data;
                   let total = 0;
-                  for (let index = 0; index < a.length; index++) {
+                  for (let index = 0; index < a.length; index += 1) {
                     total += Math.abs(a[index] - b[index]);
                   }
                   differences[name] = total / a.length;
@@ -610,6 +686,7 @@ describe(
             assert.ok(pageText < 3, "sensitive values in page text are hidden");
             assert.ok(publicText < 3, "non-sensitive page text stays visible");
             assert.equal(
+              // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- This is Playwright Locator.innerText(), not a DOM property assignment.
               await page.locator('span[style="top:90px"]').innerText(),
               SECRET,
               "the original page text is restored after capture"
@@ -641,8 +718,12 @@ describe(
           };
           await capture("webp");
           const newSession = context.newCDPSession;
-          context.newCDPSession = async () => {
-            throw new Error("CDP unavailable");
+          context.newCDPSession = () => {
+            try {
+              throw new Error("CDP unavailable");
+            } catch (error) {
+              return Promise.reject(error);
+            }
           };
           try {
             await capture("png");
@@ -653,20 +734,35 @@ describe(
           const { evaluateHandle } = frame;
           const { screenshot } = page;
           let unsafeCaptures = 0;
-          frame.evaluateHandle = async () => new Promise<never>(() => {});
-          context.newCDPSession = async () => {
-            unsafeCaptures++;
-            throw new Error("Unexpected capture");
+          frame.evaluateHandle = () => {
+            try {
+              // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+              return Promise.resolve(new Promise<never>(() => {}));
+            } catch (error) {
+              return Promise.reject(error);
+            }
           };
-          page.screenshot = async () => {
-            unsafeCaptures++;
-            throw new Error("Unexpected capture");
+          context.newCDPSession = () => {
+            try {
+              unsafeCaptures += 1;
+              throw new Error("Unexpected capture");
+            } catch (error) {
+              return Promise.reject(error);
+            }
+          };
+          page.screenshot = () => {
+            try {
+              unsafeCaptures += 1;
+              throw new Error("Unexpected capture");
+            } catch (error) {
+              return Promise.reject(error);
+            }
           };
           try {
             const target = path.join(directory, "unavailable");
             await assert.rejects(
               captureStepScreenshot(page, target, [SECRET]),
-              /Browser evidence timed out/
+              /Browser evidence timed out/u
             );
             assert.equal(
               unsafeCaptures,
@@ -825,7 +921,7 @@ describe(
         );
         assert.match(
           guard?.failReason ?? "",
-          /Refusing to type a secret: the current page origin is not allowed/
+          /Refusing to type a secret: the current page origin is not allowed/u
         );
         const guardEvidence = JSON.parse(
           await fs.readFile(path.join(guardDir, "evidence.json"), "utf-8")
@@ -879,18 +975,20 @@ describe(
         const result = outcome.results.get("fail");
         assert.equal(result?.status, "failed");
         assert.equal(result?.failedStep, "See the greeting");
-        assert.match(result?.failReason ?? "", /toHaveText/);
-        assert.doesNotMatch(result?.failReason ?? "", /\u001B\[/);
+        assert.match(result?.failReason ?? "", /toHaveText/u);
+        // oxlint-disable-next-line no-control-regex -- Verify that terminal escape sequences are removed from recorded failures.
+        assert.doesNotMatch(result?.failReason ?? "", /\u001B\[/u);
         const evidence = JSON.parse(
           await fs.readFile(path.join(directory, "evidence.json"), "utf-8")
         );
         assert.equal(evidence.steps.length, 2);
         assert.equal(evidence.video, "evidence/execution.webm");
-        assert.match(evidence.errorContext, /heading "Home"/);
+        assert.match(evidence.errorContext, /heading "Home"/u);
         const events = await readReplay(directory);
         assert.ok(events);
-        const ending = events.filter((event) => event.type === 5).at(-1)
-          ?.data as { payload: { number: number; outcome: string } };
+        const ending = events.findLast((event) => event.type === 5)?.data as {
+          payload: { number: number; outcome: string };
+        };
         assert.deepEqual(
           { number: ending.payload.number, outcome: ending.payload.outcome },
           { number: 2, outcome: "failed" }
@@ -961,7 +1059,7 @@ describe(
               entry.url?.endsWith("/network-error")
           )
         );
-        assert.match(evidence.errorContext, /heading "Diagnostics ••••"/);
+        assert.match(evidence.errorContext, /heading "Diagnostics ••••"/u);
         assert.ok(!existsSync(path.join(directory, "report")));
         assert.ok(!existsSync(path.join(directory, "work")));
 
@@ -1009,14 +1107,24 @@ describe("Playwright runner (API)", () => {
       const source =
         'import { test, expect } from "specbook"; test("Cleanup budget", async ({ page, request, step, cleanup }) => { await cleanup(async () => { await page.goto("/diagnostics"); await request.get("/slow-cleanup"); }); await step("Check the page", async () => { const response = await request.get("/"); await expect(response).toBeOK(); }); });';
       const write = fs.writeFile;
-      fs.writeFile = async (file, contents, options) =>
-        write(
-          file,
-          String(file).endsWith("playwright.config.mjs")
-            ? String(contents).replace('"timeout": 100000', '"timeout": 3000')
-            : contents,
-          options
-        );
+      fs.writeFile = (file, contents, options) => {
+        try {
+          return Promise.resolve(
+            write(
+              file,
+              String(file).endsWith("playwright.config.mjs")
+                ? String(contents).replace(
+                    '"timeout": 100000',
+                    '"timeout": 3000'
+                  )
+                : contents,
+              options
+            )
+          );
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      };
       let outcome;
       try {
         outcome = await runPlaywrightSuite({
@@ -1084,7 +1192,7 @@ test("API echo", async ({ request, step, secret }) => {
       assert.equal(outcome.results.get("api-blocked")?.status, "failed");
       assert.match(
         outcome.results.get("api-blocked")?.failReason ?? "",
-        /API request origin is not allowed/
+        /API request origin is not allowed/u
       );
       assert.ok(!externalRequests.includes("/api/secret-target"));
       const text = await fs.readFile(
@@ -1165,7 +1273,13 @@ describe("exploratory page scan", { skip: !available }, () => {
         const mcp = {
           client,
           tools: [],
-          ensureBrowser: async () => {},
+          ensureBrowser: () => {
+            try {
+              return Promise.resolve();
+            } catch (error) {
+              return Promise.reject(error);
+            }
+          },
           navigate: async (url: string) => {
             await client.callTool({
               name: "browser_navigate",
@@ -1180,10 +1294,20 @@ describe("exploratory page scan", { skip: !available }, () => {
           await scanPage({
             baseUrl: origin(app),
             mcp,
-            scrub: async (value) => createSecretScrubber([SECRET])(value),
-            recordEvidence: async (value) => {
-              evidence = value;
-              return "/activity#scan";
+            scrub: (value) => {
+              try {
+                return Promise.resolve(createSecretScrubber([SECRET])(value));
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            },
+            recordEvidence: (value) => {
+              try {
+                evidence = value;
+                return Promise.resolve("/activity#scan");
+              } catch (error) {
+                return Promise.reject(error);
+              }
             },
           })
         );
@@ -1239,9 +1363,15 @@ describe("exploratory page scan", { skip: !available }, () => {
             scanPage({
               baseUrl: origin(app),
               mcp,
-              scrub: async (value) => value,
+              scrub: (value) => {
+                try {
+                  return Promise.resolve(value);
+                } catch (error) {
+                  return Promise.reject(error);
+                }
+              },
             }),
-          /project origin/
+          /project origin/u
         );
       } finally {
         await client.close();
@@ -1271,6 +1401,7 @@ describe(
         const stacks: Awaited<ReturnType<typeof startVncStack>>[] = [];
         let owner: ReturnType<typeof spawn> | undefined;
         const listening = (port: number): Promise<boolean> =>
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
           new Promise((resolve) => {
             const socket = net.createConnection(port, "127.0.0.1");
             const finish = (result: boolean) => {
@@ -1292,9 +1423,12 @@ describe(
           assert.equal(new Set(stacks.map((stack) => stack.display)).size, 2);
           assert.equal(new Set(stacks.map((stack) => stack.port)).size, 2);
           assert.ok(
-            (
-              await Promise.all(stacks.map((stack) => listening(stack.port)))
-            ).every(Boolean)
+            await (async () => {
+              const awaitedValue49590 = await Promise.all(
+                stacks.map((stack) => listening(stack.port))
+              );
+              return awaitedValue49590.every(Boolean);
+            })()
           );
           const moduleUrl = new URL(
             "../../src/core/browser/vnc.ts",
@@ -1314,6 +1448,7 @@ describe(
             ],
             { stdio: ["pipe", "pipe", "pipe"], env: minimalChildEnv() }
           );
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
           const childStack = await new Promise<{
             id: string;
             display: string;
@@ -1325,21 +1460,27 @@ describe(
               () => reject(new Error("Browser owner did not start")),
               12_000
             );
-            owner!.stdout!.on("data", (chunk: Buffer) => {
-              output += chunk.toString();
-              if (output.includes("\n")) {
-                clearTimeout(timer);
-                resolve(JSON.parse(output.split("\n")[0]));
+            requireValue(requireValue(owner).stdout).on(
+              "data",
+              (chunk: Buffer) => {
+                output += chunk.toString();
+                if (output.includes("\n")) {
+                  clearTimeout(timer);
+                  resolve(JSON.parse(output.split("\n")[0]));
+                }
               }
-            });
-            owner!.stderr!.on("data", (chunk: Buffer) => {
-              error += chunk.toString();
-            });
-            owner!.once("error", (cause) => {
+            );
+            requireValue(requireValue(owner).stderr).on(
+              "data",
+              (chunk: Buffer) => {
+                error += chunk.toString();
+              }
+            );
+            requireValue(owner).once("error", (cause) => {
               clearTimeout(timer);
               reject(cause);
             });
-            owner!.once("exit", () => {
+            requireValue(owner).once("exit", () => {
               clearTimeout(timer);
               reject(new Error(error || "Browser owner exited before startup"));
             });
@@ -1353,47 +1494,64 @@ describe(
           );
           assert.ok(await listening(childStack.port));
           const lock = `/tmp/.X${childStack.display.slice(1)}-lock`;
-          const exit = new Promise<void>((resolve) =>
-            owner!.once("exit", () => resolve())
-          );
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          const exit = new Promise<void>((resolve) => {
+            requireValue(owner).once("exit", () => resolve());
+          });
           owner.kill("SIGKILL");
           await exit;
+          /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
           for (
             let attempt = 0;
             attempt < 60 && (await listening(childStack.port));
-            attempt++
+            attempt += 1
           ) {
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise((resolve) => {
+              setTimeout(resolve, 50);
+            });
           }
+          /* oxlint-enable no-await-in-loop */
           assert.equal(
             await listening(childStack.port),
             false,
             "the orphaned supervisor stops its own VNC process"
           );
+          /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
           for (
             let attempt = 0;
             attempt < 60 && (await fs.stat(lock).catch(() => null));
-            attempt++
+            attempt += 1
           ) {
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise((resolve) => {
+              setTimeout(resolve, 50);
+            });
           }
+          /* oxlint-enable no-await-in-loop */
           assert.equal(
             await fs.stat(lock).catch(() => null),
             null,
             "the owned X server exits and removes its lock"
           );
           assert.ok(
-            (
-              await Promise.all(stacks.map((stack) => listening(stack.port)))
-            ).every(Boolean),
+            await (async () => {
+              const awaitedValue52679 = await Promise.all(
+                stacks.map((stack) => listening(stack.port))
+              );
+              return awaitedValue52679.every(Boolean);
+            })(),
             "another backend's displays keep running"
           );
           await Promise.all(stacks.map((stack) => stopVncStack(stack.id)));
           assert.ok(stacks.every((stack) => getVncSession(stack.id) === null));
           assert.ok(
-            (
-              await Promise.all(stacks.map((stack) => listening(stack.port)))
-            ).every((open) => !open),
+            await (async () => {
+              const awaitedValue53045 = await Promise.all(
+                stacks.map((stack) => listening(stack.port))
+              );
+              return awaitedValue53045.every((open) => !open);
+            })(),
             "stop waits until the sockets are closed"
           );
         } finally {
@@ -1440,7 +1598,7 @@ describe(
             const target = snapshot
               .split("\n")
               .find((line) => line.includes(`"${name}"`))
-              ?.match(/\[ref=([^\]]+)\]/)?.[1];
+              ?.match(/\[ref=(?<capture1>[^\]]+)\]/u)?.[1];
             assert.ok(target, snapshot);
             return target;
           };
@@ -1451,23 +1609,23 @@ describe(
             mcp
           );
           await assert.rejects(
-            policy.beforeCall!("browser_click", {
+            requireValue(policy.beforeCall)("browser_click", {
               target: `aria-ref=${ref("Delete account")}`,
               element: "Products",
             }),
-            /actual button Delete account/
+            /actual button Delete account/u
           );
           const args = {
             target: `aria-ref=${ref("Products")}`,
             element: "Products",
           };
-          await policy.beforeCall!("browser_click", args);
+          await requireValue(policy.beforeCall)("browser_click", args);
           const click = await mcp.client.callTool({
             name: "browser_click",
             arguments: args,
           });
           assert.ok(!click.isError, JSON.stringify(click));
-          assert.match(await readBrowserSnapshot(mcp), /Opened/);
+          assert.match(await readBrowserSnapshot(mcp), /Opened/u);
           assert.ok(
             !explorationRequests.some((entry) =>
               entry.includes("unsafe-action")
@@ -1475,15 +1633,16 @@ describe(
           );
 
           const blocked = (url: string) =>
-            mcp!
+            requireValue(mcp)
               .navigate(url)
+              // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This handler models the callback interface exercised by the test.
               .catch((error: Error) =>
-                assert.match(error.message, /ERR_BLOCKED_BY_CLIENT/)
+                assert.match(error.message, /ERR_BLOCKED_BY_CLIENT/u)
               );
           await blocked(`${origin(app)}/policy-redirect`);
           await blocked(`${origin(evil)}/policy-offsite`);
           await mcp.navigate(`${origin(app)}/policy`);
-          assert.match(await readBrowserSnapshot(mcp), /Policy/);
+          assert.match(await readBrowserSnapshot(mcp), /Policy/u);
           assert.ok(
             !externalRequests.some((url) => url.startsWith("/policy-")),
             "forbidden documents are never fetched, even through allowed-origin redirects"

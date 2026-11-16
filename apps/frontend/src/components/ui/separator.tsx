@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Separator({
+const Separator = function Separator({
   className,
   orientation = "horizontal",
   decorative = true,
@@ -23,6 +23,6 @@ function Separator({
       {...props}
     />
   );
-}
+};
 
 export { Separator };

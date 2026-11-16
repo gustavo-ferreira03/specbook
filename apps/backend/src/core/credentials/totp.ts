@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 
-const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+import { requireValue } from "../utils/require-value";
 
-function decodeBase32(input: string): Buffer {
-  const clean = input.toUpperCase().replaceAll(/[\s=-]/g, "");
+const decodeBase32 = function decodeBase32(input: string): Buffer {
+  const clean = input.toUpperCase().replaceAll(/[\s=-]/gu, "");
   let bits = 0;
   let value = 0;
   const bytes: number[] = [];
@@ -12,24 +12,19 @@ function decodeBase32(input: string): Buffer {
     if (index === -1) {
       throw new Error("The authenticator key is not valid base32.");
     }
+    // oxlint-disable-next-line no-bitwise -- Implement the byte layout required by the encoded protocol.
     value = (value << 5) | index;
     bits += 5;
     if (bits >= 8) {
+      // oxlint-disable-next-line no-bitwise -- Implement the byte layout required by the encoded protocol.
       bytes.push((value >>> (bits - 8)) & 0xff);
       bits -= 8;
     }
   }
   return Buffer.from(bytes);
-}
+};
 
-interface TotpParams {
-  secret: Buffer;
-  digits: number;
-  period: number;
-  algorithm: "sha1" | "sha256" | "sha512";
-}
-
-function parseTotpSeed(seed: string): TotpParams {
+const parseTotpSeed = function parseTotpSeed(seed: string): TotpParams {
   const trimmed = seed.trim();
   if (!trimmed.toLowerCase().startsWith("otpauth://")) {
     return {
@@ -52,14 +47,28 @@ function parseTotpSeed(seed: string): TotpParams {
     algorithm:
       algorithm === "sha256" || algorithm === "sha512" ? algorithm : "sha1",
   };
-}
+};
 
-export function generateTotp(seed: string, now = Date.now()): string {
+export const generateTotp = function generateTotp(
+  seed: string,
+  now = Date.now()
+): string {
   const { secret, digits, period, algorithm } = parseTotpSeed(seed);
   const counter = Buffer.alloc(8);
   counter.writeBigUInt64BE(BigInt(Math.floor(now / 1000 / period)));
   const hmac = crypto.createHmac(algorithm, secret).update(counter).digest();
-  const offset = hmac.at(-1)! & 0x0f;
+  // oxlint-disable-next-line no-bitwise -- Implement the byte layout required by the encoded protocol.
+  const offset = requireValue(hmac.at(-1)) & 0x0f;
+  // oxlint-disable-next-line no-bitwise -- Implement the byte layout required by the encoded protocol.
   const binary = (hmac.readUInt32BE(offset) & 0x7f_ff_ff_ff) % 10 ** digits;
   return binary.toString().padStart(digits, "0");
+};
+
+const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+interface TotpParams {
+  secret: Buffer;
+  digits: number;
+  period: number;
+  algorithm: "sha1" | "sha256" | "sha512";
 }

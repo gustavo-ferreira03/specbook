@@ -3,16 +3,13 @@ import crypto from "node:crypto";
 import type { ErrorCode } from "@specbook/runtime/errors";
 import { and, desc, eq, inArray, lt, max, or } from "drizzle-orm";
 
+import { requireValue } from "../../core/utils/require-value";
 import { db } from "../db/client";
 import { runs } from "../db/schema";
 import type { RunStatus, RunEnvironment } from "../db/schema";
 
-export type Run = typeof runs.$inferSelect;
-
-export const DEFAULT_RUN_LIST_LIMIT = 50;
-export const MAX_RUN_LIST_LIMIT = 200;
-
 class RunsRepository {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async createRun(input: {
     specId: string;
     commitSha: string;
@@ -46,6 +43,7 @@ class RunsRepository {
     return row;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async finishRun(
     id: string,
     status: Exclude<RunStatus, "running">,
@@ -73,13 +71,15 @@ class RunsRepository {
       if (!cursor || cursor.specId !== specId) {
         return [];
       }
-      condition = and(
-        condition,
-        or(
-          lt(runs.startedAt, cursor.startedAt),
-          and(eq(runs.startedAt, cursor.startedAt), lt(runs.id, cursor.id))
+      condition = requireValue(
+        and(
+          condition,
+          or(
+            lt(runs.startedAt, cursor.startedAt),
+            and(eq(runs.startedAt, cursor.startedAt), lt(runs.id, cursor.id))
+          )
         )
-      )!;
+      );
     }
     return db
       .select()
@@ -89,18 +89,21 @@ class RunsRepository {
       .limit(limit);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async hasPassed(specId: string): Promise<boolean> {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue2580 = await db
           .select({ id: runs.id })
           .from(runs)
           .where(and(eq(runs.specId, specId), eq(runs.status, "passed")))
-          .limit(1)
-      ).length > 0
+          .limit(1);
+        return awaitedValue2580.length;
+      })()) > 0
     );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async latestRuns(specIds: string[]): Promise<Map<string, Run>> {
     const latest = new Map<string, Run>();
     if (specIds.length === 0) {
@@ -131,8 +134,9 @@ class RunsRepository {
     return latest;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async pendingAutomation(): Promise<Run[]> {
-    return db
+    return await db
       .select()
       .from(runs)
       .where(
@@ -144,12 +148,20 @@ class RunsRepository {
       .limit(100);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async retryFor(runId: string): Promise<Run | null> {
     return (
-      (await db.select().from(runs).where(eq(runs.retryOf, runId)))[0] ?? null
+      (await (async () => {
+        const awaitedValue3879 = await db
+          .select()
+          .from(runs)
+          .where(eq(runs.retryOf, runId));
+        return awaitedValue3879[0];
+      })()) ?? null
     );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async markFlaky(originalId: string, retryId: string): Promise<void> {
     await db
       .update(runs)
@@ -157,6 +169,7 @@ class RunsRepository {
       .where(inArray(runs.id, [originalId, retryId]));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async acknowledgeAutomation(id: string): Promise<void> {
     await db
       .update(runs)
@@ -164,6 +177,7 @@ class RunsRepository {
       .where(eq(runs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async markAwaitingDeploy(id: string): Promise<void> {
     await db
       .update(runs)
@@ -171,11 +185,13 @@ class RunsRepository {
       .where(eq(runs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getRun(id: string): Promise<Run | null> {
     const rows = await db.select().from(runs).where(eq(runs.id, id));
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async hasRunningRuns(specIds: string[]): Promise<boolean> {
     if (specIds.length === 0) {
       return false;
@@ -188,10 +204,12 @@ class RunsRepository {
     return rows.length > 0;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async deleteRun(id: string): Promise<void> {
     await db.delete(runs).where(eq(runs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async markInterruptedRuns(): Promise<void> {
     const { pendingRunnerRunIds } =
       await import("../../core/private-runner/queue");
@@ -201,12 +219,13 @@ class RunsRepository {
     for (const id of await pendingRunnerRunIds()) {
       pending.add(id);
     }
-    const interrupted = (
-      await db
+    const interrupted = await (async () => {
+      const awaitedValue5493 = await db
         .select({ id: runs.id })
         .from(runs)
-        .where(eq(runs.status, "running"))
-    ).filter((row) => !pending.has(row.id));
+        .where(eq(runs.status, "running"));
+      return awaitedValue5493.filter((row) => !pending.has(row.id));
+    })();
     if (!interrupted.length) {
       return;
     }
@@ -225,5 +244,10 @@ class RunsRepository {
       );
   }
 }
+
+export type Run = typeof runs.$inferSelect;
+
+export const DEFAULT_RUN_LIST_LIMIT = 50;
+export const MAX_RUN_LIST_LIMIT = 200;
 
 export const runsRepository = new RunsRepository();

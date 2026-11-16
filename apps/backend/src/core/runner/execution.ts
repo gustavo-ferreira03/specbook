@@ -6,13 +6,11 @@ import { parseSpecYaml } from "@specbook/runtime/yaml";
 import type { RunEnvironment } from "../../infra/db/schema";
 import type { Run } from "../../infra/repositories/runs";
 
-export const RUN_TIMEOUT_MS = 120_000;
-export const MAX_FAIL_REASON_CHARS = 2000;
-export const MAX_FAILED_STEP_CHARS = 500;
+export class StaleRunError extends Error {
+  name = "StaleRunError";
+}
 
-export type ExecutedRun = Run & { failedStep: string | null };
-
-export function analyzeForRun(
+export const analyzeForRun = function analyzeForRun(
   title: string,
   testSource: string,
   markdown: string
@@ -35,9 +33,13 @@ export function analyzeForRun(
     );
   }
   return analysis.analysis;
-}
+};
 
-export class StaleRunError extends Error {}
+export const RUN_TIMEOUT_MS = 120_000;
+export const MAX_FAIL_REASON_CHARS = 2000;
+export const MAX_FAILED_STEP_CHARS = 500;
+
+export type ExecutedRun = Run & { failedStep: string | null };
 
 export interface RunOptions {
   updateSpecStatus?: boolean;

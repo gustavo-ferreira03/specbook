@@ -20,7 +20,7 @@ interface ImageEvent {
 }
 
 // Serialized into the init script; keep its browser dependencies inside the function.
-export function createReplayImageRecorder(
+export const createReplayImageRecorder = function createReplayImageRecorder(
   deliver: (event: unknown) => void,
   mirror: ReplayImageMirror
 ): { process: (event: unknown) => unknown; stop: () => void } {
@@ -42,6 +42,7 @@ export function createReplayImageRecorder(
       }
       return false;
     },
+    // oxlint-disable-next-line complexity -- Check image availability and encoding limits together before capturing pixels.
     encode(image: HTMLImageElement): string | undefined {
       if (
         !context ||
@@ -109,7 +110,8 @@ export function createReplayImageRecorder(
         state.set(image, { key, data });
         return data;
       } catch {
-        return;
+        /* Cleanup is best effort; preserve the original result. */
+        // An unreadable canvas leaves this image without replay data.
       }
     },
     refresh(image: HTMLImageElement): void {
@@ -159,7 +161,9 @@ export function createReplayImageRecorder(
       const computed = image.ownerDocument.defaultView?.getComputedStyle(image);
       if (
         !computed ||
+        // oxlint-disable-next-line unicorn/prefer-number-coercion -- CSS dimensions include a px suffix, so parseFloat is required.
         !Number.parseFloat(computed.width) ||
+        // oxlint-disable-next-line unicorn/prefer-number-coercion -- CSS dimensions include a px suffix, so parseFloat is required.
         !Number.parseFloat(computed.height)
       ) {
         return;
@@ -203,17 +207,19 @@ export function createReplayImageRecorder(
       if (node.tagName === "img") {
         images.attributes(node.id, node.attributes);
       }
-      node.childNodes?.forEach((child) => images.node(child));
+      for (const child of node.childNodes ?? []) {
+        images.node(child);
+      }
     },
     prune(): void {
-      tracked.forEach((image) => {
+      for (const image of tracked) {
         if (image.isConnected) {
-          return;
+          continue;
         }
         observer.unobserve(image);
         image.removeEventListener("load", images.load);
         tracked.delete(image);
-      });
+      }
     },
     process(event: unknown): unknown {
       const item = event as ImageEvent;
@@ -223,24 +229,28 @@ export function createReplayImageRecorder(
       }
       if (item.type === 3 && item.data?.source === 0) {
         images.prune();
-        item.data.adds?.forEach((addition) => images.node(addition.node));
-        item.data.attributes?.forEach((change) =>
-          images.attributes(change.id, change.attributes, true)
-        );
+        for (const addition of item.data.adds ?? []) {
+          images.node(addition.node);
+        }
+        for (const change of item.data.attributes ?? []) {
+          images.attributes(change.id, change.attributes, true);
+        }
       }
       return event;
     },
     stop(): void {
       stopped = true;
       observer.disconnect();
-      tracked.forEach((image) =>
-        image.removeEventListener("load", images.load)
-      );
+      for (const image of tracked) {
+        image.removeEventListener("load", images.load);
+      }
       tracked.clear();
     },
   };
-  const observer = new ResizeObserver((entries) =>
-    entries.forEach((entry) => images.refresh(entry.target as HTMLImageElement))
-  );
+  const observer = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      images.refresh(entry.target as HTMLImageElement);
+    }
+  });
   return images;
-}
+};

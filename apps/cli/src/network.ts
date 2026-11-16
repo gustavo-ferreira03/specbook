@@ -4,28 +4,34 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { ProxyAgent } from "undici-proxy";
 import type { Dispatcher } from "undici-proxy";
 
+import { requiredValue } from "./values";
+
 const dispatchers = new Map<string, Dispatcher>();
 const socketAgents = new Map<string, HttpAgent>();
 const env = (name: string) =>
   process.env[name.toLowerCase()] || process.env[name];
 
-function proxyFor(input: string | URL): string | undefined {
+const proxyFor = function proxyFor(input: string | URL): string | undefined {
   const url = new URL(input);
   const secure = url.protocol === "https:" || url.protocol === "wss:";
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
   const port = url.port || (secure ? "443" : "80");
-  for (const entry of (env("NO_PROXY") ?? "").split(/[\s,]+/).filter(Boolean)) {
+  for (const entry of (env("NO_PROXY") ?? "")
+    .split(/[\s,]+/u)
+    .filter(Boolean)) {
     if (entry === "*") {
       return;
     }
-    const match = entry.match(/^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/);
+    const match = entry.match(
+      /^(?<segment1>\[[^\]]+\]|[^:]+)(?::(?<segment2>\d+))?$/u
+    );
     if (!match || (match[2] && match[2] !== port)) {
       continue;
     }
-    const host = match[1]!
+    const host = requiredValue(match[1])
       .toLowerCase()
-      .replace(/\.$/, "")
-      .replace(/^\*?\./, "");
+      .replace(/\.$/u, "")
+      .replace(/^\*?\./u, "");
     if (hostname === host || hostname.endsWith(`.${host}`)) {
       return;
     }
@@ -43,15 +49,15 @@ function proxyFor(input: string | URL): string | undefined {
       proxy.search ||
       proxy.hash
     ) {
-      throw new Error();
+      throw new Error("The proxy must use HTTP or HTTPS");
     }
   } catch {
     throw new Error("Use an HTTP(S) URL for HTTPS_PROXY or HTTP_PROXY");
   }
   return value;
-}
+};
 
-export function remoteFetch(
+export const remoteFetch = function remoteFetch(
   url: string | URL,
   options: RequestInit = {}
 ): Promise<Response> {
@@ -67,9 +73,11 @@ export function remoteFetch(
   return fetch(url, { ...options, dispatcher } as RequestInit & {
     dispatcher: Dispatcher;
   });
-}
+};
 
-export function webSocketProxyAgent(url: string | URL): HttpAgent | undefined {
+export const webSocketProxyAgent = function webSocketProxyAgent(
+  url: string | URL
+): HttpAgent | undefined {
   const proxy = proxyFor(url);
   if (!proxy) {
     return;
@@ -80,42 +88,48 @@ export function webSocketProxyAgent(url: string | URL): HttpAgent | undefined {
     socketAgents.set(proxy, agent);
   }
   return agent;
-}
+};
 
-export function redactProxyCredentials(text: string): string {
-  const values = new Set<string>();
+export const redactProxyCredentials = function redactProxyCredentials(
+  input: string
+): string {
+  let text = input;
+  const valuesValue = new Set<string>();
   for (const value of [env("HTTP_PROXY"), env("HTTPS_PROXY")]) {
     if (!value) {
       continue;
     }
-    values.add(value);
+    valuesValue.add(value);
     try {
       const url = new URL(value);
       const username = decodeURIComponent(url.username);
       const password = decodeURIComponent(url.password);
       if (username) {
-        values.add(username);
+        valuesValue.add(username);
       }
       if (password) {
-        values.add(password);
+        valuesValue.add(password);
       }
       if (username || password) {
-        values.add(Buffer.from(`${username}:${password}`).toString("base64"));
+        valuesValue.add(
+          Buffer.from(`${username}:${password}`).toString("base64")
+        );
       }
     } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
       /* Invalid proxy configuration is still hidden. */
     }
   }
-  for (const value of [...values]
-    .flatMap((value) => [
-      value,
-      encodeURIComponent(value),
-      JSON.stringify(value).slice(1, -1),
+  for (const value of [...valuesValue]
+    .flatMap((secretValue) => [
+      secretValue,
+      encodeURIComponent(secretValue),
+      JSON.stringify(secretValue).slice(1, -1),
     ])
-    .sort((a, b) => b.length - a.length)) {
+    .toSorted((a, b) => b.length - a.length)) {
     if (value) {
       text = text.split(value).join("[REDACTED]");
     }
   }
   return text;
-}
+};

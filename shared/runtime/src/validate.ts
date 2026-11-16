@@ -1,6 +1,7 @@
 import { parse } from "@babel/parser";
 import type * as t from "@babel/types";
 
+import { SpecSourceError } from "./spec-source-error.ts";
 import {
   LOCATOR_ACTIONS,
   LOCATOR_FACTORIES,
@@ -14,6 +15,9 @@ import {
 } from "./specbook/guard.ts";
 import { executionSteps } from "./types.ts";
 import type { HumanSpec } from "./types.ts";
+
+const numbered = (titles: string[]) =>
+  titles.map((title, index) => `${index + 1}. "${title}"`).join(" ");
 
 export { LOCATOR_ACTIONS, LOCATOR_FACTORIES } from "./specbook/allowlist.ts";
 
@@ -91,22 +95,23 @@ const API_MATCHERS = [
 
 type ChainKind = "page" | "locator" | "keyboard" | "mouse";
 
-class SpecSourceError extends Error {}
-
-function where(node: t.Node | null | undefined): string {
+const where = function where(node: t.Node | null | undefined): string {
   const start = node?.loc?.start;
   return start ? `Line ${start.line}, column ${start.column + 1}: ` : "";
-}
+};
 
-function fail(node: t.Node | null | undefined, message: string): never {
-  throw new SpecSourceError(`${where(node)}${message}`);
-}
+const fail: (node: t.Node | null | undefined, message: string) => never =
+  function fail(node: t.Node | null | undefined, message: string): never {
+    throw new SpecSourceError(`${where(node)}${message}`);
+  };
 
-function list(values: string[]): string {
+const list = function list(values: string[]): string {
   return values.join(", ");
-}
+};
 
-function staticString(node: t.Node | null | undefined): string | null {
+const staticString = function staticString(
+  node: t.Node | null | undefined
+): string | null {
   if (!node) {
     return null;
   }
@@ -121,9 +126,9 @@ function staticString(node: t.Node | null | undefined): string | null {
     return node.quasis[0].value.cooked ?? null;
   }
   return null;
-}
+};
 
-function noTypeArguments(node: t.CallExpression): void {
+const noTypeArguments = function noTypeArguments(node: t.CallExpression): void {
   const typed = node as t.CallExpression & {
     typeArguments?: unknown;
     typeParameters?: unknown;
@@ -131,7 +136,7 @@ function noTypeArguments(node: t.CallExpression): void {
   if (typed.typeArguments || typed.typeParameters) {
     fail(node, "Type arguments are not allowed.");
   }
-}
+};
 
 class Validator {
   private readonly fixtures = new Set<string>();
@@ -175,6 +180,7 @@ class Validator {
     this.testCall(second);
   }
 
+  // oxlint-disable-next-line complexity -- Keep the explicit syntax allowlist together so every unsupported form is rejected.
   private importDeclaration(node: t.ImportDeclaration): void {
     const declaration = node as t.ImportDeclaration & {
       phase?: unknown;
@@ -240,6 +246,7 @@ class Validator {
     };
   }
 
+  // oxlint-disable-next-line complexity -- Keep the explicit syntax allowlist together so every unsupported form is rejected.
   private testCall(statement: t.Statement): void {
     const call =
       statement.type === "ExpressionStatement" ? statement.expression : null;
@@ -266,7 +273,7 @@ class Validator {
       );
     }
     this.testTitle = title.trim();
-    const fn = call.arguments[1];
+    const [, fn] = call.arguments;
     if (fn.type !== "ArrowFunctionExpression" || !fn.async) {
       fail(
         fn,
@@ -282,7 +289,7 @@ class Validator {
         "The test function takes one destructured parameter: ({ page, step, secret })."
       );
     }
-    const pattern = fn.params[0];
+    const [pattern] = fn.params;
     if (pattern.typeAnnotation || pattern.decorators?.length) {
       fail(pattern, "Type annotations are not allowed.");
     }
@@ -493,7 +500,13 @@ class Validator {
     }
     if (inStep && declarator.init?.type === "AwaitExpression") {
       this.requestCall(declarator.init.argument);
-      this.responseScopes.at(-1)!.add(id.name);
+      (() => {
+        const presentValue = this.responseScopes.at(-1);
+        if (presentValue === null || presentValue === undefined) {
+          throw new Error("Expected an existing value");
+        }
+        return presentValue;
+      })().add(id.name);
       return true;
     }
     if (!declarator.init) {
@@ -513,7 +526,13 @@ class Validator {
         'Only locators can be stored in constants, like const button = page.getByRole("button", { name: "Save" }).'
       );
     }
-    this.scopes.at(-1)!.add(id.name);
+    (() => {
+      const presentValue = this.scopes.at(-1);
+      if (presentValue === null || presentValue === undefined) {
+        throw new Error("Expected an existing value");
+      }
+      return presentValue;
+    })().add(id.name);
     return false;
   }
 
@@ -521,6 +540,7 @@ class Validator {
     return this.responseScopes.some((scope) => scope.has(name));
   }
 
+  // oxlint-disable-next-line complexity -- Keep the explicit syntax allowlist together so every unsupported form is rejected.
   private requestCall(node: t.Node): void {
     if (
       node.type !== "CallExpression" ||
@@ -553,8 +573,12 @@ class Validator {
         ["http:", "https:"].includes(url.protocol) &&
         !url.username &&
         !url.password &&
-        !/[\\\u0000-\u001F]/.test(target ?? "");
-    } catch {}
+        // oxlint-disable-next-line no-control-regex -- Control characters must be matched explicitly at this input/output boundary.
+        !/[\\\u0000-\u001F]/u.test(target ?? "");
+    } catch {
+      /* Cleanup is best effort; preserve the original result. */
+      /* Cleanup is best effort; preserve the original result. */
+    }
     if (target === null || (!isSafeRelativePath(target) && !absolute)) {
       fail(
         node.arguments[0] ?? node,
@@ -564,7 +588,7 @@ class Validator {
     if (node.arguments.length > 2) {
       fail(node, "API requests take a path and an optional options object.");
     }
-    const options = node.arguments[1];
+    const [, options] = node.arguments;
     if (!options) {
       return;
     }
@@ -575,7 +599,7 @@ class Validator {
       );
     }
     for (const item of options.properties) {
-      const key = this.apiKey(item);
+      const key = Validator.apiKey(item);
       const property = item as t.ObjectProperty;
       if (!["headers", "data", "timeout"].includes(key)) {
         fail(
@@ -587,14 +611,16 @@ class Validator {
         if (property.value.type !== "ObjectExpression") {
           fail(property, "API headers must be a literal object.");
         }
-        for (const item of property.value.properties) {
-          if (API_ROUTING_HEADERS.has(this.apiKey(item).toLowerCase())) {
+        for (const headerItem of property.value.properties) {
+          if (
+            API_ROUTING_HEADERS.has(Validator.apiKey(headerItem).toLowerCase())
+          ) {
             fail(
-              item,
+              headerItem,
               "API routing headers are controlled by the run's origin policy."
             );
           }
-          const header = item as t.ObjectProperty;
+          const header = headerItem as t.ObjectProperty;
           if (
             !this.secretCall(header.value) &&
             staticString(header.value) === null
@@ -619,7 +645,7 @@ class Validator {
     }
   }
 
-  private apiKey(node: t.Node): string {
+  private static apiKey(node: t.Node): string {
     if (
       node.type !== "ObjectProperty" ||
       node.computed ||
@@ -652,7 +678,7 @@ class Validator {
       staticString(node) !== null ||
       node.type === "NullLiteral" ||
       node.type === "BooleanLiteral" ||
-      this.isNumber(node)
+      Validator.isNumber(node)
     ) {
       return;
     }
@@ -667,7 +693,7 @@ class Validator {
     }
     if (node.type === "ObjectExpression") {
       for (const item of node.properties) {
-        this.apiKey(item);
+        Validator.apiKey(item);
         this.apiValue((item as t.ObjectProperty).value, secrets, depth + 1);
       }
       return;
@@ -678,6 +704,7 @@ class Validator {
     );
   }
 
+  // oxlint-disable-next-line complexity -- Keep the explicit syntax allowlist together so every unsupported form is rejected.
   private chain(node: t.Node): ChainKind {
     if (node.type === "Identifier") {
       if (node.name === "page") {
@@ -740,12 +767,12 @@ class Validator {
         }
         return "locator";
       }
-      fail(callee.property, this.unknownMethod(kind, method));
+      fail(callee.property, Validator.unknownMethod(kind, method));
     }
-    return fail(node, this.unexpected(node));
+    return fail(node, Validator.unexpected(node));
   }
 
-  private unexpected(node: t.Node): string {
+  private static unexpected(node: t.Node): string {
     switch (node.type) {
       case "OptionalMemberExpression":
       case "OptionalCallExpression": {
@@ -786,7 +813,7 @@ class Validator {
     }
   }
 
-  private unknownMethod(kind: ChainKind, method: string): string {
+  private static unknownMethod(kind: ChainKind, method: string): string {
     if (kind === "page") {
       return `page.${method}() is not allowed. Page methods: ${list([...PAGE_ACTIONS, ...LOCATOR_FACTORIES])}, keyboard.press(), keyboard.type(), mouse.${MOUSE_ACTIONS.join("(), mouse.")}().`;
     }
@@ -799,11 +826,12 @@ class Validator {
     return `Locator method ${method}() is not allowed. Locator methods: ${list([...LOCATOR_FACTORIES, ...LOCATOR_REFINERS, ...LOCATOR_ACTIONS])}.`;
   }
 
+  // oxlint-disable-next-line complexity -- Keep the explicit syntax allowlist together so every unsupported form is rejected.
   private awaited(expression: t.Expression): void {
     const onlyActions =
       "Await only page/locator actions and expect(...) assertions.";
     if (expression.type !== "CallExpression") {
-      fail(expression, `${this.unexpected(expression)} ${onlyActions}`);
+      fail(expression, `${Validator.unexpected(expression)} ${onlyActions}`);
     }
     noTypeArguments(expression);
     const { callee } = expression;
@@ -817,7 +845,7 @@ class Validator {
       fail(callee, `"${callee.name}" is not available. ${onlyActions}`);
     }
     if (callee.type !== "MemberExpression") {
-      fail(callee, `${this.unexpected(callee)} ${onlyActions}`);
+      fail(callee, `${Validator.unexpected(callee)} ${onlyActions}`);
     }
     if (callee.computed || callee.property.type !== "Identifier") {
       fail(callee, "Computed property access (x[...]) is not allowed.");
@@ -828,11 +856,12 @@ class Validator {
       const allowed =
         assertion === "apiResponse"
           ? ["toBeOK"]
-          : assertion === "apiValue"
-            ? API_MATCHERS
-            : assertion === "page"
-              ? PAGE_MATCHERS
-              : LOCATOR_MATCHERS;
+          : (() => {
+              if (assertion === "apiValue") {
+                return API_MATCHERS;
+              }
+              return assertion === "page" ? PAGE_MATCHERS : LOCATOR_MATCHERS;
+            })();
       if (!allowed.includes(method)) {
         fail(
           callee.property,
@@ -886,11 +915,12 @@ class Validator {
     const allowed =
       kind === "page"
         ? PAGE_ACTIONS
-        : kind === "keyboard"
-          ? KEYBOARD_ACTIONS
-          : kind === "mouse"
-            ? MOUSE_ACTIONS
-            : LOCATOR_ACTIONS;
+        : (() => {
+            if (kind === "keyboard") {
+              return KEYBOARD_ACTIONS;
+            }
+            return kind === "mouse" ? MOUSE_ACTIONS : LOCATOR_ACTIONS;
+          })();
     if (!allowed.includes(method)) {
       if (
         (kind === "page" || kind === "locator") &&
@@ -902,7 +932,7 @@ class Validator {
           "A locator on its own does nothing; await an action (click, fill, ...) or an expect(...) assertion."
         );
       }
-      fail(callee.property, this.unknownMethod(kind, method));
+      fail(callee.property, Validator.unknownMethod(kind, method));
     }
     this.actionArgs(kind, method, expression);
   }
@@ -947,7 +977,7 @@ class Validator {
         "expect() takes exactly one argument: the page, a locator or an API response value."
       );
     }
-    const arg = target.arguments[0];
+    const [arg] = target.arguments;
     if (arg.type === "Identifier" && this.isResponseConstant(arg.name)) {
       return "apiResponse";
     }
@@ -974,7 +1004,13 @@ class Validator {
         fail(node, "API response property access needs a literal key.");
       }
       const key = node.computed
-        ? staticString(node.property)!
+        ? (() => {
+            const presentValue = staticString(node.property);
+            if (presentValue === null || presentValue === undefined) {
+              throw new Error("Expected an existing value");
+            }
+            return presentValue;
+          })()
         : (node.property as t.Identifier).name;
       if (FORBIDDEN_KEYS.has(key)) {
         fail(node, `API key "${key}" is not allowed.`);
@@ -1050,7 +1086,7 @@ class Validator {
         fail(call, `${method}() takes no arguments.`);
       }
     } else if (method === "nth") {
-      if (args.length !== 1 || !this.isNumber(args[0])) {
+      if (args.length !== 1 || !Validator.isNumber(args[0])) {
         fail(call, "nth() takes one number.");
       }
     } else if (method === "filter") {
@@ -1060,10 +1096,8 @@ class Validator {
       if (args[0]) {
         this.value(args[0], { locatorKeys: true, depth: 0 });
       }
-    } else {
-      if (args.length !== 1 || this.chainIsLocator(args[0]) === false) {
-        fail(call, `${method}() takes one locator.`);
-      }
+    } else if (args.length !== 1 || this.chainIsLocator(args[0]) === false) {
+      fail(call, `${method}() takes one locator.`);
     }
   }
 
@@ -1071,7 +1105,7 @@ class Validator {
     return this.chain(node) === "locator";
   }
 
-  private isNumber(node: t.Node): boolean {
+  private static isNumber(node: t.Node): boolean {
     return (
       node.type === "NumericLiteral" ||
       (node.type === "UnaryExpression" &&
@@ -1080,6 +1114,7 @@ class Validator {
     );
   }
 
+  // oxlint-disable-next-line complexity -- Keep the explicit syntax allowlist together so every unsupported form is rejected.
   private actionArgs(
     kind: ChainKind,
     method: string,
@@ -1096,7 +1131,7 @@ class Validator {
         );
       }
       for (const arg of args.slice(0, coordinates)) {
-        if (!this.isNumber(arg)) {
+        if (!Validator.isNumber(arg)) {
           fail(
             arg,
             `page.mouse.${method}() coordinates must be literal numbers.`
@@ -1154,10 +1189,11 @@ class Validator {
       this.plainArgs(call, 1, 2);
       return;
     }
-    if ((method === "press" && kind !== "page") || method === "setChecked") {
-      if (!args[0]) {
-        fail(call, `${method}() needs an argument.`);
-      }
+    if (
+      ((method === "press" && kind !== "page") || method === "setChecked") &&
+      !args[0]
+    ) {
+      fail(call, `${method}() needs an argument.`);
     }
     this.plainArgs(call, 0, 2);
   }
@@ -1204,6 +1240,7 @@ class Validator {
     return true;
   }
 
+  // oxlint-disable-next-line complexity -- Keep the explicit syntax allowlist together so every unsupported form is rejected.
   private value(
     node: t.Node,
     options: { locatorKeys: boolean; depth: number }
@@ -1220,20 +1257,25 @@ class Validator {
         return;
       }
       case "RegExpLiteral": {
-        if (/[^dgimsuy]/.test(node.flags)) {
+        if (/[^dgimsuy]/u.test(node.flags)) {
           fail(node, "Unsupported regular expression flags.");
         }
         return;
       }
       case "UnaryExpression": {
-        if (this.isNumber(node)) {
+        if (Validator.isNumber(node)) {
           return;
         }
         break;
       }
       case "TemplateLiteral": {
-        fail(node, "Template literals cannot contain ${...} expressions.");
+        return fail(
+          node,
+          // oxlint-disable-next-line no-template-curly-in-string -- The error message shows a literal forbidden template expression.
+          "Template literals cannot contain ${...} expressions."
+        );
       }
+      // falls through only if fail() returns; its return type is never.
       case "CallExpression": {
         if (
           node.callee.type === "Identifier" &&
@@ -1297,22 +1339,22 @@ class Validator {
     }
     fail(
       node,
-      `${this.unexpectedValue(node)} Arguments must be literals (strings, numbers, booleans, regular expressions, arrays or { key: value } options).`
+      `${Validator.unexpectedValue(node)} Arguments must be literals (strings, numbers, booleans, regular expressions, arrays or { key: value } options).`
     );
   }
 
-  private unexpectedValue(node: t.Node): string {
+  private static unexpectedValue(node: t.Node): string {
     if (node.type === "Identifier") {
       return `"${node.name}" cannot be used as a value.`;
     }
     if (node.type === "MemberExpression" || node.type === "CallExpression") {
       return "Expressions cannot be used as values.";
     }
-    return this.unexpected(node);
+    return Validator.unexpected(node);
   }
 }
 
-function parseSource(source: string): t.File {
+const parseSource = function parseSource(source: string): t.File {
   try {
     return parse(source, {
       sourceType: "module",
@@ -1330,15 +1372,15 @@ function parseSource(source: string): t.File {
     const { loc } = error as { loc?: { line: number; column: number } };
     const message =
       error instanceof Error
-        ? error.message.replace(/\s*\(\d+:\d+\)$/, "")
+        ? error.message.replace(/\s*\(\d+:\d+\)$/u, "")
         : String(error);
     throw new SpecSourceError(
       `${loc ? `Line ${loc.line}, column ${loc.column + 1}: ` : ""}Syntax error: ${message}`
     );
   }
-}
+};
 
-export function analyzeSpecSource(
+export const analyzeSpecSource = function analyzeSpecSource(
   source: string
 ): { ok: true; analysis: SpecAnalysis } | { ok: false; error: string } {
   try {
@@ -1365,27 +1407,29 @@ export function analyzeSpecSource(
     }
     throw error;
   }
-}
+};
 
-function comparable(title: string): string {
+const comparable = function comparable(title: string): string {
   return title
     .trim()
-    .replaceAll(/\s+/g, " ")
-    .replace(/[.;:]+$/, "")
+    .replaceAll(/\s+/gu, " ")
+    .replace(/[.;:]+$/u, "")
     .toLowerCase();
-}
+};
 
-export function sameStepTitle(a: string, b: string): boolean {
+export const sameStepTitle = function sameStepTitle(
+  a: string,
+  b: string
+): boolean {
   return comparable(a) === comparable(b);
-}
+};
 
-export function stepTitlesError(
+export const stepTitlesError = function stepTitlesError(
   stepTitles: string[],
   humanSpec: HumanSpec
 ): string | null {
   const expected = executionSteps(humanSpec);
-  const numbered = (titles: string[]) =>
-    titles.map((title, index) => `${index + 1}. "${title}"`).join(" ");
+
   if (humanSpec.steps.every((step) => !step.trim())) {
     return `spec.yml lists no steps. List the preconditions, steps, expected result and postconditions in spec.yml, one per step() block of spec.ts, in order: ${numbered(stepTitles)}.`;
   }
@@ -1398,14 +1442,17 @@ export function stepTitlesError(
   const index = mismatch === -1 ? expected.length : mismatch;
   const detail =
     index < expected.length
-      ? stepTitles[index] === undefined
-        ? `spec.ts has no step() for "${expected[index]}".`
-        : `step() ${index + 1} of spec.ts is "${stepTitles[index]}" but spec.yml expects "${expected[index]}".`
+      ? (() => {
+          if (stepTitles[index] === undefined) {
+            return `spec.ts has no step() for "${expected[index]}".`;
+          }
+          return `step() ${index + 1} of spec.ts is "${stepTitles[index]}" but spec.yml expects "${expected[index]}".`;
+        })()
       : `spec.ts has an extra step() ${index + 1} "${stepTitles[index]}".`;
   return `spec.ts must have one step() per precondition, per step, for the expected result and per postcondition, with the same titles and order as spec.yml: ${detail} Expected step() titles: ${numbered(expected)}.`;
-}
+};
 
-export function validateSpecSource(
+export const validateSpecSource = function validateSpecSource(
   source: string,
   humanSpec?: HumanSpec | null
 ): SpecSourceValidation {
@@ -1420,9 +1467,9 @@ export function validateSpecSource(
     }
   }
   return { ok: true };
-}
+};
 
-export function secretEnvRefs(source: string): string[] {
+export const secretEnvRefs = function secretEnvRefs(source: string): string[] {
   const result = analyzeSpecSource(source);
   return result.ok ? result.analysis.secretRefs.map((ref) => ref.envName) : [];
-}
+};

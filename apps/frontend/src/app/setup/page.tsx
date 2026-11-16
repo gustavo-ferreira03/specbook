@@ -11,18 +11,18 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { useAuth } from "@/components/AuthProvider";
-import { EmptyState } from "@/components/EmptyState";
-import { InstanceHeader } from "@/components/InstanceHeader";
-import { ModelSettings } from "@/components/ModelSettings";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
+import { useAuth } from "@/components/auth-provider";
+import { EmptyState } from "@/components/empty-state";
+import { InstanceHeader } from "@/components/instance-header";
+import { ModelSettings } from "@/components/model-settings";
+import { PageContainer, PageHeader } from "@/components/page-header";
 import {
   InlineFeedback,
   SettingsBlock,
   SettingsFooter,
   SettingsRow,
   SettingsSection,
-} from "@/components/SettingsLayout";
+} from "@/components/settings-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,7 +31,7 @@ import type { Project, SetupStatus } from "@/lib/types";
 
 type SetupStep = "admin" | "model" | "project";
 
-export default function SetupPage() {
+const SetupPage = function SetupPage() {
   const router = useRouter();
   const { refresh } = useAuth();
   const [status, setStatus] = useState<SetupStatus | null>(null);
@@ -67,16 +67,17 @@ export default function SetupPage() {
       }
       setStatus(result);
       setStep(result.needsAdmin ? "admin" : "model");
-    } catch (reason) {
-      setLoadError(errorMessage(reason));
+    } catch (error_) {
+      setLoadError(errorMessage(error_));
     }
   }, [router, refresh]);
 
   useEffect(() => {
-    void load();
+    // oxlint-disable-next-line react/set-state-in-effect -- Reset the previous request or selection when its external key changes before loading fresh state.
+    load();
   }, [load]);
 
-  async function createAdmin(event: React.FormEvent) {
+  const createAdmin = async function createAdmin(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
@@ -92,30 +93,31 @@ export default function SetupPage() {
       setPassword("");
       await refresh();
       await load();
-    } catch (reason) {
-      setError(errorMessage(reason));
+    } catch (error_) {
+      setError(errorMessage(error_));
+      // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
     } finally {
       setBusy(false);
     }
-  }
+  };
 
-  function connectionTested() {
+  const connectionTested = function connectionTested() {
     if (!status?.needsProject) {
       router.replace("/");
       return;
     }
     setError("");
     setStep("project");
-  }
+  };
 
-  function tryDemo() {
+  const tryDemo = function tryDemo() {
     setDemo(true);
     setProjectName("Sauce Demo");
     setBaseUrl("https://www.saucedemo.com");
     setError("");
-  }
+  };
 
-  async function createProject(event: React.FormEvent) {
+  const createProject = async function createProject(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
@@ -137,17 +139,19 @@ export default function SetupPage() {
           );
       try {
         localStorage.setItem("specbook:last-project", result.project.id);
-      } catch {}
+      } catch {
+        // Keep the last usable state if this optional operation fails.
+      }
       router.push(
         result.discoveryChatId
           ? `/p/${result.project.id}/chats/${result.discoveryChatId}`
           : `/p/${result.project.id}`
       );
-    } catch (reason) {
-      setError(errorMessage(reason));
+    } catch (error_) {
+      setError(errorMessage(error_));
       setBusy(false);
     }
-  }
+  };
 
   const steps: { id: SetupStep; title: string }[] = [
     ...(status?.needsAdmin
@@ -172,224 +176,241 @@ export default function SetupPage() {
         className="pb-16"
         innerClassName="space-y-8"
       >
-        {loadError ? (
-          <EmptyState
-            icon={AlertCircle}
-            tone="danger"
-            role="alert"
-            title="Setup could not load"
-            description={loadError}
-            action={
-              <Button onClick={() => void load()}>
-                <RefreshCw size={14} /> Try again
-              </Button>
-            }
-          />
-        ) : status ? (
-          <>
-            <ol
-              aria-label="Setup progress"
-              className="text-body flex flex-wrap items-center gap-x-6 gap-y-3"
-            >
-              {steps.map((item, index) => (
-                <li
-                  key={item.id}
-                  aria-current={step === item.id ? "step" : undefined}
-                  className={`flex items-center gap-2 ${step === item.id ? "text-ink font-medium" : "text-ink-muted"}`}
-                >
-                  <span
-                    className="border-line bg-surface text-meta tabular flex size-6 shrink-0 items-center justify-center rounded-full border"
-                    aria-hidden="true"
-                  >
-                    {index < steps.findIndex((item) => item.id === step) ? (
-                      <Check size={14} />
-                    ) : (
-                      index + 1
-                    )}
-                  </span>
-                  {item.title}
-                </li>
-              ))}
-            </ol>
-            {step === "admin" && (
-              <SettingsSection
-                id="setup-admin-heading"
-                title="Create the administrator"
-                description="This account manages access and settings for this Specbook instance."
-              >
-                <form onSubmit={createAdmin}>
-                  <SettingsRow label="Name" htmlFor="admin-name">
-                    <Input
-                      id="admin-name"
-                      value={adminName}
-                      onChange={(event) => setAdminName(event.target.value)}
-                      required
-                      autoComplete="name"
-                      disabled={busy}
-                    />
-                  </SettingsRow>
-                  <SettingsRow label="Email" htmlFor="admin-email">
-                    <Input
-                      id="admin-email"
-                      type="email"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      required
-                      autoComplete="email"
-                      disabled={busy}
-                    />
-                  </SettingsRow>
-                  <SettingsRow
-                    label="Password"
-                    htmlFor="admin-password"
-                    description="Use at least 12 characters."
-                  >
-                    <Input
-                      id="admin-password"
-                      type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      minLength={12}
-                      maxLength={128}
-                      required
-                      autoComplete="new-password"
-                      disabled={busy}
-                    />
-                  </SettingsRow>
-                  <SettingsFooter
-                    feedback={
-                      <InlineFeedback
-                        feedback={error ? { type: "error", text: error } : null}
-                      />
-                    }
-                  >
-                    <Button type="submit" disabled={busy}>
-                      {busy ? "Creating account…" : "Create admin and continue"}
-                      <ArrowRight size={14} />
-                    </Button>
-                  </SettingsFooter>
-                </form>
-              </SettingsSection>
-            )}
-            {step === "model" && (
-              <ModelSettings onConnectionTested={connectionTested} />
-            )}
-            {step === "project" && (
-              <>
-                <SettingsSection
-                  id="setup-project-heading"
-                  title="Your first project"
-                  description="Use an app your Specbook server can reach. You can change these details later."
-                  actions={
-                    <Button
-                      variant="outline"
-                      onClick={
-                        demo
-                          ? () => {
-                              setDemo(false);
-                              setProjectName("");
-                              setBaseUrl("");
-                            }
-                          : tryDemo
-                      }
-                      disabled={busy}
-                    >
-                      {demo ? "Use my own app" : "Try with a demo app"}
-                    </Button>
-                  }
-                >
-                  <form onSubmit={createProject}>
-                    <SettingsRow
-                      label="Project name"
-                      htmlFor="setup-project-name"
-                    >
-                      <Input
-                        id="setup-project-name"
-                        value={projectName}
-                        onChange={(event) => setProjectName(event.target.value)}
-                        placeholder="Customer portal"
-                        required
-                        disabled={busy || demo}
-                      />
-                    </SettingsRow>
-                    <SettingsRow label="App URL" htmlFor="setup-base-url">
-                      <Input
-                        id="setup-base-url"
-                        value={baseUrl}
-                        onChange={(event) => setBaseUrl(event.target.value)}
-                        type="url"
-                        inputMode="url"
-                        placeholder="https://staging.example.com"
-                        required
-                        disabled={busy || demo}
-                      />
-                    </SettingsRow>
-                    {demo && (
-                      <SettingsBlock>
-                        <p className="text-body text-ink">
-                          Sauce Demo is a public practice store. Specbook will
-                          save its public login for the agent to use.
-                        </p>
-                        <p className="text-body text-ink-muted mt-2">
-                          Username:{" "}
-                          <code className="text-meta">standard_user</code>
-                          <br />
-                          Password:{" "}
-                          <code className="text-meta">secret_sauce</code>
-                        </p>
-                      </SettingsBlock>
-                    )}
-                    <SettingsFooter
-                      feedback={
-                        <InlineFeedback
-                          feedback={
-                            error ? { type: "error", text: error } : null
-                          }
-                        />
-                      }
-                    >
-                      <Button type="submit" disabled={busy}>
-                        {busy && (
-                          <LoaderCircle
-                            size={14}
-                            className="animate-spin motion-reduce:animate-none"
-                          />
-                        )}
-                        {busy
-                          ? "Preparing your project…"
-                          : "Create project and explore"}
-                        <ArrowRight size={14} />
-                      </Button>
-                    </SettingsFooter>
-                  </form>
-                </SettingsSection>
-                <div className="flex flex-wrap justify-between gap-3">
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setError("");
-                      setStep("model");
-                    }}
-                    disabled={busy}
-                  >
-                    <ArrowLeft size={14} /> Model settings
+        {(() => {
+          if (loadError) {
+            return (
+              <EmptyState
+                icon={AlertCircle}
+                tone="danger"
+                role="alert"
+                title="Setup could not load"
+                description={loadError}
+                action={
+                  <Button onClick={() => load()}>
+                    <RefreshCw size={14} /> Try again
                   </Button>
-                </div>
+                }
+              />
+            );
+          }
+          if (status) {
+            return (
+              <>
+                <ol
+                  aria-label="Setup progress"
+                  className="text-body flex flex-wrap items-center gap-x-6 gap-y-3"
+                >
+                  {steps.map((item, index) => (
+                    <li
+                      key={item.id}
+                      aria-current={step === item.id ? "step" : undefined}
+                      className={`flex items-center gap-2 ${step === item.id ? "text-ink font-medium" : "text-ink-muted"}`}
+                    >
+                      <span
+                        className="border-line bg-surface text-meta tabular flex size-6 shrink-0 items-center justify-center rounded-full border"
+                        aria-hidden="true"
+                      >
+                        {index <
+                        steps.findIndex(
+                          (itemValue) => itemValue.id === step
+                        ) ? (
+                          <Check size={14} />
+                        ) : (
+                          index + 1
+                        )}
+                      </span>
+                      {item.title}
+                    </li>
+                  ))}
+                </ol>
+                {step === "admin" && (
+                  <SettingsSection
+                    id="setup-admin-heading"
+                    title="Create the administrator"
+                    description="This account manages access and settings for this Specbook instance."
+                  >
+                    <form onSubmit={createAdmin}>
+                      <SettingsRow label="Name" htmlFor="admin-name">
+                        <Input
+                          id="admin-name"
+                          value={adminName}
+                          onChange={(event) => setAdminName(event.target.value)}
+                          required
+                          autoComplete="name"
+                          disabled={busy}
+                        />
+                      </SettingsRow>
+                      <SettingsRow label="Email" htmlFor="admin-email">
+                        <Input
+                          id="admin-email"
+                          type="email"
+                          value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          required
+                          autoComplete="email"
+                          disabled={busy}
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        label="Password"
+                        htmlFor="admin-password"
+                        description="Use at least 12 characters."
+                      >
+                        <Input
+                          id="admin-password"
+                          type="password"
+                          value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          minLength={12}
+                          maxLength={128}
+                          required
+                          autoComplete="new-password"
+                          disabled={busy}
+                        />
+                      </SettingsRow>
+                      <SettingsFooter
+                        feedback={
+                          <InlineFeedback
+                            feedback={
+                              error ? { type: "error", text: error } : null
+                            }
+                          />
+                        }
+                      >
+                        <Button type="submit" disabled={busy}>
+                          {busy
+                            ? "Creating account…"
+                            : "Create admin and continue"}
+                          <ArrowRight size={14} />
+                        </Button>
+                      </SettingsFooter>
+                    </form>
+                  </SettingsSection>
+                )}
+                {step === "model" && (
+                  <ModelSettings onConnectionTested={connectionTested} />
+                )}
+                {step === "project" && (
+                  <>
+                    <SettingsSection
+                      id="setup-project-heading"
+                      title="Your first project"
+                      description="Use an app your Specbook server can reach. You can change these details later."
+                      actions={
+                        <Button
+                          variant="outline"
+                          onClick={
+                            demo
+                              ? () => {
+                                  setDemo(false);
+                                  setProjectName("");
+                                  setBaseUrl("");
+                                }
+                              : tryDemo
+                          }
+                          disabled={busy}
+                        >
+                          {demo ? "Use my own app" : "Try with a demo app"}
+                        </Button>
+                      }
+                    >
+                      <form onSubmit={createProject}>
+                        <SettingsRow
+                          label="Project name"
+                          htmlFor="setup-project-name"
+                        >
+                          <Input
+                            id="setup-project-name"
+                            value={projectName}
+                            onChange={(event) =>
+                              setProjectName(event.target.value)
+                            }
+                            placeholder="Customer portal"
+                            required
+                            disabled={busy || demo}
+                          />
+                        </SettingsRow>
+                        <SettingsRow label="App URL" htmlFor="setup-base-url">
+                          <Input
+                            id="setup-base-url"
+                            value={baseUrl}
+                            onChange={(event) => setBaseUrl(event.target.value)}
+                            type="url"
+                            inputMode="url"
+                            placeholder="https://staging.example.com"
+                            required
+                            disabled={busy || demo}
+                          />
+                        </SettingsRow>
+                        {demo && (
+                          <SettingsBlock>
+                            <p className="text-body text-ink">
+                              Sauce Demo is a public practice store. Specbook
+                              will save its public login for the agent to use.
+                            </p>
+                            <p className="text-body text-ink-muted mt-2">
+                              Username:{" "}
+                              <code className="text-meta">standard_user</code>
+                              <br />
+                              Password:{" "}
+                              <code className="text-meta">secret_sauce</code>
+                            </p>
+                          </SettingsBlock>
+                        )}
+                        <SettingsFooter
+                          feedback={
+                            <InlineFeedback
+                              feedback={
+                                error ? { type: "error", text: error } : null
+                              }
+                            />
+                          }
+                        >
+                          <Button type="submit" disabled={busy}>
+                            {busy && (
+                              <LoaderCircle
+                                size={14}
+                                className="animate-spin motion-reduce:animate-none"
+                              />
+                            )}
+                            {busy
+                              ? "Preparing your project…"
+                              : "Create project and explore"}
+                            <ArrowRight size={14} />
+                          </Button>
+                        </SettingsFooter>
+                      </form>
+                    </SettingsSection>
+                    <div className="flex flex-wrap justify-between gap-3">
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setError("");
+                          setStep("model");
+                        }}
+                        disabled={busy}
+                      >
+                        <ArrowLeft size={14} /> Model settings
+                      </Button>
+                    </div>
+                  </>
+                )}
               </>
-            )}
-          </>
-        ) : (
-          <div
-            role="status"
-            aria-label="Loading setup"
-            aria-busy="true"
-            className="space-y-5"
-          >
-            <Skeleton className="h-5 w-60" />
-            <Skeleton className="h-48 w-full" />
-          </div>
-        )}
+            );
+          }
+          return (
+            <output
+              aria-label="Loading setup"
+              aria-busy="true"
+              className="block space-y-5"
+            >
+              <Skeleton className="h-5 w-60" />
+              <Skeleton className="h-48 w-full" />
+            </output>
+          );
+        })()}
       </PageContainer>
     </main>
   );
-}
+};
+export default SetupPage;

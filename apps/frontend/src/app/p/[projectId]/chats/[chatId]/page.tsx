@@ -16,7 +16,6 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import Link from "next/link";
 import {
   memo,
   use,
@@ -32,17 +31,17 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { useAuth } from "@/components/AuthProvider";
-import { ChatResultGroup } from "@/components/ChatResultGroup";
-import { ChatSettingsDialog } from "@/components/ChatSettingsDialog";
-import { ChatSpecPreview } from "@/components/ChatSpecPreview";
-import { CredentialRequestCard } from "@/components/CredentialRequestCard";
-import { EmptyState } from "@/components/EmptyState";
-import { LogoMark } from "@/components/LogoMark";
-import { PageHeader } from "@/components/PageHeader";
-import { RelativeTime } from "@/components/RelativeTime";
-import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
-import { TunnelConnectionNotice } from "@/components/TunnelConnectionNotice";
+import { useAuth } from "@/components/auth-provider";
+import { ChatResultGroup } from "@/components/chat-result-group";
+import { ChatSettingsDialog } from "@/components/chat-settings-dialog";
+import { ChatSpecPreview } from "@/components/chat-spec-preview";
+import { CredentialRequestCard } from "@/components/credential-request-card";
+import { EmptyState } from "@/components/empty-state";
+import { LogoMark } from "@/components/logo-mark";
+import { PageHeader } from "@/components/page-header";
+import { RelativeTime } from "@/components/relative-time";
+import { RunnerExplorationNotice } from "@/components/runner-exploration-notice";
+import { TunnelConnectionNotice } from "@/components/tunnel-connection-notice";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -67,13 +66,14 @@ import {
   retryChatMessage,
   sendChatMessage,
 } from "@/lib/api";
-import { useChatResults } from "@/lib/chatResults";
-import type { ChatResults } from "@/lib/chatResults";
+import { useChatResults } from "@/lib/chat-results";
+import type { ChatResults } from "@/lib/chat-results";
 import { copyText } from "@/lib/clipboard";
 import { countLabel } from "@/lib/format";
 import { onInvalidate } from "@/lib/invalidation";
+import { requiredValue } from "@/lib/required-value";
 import type { ChatMessage, ChatState } from "@/lib/types";
-import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
+import { useRunnerEnvironment } from "@/lib/use-runner-environment";
 import { cn } from "@/lib/utils";
 
 import { LiveBrowser, originOf, useWideLayout } from "./live-browser";
@@ -177,7 +177,7 @@ const MessageContent = memo(({ content }: { content: string }) => (
   </ReactMarkdown>
 ));
 
-function AgentAvatar() {
+const AgentAvatar = function AgentAvatar() {
   return (
     <span
       className="border-line bg-surface flex size-7 shrink-0 items-center justify-center rounded-full border"
@@ -186,19 +186,21 @@ function AgentAvatar() {
       <LogoMark className="size-4 dark:invert" />
     </span>
   );
-}
+};
 
-function useStableCallback<Args extends unknown[], Result>(
-  callback: (...args: Args) => Result
-): (...args: Args) => Result {
+const useStableCallback = function useStableCallback<
+  Args extends unknown[],
+  Result,
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This hook accepts a synchronous React event handler and returns a stable handler, not an asynchronous completion callback.
+>(callback: (...args: Args) => Result): (...args: Args) => Result {
   const ref = useRef(callback);
   useEffect(() => {
     ref.current = callback;
   });
   return useCallback((...args: Args) => ref.current(...args), []);
-}
+};
 
-function createStreamStore() {
+const createStreamStore = function createStreamStore() {
   let text = "";
   let pending = "";
   let frame: number | null = null;
@@ -241,11 +243,14 @@ function createStreamStore() {
       emit();
     },
   };
-}
+};
 
 type StreamStore = ReturnType<typeof createStreamStore>;
 
-function sameChatState(left: ChatState, right: ChatState): boolean {
+const sameChatState = function sameChatState(
+  left: ChatState,
+  right: ChatState
+): boolean {
   if (
     left.title !== right.title ||
     left.busy !== right.busy ||
@@ -284,9 +289,9 @@ function sameChatState(left: ChatState, right: ChatState): boolean {
       message.canRetry === next.canRetry
     );
   });
-}
+};
 
-function StreamingBubble({
+const StreamingBubble = function StreamingBubble({
   store,
   busy,
   onGrow,
@@ -318,9 +323,9 @@ function StreamingBubble({
       </div>
     </article>
   );
-}
+};
 
-function ActionButton({
+const ActionButton = function ActionButton({
   label,
   disabled,
   children,
@@ -351,9 +356,9 @@ function ActionButton({
       </TooltipContent>
     </Tooltip>
   );
-}
+};
 
-function MessageActions({
+const MessageActions = function MessageActions({
   userMessage,
   retryable,
   disabled,
@@ -408,7 +413,7 @@ function MessageActions({
       />
     </div>
   );
-}
+};
 
 interface MessageHandlers {
   onCopy: (message: ChatMessage) => void;
@@ -462,7 +467,7 @@ const MessageItem = memo(
         >
           {editing ? (
             <form
-              onSubmit={handlers.onSubmitEdit}
+              onSubmit={(event) => handlers.onSubmitEdit(event)}
               className="border-line-strong bg-surface shadow-composer w-full max-w-[min(100%,560px)] rounded-2xl border p-2"
             >
               <Textarea
@@ -484,7 +489,7 @@ const MessageItem = memo(
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={handlers.onCancelEdit}
+                    onClick={() => handlers.onCancelEdit()}
                   >
                     <X size={13} /> Cancel
                   </Button>
@@ -602,1191 +607,1277 @@ const MessageList = memo(
   }
 );
 
-function ChatContent({
-  projectId,
-  chatId,
-}: {
-  projectId: string;
-  chatId: string;
-}) {
-  const { canEdit, isAdmin } = useAuth();
-  const runnerEnvironment = useRunnerEnvironment(projectId);
-  const chatResults = useChatResults(chatId, projectId);
-  const [state, setState] = useState<ChatState | null>(null);
-  const [text, setText] = useState("");
-  const [loadError, setLoadError] = useState("");
-  const [pollError, setPollError] = useState("");
-  const [sendError, setSendError] = useState("");
-  const [sending, setSending] = useState(false);
-  const [actionMessageId, setActionMessageId] = useState("");
-  const [actionError, setActionError] = useState("");
-  const [copiedMessageId, setCopiedMessageId] = useState("");
-  const [editingMessageId, setEditingMessageId] = useState("");
-  const [editingText, setEditingText] = useState("");
-  const [streamStore] = useState(createStreamStore);
-  const [eventsPaused, setEventsPaused] = useState(false);
-  const [activeTool, setActiveTool] = useState("");
-  const [agentStatus, setAgentStatus] = useState("");
-  const [stopping, setStopping] = useState(false);
-  const [retryKey, setRetryKey] = useState(0);
-  const [steps, setSteps] = useState<ToolStep[]>([]);
-  const [modelReady, setModelReady] = useState<boolean | null>(null);
-  const [projectOrigin, setProjectOrigin] = useState("");
-  const [settingsTab, setSettingsTab] = useState<
-    "credentials" | "environments" | "model" | "automation" | null
-  >(null);
-  const [preview, setPreview] = useState<{
-    specId: string;
-    runId?: string;
-  } | null>(null);
-  const wide = useWideLayout();
-  const streamAnchorRef = useRef<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const stickToBottomRef = useRef(true);
+const ChatContent =
+  /* oxlint-disable eslint/complexity -- Keep the existing render states and their coordinated actions together during the lint migration. */
+  function ChatContent({
+    projectId,
+    chatId,
+  }: {
+    projectId: string;
+    chatId: string;
+  }) {
+    const { canEdit, isAdmin } = useAuth();
+    const runnerEnvironment = useRunnerEnvironment(projectId);
+    const chatResults = useChatResults(chatId, projectId);
+    const { data: resultData, reload: reloadChatResults } = chatResults;
+    const [state, setState] = useState<ChatState | null>(null);
+    const [text, setText] = useState("");
+    const [loadError, setLoadError] = useState("");
+    const [pollError, setPollError] = useState("");
+    const [sendError, setSendError] = useState("");
+    const [sending, setSending] = useState(false);
+    const [actionMessageId, setActionMessageId] = useState("");
+    const [actionError, setActionError] = useState("");
+    const [copiedMessageId, setCopiedMessageId] = useState("");
+    const [editingMessageId, setEditingMessageId] = useState("");
+    const [editingText, setEditingText] = useState("");
+    // oxlint-disable-next-line react/hook-use-state -- The stream store is intentionally initialized once and has no state setter; its own subscription publishes updates.
+    const [streamStore] = useState(createStreamStore);
+    const [eventsPaused, setEventsPaused] = useState(false);
+    const [activeTool, setActiveTool] = useState("");
+    const [agentStatus, setAgentStatus] = useState("");
+    const [stopping, setStopping] = useState(false);
+    const [retryKey, setRetryKey] = useState(0);
+    const [steps, setSteps] = useState<ToolStep[]>([]);
+    const [modelReady, setModelReady] = useState<boolean | null>(null);
+    const [projectOrigin, setProjectOrigin] = useState("");
+    const [settingsTab, setSettingsTab] = useState<
+      "credentials" | "environments" | "model" | "automation" | null
+    >(null);
+    const [preview, setPreview] = useState<{
+      specId: string;
+      runId?: string;
+    } | null>(null);
+    const wide = useWideLayout();
+    const streamAnchorRef = useRef<string | null>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const stickToBottomRef = useRef(true);
 
-  useEffect(() => {
-    setText("");
-  }, [chatId]);
+    useEffect(() => {
+      // oxlint-disable-next-line react/set-state-in-effect -- Reset the previous request or selection when its external key changes before loading fresh state.
+      setText("");
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
+    }, [chatId]);
 
-  useEffect(() => {
-    let active = true;
-    let loaded = false;
-    let refreshController: AbortController | null = null;
-    let events: EventSource | null = null;
-    let reconnectTimer: number | null = null;
-    let reconnectAttempt = 0;
-    let hasOpened = false;
-    setState(null);
-    setLoadError("");
-    setPollError("");
-    setActionError("");
-    setActionMessageId("");
-    setEditingMessageId("");
-    setEventsPaused(false);
-    streamStore.reset();
-    streamAnchorRef.current = null;
-    setActiveTool("");
-    setAgentStatus("");
-    setSteps([]);
-
-    async function refresh() {
-      refreshController?.abort();
-      const controller = new AbortController();
-      refreshController = controller;
-      try {
-        const result = await getChat(chatId, controller.signal);
-        if (!active || controller.signal.aborted) {
-          return;
-        }
-        loaded = true;
-        if (!result.busy) {
-          streamStore.reset();
-        }
-        setState((current) =>
-          current && sameChatState(current, result) ? current : result
-        );
-        void chatResults.reload();
-        if (!result.busy) {
-          setActiveTool("");
-          setAgentStatus("");
-          setSteps([]);
-        }
-        setLoadError("");
-        setPollError("");
-      } catch (error) {
-        if (!active || isAbortError(error)) {
-          return;
-        }
-        const message = errorMessage(error);
-        if (loaded) {
-          setPollError(message);
-        } else {
-          setLoadError(message);
-        }
-      }
-    }
-
-    const readEvent = (event: Event) => {
-      try {
-        return JSON.parse((event as MessageEvent<string>).data) as {
-          delta?: string;
-          toolName?: string;
-          status?: "working" | "retrying" | "idle";
-          message?: string | ChatMessage;
-          steering?: number;
-          followUp?: number;
-          afterMessageId?: string | null;
-          step?: ToolStep;
-          stepId?: string;
-          endedAt?: number;
-        };
-      } catch {
-        return null;
-      }
-    };
-    const onConnected = () => {
-      reconnectAttempt = 0;
+    useEffect(() => {
+      let active = true;
+      let loaded = false;
+      let refreshController: AbortController | null = null;
+      let events: EventSource | null = null;
+      let reconnectTimer: number | null = null;
+      let reconnectAttempt = 0;
+      let hasOpened = false;
+      // oxlint-disable-next-line react/set-state-in-effect -- Reset the previous request or selection when its external key changes before loading fresh state.
+      setState(null);
+      setLoadError("");
+      setPollError("");
+      setActionError("");
+      setActionMessageId("");
+      setEditingMessageId("");
       setEventsPaused(false);
       streamStore.reset();
+      streamAnchorRef.current = null;
+      setActiveTool("");
+      setAgentStatus("");
       setSteps([]);
-      void refresh();
-    };
-    const onDelta = (event: Event) => {
-      const data = readEvent(event);
-      if (data?.delta) {
-        streamStore.append(data.delta);
-      }
-    };
-    const onMessageStart = (event: Event) => {
-      streamAnchorRef.current = readEvent(event)?.afterMessageId ?? null;
-      streamStore.reset();
-    };
-    const onMessageEnd = (event: Event) => {
-      const data = readEvent(event);
-      const message =
-        typeof data?.message === "object" ? data.message : undefined;
-      refreshController?.abort();
-      if (message) {
-        if (
-          message.role === "agent" &&
-          streamAnchorRef.current === data?.afterMessageId
-        ) {
-          streamStore.reset();
+
+      const refresh = async function refresh() {
+        refreshController?.abort();
+        const controller = new AbortController();
+        refreshController = controller;
+        try {
+          const result = await getChat(chatId, controller.signal);
+          if (!active || controller.signal.aborted) {
+            return;
+          }
+          loaded = true;
+          if (!result.busy) {
+            streamStore.reset();
+          }
+          setState((current) =>
+            current && sameChatState(current, result) ? current : result
+          );
+          reloadChatResults();
+          if (!result.busy) {
+            setActiveTool("");
+            setAgentStatus("");
+            setSteps([]);
+          }
+          setLoadError("");
+          setPollError("");
+        } catch (error) {
+          if (!active || isAbortError(error)) {
+            return;
+          }
+          const message = errorMessage(error);
+          if (loaded) {
+            setPollError(message);
+          } else {
+            setLoadError(message);
+          }
         }
-        setState((current) => {
+      };
+
+      const readEvent = (event: Event) => {
+        try {
+          return JSON.parse((event as MessageEvent<string>).data) as {
+            delta?: string;
+            toolName?: string;
+            status?: "working" | "retrying" | "idle";
+            message?: string | ChatMessage;
+            steering?: number;
+            followUp?: number;
+            afterMessageId?: string | null;
+            step?: ToolStep;
+            stepId?: string;
+            endedAt?: number;
+          };
+        } catch {
+          return null;
+        }
+      };
+      const onConnected = () => {
+        reconnectAttempt = 0;
+        setEventsPaused(false);
+        streamStore.reset();
+        setSteps([]);
+        refresh();
+      };
+      const onDelta = (event: Event) => {
+        const data = readEvent(event);
+        if (data?.delta) {
+          streamStore.append(data.delta);
+        }
+      };
+      const onMessageStart = (event: Event) => {
+        streamAnchorRef.current = readEvent(event)?.afterMessageId ?? null;
+        streamStore.reset();
+      };
+      const onMessageEnd = (event: Event) => {
+        const data = readEvent(event);
+        const message =
+          typeof data?.message === "object" ? data.message : undefined;
+        refreshController?.abort();
+        if (message) {
           if (
-            !current ||
-            current.messages.some((item) => item.id === message.id)
+            message.role === "agent" &&
+            streamAnchorRef.current === data?.afterMessageId
           ) {
+            streamStore.reset();
+          }
+          setState((current) => {
+            if (
+              !current ||
+              current.messages.some((item) => item.id === message.id)
+            ) {
+              return current;
+            }
+            return { ...current, messages: [...current.messages, message] };
+          });
+        }
+        refresh();
+      };
+      const onToolStart = (event: Event) => {
+        const data = readEvent(event);
+        const toolName = data?.toolName;
+        const step = data?.step;
+        if (!toolName || !step) {
+          return;
+        }
+        setActiveTool(toolName);
+        setSteps((current) =>
+          current.some((item) => item.id === step.id)
+            ? current
+            : [...current, step]
+        );
+      };
+      const onToolEnd = (event: Event) => {
+        setActiveTool("");
+        const data = readEvent(event);
+        const stepId = data?.stepId;
+        const endedAt = data?.endedAt;
+        if (!stepId || endedAt === undefined) {
+          return;
+        }
+        setSteps((current) => {
+          const index = current.findIndex((step) => step.id === stepId);
+          if (index === -1) {
             return current;
           }
-          return { ...current, messages: [...current.messages, message] };
+          const next = [...current];
+          next[index] = { ...next[index], endedAt };
+          return next;
         });
-      }
-      void refresh();
-    };
-    const onToolStart = (event: Event) => {
-      const data = readEvent(event);
-      const toolName = data?.toolName;
-      const step = data?.step;
-      if (!toolName || !step) {
-        return;
-      }
-      setActiveTool(toolName);
-      setSteps((current) =>
-        current.some((item) => item.id === step.id)
-          ? current
-          : [...current, step]
-      );
-    };
-    const onToolEnd = (event: Event) => {
-      setActiveTool("");
-      const data = readEvent(event);
-      const stepId = data?.stepId;
-      const endedAt = data?.endedAt;
-      if (!stepId || endedAt === undefined) {
-        return;
-      }
-      setSteps((current) => {
-        const index = current.findIndex((step) => step.id === stepId);
-        if (index === -1) {
-          return current;
-        }
-        const next = [...current];
-        next[index] = { ...next[index], endedAt };
-        return next;
-      });
-    };
-    const onAgentStatus = (event: Event) => {
-      const data = readEvent(event);
-      if (data?.status === "retrying") {
-        setAgentStatus(
-          typeof data.message === "string"
-            ? data.message
-            : "Retrying the response"
-        );
-      } else if (data?.status === "working") {
-        setAgentStatus("Thinking through the request");
-      } else {
-        setAgentStatus("");
-      }
-    };
-    const onQueueUpdate = (event: Event) => {
-      const data = readEvent(event);
-      if (
-        typeof data?.steering !== "number" ||
-        typeof data.followUp !== "number"
-      ) {
-        return;
-      }
-      setState((current) =>
-        current
-          ? {
-              ...current,
-              queue: { steering: data.steering!, followUp: data.followUp! },
-            }
-          : current
-      );
-    };
-
-    function connect() {
-      if (!active) {
-        return;
-      }
-      const source = new EventSource(chatEventsUrl(chatId));
-      events = source;
-      source.addEventListener("connected", onConnected);
-      source.addEventListener("updated", () => void refresh());
-      source.addEventListener("assistant_delta", onDelta);
-      source.addEventListener("message_start", onMessageStart);
-      source.addEventListener("message_end", onMessageEnd);
-      source.addEventListener("tool_start", onToolStart);
-      source.addEventListener("tool_end", onToolEnd);
-      source.addEventListener("agent_status", onAgentStatus);
-      source.addEventListener("queue_update", onQueueUpdate);
-      source.onopen = () => {
-        setEventsPaused(false);
-        if (hasOpened) {
-          onConnected();
-        }
-        hasOpened = true;
       };
-      source.onerror = () => {
+      const onAgentStatus = (event: Event) => {
+        const data = readEvent(event);
+        if (data?.status === "retrying") {
+          setAgentStatus(
+            typeof data.message === "string"
+              ? data.message
+              : "Retrying the response"
+          );
+        } else if (data?.status === "working") {
+          setAgentStatus("Thinking through the request");
+        } else {
+          setAgentStatus("");
+        }
+      };
+      const onQueueUpdate = (event: Event) => {
+        const data = readEvent(event);
+        if (
+          typeof data?.steering !== "number" ||
+          typeof data.followUp !== "number"
+        ) {
+          return;
+        }
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                queue: {
+                  steering: requiredValue(data.steering),
+                  followUp: requiredValue(data.followUp),
+                },
+              }
+            : current
+        );
+      };
+
+      const connect = function connect() {
         if (!active) {
           return;
         }
-        setEventsPaused(true);
-        if (source.readyState !== EventSource.CLOSED) {
-          return;
-        }
-        source.close();
-        const delay = Math.min(1000 * 2 ** reconnectAttempt, 30_000);
-        reconnectAttempt += 1;
-        reconnectTimer = window.setTimeout(connect, delay);
+        const source = new EventSource(chatEventsUrl(chatId));
+        events = source;
+        source.addEventListener("connected", onConnected);
+        source.addEventListener("updated", () => refresh());
+        source.addEventListener("assistant_delta", onDelta);
+        source.addEventListener("message_start", onMessageStart);
+        source.addEventListener("message_end", onMessageEnd);
+        source.addEventListener("tool_start", onToolStart);
+        source.addEventListener("tool_end", onToolEnd);
+        source.addEventListener("agent_status", onAgentStatus);
+        source.addEventListener("queue_update", onQueueUpdate);
+        source.addEventListener("open", () => {
+          setEventsPaused(false);
+          if (hasOpened) {
+            onConnected();
+          }
+          hasOpened = true;
+        });
+        source.addEventListener("error", () => {
+          if (!active) {
+            return;
+          }
+          setEventsPaused(true);
+          if (source.readyState !== EventSource.CLOSED) {
+            return;
+          }
+          source.close();
+          const delay = Math.min(1000 * 2 ** reconnectAttempt, 30_000);
+          reconnectAttempt += 1;
+          reconnectTimer = window.setTimeout(connect, delay);
+        });
       };
-    }
 
-    void refresh();
-    connect();
-    return () => {
-      active = false;
-      refreshController?.abort();
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-      }
-      events?.close();
-      streamStore.reset();
-    };
-  }, [chatId, retryKey, streamStore, chatResults.reload]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let active = true;
-    getLlmRuntimeStatus()
-      .then((status) => active && setModelReady(status.ready))
-      .catch(() => active && setModelReady(null));
-    getProject(projectId, controller.signal)
-      .then(
-        ({ project }) => active && setProjectOrigin(originOf(project.baseUrl))
-      )
-      .catch(() => undefined);
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [projectId]);
-
-  useEffect(
-    () =>
-      onInvalidate((event) => {
-        if (event.resource && event.resource !== "settings") {
-          return;
+      refresh();
+      connect();
+      return () => {
+        active = false;
+        refreshController?.abort();
+        if (reconnectTimer !== null) {
+          window.clearTimeout(reconnectTimer);
         }
-        getLlmRuntimeStatus()
-          .then((status) => setModelReady(status.ready))
-          .catch(() => undefined);
-      }),
-    []
-  );
+        events?.close();
+        streamStore.reset();
+      };
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
+    }, [chatId, retryKey, streamStore, reloadChatResults]);
 
-  const scrollToBottomIfPinned = useCallback(() => {
-    const container = scrollRef.current?.querySelector<HTMLElement>(
-      "[data-slot=scroll-area-viewport]"
-    );
-    if (container && stickToBottomRef.current) {
-      container.scrollTop = container.scrollHeight;
-    }
-  }, []);
+    useEffect(() => {
+      const controller = new AbortController();
+      let active = true;
+      (async () => {
+        try {
+          const resolvedValue = await getLlmRuntimeStatus();
+          const status = resolvedValue;
+          return active && setModelReady(status.ready);
+        } catch {
+          return active && setModelReady(null);
+        }
+      })();
+      (async () => {
+        try {
+          const resolvedValue = await getProject(projectId, controller.signal);
+          const { project } = resolvedValue;
+          return active && setProjectOrigin(originOf(project.baseUrl));
+        } catch {
+          // Keep the last usable state if this optional operation fails.
+        }
+      })();
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }, [projectId]);
 
-  useEffect(() => {
-    const container = scrollRef.current?.querySelector<HTMLElement>(
-      "[data-slot=scroll-area-viewport]"
+    useEffect(
+      () =>
+        onInvalidate((event) => {
+          if (event.resource && event.resource !== "settings") {
+            return;
+          }
+          (async () => {
+            try {
+              const resolvedValue = await getLlmRuntimeStatus();
+              const status = resolvedValue;
+              return setModelReady(status.ready);
+            } catch {
+              // Keep the last usable state if this optional operation fails.
+            }
+          })();
+        }),
+      []
     );
-    if (container && stickToBottomRef.current) {
-      container.scrollTop = container.scrollHeight;
-    }
-  }, [
-    state?.busy,
-    state?.messages.length,
-    state?.vncSessionId,
-    steps.length,
-    chatResults.data,
-  ]);
 
-  useEffect(() => {
-    if (!state) {
-      return;
-    }
-    const container = scrollRef.current?.querySelector<HTMLElement>(
-      "[data-slot=scroll-area-viewport]"
-    );
-    if (!container) {
-      return;
-    }
-    const handleScroll = () => {
-      stickToBottomRef.current =
-        container.scrollHeight - container.scrollTop - container.clientHeight <
-        80;
+    const scrollToBottomIfPinned = useCallback(() => {
+      const container = scrollRef.current?.querySelector<HTMLElement>(
+        "[data-slot=scroll-area-viewport]"
+      );
+      if (container && stickToBottomRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }, []);
+
+    useEffect(() => {
+      const container = scrollRef.current?.querySelector<HTMLElement>(
+        "[data-slot=scroll-area-viewport]"
+      );
+      if (container && stickToBottomRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }, [
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
+      state?.busy,
+      state?.messages.length,
+      state?.vncSessionId,
+      steps.length,
+      resultData,
+    ]);
+
+    useEffect(() => {
+      if (!state) {
+        return;
+      }
+      const container = scrollRef.current?.querySelector<HTMLElement>(
+        "[data-slot=scroll-area-viewport]"
+      );
+      if (!container) {
+        return;
+      }
+      const handleScroll = () => {
+        stickToBottomRef.current =
+          container.scrollHeight -
+            container.scrollTop -
+            container.clientHeight <
+          80;
+      };
+      container.addEventListener("scroll", handleScroll, { passive: true });
+      return () => container.removeEventListener("scroll", handleScroll);
+    }, [state]);
+
+    const discovery =
+      state?.mode === "discovery" && state.contextRevision?.status === "draft";
+    const revisionInfo = state?.contextRevision ?? null;
+
+    const sendMessage = async function sendMessage(
+      event: React.FormEvent<HTMLFormElement>
+    ) {
+      event.preventDefault();
+      const value = text.trim();
+      if (!value || !state || sending) {
+        return;
+      }
+      const followUp = state.busy;
+      setSending(true);
+      setSendError("");
+      setActionError("");
+      setText("");
+      stickToBottomRef.current = true;
+      try {
+        if (followUp) {
+          await queueChatFollowUp(chatId, value);
+        } else {
+          await sendChatMessage(chatId, value);
+          setState((current) =>
+            current ? { ...current, busy: true } : current
+          );
+        }
+        if (followUp) {
+          setState((current) =>
+            current
+              ? {
+                  ...current,
+                  queue: {
+                    ...current.queue,
+                    followUp: current.queue.followUp + 1,
+                  },
+                }
+              : current
+          );
+        }
+        setPollError("");
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "auto";
+        }
+      } catch (error) {
+        setSendError(errorMessage(error));
+        setText(value);
+        // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+      } finally {
+        setSending(false);
+      }
     };
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    return () => container.removeEventListener("scroll", handleScroll);
-  }, [state?.messages.length]);
 
-  const discovery =
-    state?.mode === "discovery" && state.contextRevision?.status === "draft";
-  const revisionInfo = state?.contextRevision ?? null;
-
-  async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const value = text.trim();
-    if (!value || !state || sending) {
-      return;
-    }
-    const followUp = state.busy;
-    setSending(true);
-    setSendError("");
-    setActionError("");
-    setText("");
-    stickToBottomRef.current = true;
-    try {
-      if (followUp) {
-        await queueChatFollowUp(chatId, value);
-      } else {
-        await sendChatMessage(chatId, value);
-        setState((current) => (current ? { ...current, busy: true } : current));
+    const stopAgent = async function stopAgent() {
+      if (stopping || !state?.busy) {
+        return;
       }
-      if (followUp) {
-        setState((current) =>
-          current
-            ? {
-                ...current,
-                queue: {
-                  ...current.queue,
-                  followUp: current.queue.followUp + 1,
-                },
-              }
-            : current
+      setStopping(true);
+      setActionError("");
+      try {
+        await abortChatTurn(chatId);
+        streamStore.reset();
+        setActiveTool("");
+        setSteps((current) =>
+          current.map((step) =>
+            step.endedAt === null ? { ...step, endedAt: Date.now() } : step
+          )
         );
+      } catch (error) {
+        setActionError(errorMessage(error));
+        // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+      } finally {
+        setStopping(false);
       }
-      setPollError("");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
-      }
-    } catch (error) {
-      setSendError(errorMessage(error));
-      setText(value);
-    } finally {
-      setSending(false);
-    }
-  }
+    };
 
-  async function stopAgent() {
-    if (stopping || !state?.busy) {
-      return;
-    }
-    setStopping(true);
-    setActionError("");
-    try {
-      await abortChatTurn(chatId);
-      streamStore.reset();
-      setActiveTool("");
-      setSteps((current) =>
-        current.map((step) =>
-          step.endedAt === null ? { ...step, endedAt: Date.now() } : step
-        )
-      );
-    } catch (error) {
-      setActionError(errorMessage(error));
-    } finally {
-      setStopping(false);
-    }
-  }
-
-  async function copyMessage(messageId: string, content: string) {
-    if (await copyText(content)) {
-      setCopiedMessageId(messageId);
-      window.setTimeout(
-        () =>
-          setCopiedMessageId((current) =>
-            current === messageId ? "" : current
-          ),
-        1600
-      );
-    } else {
-      setActionError(
-        "Could not copy this message. Select the text and copy it manually."
-      );
-    }
-  }
-
-  async function editMessage(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const value = editingText.trim();
-    if (!editingMessageId || !value || state?.busy || actionMessageId) {
-      return;
-    }
-    setActionMessageId(editingMessageId);
-    setActionError("");
-    try {
-      await editChatMessage(chatId, editingMessageId, value);
-      setEditingMessageId("");
-      setEditingText("");
-      setState((current) => (current ? { ...current, busy: true } : current));
-      stickToBottomRef.current = true;
-    } catch (error) {
-      setActionError(errorMessage(error));
-    } finally {
-      setActionMessageId("");
-    }
-  }
-
-  async function retryMessage(messageId: string) {
-    if (state?.busy || actionMessageId) {
-      return;
-    }
-    setActionMessageId(messageId);
-    setActionError("");
-    try {
-      await retryChatMessage(chatId, messageId);
-      setState((current) => (current ? { ...current, busy: true } : current));
-      stickToBottomRef.current = true;
-    } catch (error) {
-      setActionError(errorMessage(error));
-    } finally {
-      setActionMessageId("");
-    }
-  }
-
-  const handleCopy = useStableCallback(
-    (message: ChatMessage) => void copyMessage(message.id, message.content)
-  );
-  const handleStartEdit = useStableCallback((message: ChatMessage) => {
-    setEditingMessageId(message.id);
-    setEditingText(message.content);
-    setActionError("");
-  });
-  const handleSubmitEdit = useStableCallback(
-    (event: React.FormEvent<HTMLFormElement>) => void editMessage(event)
-  );
-  const handleRetry = useStableCallback(
-    (messageId: string) => void retryMessage(messageId)
-  );
-  const messageHandlers = useMemo<MessageHandlers>(
-    () => ({
-      onCopy: handleCopy,
-      onStartEdit: handleStartEdit,
-      onCancelEdit: () => setEditingMessageId(""),
-      onEditTextChange: setEditingText,
-      onSubmitEdit: handleSubmitEdit,
-      onRetry: handleRetry,
-    }),
-    [handleCopy, handleRetry, handleStartEdit, handleSubmitEdit]
-  );
-  const visibleSteps = useMemo(() => {
-    const merged = new Map(
-      (state?.toolSteps ?? []).map((step) => [step.id, step])
-    );
-    for (const step of steps) {
-      merged.set(step.id, step);
-    }
-    return [...merged.values()];
-  }, [state?.toolSteps, steps]);
-
-  const reloadResults = useStableCallback(async () => {
-    await chatResults.reload();
-    const current = await getChat(chatId);
-    setState((previous) =>
-      previous && sameChatState(previous, current) ? previous : current
-    );
-  });
-  const discussResult = useStableCallback(async (message: string) => {
-    if (sending || !state) {
-      throw new Error("Wait for the current message to be sent.");
-    }
-    setSending(true);
-    try {
-      if (state.busy) {
-        await queueChatFollowUp(chatId, message);
-        setState((current) =>
-          current
-            ? {
-                ...current,
-                queue: {
-                  ...current.queue,
-                  followUp: current.queue.followUp + 1,
-                },
-              }
-            : current
+    const copyMessage = async function copyMessage(
+      messageId: string,
+      content: string
+    ) {
+      if (await copyText(content)) {
+        setCopiedMessageId(messageId);
+        window.setTimeout(
+          () =>
+            setCopiedMessageId((current) =>
+              current === messageId ? "" : current
+            ),
+          1600
         );
       } else {
-        await sendChatMessage(chatId, message);
-        setState((current) => (current ? { ...current, busy: true } : current));
+        setActionError(
+          "Could not copy this message. Select the text and copy it manually."
+        );
       }
-      stickToBottomRef.current = true;
-    } finally {
-      setSending(false);
-    }
-  });
-  const viewSpec = useCallback(
-    (specId: string, runId?: string) => setPreview({ specId, runId }),
-    []
-  );
-  const scrollToResult = useCallback((id: string) => {
-    const element = document.querySelector(`#${id}`);
-    if (!element) {
-      return;
-    }
-    stickToBottomRef.current = false;
-    element.scrollIntoView({ block: "center" });
-    const target = element.querySelector<HTMLElement>(
-      "textarea, button, input"
+    };
+
+    const editMessage = async function editMessage(
+      event: React.FormEvent<HTMLFormElement>
+    ) {
+      event.preventDefault();
+      const value = editingText.trim();
+      if (!editingMessageId || !value || state?.busy || actionMessageId) {
+        return;
+      }
+      setActionMessageId(editingMessageId);
+      setActionError("");
+      try {
+        await editChatMessage(chatId, editingMessageId, value);
+        setEditingMessageId("");
+        setEditingText("");
+        setState((current) => (current ? { ...current, busy: true } : current));
+        stickToBottomRef.current = true;
+      } catch (error) {
+        setActionError(errorMessage(error));
+        // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+      } finally {
+        setActionMessageId("");
+      }
+    };
+
+    const retryMessage = async function retryMessage(messageId: string) {
+      if (state?.busy || actionMessageId) {
+        return;
+      }
+      setActionMessageId(messageId);
+      setActionError("");
+      try {
+        await retryChatMessage(chatId, messageId);
+        setState((current) => (current ? { ...current, busy: true } : current));
+        stickToBottomRef.current = true;
+      } catch (error) {
+        setActionError(errorMessage(error));
+        // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+      } finally {
+        setActionMessageId("");
+      }
+    };
+
+    const handleCopy = useStableCallback((message: ChatMessage) =>
+      copyMessage(message.id, message.content)
     );
-    target?.focus({ preventScroll: true });
-  }, []);
-  const reviewContext = useCallback(
-    () => scrollToResult("chat-context-review"),
-    [scrollToResult]
-  );
-  const answerQuestion = useCallback(
-    (id: string) => scrollToResult(`chat-result-${id}`),
-    [scrollToResult]
-  );
-  const manageAutomation = useCallback(() => setSettingsTab("automation"), []);
-  const resultGroups = useMemo(() => {
-    const nodes = new Map<string | null, ReactNode>();
-    const { data } = chatResults;
-    if (!data || !state) {
+    const handleStartEdit = useStableCallback((message: ChatMessage) => {
+      setEditingMessageId(message.id);
+      setEditingText(message.content);
+      setActionError("");
+    });
+    const handleSubmitEdit = useStableCallback(
+      (event: React.FormEvent<HTMLFormElement>) => editMessage(event)
+    );
+    const handleRetry = useStableCallback((messageId: string) =>
+      retryMessage(messageId)
+    );
+    const messageHandlers = useMemo<MessageHandlers>(
+      () => ({
+        onCopy: handleCopy,
+        onStartEdit: handleStartEdit,
+        onCancelEdit: () => setEditingMessageId(""),
+        onEditTextChange: setEditingText,
+        onSubmitEdit: handleSubmitEdit,
+        onRetry: handleRetry,
+      }),
+      [handleCopy, handleRetry, handleStartEdit, handleSubmitEdit]
+    );
+    const visibleSteps = useMemo(() => {
+      const merged = new Map(
+        (state?.toolSteps ?? []).map((step) => [step.id, step])
+      );
+      for (const step of steps) {
+        merged.set(step.id, step);
+      }
+      return [...merged.values()];
+    }, [state?.toolSteps, steps]);
+
+    const reloadResults = useStableCallback(async () => {
+      await reloadChatResults();
+      const current = await getChat(chatId);
+      setState((previous) =>
+        previous && sameChatState(previous, current) ? previous : current
+      );
+    });
+    const discussResult = useStableCallback(async (message: string) => {
+      if (sending || !state) {
+        throw new Error("Wait for the current message to be sent.");
+      }
+      setSending(true);
+      // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+      try {
+        if (state.busy) {
+          await queueChatFollowUp(chatId, message);
+          setState((current) =>
+            current
+              ? {
+                  ...current,
+                  queue: {
+                    ...current.queue,
+                    followUp: current.queue.followUp + 1,
+                  },
+                }
+              : current
+          );
+        } else {
+          await sendChatMessage(chatId, message);
+          setState((current) =>
+            current ? { ...current, busy: true } : current
+          );
+        }
+        stickToBottomRef.current = true;
+      } finally {
+        setSending(false);
+      }
+    });
+    const viewSpec = useCallback(
+      (specId: string, runId?: string) => setPreview({ specId, runId }),
+      []
+    );
+    const scrollToResult = useCallback((id: string) => {
+      const element = document.querySelector(`#${id}`);
+      if (!element) {
+        return;
+      }
+      stickToBottomRef.current = false;
+      element.scrollIntoView({ block: "center" });
+      const target = element.querySelector<HTMLElement>(
+        "textarea, button, input"
+      );
+      target?.focus({ preventScroll: true });
+    }, []);
+    const reviewContext = useCallback(
+      () => scrollToResult("chat-context-review"),
+      [scrollToResult]
+    );
+    const answerQuestion = useCallback(
+      (id: string) => scrollToResult(`chat-result-${id}`),
+      [scrollToResult]
+    );
+    const manageAutomation = useCallback(
+      () => setSettingsTab("automation"),
+      []
+    );
+    const resultGroups = useMemo(() => {
+      const nodes = new Map<string | null, ReactNode>();
+      const data = resultData;
+      if (!data || !state) {
+        return nodes;
+      }
+      const messages = new Set(state.messages.map((message) => message.id));
+      const fallback = state.messages.at(-1)?.id ?? null;
+      const groups = new Map<string | null, ChatResults>();
+      const group = function group(anchor?: string | null) {
+        const key =
+          anchor === null || (anchor !== undefined && messages.has(anchor))
+            ? anchor
+            : fallback;
+        let value = groups.get(key);
+        if (!value) {
+          value = {
+            items: [],
+            tasks: [],
+            notes: [],
+            runs: [],
+            specs: [],
+            credentialRequests: [],
+            contextRevision: null,
+          };
+          groups.set(key, value);
+        }
+        return value;
+      };
+      for (const item of data.items) {
+        group(item.afterMessageId).items.push(item);
+      }
+      for (const task of data.tasks) {
+        group(task.afterMessageId).tasks.push(task);
+      }
+      for (const note of data.notes) {
+        group(note.afterMessageId).notes.push(note);
+      }
+      for (const run of data.runs) {
+        group(run.afterMessageId).runs.push(run);
+      }
+      for (const spec of data.specs) {
+        group(spec.afterMessageId).specs.push(spec);
+      }
+      for (const request of data.credentialRequests) {
+        if (request.chatId !== chatId) {
+          group(request.afterMessageId).credentialRequests.push(request);
+        }
+      }
+      if (data.contextRevision) {
+        const anchor = visibleSteps.findLast(
+          (step) => step.toolName === "propose_project_context"
+        )?.afterMessageId;
+        group(anchor).contextRevision = data.contextRevision;
+      }
+      for (const [anchor, value] of groups) {
+        nodes.set(
+          anchor,
+          <article
+            key={`results-${anchor}`}
+            className="mt-3 flex items-start gap-3"
+            aria-label="Specbook results"
+          >
+            <AgentAvatar />
+            <div className="min-w-0 flex-1">
+              <p className="text-control text-ink mb-1 flex h-7 items-center font-semibold">
+                Specbook
+              </p>
+              <ChatResultGroup
+                projectId={projectId}
+                data={value}
+                busy={state.busy}
+                onChange={reloadResults}
+                onDiscuss={discussResult}
+                onViewSpec={viewSpec}
+                onReviewContext={reviewContext}
+                onAnswerQuestion={answerQuestion}
+                onManageAutomation={manageAutomation}
+              />
+            </div>
+          </article>
+        );
+      }
       return nodes;
-    }
-    const messages = new Set(state.messages.map((message) => message.id));
-    const fallback = state.messages.at(-1)?.id ?? null;
-    const groups = new Map<string | null, ChatResults>();
-    function group(anchor?: string | null) {
-      const key =
-        anchor === null || (anchor !== undefined && messages.has(anchor))
-          ? anchor
-          : fallback;
-      let value = groups.get(key);
-      if (!value) {
-        value = {
-          items: [],
-          tasks: [],
-          notes: [],
-          runs: [],
-          specs: [],
-          credentialRequests: [],
-          contextRevision: null,
-        };
-        groups.set(key, value);
+    }, [
+      answerQuestion,
+      chatId,
+      resultData,
+      discussResult,
+      manageAutomation,
+      projectId,
+      reloadResults,
+      reviewContext,
+      state,
+      viewSpec,
+      visibleSteps,
+    ]);
+
+    const modelMissing = modelReady === false;
+    const composerDisabled = modelMissing;
+    const chatsHref = `/p/${projectId}/chats`;
+
+    const chatLoaded = state !== null;
+    useEffect(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        return;
       }
-      return value;
-    }
-    for (const item of data.items) {
-      group(item.afterMessageId).items.push(item);
-    }
-    for (const task of data.tasks) {
-      group(task.afterMessageId).tasks.push(task);
-    }
-    for (const note of data.notes) {
-      group(note.afterMessageId).notes.push(note);
-    }
-    for (const run of data.runs) {
-      group(run.afterMessageId).runs.push(run);
-    }
-    for (const spec of data.specs) {
-      group(spec.afterMessageId).specs.push(spec);
-    }
-    for (const request of data.credentialRequests) {
-      if (request.chatId !== chatId)
-        group(request.afterMessageId).credentialRequests.push(request);
-    }
-    if (data.contextRevision) {
-      const anchor = visibleSteps.findLast(
-        (step) => step.toolName === "propose_project_context"
-      )?.afterMessageId;
-      group(anchor).contextRevision = data.contextRevision;
-    }
-    for (const [anchor, value] of groups) {
-      nodes.set(
-        anchor,
-        <article
-          key={`results-${anchor}`}
-          className="mt-3 flex items-start gap-3"
-          aria-label="Specbook results"
-        >
-          <AgentAvatar />
-          <div className="min-w-0 flex-1">
-            <p className="text-control text-ink mb-1 flex h-7 items-center font-semibold">
-              Specbook
-            </p>
-            <ChatResultGroup
-              projectId={projectId}
-              data={value}
-              busy={state.busy}
-              onChange={reloadResults}
-              onDiscuss={discussResult}
-              onViewSpec={viewSpec}
-              onReviewContext={reviewContext}
-              onAnswerQuestion={answerQuestion}
-              onManageAutomation={manageAutomation}
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
+    }, [text, chatLoaded]);
+
+    if (loadError && !state) {
+      return (
+        <div className="bg-surface flex min-h-full flex-col">
+          <PageHeader
+            title="Chat"
+            breadcrumbs={[{ label: "Chats", href: chatsHref }]}
+            width="chat"
+          />
+          <div className="flex flex-1 items-center justify-center">
+            <EmptyState
+              role="alert"
+              tone="danger"
+              icon={AlertCircle}
+              title="Chat could not load"
+              description={loadError}
+              action={
+                <Button
+                  type="button"
+                  onClick={() => setRetryKey((key) => key + 1)}
+                >
+                  <RefreshCw size={14} /> Try again
+                </Button>
+              }
             />
           </div>
-        </article>
+        </div>
       );
     }
-    return nodes;
-  }, [
-    answerQuestion,
-    chatId,
-    chatResults.data,
-    discussResult,
-    manageAutomation,
-    projectId,
-    reloadResults,
-    reviewContext,
-    state,
-    viewSpec,
-    visibleSteps,
-  ]);
 
-  const modelMissing = modelReady === false;
-  const composerDisabled = modelMissing;
-  const chatsHref = `/p/${projectId}/chats`;
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      return;
+    if (!state) {
+      return (
+        <output
+          className="bg-surface flex h-full min-h-0 flex-col"
+          aria-label="Loading chat"
+          aria-busy="true"
+        >
+          <div className="border-line shrink-0 border-b px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5">
+            <div className="max-w-chat mx-auto w-full">
+              <Skeleton className="h-3.5 w-14" />
+              <Skeleton className="mt-3 h-6 w-2/3 max-w-md" />
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden px-4 pt-8 md:px-8">
+            <div className="max-w-chat mx-auto w-full space-y-8">
+              <Skeleton className="ml-auto h-11 w-1/2 rounded-2xl" />
+              <div className="flex gap-3">
+                <Skeleton className="size-7 shrink-0 rounded-full" />
+                <div className="flex-1 space-y-2 pt-1.5">
+                  <Skeleton className="h-3.5 w-20" />
+                  <Skeleton className="h-3.5 w-11/12" />
+                  <Skeleton className="h-3.5 w-3/4" />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="shrink-0 px-3 pb-4 md:px-8">
+            <Skeleton className="max-w-chat mx-auto h-[92px] w-full rounded-2xl" />
+          </div>
+        </output>
+      );
     }
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-  }, [text, state !== null]);
 
-  if (loadError && !state) {
+    const browserBeside = canEdit && wide && Boolean(state.vncSessionId);
+    const browserOrigin =
+      originOf(revisionInfo?.brief.startUrl) || projectOrigin;
+
     return (
-      <div className="bg-surface flex min-h-full flex-col">
+      <div className="bg-surface flex h-full min-h-0 flex-col">
         <PageHeader
-          title="Chat"
-          breadcrumbs={[{ label: "Chats", href: chatsHref }]}
-          width="chat"
+          title={
+            <span
+              className="max-sm:text-section line-clamp-1"
+              title={state.title}
+            >
+              {state.title}
+            </span>
+          }
+          breadcrumbs={[
+            {
+              label: discovery ? "Project discovery" : "Chats",
+              href: discovery ? `/p/${projectId}` : chatsHref,
+            },
+          ]}
+          width={browserBeside ? "full" : "chat"}
+          className="pt-3 pb-3 md:pt-5 md:pb-4"
         />
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState
+
+        {runnerEnvironment && (
+          <div className="shrink-0 px-4 pb-3 md:px-8">
+            <div className="max-w-chat mx-auto w-full">
+              <RunnerExplorationNotice />
+            </div>
+          </div>
+        )}
+        <div className="shrink-0 px-4 md:px-8">
+          <div className="max-w-chat mx-auto w-full">
+            <TunnelConnectionNotice projectId={projectId} className="mb-3" />
+          </div>
+        </div>
+
+        {discovery && revisionInfo && (
+          <div
+            className="border-line bg-surface-soft shrink-0 border-b px-4 py-2 md:px-8"
+            role="note"
+            aria-label="Project discovery status"
+          >
+            <div
+              className={cn(
+                "text-control mx-auto flex w-full flex-wrap items-center gap-x-3 gap-y-1",
+                browserBeside ? "max-w-none" : "max-w-chat"
+              )}
+            >
+              <span className="text-ink flex items-center gap-1.5 font-medium">
+                <Compass
+                  size={14}
+                  className="text-ink-subtle"
+                  aria-hidden="true"
+                />{" "}
+                Discovery goal
+              </span>
+              <span
+                className="text-ink-muted min-w-0 flex-1 truncate"
+                title={revisionInfo.brief.goal}
+              >
+                {revisionInfo.brief.goal}
+              </span>
+              {revisionInfo.hasProposal && revisionInfo.status === "draft" ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={reviewContext}
+                >
+                  Review project context
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        {eventsPaused && !pollError && (
+          /* oxlint-disable jsx-a11y/prefer-tag-over-role -- Alert forwards live-region semantics to its shared native wrapper; preserve the component structure. */
+          <Alert
+            variant="warning"
+            className="shrink-0 rounded-none border-x-0 border-t-0 px-4 py-2 md:px-8"
+            role="status"
+          >
+            <div className="max-w-chat mx-auto flex w-full items-center gap-2">
+              <WifiOff
+                size={14}
+                className="status-pulse shrink-0"
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1 break-words">
+                Updates paused. Reconnecting to the agent…
+              </span>
+            </div>
+          </Alert>
+          /* oxlint-enable jsx-a11y/prefer-tag-over-role */
+        )}
+
+        {pollError && (
+          <Alert
+            variant="destructive"
+            className="shrink-0 rounded-none border-x-0 border-t-0 px-4 py-1.5 md:px-8"
             role="alert"
-            tone="danger"
-            icon={AlertCircle}
-            title="Chat could not load"
-            description={loadError}
-            action={
+          >
+            <div className="max-w-chat mx-auto flex w-full items-center gap-2">
+              <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 break-words">
+                Updates paused: {pollError}
+              </span>
               <Button
                 type="button"
-                onClick={() => setRetryKey((key) => key + 1)}
-              >
-                <RefreshCw size={14} /> Try again
-              </Button>
-            }
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (!state) {
-    return (
-      <div
-        className="bg-surface flex h-full min-h-0 flex-col"
-        aria-label="Loading chat"
-        aria-busy="true"
-        role="status"
-      >
-        <div className="border-line shrink-0 border-b px-4 pt-5 pb-4 md:px-8 md:pt-6 md:pb-5">
-          <div className="max-w-chat mx-auto w-full">
-            <Skeleton className="h-3.5 w-14" />
-            <Skeleton className="mt-3 h-6 w-2/3 max-w-md" />
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden px-4 pt-8 md:px-8">
-          <div className="max-w-chat mx-auto w-full space-y-8">
-            <Skeleton className="ml-auto h-11 w-1/2 rounded-2xl" />
-            <div className="flex gap-3">
-              <Skeleton className="size-7 shrink-0 rounded-full" />
-              <div className="flex-1 space-y-2 pt-1.5">
-                <Skeleton className="h-3.5 w-20" />
-                <Skeleton className="h-3.5 w-11/12" />
-                <Skeleton className="h-3.5 w-3/4" />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="shrink-0 px-3 pb-4 md:px-8">
-          <Skeleton className="max-w-chat mx-auto h-[92px] w-full rounded-2xl" />
-        </div>
-      </div>
-    );
-  }
-
-  const browserBeside = canEdit && wide && Boolean(state.vncSessionId);
-  const browserOrigin = originOf(revisionInfo?.brief.startUrl) || projectOrigin;
-
-  return (
-    <div className="bg-surface flex h-full min-h-0 flex-col">
-      <PageHeader
-        title={
-          <span
-            className="max-sm:text-section line-clamp-1"
-            title={state.title}
-          >
-            {state.title}
-          </span>
-        }
-        breadcrumbs={[
-          {
-            label: discovery ? "Project discovery" : "Chats",
-            href: discovery ? `/p/${projectId}` : chatsHref,
-          },
-        ]}
-        width={browserBeside ? "full" : "chat"}
-        className="pt-3 pb-3 md:pt-5 md:pb-4"
-      />
-
-      {runnerEnvironment && (
-        <div className="shrink-0 px-4 pb-3 md:px-8">
-          <div className="max-w-chat mx-auto w-full">
-            <RunnerExplorationNotice />
-          </div>
-        </div>
-      )}
-      <div className="shrink-0 px-4 md:px-8">
-        <div className="max-w-chat mx-auto w-full">
-          <TunnelConnectionNotice projectId={projectId} className="mb-3" />
-        </div>
-      </div>
-
-      {discovery && revisionInfo && (
-        <div
-          className="border-line bg-surface-soft shrink-0 border-b px-4 py-2 md:px-8"
-          role="note"
-          aria-label="Project discovery status"
-        >
-          <div
-            className={cn(
-              "text-control mx-auto flex w-full flex-wrap items-center gap-x-3 gap-y-1",
-              browserBeside ? "max-w-none" : "max-w-chat"
-            )}
-          >
-            <span className="text-ink flex items-center gap-1.5 font-medium">
-              <Compass
-                size={14}
-                className="text-ink-subtle"
-                aria-hidden="true"
-              />{" "}
-              Discovery goal
-            </span>
-            <span
-              className="text-ink-muted min-w-0 flex-1 truncate"
-              title={revisionInfo.brief.goal}
-            >
-              {revisionInfo.brief.goal}
-            </span>
-            {revisionInfo.hasProposal && revisionInfo.status === "draft" ? (
-              <Button
-                variant="outline"
+                variant="link"
                 size="sm"
-                className="shrink-0"
-                onClick={reviewContext}
+                onClick={() => setRetryKey((key) => key + 1)}
+                className="text-danger shrink-0"
               >
-                Review project context
+                Retry
               </Button>
-            ) : null}
-          </div>
-        </div>
-      )}
-
-      {eventsPaused && !pollError && (
-        <Alert
-          variant="warning"
-          className="shrink-0 rounded-none border-x-0 border-t-0 px-4 py-2 md:px-8"
-          role="status"
-        >
-          <div className="max-w-chat mx-auto flex w-full items-center gap-2">
-            <WifiOff
-              size={14}
-              className="status-pulse shrink-0"
-              aria-hidden="true"
-            />
-            <span className="min-w-0 flex-1 break-words">
-              Updates paused. Reconnecting to the agent…
-            </span>
-          </div>
-        </Alert>
-      )}
-
-      {pollError && (
-        <Alert
-          variant="destructive"
-          className="shrink-0 rounded-none border-x-0 border-t-0 px-4 py-1.5 md:px-8"
-          role="alert"
-        >
-          <div className="max-w-chat mx-auto flex w-full items-center gap-2">
-            <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 break-words">
-              Updates paused: {pollError}
-            </span>
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              onClick={() => setRetryKey((key) => key + 1)}
-              className="text-danger shrink-0"
-            >
-              Retry
-            </Button>
-          </div>
-        </Alert>
-      )}
-
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
-            <div className="px-4 pt-6 pb-10 md:px-8 md:pt-8">
-              <div className="max-w-chat mx-auto w-full">
-                <MessageList
-                  messages={state.messages}
-                  steps={visibleSteps}
-                  busy={state.busy}
-                  editingMessageId={editingMessageId}
-                  editingText={editingText}
-                  actionMessageId={actionMessageId}
-                  copiedMessageId={copiedMessageId}
-                  actionsDisabled={Boolean(
-                    state.busy || actionMessageId || modelMissing
-                  )}
-                  handlers={messageHandlers}
-                  results={resultGroups}
-                />
-
-                <StreamingBubble
-                  store={streamStore}
-                  busy={state.busy}
-                  onGrow={scrollToBottomIfPinned}
-                />
-
-                {chatResults.error && (
-                  <Alert
-                    variant="danger"
-                    className="mt-3 md:ml-10"
-                    role="alert"
-                  >
-                    <AlertDescription>
-                      Results could not update: {chatResults.error}
-                    </AlertDescription>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void chatResults.reload()}
-                    >
-                      Retry results
-                    </Button>
-                  </Alert>
-                )}
-
-                {state.busy && (
-                  <div
-                    className={cn(
-                      "text-control text-ink-muted mt-3 flex items-center gap-2.5 pl-10",
-                      activeTool && state.queue.followUp === 0 && "sr-only"
-                    )}
-                    role="status"
-                  >
-                    <span className="flex gap-1" aria-hidden="true">
-                      <span className="status-pulse bg-running size-1.5 rounded-full" />
-                      <span className="status-pulse bg-running size-1.5 rounded-full [animation-delay:200ms]" />
-                      <span className="status-pulse bg-running size-1.5 rounded-full [animation-delay:400ms]" />
-                    </span>
-                    <span>
-                      {activeTool
-                        ? activeToolLabel(activeTool)
-                        : agentStatus || "Thinking through the request"}
-                      {state.queue.followUp > 0 && (
-                        <span className="text-ink-subtle">
-                          {" "}
-                          · {countLabel(state.queue.followUp, "follow-up")}{" "}
-                          queued
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                )}
-
-                {canEdit && state.vncSessionId && !browserBeside && (
-                  <LiveBrowser
-                    sessionId={state.vncSessionId}
-                    origin={browserOrigin}
-                    variant="inline"
-                  />
-                )}
-
-                {canEdit && state.credentialRequest && (
-                  <CredentialRequestCard
-                    chatId={chatId}
-                    request={state.credentialRequest}
-                    onResolved={() =>
-                      setState((prev) =>
-                        prev ? { ...prev, credentialRequest: null } : prev
-                      )
-                    }
-                  />
-                )}
-              </div>
             </div>
-          </ScrollArea>
+          </Alert>
+        )}
 
-          {canEdit ? (
-            <div className="bg-surface relative shrink-0 px-3 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-5">
-              <div
-                aria-hidden="true"
-                className="from-surface pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t to-transparent"
-              />
-              <div className="max-w-chat mx-auto w-full">
-                {sendError && (
-                  <Alert
-                    variant="destructive"
-                    className="mb-2 flex items-start gap-2"
-                    role="alert"
-                  >
-                    <AlertCircle
-                      size={14}
-                      className="mt-0.5 shrink-0"
-                      aria-hidden="true"
-                    />
-                    <AlertDescription>{sendError}</AlertDescription>
-                  </Alert>
-                )}
-                {actionError && (
-                  <Alert
-                    variant="destructive"
-                    className="mb-2 flex items-start gap-2"
-                    role="alert"
-                  >
-                    <AlertCircle
-                      size={14}
-                      className="mt-0.5 shrink-0"
-                      aria-hidden="true"
-                    />
-                    <AlertDescription>{actionError}</AlertDescription>
-                  </Alert>
-                )}
-                <form
-                  onSubmit={sendMessage}
-                  className={cn(
-                    "bg-surface shadow-composer overflow-hidden rounded-2xl border transition-colors duration-150",
-                    composerDisabled
-                      ? "border-line bg-surface-soft"
-                      : "border-line-strong focus-within:border-line-hover"
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
+              <div className="px-4 pt-6 pb-10 md:px-8 md:pt-8">
+                <div className="max-w-chat mx-auto w-full">
+                  <MessageList
+                    messages={state.messages}
+                    steps={visibleSteps}
+                    busy={state.busy}
+                    editingMessageId={editingMessageId}
+                    editingText={editingText}
+                    actionMessageId={actionMessageId}
+                    copiedMessageId={copiedMessageId}
+                    actionsDisabled={Boolean(
+                      state.busy || actionMessageId || modelMissing
+                    )}
+                    handlers={messageHandlers}
+                    results={resultGroups}
+                  />
+
+                  <StreamingBubble
+                    store={streamStore}
+                    busy={state.busy}
+                    onGrow={scrollToBottomIfPinned}
+                  />
+
+                  {chatResults.error && (
+                    <Alert
+                      variant="danger"
+                      className="mt-3 md:ml-10"
+                      role="alert"
+                    >
+                      <AlertDescription>
+                        Results could not update: {chatResults.error}
+                      </AlertDescription>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => reloadChatResults()}
+                      >
+                        Retry results
+                      </Button>
+                    </Alert>
                   )}
-                >
-                  {modelMissing && (
-                    <div className="border-line bg-surface-soft flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2.5">
-                      <p className="text-control text-ink-muted flex min-w-0 flex-1 items-center gap-2">
-                        <span
-                          className="bg-warning-chart size-1.5 shrink-0 rounded-full"
-                          aria-hidden="true"
-                        />
-                        <span>
-                          No model is set up yet.
-                          <span className="hidden sm:inline">
+
+                  {state.busy && (
+                    <output
+                      className={cn(
+                        "text-control text-ink-muted mt-3 flex items-center gap-2.5 pl-10",
+                        activeTool && state.queue.followUp === 0 && "sr-only"
+                      )}
+                    >
+                      <span className="flex gap-1" aria-hidden="true">
+                        <span className="status-pulse bg-running size-1.5 rounded-full" />
+                        <span className="status-pulse bg-running size-1.5 rounded-full [animation-delay:200ms]" />
+                        <span className="status-pulse bg-running size-1.5 rounded-full [animation-delay:400ms]" />
+                      </span>
+                      <span>
+                        {activeTool
+                          ? activeToolLabel(activeTool)
+                          : agentStatus || "Thinking through the request"}
+                        {state.queue.followUp > 0 && (
+                          <span className="text-ink-subtle">
                             {" "}
-                            {isAdmin
-                              ? "Choose a provider to chat with the agent."
-                              : "Ask an administrator to connect a provider."}
+                            · {countLabel(
+                              state.queue.followUp,
+                              "follow-up"
+                            )}{" "}
+                            queued
                           </span>
+                        )}
+                      </span>
+                    </output>
+                  )}
+
+                  {canEdit && state.vncSessionId && !browserBeside && (
+                    <LiveBrowser
+                      sessionId={state.vncSessionId}
+                      origin={browserOrigin}
+                      variant="inline"
+                    />
+                  )}
+
+                  {canEdit && state.credentialRequest && (
+                    <CredentialRequestCard
+                      chatId={chatId}
+                      request={state.credentialRequest}
+                      onResolved={() =>
+                        setState((prev) =>
+                          prev ? { ...prev, credentialRequest: null } : prev
+                        )
+                      }
+                    />
+                  )}
+                </div>
+              </div>
+            </ScrollArea>
+
+            {canEdit ? (
+              <div className="bg-surface relative shrink-0 px-3 pb-[max(12px,env(safe-area-inset-bottom))] md:px-8 md:pb-5">
+                <div
+                  aria-hidden="true"
+                  className="from-surface pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t to-transparent"
+                />
+                <div className="max-w-chat mx-auto w-full">
+                  {sendError && (
+                    <Alert
+                      variant="destructive"
+                      className="mb-2 flex items-start gap-2"
+                      role="alert"
+                    >
+                      <AlertCircle
+                        size={14}
+                        className="mt-0.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <AlertDescription>{sendError}</AlertDescription>
+                    </Alert>
+                  )}
+                  {actionError && (
+                    <Alert
+                      variant="destructive"
+                      className="mb-2 flex items-start gap-2"
+                      role="alert"
+                    >
+                      <AlertCircle
+                        size={14}
+                        className="mt-0.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <AlertDescription>{actionError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <form
+                    onSubmit={sendMessage}
+                    className={cn(
+                      "bg-surface shadow-composer overflow-hidden rounded-2xl border transition-colors duration-150",
+                      composerDisabled
+                        ? "border-line bg-surface-soft"
+                        : "border-line-strong focus-within:border-line-hover"
+                    )}
+                  >
+                    {modelMissing && (
+                      <div className="border-line bg-surface-soft flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2.5">
+                        <p className="text-control text-ink-muted flex min-w-0 flex-1 items-center gap-2">
+                          <span
+                            className="bg-warning-chart size-1.5 shrink-0 rounded-full"
+                            aria-hidden="true"
+                          />
+                          <span>
+                            No model is set up yet.
+                            <span className="hidden sm:inline">
+                              {" "}
+                              {isAdmin
+                                ? "Choose a provider to chat with the agent."
+                                : "Ask an administrator to connect a provider."}
+                            </span>
+                          </span>
+                        </p>
+                        {isAdmin && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSettingsTab("model")}
+                          >
+                            <Settings2 size={13} /> Set up model
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    <Label className="block">
+                      <span className="sr-only">Message Specbook</span>
+                      <Textarea
+                        ref={textareaRef}
+                        value={text}
+                        onChange={(event) => setText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Enter" &&
+                            !event.shiftKey &&
+                            !event.nativeEvent.isComposing
+                          ) {
+                            event.preventDefault();
+                            event.currentTarget.form?.requestSubmit();
+                          }
+                        }}
+                        rows={1}
+                        disabled={composerDisabled}
+                        placeholder={(() => {
+                          if (modelMissing) {
+                            return "Describe a behavior to verify…";
+                          }
+                          if (state.busy) {
+                            return "Add a follow-up for the agent…";
+                          }
+                          if (discovery) {
+                            return "Guide the discovery or ask about what was found…";
+                          }
+                          return "Describe what to explore or verify…";
+                        })()}
+                        className="text-body block max-h-[200px] min-h-12 resize-none rounded-none border-0 bg-transparent px-4 pt-3.5 pb-1 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-100"
+                      />
+                    </Label>
+                    <div className="flex items-center gap-2 px-2.5 pb-2.5">
+                      <p className="text-meta text-ink-subtle min-w-0 flex-1 truncate pl-1.5">
+                        <span
+                          className={cn(
+                            "hidden",
+                            !composerDisabled && "sm:inline"
+                          )}
+                        >
+                          {(() => {
+                            if (discovery) {
+                              return "Explores within the allowed origin and drafts project context. It cannot create Specs here.";
+                            }
+                            if (state.busy) {
+                              return "Messages sent now are queued as follow-ups.";
+                            }
+                            return "Enter to send · Shift+Enter for a new line";
+                          })()}
                         </span>
                       </p>
-                      {isAdmin && (
+                      {canEdit && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-meta text-ink-subtle h-7 px-2"
+                          onClick={() => setSettingsTab("credentials")}
+                        >
+                          <Settings2 size={13} /> Settings
+                        </Button>
+                      )}
+                      {state.busy && (
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => setSettingsTab("model")}
+                          onClick={() => stopAgent()}
+                          disabled={stopping}
+                          className="rounded-lg"
                         >
-                          <Settings2 size={13} /> Set up model
+                          {stopping ? (
+                            <LoaderCircle size={13} className="animate-spin" />
+                          ) : (
+                            <Square size={11} fill="currentColor" />
+                          )}
+                          {stopping ? "Stopping" : "Stop"}
                         </Button>
                       )}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="submit"
+                            disabled={
+                              !text.trim() || sending || composerDisabled
+                            }
+                            size="icon-sm"
+                            className="rounded-lg disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-30"
+                            aria-label={
+                              state.busy ? "Queue follow-up" : "Send message"
+                            }
+                          >
+                            {sending ? (
+                              <LoaderCircle
+                                size={15}
+                                className="animate-spin"
+                              />
+                            ) : (
+                              <ArrowUp size={16} strokeWidth={2.2} />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {state.busy ? "Queue follow-up" : "Send message"}
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
-                  )}
-                  <Label className="block">
-                    <span className="sr-only">Message Specbook</span>
-                    <Textarea
-                      ref={textareaRef}
-                      value={text}
-                      onChange={(event) => setText(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (
-                          event.key === "Enter" &&
-                          !event.shiftKey &&
-                          !event.nativeEvent.isComposing
-                        ) {
-                          event.preventDefault();
-                          event.currentTarget.form?.requestSubmit();
-                        }
-                      }}
-                      rows={1}
-                      disabled={composerDisabled}
-                      placeholder={
-                        modelMissing
-                          ? "Describe a behavior to verify…"
-                          : state.busy
-                            ? "Add a follow-up for the agent…"
-                            : discovery
-                              ? "Guide the discovery or ask about what was found…"
-                              : "Describe what to explore or verify…"
-                      }
-                      className="text-body block max-h-[200px] min-h-12 resize-none rounded-none border-0 bg-transparent px-4 pt-3.5 pb-1 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-100"
-                    />
-                  </Label>
-                  <div className="flex items-center gap-2 px-2.5 pb-2.5">
-                    <p className="text-meta text-ink-subtle min-w-0 flex-1 truncate pl-1.5">
-                      <span
-                        className={cn(
-                          "hidden",
-                          !composerDisabled && "sm:inline"
-                        )}
-                      >
-                        {discovery
-                          ? "Explores within the allowed origin and drafts project context. It cannot create Specs here."
-                          : state.busy
-                            ? "Messages sent now are queued as follow-ups."
-                            : "Enter to send · Shift+Enter for a new line"}
-                      </span>
-                    </p>
-                    {canEdit && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-meta text-ink-subtle h-7 px-2"
-                        onClick={() => setSettingsTab("credentials")}
-                      >
-                        <Settings2 size={13} /> Settings
-                      </Button>
-                    )}
-                    {state.busy && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void stopAgent()}
-                        disabled={stopping}
-                        className="rounded-lg"
-                      >
-                        {stopping ? (
-                          <LoaderCircle size={13} className="animate-spin" />
-                        ) : (
-                          <Square size={11} fill="currentColor" />
-                        )}
-                        {stopping ? "Stopping" : "Stop"}
-                      </Button>
-                    )}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="submit"
-                          disabled={!text.trim() || sending || composerDisabled}
-                          size="icon-sm"
-                          className="rounded-lg disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-30"
-                          aria-label={
-                            state.busy ? "Queue follow-up" : "Send message"
-                          }
-                        >
-                          {sending ? (
-                            <LoaderCircle size={15} className="animate-spin" />
-                          ) : (
-                            <ArrowUp size={16} strokeWidth={2.2} />
-                          )}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        {state.busy ? "Queue follow-up" : "Send message"}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                </form>
+                  </form>
+                </div>
               </div>
-            </div>
-          ) : (
-            <p className="border-line text-control text-ink-muted border-t px-4 py-3">
-              This conversation is read-only for your account.
-            </p>
+            ) : (
+              <p className="border-line text-control text-ink-muted border-t px-4 py-3">
+                This conversation is read-only for your account.
+              </p>
+            )}
+          </div>
+
+          {browserBeside && state.vncSessionId && (
+            <aside
+              className="border-line bg-canvas flex w-[min(46%,760px)] shrink-0 flex-col border-l p-4"
+              aria-label="Agent browser"
+            >
+              <LiveBrowser
+                sessionId={state.vncSessionId}
+                origin={browserOrigin}
+                variant="pane"
+              />
+            </aside>
           )}
         </div>
-
-        {browserBeside && state.vncSessionId && (
-          <aside
-            className="border-line bg-canvas flex w-[min(46%,760px)] shrink-0 flex-col border-l p-4"
-            aria-label="Agent browser"
-          >
-            <LiveBrowser
-              sessionId={state.vncSessionId}
-              origin={browserOrigin}
-              variant="pane"
-            />
-          </aside>
+        {preview && (
+          <ChatSpecPreview
+            key={`${preview.specId}:${preview.runId ?? "latest"}`}
+            {...preview}
+            onClose={() => setPreview(null)}
+          />
+        )}
+        {settingsTab && (
+          <ChatSettingsDialog
+            projectId={projectId}
+            tab={settingsTab}
+            onClose={() => {
+              setSettingsTab(null);
+              (async () => {
+                try {
+                  const resolvedValue = await getLlmRuntimeStatus();
+                  const status = resolvedValue;
+                  return setModelReady(status.ready);
+                } catch {
+                  // Keep the last usable state if this optional operation fails.
+                }
+              })();
+              (async () => {
+                try {
+                  const resolvedValue = await getProject(projectId);
+                  const { project } = resolvedValue;
+                  return setProjectOrigin(originOf(project.baseUrl));
+                } catch {
+                  // Keep the last usable state if this optional operation fails.
+                }
+              })();
+            }}
+          />
         )}
       </div>
-      {preview && (
-        <ChatSpecPreview
-          key={`${preview.specId}:${preview.runId ?? "latest"}`}
-          {...preview}
-          onClose={() => setPreview(null)}
-        />
-      )}
-      {settingsTab && (
-        <ChatSettingsDialog
-          projectId={projectId}
-          tab={settingsTab}
-          onClose={() => {
-            setSettingsTab(null);
-            getLlmRuntimeStatus()
-              .then((status) => setModelReady(status.ready))
-              .catch(() => undefined);
-            getProject(projectId)
-              .then(({ project }) =>
-                setProjectOrigin(originOf(project.baseUrl))
-              )
-              .catch(() => undefined);
-          }}
-        />
-      )}
-    </div>
-  );
-}
+    );
+  };
+/* oxlint-enable eslint/complexity */
 
-export default function ChatPage({
+const ChatPage = function ChatPage({
   params,
 }: {
   params: Promise<{ projectId: string; chatId: string }>;
 }) {
   const { projectId, chatId } = use(params);
   return <ChatContent projectId={projectId} chatId={chatId} />;
-}
+};
+export default ChatPage;
+
+MessageContent.displayName = "MessageContent";
+
+MessageItem.displayName = "MessageItem";
+
+MessageList.displayName = "MessageList";

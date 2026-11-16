@@ -29,9 +29,14 @@ import {
 import { retryInfrastructure } from "./retry";
 import { triageSchema } from "./schemas";
 
-export class StaleTriageError extends Error {}
+export class StaleTriageError extends Error {
+  name = "StaleTriageError";
+}
 
-export async function currentFailure(projectId: string, runId?: string) {
+export const currentFailure = async function currentFailure(
+  projectId: string,
+  runId?: string
+) {
   const run = runId ? await runsRepository.getRun(runId) : null;
   const spec = run ? await specsRepository.getSpec(run.specId) : null;
   if (
@@ -45,15 +50,25 @@ export async function currentFailure(projectId: string, runId?: string) {
     return null;
   }
   if (
-    (await runsRepository.listRuns(spec.id, { limit: 1 }))[0]?.id !== run.id ||
+    (await (async () => {
+      const resolvedValue1566 = await (async () => {
+        const awaitedValue1488 = await runsRepository.listRuns(spec.id, {
+          limit: 1,
+        });
+        return awaitedValue1488[0];
+      })();
+      return resolvedValue1566?.id;
+    })()) !== run.id ||
     !(await matchesCurrentSpec(run, spec))
   ) {
     return null;
   }
   return { run, spec };
-}
+};
 
-export async function cancelStaleTriage(job: Job): Promise<boolean> {
+export const cancelStaleTriage = async function cancelStaleTriage(
+  job: Job
+): Promise<boolean> {
   if (
     job.kind !== "failure_triage" ||
     (await currentFailure(job.projectId, job.runId ?? undefined))
@@ -73,9 +88,12 @@ export async function cancelStaleTriage(job: Job): Promise<boolean> {
     );
   }
   return true;
-}
+};
 
-export async function prepareTriageGoal(projectId: string, runId?: string) {
+export const prepareTriageGoal = async function prepareTriageGoal(
+  projectId: string,
+  runId?: string
+) {
   const current = await currentFailure(projectId, runId);
   if (!current) {
     throw new StaleTriageError(
@@ -96,9 +114,12 @@ export async function prepareTriageGoal(projectId: string, runId?: string) {
     goal: `Investigate failure in ${spec.title}`,
     message: `Investigate the failure of Spec "${spec.title}" (${spec.id}), run ${run.id}. ${investigation} In get_failure_evidence, evidenceReview "assertion_wrong" means the screen showed the expected result: treat it as test drift unless you see the app fail.${draft}\n- Test drift (locator or timing): call update_spec with the smallest spec.ts change that keeps the same behavior and assertions, without asking. Candidates are verified in isolation and need a passing verification for approval.\n- App bug: report it with reproduction steps, observed versus expected behavior and evidence; leave the test untouched.\n- Environment (site down, expired session, missing credentials): retry if transient, otherwise ask in the Inbox and resume after the answer.\nNever change spec.yml or weaken the test to pass; ask if the intended behavior must change. End with an Inbox result.`,
   };
-}
+};
 
-export function createTriageTools(job: Job, abort: () => void) {
+export const createTriageTools = function createTriageTools(
+  job: Job,
+  abort: () => void
+) {
   const scrub = createProjectScrubber(job.projectId);
   return [
     defineTool({
@@ -136,7 +157,10 @@ export function createTriageTools(job: Job, abort: () => void) {
             ),
           },
         ];
-        for (const step of (await getSecuritySettings()).sendScreenshotsToModel
+        for (const step of (await (async () => {
+          const awaitedValue6303 = await getSecuritySettings();
+          return awaitedValue6303.sendScreenshotsToModel;
+        })())
           ? reviewedScreenshots(
               evidence,
               await fs
@@ -148,6 +172,7 @@ export function createTriageTools(job: Job, abort: () => void) {
             continue;
           }
           const file = path.join(directory, step.file);
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           const bytes = await fs.readFile(file).catch(() => null);
           if (bytes && bytes.byteLength <= 4 * 1024 * 1024) {
             content.push({
@@ -168,6 +193,7 @@ export function createTriageTools(job: Job, abort: () => void) {
       parameters: Type.Unsafe<z.infer<typeof triageSchema>>(
         triageSchema.toJSONSchema()
       ),
+      // oxlint-disable-next-line complexity -- Keep the triage decision tree together so state transitions and error ordering remain explicit.
       async execute(_id, input) {
         const triage = triageSchema.parse(input);
         const run = job.runId ? await runsRepository.getRun(job.runId) : null;
@@ -206,22 +232,28 @@ export function createTriageTools(job: Job, abort: () => void) {
         const body = await scrub(
           `${triage.reason}\n\nReproduction:\n${triage.reproduction.map((step, index) => `${index + 1}. ${step}`).join("\n")}\n\nEvidence:\n${triage.evidence.join("\n")}\nRun: ${job.runId}${runnerCredentials ? "\n\nRestore the named local profile on the runner with specbook credentials add, then answer here to retry." : ""}`
         );
-        const kind =
-          triage.classification === "application_bug"
-            ? "bug_report"
-            : credentials
-              ? "question"
-              : "note";
+        const kind = (() => {
+          if (triage.classification === "application_bug") {
+            return "bug_report";
+          }
+          if (credentials) {
+            return "question";
+          }
+          return "note";
+        })();
         const item = await jobsRepository.addItem({
           jobId: job.id,
           projectId: job.projectId,
           kind,
-          title:
-            kind === "bug_report"
-              ? "The app did not behave as expected. What should happen next?"
-              : credentials
-                ? "Can you restore access to the app?"
-                : "The failure was investigated",
+          title: (() => {
+            if (kind === "bug_report") {
+              return "The app did not behave as expected. What should happen next?";
+            }
+            if (credentials) {
+              return "Can you restore access to the app?";
+            }
+            return "The failure was investigated";
+          })(),
           body,
           payload: {
             errorCode: credentials
@@ -274,4 +306,4 @@ export function createTriageTools(job: Job, abort: () => void) {
       },
     }),
   ];
-}
+};

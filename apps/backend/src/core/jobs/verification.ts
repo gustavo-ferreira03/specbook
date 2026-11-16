@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import type { ErrorCode } from "@specbook/runtime/errors";
 import { CodedError } from "@specbook/runtime/errors";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import { runPlaywrightSuite } from "@specbook/runtime/playwright";
@@ -28,30 +29,18 @@ import {
   createEnvironmentTunnelProxy,
   waitForTunnel,
 } from "../tunnel/registry";
-import { jobBaseUrl, jobEnvironment } from "./environment";
+import { requireValue } from "../utils/require-value";
+import { jobEnvironment } from "./environment";
 import { isAgentPaused } from "./pause";
 import { payloadOf, fixProposalSchema } from "./schemas";
 
-export interface ProposalVerification {
-  id: string;
-  status: "passed" | "failed" | "error";
-  durationMs: number | null;
-  failReason: string | null;
-  failedStep: string | null;
-  sourceHash: string;
-  baseUrl: string;
-  screenshots: string[];
-  errorCode?: import("@specbook/runtime/errors").ErrorCode | null;
-  review?: EvidenceReview | null;
-}
-
-export function proposalDirectory(
+export const proposalDirectory = function proposalDirectory(
   item: InboxItem,
   verificationId: string
 ): string {
   if (
     ![item.projectId, item.id, verificationId].every((value) =>
-      /^[a-f0-9-]{36}$/.test(value)
+      /^[a-f0-9-]{36}$/u.test(value)
     )
   ) {
     throw new Error("Invalid proposal artifact id");
@@ -63,9 +52,10 @@ export function proposalDirectory(
     item.id,
     verificationId
   );
-}
+};
 
-export async function verifyProposal(
+// oxlint-disable-next-line complexity -- Keep the verification decision tree together so state transitions and error ordering remain explicit.
+export const verifyProposal = async function verifyProposal(
   job: Job,
   item: InboxItem,
   signal?: AbortSignal
@@ -100,7 +90,7 @@ export async function verifyProposal(
   const raw = await repoGit.withRepoLock(job.projectId, () =>
     readSpecRawFiles(spec)
   );
-  const original = payloadOf(item).before!;
+  const original = requireValue(payloadOf(item).before);
   if (raw.yaml !== original.yaml || raw.testSource !== original.testSource) {
     throw new Error(
       "Proposal is stale; inspect the current Spec and propose again"
@@ -172,7 +162,7 @@ export async function verifyProposal(
         results: new Map([[id, run]]),
       }))
     : await withRunSlot(async () => {
-        const timeoutMs = await check();
+        const timeoutMsValue = await check();
         const proxy =
           environment.executor === "tunnel"
             ? await createEnvironmentTunnelProxy(environment)
@@ -190,13 +180,13 @@ export async function verifyProposal(
             specs: [
               {
                 key: id,
-                source: patch.testSource!,
+                source: requireValue(patch.testSource),
                 analysis: analysis.analysis,
                 humanSpec,
                 outputDir: directory,
               },
             ],
-            timeoutMs,
+            timeoutMs: timeoutMsValue,
             timeoutScale: environment.timeoutScale,
             secretEnv,
             secretOrigins,
@@ -237,4 +227,17 @@ export async function verifyProposal(
     `${item.id}: ${verification.status}`
   );
   return verification;
+};
+
+export interface ProposalVerification {
+  id: string;
+  status: "passed" | "failed" | "error";
+  durationMs: number | null;
+  failReason: string | null;
+  failedStep: string | null;
+  sourceHash: string;
+  baseUrl: string;
+  screenshots: string[];
+  errorCode?: ErrorCode | null;
+  review?: EvidenceReview | null;
 }

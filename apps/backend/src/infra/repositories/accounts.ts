@@ -5,6 +5,7 @@ import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { DEFAULT_SSO_SETTINGS } from "../../core/accounts/schemas";
 import type { SsoSettings, UserRole } from "../../core/accounts/schemas";
 import { createKeyedLock } from "../../core/operations/keyed-lock";
+import { requireValue } from "../../core/utils/require-value";
 import { db } from "../db/client";
 import {
   appSettings,
@@ -17,36 +18,63 @@ import {
   userSessions,
 } from "../db/schema";
 
+const usableLogin = function usableLogin(sso: SsoSettings) {
+  return sql`((${sso.passwordLoginEnabled} and password_hash is not null)
+        or (${sso.enabled} and id in (select value from json_each(${JSON.stringify(sso.verifiedUsers ?? [])}))
+        and (${sso.allowedEmailDomains.length === 0} or lower(substr(email, instr(email, '@') + 1)) in (select value from json_each(${JSON.stringify(sso.allowedEmailDomains)})))
+        and id in (select user_id from oidc_identities where issuer = ${sso.issuer})))`;
+};
+
+export const withAccountsLock = function withAccountsLock<T>(
+  work: () => Promise<T>
+): Promise<T> {
+  return accountLock.run("accounts", work);
+};
+
 export type User = typeof users.$inferSelect;
 export type Invitation = typeof userInvites.$inferSelect;
 const now = () => new Date().toISOString();
 const accountLock = createKeyedLock();
 
-function usableLogin(sso: SsoSettings) {
-  return sql`((${sso.passwordLoginEnabled} and password_hash is not null)
-        or (${sso.enabled} and id in (select value from json_each(${JSON.stringify(sso.verifiedUsers ?? [])}))
-        and (${sso.allowedEmailDomains.length === 0} or lower(substr(email, instr(email, '@') + 1)) in (select value from json_each(${JSON.stringify(sso.allowedEmailDomains)})))
-        and id in (select user_id from oidc_identities where issuer = ${sso.issuer})))`;
-}
-
-export function withAccountsLock<T>(work: () => Promise<T>): Promise<T> {
-  return accountLock.run("accounts", work);
-}
-
 export const accountsRepository = {
   async hasUsers() {
-    return Boolean((await db.select({ id: users.id }).from(users).limit(1))[0]);
+    return Boolean(
+      await (async () => {
+        const awaitedValue1447 = await db
+          .select({ id: users.id })
+          .from(users)
+          .limit(1);
+        return awaitedValue1447[0];
+      })()
+    );
   },
   async getUser(id: string) {
-    return (await db.select().from(users).where(eq(users.id, id)))[0] ?? null;
+    return (
+      (await (async () => {
+        const awaitedValue1555 = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, id));
+        return awaitedValue1555[0];
+      })()) ?? null
+    );
   },
   async userByEmail(email: string) {
     return (
-      (await db.select().from(users).where(eq(users.email, email)))[0] ?? null
+      (await (async () => {
+        const awaitedValue1684 = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, email));
+        return awaitedValue1684[0];
+      })()) ?? null
     );
   },
   async listUsers() {
-    return db.select().from(users).orderBy(asc(users.createdAt), asc(users.id));
+    return await db
+      .select()
+      .from(users)
+      .orderBy(asc(users.createdAt), asc(users.id));
   },
   async bootstrap(input: {
     email: string;
@@ -66,8 +94,8 @@ export const accountsRepository = {
       .values({ tokenHash, userId, expiresAt, createdAt: now() });
   },
   async session(tokenHash: string) {
-    const row = (
-      await db
+    const row = await (async () => {
+      const awaitedValue2619 = await db
         .select({ user: users, session: userSessions })
         .from(userSessions)
         .innerJoin(users, eq(users.id, userSessions.userId))
@@ -77,8 +105,9 @@ export const accountsRepository = {
             gt(userSessions.expiresAt, now()),
             isNull(users.disabledAt)
           )
-        )
-    )[0];
+        );
+      return awaitedValue2619[0];
+    })();
     return row ?? null;
   },
   async deleteSession(tokenHash: string) {
@@ -103,7 +132,7 @@ export const accountsRepository = {
     ]);
   },
   async accessTokens(userId: string) {
-    return db
+    return await db
       .select({
         id: personalAccessTokens.id,
         name: personalAccessTokens.name,
@@ -141,11 +170,11 @@ export const accountsRepository = {
         lastUsedAt: personalAccessTokens.lastUsedAt,
         expiresAt: personalAccessTokens.expiresAt,
       });
-    return token!;
+    return requireValue(token);
   },
   async accessTokenUser(tokenHash: string): Promise<User | null> {
-    const row = (
-      await db
+    const row = await (async () => {
+      const awaitedValue5040 = await db
         .select({ user: users, tokenId: personalAccessTokens.id })
         .from(personalAccessTokens)
         .innerJoin(users, eq(users.id, personalAccessTokens.userId))
@@ -158,8 +187,9 @@ export const accountsRepository = {
               gt(personalAccessTokens.expiresAt, now())
             )
           )
-        )
-    )[0];
+        );
+      return awaitedValue5040[0];
+    })();
     if (!row) {
       return null;
     }
@@ -180,8 +210,8 @@ export const accountsRepository = {
   },
   async revokeAccessToken(userId: string, id: string) {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue6068 = await db
           .delete(personalAccessTokens)
           .where(
             and(
@@ -189,8 +219,9 @@ export const accountsRepository = {
               eq(personalAccessTokens.userId, userId)
             )
           )
-          .returning({ id: personalAccessTokens.id })
-      ).length > 0
+          .returning({ id: personalAccessTokens.id });
+        return awaitedValue6068.length;
+      })()) > 0
     );
   },
   async changeMember(
@@ -222,7 +253,7 @@ export const accountsRepository = {
     return updated ?? null;
   },
   async invitations() {
-    return db
+    return await db
       .select()
       .from(userInvites)
       .where(
@@ -237,12 +268,12 @@ export const accountsRepository = {
       .insert(userInvites)
       .values({ ...input, id: crypto.randomUUID(), createdAt: now() })
       .returning();
-    return invite!;
+    return requireValue(invite);
   },
   async invitation(tokenHash: string) {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue7867 = await db
           .select()
           .from(userInvites)
           .where(
@@ -251,8 +282,9 @@ export const accountsRepository = {
               isNull(userInvites.consumedAt),
               gt(userInvites.expiresAt, now())
             )
-          )
-      )[0] ?? null
+          );
+        return awaitedValue7867[0];
+      })()) ?? null
     );
   },
   async revokeInvitation(id: string) {
@@ -300,18 +332,22 @@ export const accountsRepository = {
   },
   async getSso(): Promise<SsoSettings> {
     return (
-      (
-        await db
-          .select({ sso: appSettings.sso })
-          .from(appSettings)
-          .where(eq(appSettings.id, 1))
-      )[0]?.sso ?? { ...DEFAULT_SSO_SETTINGS }
+      (await (async () => {
+        const resolvedValue10446 = await (async () => {
+          const awaitedValue9598 = await db
+            .select({ sso: appSettings.sso })
+            .from(appSettings)
+            .where(eq(appSettings.id, 1));
+          return awaitedValue9598[0];
+        })();
+        return resolvedValue10446?.sso;
+      })()) ?? { ...DEFAULT_SSO_SETTINGS }
     );
   },
   async hasUsableAdministrator(sso: SsoSettings): Promise<boolean> {
     return Boolean(
-      (
-        await db
+      await (async () => {
+        const awaitedValue9884 = await db
           .select({ id: users.id })
           .from(users)
           .where(
@@ -321,8 +357,9 @@ export const accountsRepository = {
               usableLogin(sso)
             )
           )
-          .limit(1)
-      )[0]
+          .limit(1);
+        return awaitedValue9884[0];
+      })()
     );
   },
   async saveSso(sso: SsoSettings) {
@@ -341,24 +378,28 @@ export const accountsRepository = {
   },
   async identity(issuer: string, subject: string) {
     return (
-      (
-        await db
-          .select({ user: users })
-          .from(oidcIdentities)
-          .innerJoin(users, eq(users.id, oidcIdentities.userId))
-          .where(
-            and(
-              eq(oidcIdentities.issuer, issuer),
-              eq(oidcIdentities.subject, subject)
-            )
-          )
-      )[0]?.user ?? null
+      (await (async () => {
+        const resolvedValue11599 = await (async () => {
+          const awaitedValue10559 = await db
+            .select({ user: users })
+            .from(oidcIdentities)
+            .innerJoin(users, eq(users.id, oidcIdentities.userId))
+            .where(
+              and(
+                eq(oidcIdentities.issuer, issuer),
+                eq(oidcIdentities.subject, subject)
+              )
+            );
+          return awaitedValue10559[0];
+        })();
+        return resolvedValue11599?.user;
+      })()) ?? null
     );
   },
   async linked(userId: string, issuer: string) {
     return Boolean(
-      (
-        await db
+      await (async () => {
+        const awaitedValue10982 = await db
           .select({ id: oidcIdentities.id })
           .from(oidcIdentities)
           .where(
@@ -367,8 +408,9 @@ export const accountsRepository = {
               eq(oidcIdentities.issuer, issuer)
             )
           )
-          .limit(1)
-      )[0]
+          .limit(1);
+        return awaitedValue10982[0];
+      })()
     );
   },
   async addIdentity(userId: string, issuer: string, subject: string) {
@@ -406,8 +448,8 @@ export const accountsRepository = {
   },
   async takeOidcState(stateHash: string, browserHash: string) {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue12213 = await db
           .delete(oidcStates)
           .where(
             and(
@@ -416,8 +458,9 @@ export const accountsRepository = {
               gt(oidcStates.expiresAt, now())
             )
           )
-          .returning()
-      )[0] ?? null
+          .returning();
+        return awaitedValue12213[0];
+      })()) ?? null
     );
   },
   async cleanup() {
@@ -433,7 +476,7 @@ export const accountsRepository = {
     before: { createdAt: string; id: string } | null,
     limit: number
   ) {
-    return db
+    return await db
       .select()
       .from(auditEvents)
       .where(

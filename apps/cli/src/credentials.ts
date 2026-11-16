@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import { providerProfile } from "./secret-provider";
 import type { ProviderProfile } from "./secret-provider";
+import { requiredValue } from "./values";
 
 export { defaultSensitive } from "@specbook/runtime/credential-fields";
 
@@ -42,11 +43,13 @@ type Store = z.infer<typeof storeSchema>;
 type Profile = z.infer<typeof profileSchema>;
 const runnerSecretValues = new Set<string>();
 
-function sensitiveFields(profile: Profile): string[] {
+const sensitiveFields = function sensitiveFields(profile: Profile): string[] {
   return profile.sensitive ?? defaultSensitive(Object.keys(profile.fields));
-}
+};
 
-function rememberEnvironmentSecrets(store: Store): void {
+const rememberEnvironmentSecrets = function rememberEnvironmentSecrets(
+  store: Store
+): void {
   const marked = new Map(
     Object.entries(store).flatMap(([name, profile]) =>
       Object.keys(profile.fields).map(
@@ -73,18 +76,20 @@ function rememberEnvironmentSecrets(store: Store): void {
       runnerSecretValues.add(value);
     }
   }
-}
+};
 
-function environmentProfileOrigins(profile: string): string[] {
+const environmentProfileOrigins = function environmentProfileOrigins(
+  profile: string
+): string[] {
   const value = process.env[secretEnvName(profile, "ORIGINS")];
   if (!value) {
     return [];
   }
-  const origins = [...new Set(value.split(/[\s,]+/).filter(Boolean))];
+  const origins = [...new Set(value.split(/[\s,]+/u).filter(Boolean))];
   for (const origin of origins) {
     try {
       if (httpTarget(origin).origin !== origin) {
-        throw new Error();
+        throw new Error("The credential origin must be canonical");
       }
     } catch {
       throw new CodedError(
@@ -94,9 +99,9 @@ function environmentProfileOrigins(profile: string): string[] {
     }
   }
   return origins;
-}
+};
 
-export function configHome(): string {
+export const configHome = function configHome(): string {
   return path.resolve(
     process.env.SPECBOOK_HOME ??
       path.join(
@@ -104,9 +109,9 @@ export function configHome(): string {
         "specbook"
       )
   );
-}
+};
 
-async function readStore(): Promise<Store> {
+const readStore = async function readStore(): Promise<Store> {
   const file = path.join(configHome(), "credentials.json");
   try {
     const stat = await fs.lstat(file);
@@ -115,6 +120,7 @@ async function readStore(): Promise<Store> {
     }
     if (
       process.platform !== "win32" &&
+      // oxlint-disable-next-line no-bitwise -- Combine the operating-system permission or open flags required by this operation.
       (stat.mode & 0o077 || stat.uid !== process.getuid?.())
     ) {
       throw new Error(
@@ -138,9 +144,9 @@ async function readStore(): Promise<Store> {
     }
     throw error;
   }
-}
+};
 
-async function writeStore(store: Store): Promise<void> {
+const writeStore = async function writeStore(store: Store): Promise<void> {
   const directory = configHome();
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const stat = await fs.lstat(directory);
@@ -160,9 +166,9 @@ async function writeStore(store: Store): Promise<void> {
   } finally {
     await fs.rm(temporary, { force: true });
   }
-}
+};
 
-export async function addProfile(
+export const addProfile = async function addProfile(
   name: string,
   fields: Record<string, string>,
   origins: string[] = [],
@@ -193,9 +199,9 @@ export async function addProfile(
     sensitive: profile.sensitive,
     origins: profile.origins,
   };
-}
+};
 
-export async function listProfiles(): Promise<
+export const listProfiles = async function listProfiles(): Promise<
   { name: string; fields: string[]; sensitive: string[]; origins: string[] }[]
 > {
   return Object.entries(await readStore()).map(([name, profile]) => ({
@@ -204,44 +210,53 @@ export async function listProfiles(): Promise<
     sensitive: sensitiveFields(profile),
     origins: profile.origins,
   }));
-}
+};
 
-export async function removeProfile(name: string): Promise<unknown> {
+export const removeProfile = async function removeProfile(
+  name: string
+): Promise<unknown> {
   nameSchema.parse(name);
   const store = await readStore();
   const removed = Object.hasOwn(store, name);
-  delete store[name];
+  Reflect.deleteProperty(store, name);
   await writeStore(store);
   return { profile: name, removed };
-}
+};
 
-export async function resolveSecret(reference: string): Promise<string> {
+export const resolveSecret = async function resolveSecret(
+  reference: string
+): Promise<string> {
   const [profile, field, extra] = reference.split(".");
   if (extra || !field) {
     throw new Error("Use a credential reference in profile.field form");
   }
   nameSchema.parse(profile);
   nameSchema.parse(field);
-  const value = (await readStore())[profile]?.fields[field];
+  const readStoreValue1 = await readStore();
+  const value = readStoreValue1[profile]?.fields[field];
   if (value === undefined) {
     throw new Error(`Credential field ${profile}.${field} is not configured`);
   }
   return value;
-}
+};
 
-export async function secretOrigins(
+export const secretOrigins = async function secretOrigins(
   reference: string,
   baseUrl: string
 ): Promise<string[]> {
   const [profile] = reference.split(".");
-  const stored = (await readStore())[profile];
+  const readStoreValue2 = await readStore();
+  const stored = readStoreValue2[profile];
   if (!stored) {
     throw new Error(`Credential profile ${profile} is not configured`);
   }
   return stored.origins.length ? stored.origins : [new URL(baseUrl).origin];
-}
+};
 
-export async function resolveRunSecrets(refs: SecretRef[], baseUrl: string) {
+export const resolveRunSecrets = async function resolveRunSecrets(
+  refs: SecretRef[],
+  baseUrl: string
+) {
   const store = await readStore();
   const secretEnv: Record<string, string> = {};
   const byRef: Record<string, string[]> = {};
@@ -271,9 +286,9 @@ export async function resolveRunSecrets(refs: SecretRef[], baseUrl: string) {
     },
     scrub: scrubber(store),
   };
-}
+};
 
-export async function resolveRunnerSecrets(
+export const resolveRunnerSecrets = async function resolveRunnerSecrets(
   refs: SecretRef[],
   baseUrl: string,
   options: {
@@ -302,6 +317,7 @@ export async function resolveRunnerSecrets(
         .filter((ref) => !process.env[secretEnvName(ref.profile, ref.field)])
         .map((ref) => ref.profile)
     )) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const supplied = await providerProfile(
         options.command,
         profile,
@@ -335,14 +351,18 @@ export async function resolveRunnerSecrets(
         `Credential field ${ref.profile}.${ref.field} is not configured; set ${envName}, configure --secrets-command, or run specbook credentials add ${ref.profile}`
       );
     }
-    const declaredOrigins =
-      environment === undefined
-        ? provider === undefined
-          ? (profile?.origins ?? [])
-          : supplied!.origins.length
-            ? supplied!.origins
-            : environmentProfileOrigins(ref.profile)
-        : environmentProfileOrigins(ref.profile);
+    const declaredOrigins = (() => {
+      if (environment === undefined) {
+        if (provider === undefined) {
+          return profile?.origins ?? [];
+        }
+        if (requiredValue(supplied).origins.length) {
+          return requiredValue(supplied).origins;
+        }
+        return environmentProfileOrigins(ref.profile);
+      }
+      return environmentProfileOrigins(ref.profile);
+    })();
     const origins = declaredOrigins.filter((origin) =>
       sourceOrigins.includes(origin)
     );
@@ -352,12 +372,15 @@ export async function resolveRunnerSecrets(
         `Credential profile ${ref.profile} needs explicit origins matching this job; set ${secretEnvName(ref.profile, "ORIGINS")}, return provider origins, or configure credentials add ${ref.profile} --origin <allowed-origin>`
       );
     }
-    const sensitive =
-      provider !== undefined && supplied?.sensitive
-        ? supplied.sensitive.includes(ref.field)
-        : profile && Object.hasOwn(profile.fields, ref.field)
-          ? sensitiveFields(profile).includes(ref.field)
-          : isSensitiveByDefault(ref.field);
+    const sensitive = (() => {
+      if (provider !== undefined && supplied?.sensitive) {
+        return supplied.sensitive.includes(ref.field);
+      }
+      if (profile && Object.hasOwn(profile.fields, ref.field)) {
+        return sensitiveFields(profile).includes(ref.field);
+      }
+      return isSensitiveByDefault(ref.field);
+    })();
     if (sensitive) {
       runnerSecretValues.add(value);
     } else {
@@ -371,9 +394,11 @@ export async function resolveRunnerSecrets(
     secretOrigins: { defaultOrigins: sourceOrigins, byRef, publicRefs },
     scrub: scrubber(store),
   };
-}
+};
 
-function textScrubber(store: Store): (text: string) => string {
+const textScrubber = function textScrubber(
+  store: Store
+): (text: string) => string {
   rememberEnvironmentSecrets(store);
   const fields = Object.values(store).flatMap((profile) =>
     sensitiveFields(profile).flatMap((field) =>
@@ -398,23 +423,29 @@ function textScrubber(store: Store): (text: string) => string {
         ];
       })
     ),
-  ].sort((a, b) => b.length - a.length);
-  return (text) =>
-    variants.reduce(
-      (safe, value) => (value ? safe.split(value).join("[REDACTED]") : safe),
-      text
-    );
-}
+  ].toSorted((a, b) => b.length - a.length);
+  return (text) => {
+    let safe = text;
+    for (const value of variants) {
+      if (value) {
+        safe = safe.split(value).join("[REDACTED]");
+      }
+    }
+    return safe;
+  };
+};
 
-function scrubber(store: Store): (text: string) => string {
+const scrubber = function scrubber(store: Store): (text: string) => string {
   const replace = textScrubber(store);
   return (text) => scrubJsonText(text, replace);
-}
+};
 
-export async function scrub(text: string): Promise<string> {
+export const scrub = async function scrub(text: string): Promise<string> {
   return scrubber(await readStore())(text);
-}
+};
 
-export async function containsSecret(text: string): Promise<boolean> {
+export const containsSecret = async function containsSecret(
+  text: string
+): Promise<boolean> {
   return textScrubber(await readStore())(text) !== text;
-}
+};

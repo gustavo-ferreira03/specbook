@@ -36,6 +36,7 @@ import { modelRegistryPromise, modelRuntimePromise } from "../llm/runtime";
 import { storageRoot } from "../paths";
 import { createBackgroundTaskTool } from "../steward/tools";
 import { hasTunnel, tunnelStartCommand } from "../tunnel/registry";
+import { requireValue } from "../utils/require-value";
 import {
   ChatBusyError,
   clearActiveChatSession,
@@ -57,6 +58,7 @@ import {
 } from "./context-tools";
 import { createCredentialTools } from "./credential-tools";
 import { ChatTurnTimeoutError, withTurnTimeout } from "./deadline";
+// oxlint-disable-next-line import/no-cycle -- These service modules call each other after initialization; keep the existing orchestration boundary.
 import { confirmDiscoveredContext } from "./discovery";
 import {
   chatNavigationOrigins,
@@ -85,9 +87,7 @@ import { createSessionTools } from "./session-tools";
 import { createDomainTools } from "./tools";
 import type { ChatToolStepRecord } from "./types";
 
-const agentDir = path.join(storageRoot, "pi-agent");
-
-async function createResourceLoader(
+const createResourceLoader = async function createResourceLoader(
   promptText: string
 ): Promise<DefaultResourceLoader> {
   const loader = new DefaultResourceLoader({
@@ -103,18 +103,19 @@ async function createResourceLoader(
   });
   await loader.reload();
   return loader;
-}
+};
 
-export function startChatTurn(id: string, userText: string): void {
+export const startChatTurn = function startChatTurn(
+  id: string,
+  userText: string
+): void {
   if (!tryReserveChatTurn(id)) {
     throw new ChatBusyError("The agent is still replying");
   }
-  void runReservedChatTurn(id, userText, undefined, "message").catch(
-    console.error
-  );
-}
+  runReservedChatTurn(id, userText, undefined, "message").catch(console.error);
+};
 
-export async function startBranchedChatTurn(
+export const startBranchedChatTurn = async function startBranchedChatTurn(
   id: string,
   messageId: string,
   options: { editedText?: string; userOnly?: boolean } = {}
@@ -132,15 +133,12 @@ export async function startBranchedChatTurn(
   }
   const trigger: TurnTrigger =
     options.editedText === undefined ? "retry" : "edit";
-  void runReservedChatTurn(
-    id,
-    branch.text,
-    branch.sessionManager,
-    trigger
-  ).catch(console.error);
-}
+  runReservedChatTurn(id, branch.text, branch.sessionManager, trigger).catch(
+    console.error
+  );
+};
 
-export async function branchChatForTurn(
+export const branchChatForTurn = async function branchChatForTurn(
   id: string,
   messageId: string,
   options: { editedText?: string; userOnly?: boolean } = {}
@@ -153,51 +151,28 @@ export async function branchChatForTurn(
   } finally {
     releaseChatTurn(id);
   }
-}
+};
 
-export interface TurnOutcome {
-  status: "completed" | "failed" | "aborted" | "busy";
-  errorCode?: ErrorCode;
-  message?: string;
-}
-
-export async function runChatTurn(
+export const runChatTurn = async function runChatTurn(
   id: string,
   userText: string,
   existingSessionManager?: SessionManager,
   policy?: TurnPolicy
 ): Promise<TurnOutcome> {
   if (!tryReserveChatTurn(id)) {
-    return { status: "busy" };
+    return await { status: "busy" };
   }
-  return runReservedChatTurn(
+  return await runReservedChatTurn(
     id,
     userText,
     existingSessionManager,
     existingSessionManager ? "retry" : "message",
     policy
   );
-}
+};
 
-interface SessionEventValue {
-  type?: string;
-  message?: AgentMessage & {
-    usage?: Parameters<TurnMetricsRecorder["assistantMessage"]>[0]["usage"];
-  };
-  messages?: AgentMessage[];
-  assistantMessageEvent?: { type?: string; delta?: string };
-  toolName?: string;
-  toolCallId?: string;
-  isError?: boolean;
-  steering?: readonly string[];
-  followUp?: readonly string[];
-  willRetry?: boolean;
-  attempt?: number;
-  maxAttempts?: number;
-  errorMessage?: string;
-}
-
-async function runReservedChatTurn(
+// oxlint-disable-next-line complexity -- Keep the turn-runner decision tree together so state transitions and error ordering remain explicit.
+const runReservedChatTurn = async function runReservedChatTurn(
   id: string,
   userText: string,
   existingSessionManager: SessionManager | undefined,
@@ -223,7 +198,7 @@ async function runReservedChatTurn(
       return { status: "aborted", errorCode: "cancelled" };
     }
     const row = await chatsRepository.getChatRow(id);
-    sessionManager = sessionManager ?? (await openSession(id));
+    sessionManager ??= await openSession(id);
     if (!row || !sessionManager) {
       metrics.fail("error", "chat_missing");
       await fail("infrastructure", "The chat no longer exists.");
@@ -281,6 +256,7 @@ async function runReservedChatTurn(
       model: modelName || null,
     });
     const model =
+      // oxlint-disable-next-line unicorn/no-array-method-this-argument -- ModelRegistry.find accepts provider and model identifiers; it is not Array.find.
       provider && modelName ? modelRegistry.find(provider, modelName) : null;
     if (!model) {
       metrics.fail(
@@ -332,36 +308,39 @@ async function runReservedChatTurn(
         const origins = chatNavigationOrigins(startUrl, environment, profiles);
         chatBrowser = await getOrCreateChatBrowser(id, origins, environment);
         const browser = chatBrowser;
-        const basePolicy: BrowserToolPolicy = discoveryRevision
-          ? {
+        const basePolicy: BrowserToolPolicy = (() => {
+          if (discoveryRevision) {
+            return {
               ...createDiscoveryBrowserPolicy(
                 discoveryRevision,
                 browser.mcp,
                 origins
               ),
               sanitizeResult: scrub,
-            }
-          : turnPolicy?.browserScope === "explore"
-            ? {
-                ...createAutonomousBrowserPolicy(
-                  project.baseUrl,
-                  browser.mcp,
-                  origins
-                ),
-                sanitizeResult: scrub,
-              }
-            : {
-                ...createOriginBrowserPolicy(
-                  project.baseUrl,
-                  browser.mcp,
-                  origins
-                ),
-                sanitizeResult: scrub,
-              };
+            };
+          }
+          if (turnPolicy?.browserScope === "explore") {
+            return {
+              ...createAutonomousBrowserPolicy(
+                project.baseUrl,
+                browser.mcp,
+                origins
+              ),
+              sanitizeResult: scrub,
+            };
+          }
+          return {
+            ...createOriginBrowserPolicy(project.baseUrl, browser.mcp, origins),
+            sanitizeResult: scrub,
+          };
+        })();
         const policy: BrowserToolPolicy = {
           ...basePolicy,
           sendScreenshots: async () =>
-            (await getSecuritySettings()).sendScreenshotsToModel,
+            await (async () => {
+              const awaitedValue11709 = await getSecuritySettings();
+              return awaitedValue11709.sendScreenshotsToModel;
+            })(),
           beforeCall: async (toolName, args, signal) => {
             await browser.mcp.ensureBrowser(signal);
             await basePolicy.beforeCall?.(toolName, args, signal);
@@ -370,8 +349,9 @@ async function runReservedChatTurn(
           },
           afterCall: async (toolName, args, result, signal) => {
             try {
-              if (!signal?.aborted)
+              if (!signal?.aborted) {
                 await basePolicy.afterCall?.(toolName, args, result, signal);
+              }
             } finally {
               endChatBrowserTool(id, toolName);
               publishChatUpdate(id);
@@ -399,7 +379,7 @@ async function runReservedChatTurn(
       ? []
       : createCredentialTools({
           projectId: row.projectId,
-          baseUrl: storedProject!.baseUrl,
+          baseUrl: requireValue(storedProject).baseUrl,
           environment,
           chatId: id,
           mcp: chatBrowser?.mcp ?? null,
@@ -413,7 +393,7 @@ async function runReservedChatTurn(
       : createSessionTools({
           projectId: row.projectId,
           baseUrl: project.baseUrl,
-          productionBaseUrl: storedProject!.baseUrl,
+          productionBaseUrl: requireValue(storedProject).baseUrl,
           environment,
           mcp: chatBrowser?.mcp ?? null,
           workDir: chatBrowser?.workDir ?? null,
@@ -507,14 +487,18 @@ async function runReservedChatTurn(
     let timedOut = false;
     let messageAnchor: string | null = null;
     const runningSteps = new Map<string, ChatToolStepRecord>();
+    // oxlint-disable-next-line complexity -- Keep the turn-runner decision tree together so state transitions and error ordering remain explicit.
     const unsubscribe = session.subscribe((event) => {
       const value = event as unknown as SessionEventValue;
-      const messages =
-        value.type === "agent_end" && Array.isArray(value.messages)
-          ? value.messages
-          : value.message
-            ? [value.message]
-            : [];
+      const messages = (() => {
+        if (value.type === "agent_end" && Array.isArray(value.messages)) {
+          return value.messages;
+        }
+        if (value.message) {
+          return [value.message];
+        }
+        return [];
+      })();
       for (const message of messages) {
         if (
           message.role === "assistant" &&
@@ -557,10 +541,13 @@ async function runReservedChatTurn(
           const entry = manager
             .getBranch()
             .find(
-              (entry) => entry.type === "message" && entry.message === message
+              (entryValue) =>
+                entryValue.type === "message" && entryValue.message === message
             );
           const record = entry
-            ? messagesOf(id, manager).find((record) => record.id === entry.id)
+            ? messagesOf(id, manager).find(
+                (recordValue) => recordValue.id === entry.id
+              )
             : undefined;
           publishChatUpdate(id, {
             type: "message_end",
@@ -578,12 +565,12 @@ async function runReservedChatTurn(
         metrics.toolStart(toolName);
         const entry = manager
           .getBranch()
-          .reverse()
+          .toReversed()
           .find(
-            (entry) =>
-              entry.type === "message" &&
-              entry.message.role === "assistant" &&
-              entry.message.content.some(
+            (entryValue) =>
+              entryValue.type === "message" &&
+              entryValue.message.role === "assistant" &&
+              entryValue.message.content.some(
                 (part) => part.type === "toolCall" && part.id === toolCallId
               )
           );
@@ -659,6 +646,7 @@ async function runReservedChatTurn(
         async () => {
           const promptPromise = session.prompt(userText);
           for (const followUp of queuedFollowUps) {
+            // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
             await session.followUp(followUp);
           }
           await promptPromise;
@@ -740,8 +728,34 @@ async function runReservedChatTurn(
       publishChatUpdate(id, { type: "agent_status", status: "idle" });
       publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
       publishChatUpdate(id);
-      void metrics.finish();
+      metrics.finish();
     }
   }
   return outcome;
+};
+
+const agentDir = path.join(storageRoot, "pi-agent");
+
+export interface TurnOutcome {
+  status: "completed" | "failed" | "aborted" | "busy";
+  errorCode?: ErrorCode;
+  message?: string;
+}
+
+interface SessionEventValue {
+  type?: string;
+  message?: AgentMessage & {
+    usage?: Parameters<TurnMetricsRecorder["assistantMessage"]>[0]["usage"];
+  };
+  messages?: AgentMessage[];
+  assistantMessageEvent?: { type?: string; delta?: string };
+  toolName?: string;
+  toolCallId?: string;
+  isError?: boolean;
+  steering?: readonly string[];
+  followUp?: readonly string[];
+  willRetry?: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+  errorMessage?: string;
 }

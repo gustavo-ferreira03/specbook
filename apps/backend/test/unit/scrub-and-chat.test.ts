@@ -4,6 +4,7 @@ import { describe, test } from "node:test";
 import { sanitizeTechnicalDetails } from "@specbook/runtime/sanitize";
 
 import type { BrowserMcp } from "../../src/core/browser/mcp";
+import { requireValue } from "../../src/core/utils/require-value";
 import { useTempStorage } from "../helpers/storage";
 
 useTempStorage();
@@ -53,14 +54,20 @@ describe("environment credential profiles", () => {
     const typed: string[] = [];
     const mcp = {
       client: {
-        async callTool(input: { name: string; arguments: { text?: string } }) {
-          if (input.name === "browser_tabs") {
-            return {
-              content: [{ type: "text", text: `- Page URL: ${activeUrl}` }],
-            };
+        callTool(input: { name: string; arguments: { text?: string } }) {
+          try {
+            if (input.name === "browser_tabs") {
+              return Promise.resolve({
+                content: [{ type: "text", text: `- Page URL: ${activeUrl}` }],
+              });
+            }
+            typed.push(requireValue(input.arguments.text));
+            return Promise.resolve({
+              content: [{ type: "text", text: "Credential filled" }],
+            });
+          } catch (error) {
+            return Promise.reject(error);
           }
-          typed.push(input.arguments.text!);
-          return { content: [{ type: "text", text: "Credential filled" }] };
         },
       },
     } as unknown as BrowserMcp;
@@ -71,14 +78,23 @@ describe("environment credential profiles", () => {
       environment,
       mcp,
       workDir: "/tmp",
-      scrub: async (value: string) =>
-        createSecretScrubber(["production-password", "staging-password"])(
-          value
-        ),
+      scrub: (value: string) => {
+        try {
+          return Promise.resolve(
+            createSecretScrubber(["production-password", "staging-password"])(
+              value
+            )
+          );
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      },
       notify: () => {},
     };
     const fill = (input: typeof options) =>
-      createCredentialTools(input).find((tool) => tool.name === "fill_secret")!;
+      requireValue(
+        createCredentialTools(input).find((tool) => tool.name === "fill_secret")
+      );
     const params = {
       profile: "account",
       field: "password",
@@ -92,13 +108,18 @@ describe("environment credential profiles", () => {
       undefined,
       {} as never
     );
-    assert.match(JSON.stringify(blocked), /fill_secret refused/);
+    assert.match(JSON.stringify(blocked), /fill_secret refused/u);
     assert.deepEqual(typed, []);
     const ref = "SPECBOOK_SECRET_ACCOUNT_PASSWORD";
     assert.deepEqual(
-      (await resolveSecretOriginPolicy(project.id, [ref], environment)).byRef[
-        ref
-      ],
+      await (async () => {
+        const awaitedValue3562 = await resolveSecretOriginPolicy(
+          project.id,
+          [ref],
+          environment
+        );
+        return awaitedValue3562.byRef[ref];
+      })(),
       ["https://production.example.com"]
     );
     const overridden = {
@@ -114,19 +135,25 @@ describe("environment credential profiles", () => {
     );
     assert.deepEqual(typed, ["staging-password"]);
     assert.deepEqual(
-      (
-        await resolveSecretEnv(
+      await (async () => {
+        const awaitedValue4041 = await resolveSecretEnv(
           project.id,
           [ref],
           overridden.credentialOverrides
-        )
-      ).env,
+        );
+        return awaitedValue4041.env;
+      })(),
       { [ref]: "staging-password" }
     );
     assert.deepEqual(
-      (await resolveSecretOriginPolicy(project.id, [ref], overridden)).byRef[
-        ref
-      ],
+      await (async () => {
+        const awaitedValue4249 = await resolveSecretOriginPolicy(
+          project.id,
+          [ref],
+          overridden
+        );
+        return awaitedValue4249.byRef[ref];
+      })(),
       ["https://staging.example.com"]
     );
     activeUrl = project.baseUrl;
@@ -140,7 +167,7 @@ describe("environment credential profiles", () => {
           {} as never
         )
       ),
-      /fill_secret refused/
+      /fill_secret refused/u
     );
     assert.equal(typed.length, 1);
     const preview = {
@@ -162,7 +189,7 @@ describe("environment credential profiles", () => {
           {} as never
         )
       ),
-      /fill_secret refused/
+      /fill_secret refused/u
     );
     assert.equal(
       typed.length,
@@ -170,7 +197,14 @@ describe("environment credential profiles", () => {
       "a one-off preview origin does not gain credential access from a navigation allowlist"
     );
     assert.deepEqual(
-      (await resolveSecretOriginPolicy(project.id, [ref], preview)).byRef[ref],
+      await (async () => {
+        const awaitedValue5395 = await resolveSecretOriginPolicy(
+          project.id,
+          [ref],
+          preview
+        );
+        return awaitedValue5395.byRef[ref];
+      })(),
       ["https://staging.example.com"]
     );
     const session = createSessionTools({
@@ -183,31 +217,31 @@ describe("environment credential profiles", () => {
     });
     assert.match(
       JSON.stringify(
-        await session
-          .find((tool) => tool.name === "resume_session")!
-          .execute(
-            "call",
-            { profile: "account" },
-            undefined,
-            undefined,
-            {} as never
-          )
+        await requireValue(
+          session.find((tool) => tool.name === "resume_session")
+        ).execute(
+          "call",
+          { profile: "account" },
+          undefined,
+          undefined,
+          {} as never
+        )
       ),
-      /resume_session refused/
+      /resume_session refused/u
     );
     assert.match(
       JSON.stringify(
-        await session
-          .find((tool) => tool.name === "save_session")!
-          .execute(
-            "call",
-            { profile: "account" },
-            undefined,
-            undefined,
-            {} as never
-          )
+        await requireValue(
+          session.find((tool) => tool.name === "save_session")
+        ).execute(
+          "call",
+          { profile: "account" },
+          undefined,
+          undefined,
+          {} as never
+        )
       ),
-      /save_session refused/
+      /save_session refused/u
     );
     assert.equal(
       typed.length,
@@ -221,7 +255,10 @@ describe("environment credential profiles", () => {
       publicRefs: [],
     });
     assert.equal(
-      (await resolveSecretEnv(project.id, [ref])).env[ref],
+      await (async () => {
+        const awaitedValue6723 = await resolveSecretEnv(project.id, [ref]);
+        return awaitedValue6723.env[ref];
+      })(),
       "production-password"
     );
     assert.notEqual(production.id, staging.id);
@@ -264,12 +301,21 @@ describe("environment credential profiles", () => {
     const refs = ["USERNAME", "PASSWORD", "TENANT", "TOKEN"].map(
       (field) => `SPECBOOK_SECRET_ACCOUNT_${field}`
     );
-    assert.deepEqual((await resolveSecretEnv(project.id, refs)).publicRefs, [
-      refs[0],
-      refs[2],
-    ]);
     assert.deepEqual(
-      (await resolveSecretOriginPolicy(project.id, refs)).publicRefs,
+      await (async () => {
+        const awaitedValue8461 = await resolveSecretEnv(project.id, refs);
+        return awaitedValue8461.publicRefs;
+      })(),
+      [refs[0], refs[2]]
+    );
+    assert.deepEqual(
+      await (async () => {
+        const awaitedValue8584 = await resolveSecretOriginPolicy(
+          project.id,
+          refs
+        );
+        return awaitedValue8584.publicRefs;
+      })(),
       [refs[0], refs[2]]
     );
     const environment = {
@@ -281,18 +327,25 @@ describe("environment credential profiles", () => {
       credentialOverrides: { account: override.id },
     };
     assert.deepEqual(
-      (
-        await resolveSecretEnv(
+      await (async () => {
+        const awaitedValue8966 = await resolveSecretEnv(
           project.id,
           refs,
           environment.credentialOverrides
-        )
-      ).publicRefs,
+        );
+        return awaitedValue8966.publicRefs;
+      })(),
       [refs[1]]
     );
     assert.deepEqual(
-      (await resolveSecretOriginPolicy(project.id, refs, environment))
-        .publicRefs,
+      await (async () => {
+        const awaitedValue9161 = await resolveSecretOriginPolicy(
+          project.id,
+          refs,
+          environment
+        );
+        return awaitedValue9161.publicRefs;
+      })(),
       [refs[1]]
     );
     const written: string[] = [];
@@ -318,29 +371,33 @@ describe("environment credential profiles", () => {
     ];
     const mcp = {
       client: {
-        async callTool(input: {
-          name: string;
-          arguments: { function?: string };
-        }) {
-          if (input.name === "browser_tabs") {
-            return {
+        callTool(input: { name: string; arguments: { function?: string } }) {
+          try {
+            if (input.name === "browser_tabs") {
+              return Promise.resolve({
+                content: [
+                  { type: "text", text: `- Page URL: ${project.baseUrl}` },
+                ],
+              });
+            }
+            const fn = requireValue(input.arguments.function);
+            if (fn.includes("const fills =")) {
+              written.push(fn);
+              return Promise.resolve({
+                content: [{ type: "text", text: '### Result\n{"filled":1}' }],
+              });
+            }
+            return Promise.resolve({
               content: [
-                { type: "text", text: `- Page URL: ${project.baseUrl}` },
+                {
+                  type: "text",
+                  text: `### Result\n${JSON.stringify(controls)}`,
+                },
               ],
-            };
+            });
+          } catch (error) {
+            return Promise.reject(error);
           }
-          const fn = input.arguments.function!;
-          if (fn.includes("const fills =")) {
-            written.push(fn);
-            return {
-              content: [{ type: "text", text: '### Result\n{"filled":1}' }],
-            };
-          }
-          return {
-            content: [
-              { type: "text", text: `### Result\n${JSON.stringify(controls)}` },
-            ],
-          };
         },
       },
     } as unknown as BrowserMcp;
@@ -353,7 +410,9 @@ describe("environment credential profiles", () => {
       scrub: async (value) => (await projectSecretScrubber(project.id))(value),
       notify: () => {},
     });
-    const list = tools.find((tool) => tool.name === "browser_vault_list")!;
+    const list = requireValue(
+      tools.find((tool) => tool.name === "browser_vault_list")
+    );
     const result = await list.execute(
       "list",
       {},
@@ -362,8 +421,8 @@ describe("environment credential profiles", () => {
       {} as never
     );
     const output = JSON.stringify(result);
-    assert.match(output, /visible-login|visible-tenant/);
-    assert.doesNotMatch(output, /hidden-password|hidden-token/);
+    assert.match(output, /visible-login|visible-tenant/u);
+    assert.doesNotMatch(output, /hidden-password|hidden-token/u);
     assert.equal(result.content[0].type, "text");
     const { items } = JSON.parse((result.content[0] as { text: string }).text);
     assert.deepEqual(
@@ -371,7 +430,9 @@ describe("environment credential profiles", () => {
         .login_fields,
       [{ key: "username", value: "visible-login", type: "username" }]
     );
-    const fill = tools.find((tool) => tool.name === "browser_vault_fill")!;
+    const fill = requireValue(
+      tools.find((tool) => tool.name === "browser_vault_fill")
+    );
     await fill.execute(
       "fill",
       { handle: "account" },
@@ -379,16 +440,19 @@ describe("environment credential profiles", () => {
       undefined,
       {} as never
     );
-    assert.match(written[0], /hidden-password/);
-    assert.doesNotMatch(written[0], /visible-login/);
-    await updateProfile((await getProfileByName(project.id, profile.name))!, {
-      fields: fields.map((field) => ({ key: field.key, sensitive: true })),
-    });
+    assert.match(written[0], /hidden-password/u);
+    assert.doesNotMatch(written[0], /visible-login/u);
+    await updateProfile(
+      requireValue(await getProfileByName(project.id, profile.name)),
+      {
+        fields: fields.map((field) => ({ key: field.key, sensitive: true })),
+      }
+    );
     assert.doesNotMatch(
       JSON.stringify(
         await list.execute("list", {}, undefined, undefined, {} as never)
       ),
-      /visible-login/
+      /visible-login/u
     );
     await fill.execute(
       "fill",
@@ -397,18 +461,21 @@ describe("environment credential profiles", () => {
       undefined,
       {} as never
     );
-    assert.match(written[1], /visible-login/);
+    assert.match(written[1], /visible-login/u);
     const scrub = await projectSecretScrubber(project.id);
     assert.doesNotMatch(
       scrub("hidden-password hidden-token"),
-      /hidden-password|hidden-token/
+      /hidden-password|hidden-token/u
     );
-    await updateProfile((await getProfileByName(project.id, profile.name))!, {
-      fields: fields.map((field) => ({
-        key: field.key,
-        sensitive: field.key !== "password",
-      })),
-    });
+    await updateProfile(
+      requireValue(await getProfileByName(project.id, profile.name)),
+      {
+        fields: fields.map((field) => ({
+          key: field.key,
+          sensitive: field.key !== "password",
+        })),
+      }
+    );
     const publicPassword = await fill.execute(
       "fill",
       { handle: "account" },
@@ -416,9 +483,9 @@ describe("environment credential profiles", () => {
       undefined,
       {} as never
     );
-    assert.match(written[2], /visible-login/);
-    assert.doesNotMatch(written[2], /hidden-password/);
-    assert.match(JSON.stringify(publicPassword), /Submit/);
+    assert.match(written[2], /visible-login/u);
+    assert.doesNotMatch(written[2], /hidden-password/u);
+    assert.match(JSON.stringify(publicPassword), /Submit/u);
   });
 
   test("the secure login form saves a public login field and a sensitive password", async () => {
@@ -462,7 +529,7 @@ describe("environment credential profiles", () => {
       values: { username: "new@example.com", password: "new-password" },
     });
     const saved = publicProfile(
-      (await getProfileByName(project.id, "account"))!
+      requireValue(await getProfileByName(project.id, "account"))
     );
     assert.deepEqual(saved.fields, [
       { key: "email", sensitive: false, value: "new@example.com" },
@@ -495,25 +562,25 @@ describe("conversation failure messages", () => {
       assert.equal(failure.code, code);
       assert.ok(failure.nextStep);
       assert.equal(isInfrastructureFailure(failure.message), true);
-      assert.doesNotMatch(JSON.stringify(failure), /sk-secret|\/home\/server/);
+      assert.doesNotMatch(JSON.stringify(failure), /sk-secret|\/home\/server/u);
     }
     assert.match(
       browserFailureMessage(new Error("spawn Xvfb ENOENT")),
-      /required program is missing/
+      /required program is missing/u
     );
     assert.match(
       browserFailureMessage(
         new Error("Server is already active for display 118")
       ),
-      /display is already in use/
+      /display is already in use/u
     );
     assert.match(
       browserFailureMessage(new Error("EACCES /var/private")),
-      /denied permission/
+      /denied permission/u
     );
     assert.doesNotMatch(
       browserFailureMessage(new Error("Xvfb failed")),
-      /retry automatically/
+      /retry automatically/u
     );
     assert.match(
       oauthFailureMessage(
@@ -521,15 +588,15 @@ describe("conversation failure messages", () => {
           "Sign in with ChatGPT requires a device ID (UUID) for this installation"
         )
       ),
-      /initialize sign-in/
+      /initialize sign-in/u
     );
     assert.match(
       oauthFailureMessage(new Error("Port 1455 is in use")),
-      /Finish or cancel it/
+      /Finish or cancel it/u
     );
     assert.match(
       oauthFailureMessage(new Error("OAuth state mismatch")),
-      /new link/
+      /new link/u
     );
     assert.equal(
       oauthFailureMessage(
@@ -539,7 +606,7 @@ describe("conversation failure messages", () => {
     );
     assert.match(
       oauthFailureMessage(new Error("OAuth session expired")),
-      /Start sign-in again/
+      /Start sign-in again/u
     );
     assert.doesNotMatch(
       oauthFailureMessage(
@@ -547,13 +614,13 @@ describe("conversation failure messages", () => {
           "OpenAI OAuth token request failed (401): sk-secret /home/server/private"
         )
       ),
-      /sk-secret|\/home\/server|complete this response|global Settings/
+      /sk-secret|\/home\/server|complete this response|global Settings/u
     );
     const details = sanitizeTechnicalDetails(
       "Expected https://example.com/app/profile but got /home/server/storage/run/spec.ts\n    at click (/data/specbook/src/core/runner/guard.ts:1)"
     );
-    assert.match(details, /https:\/\/example.com\/app\/profile/);
-    assert.doesNotMatch(details, /\/home\/server|\/data\/specbook|at click/);
+    assert.match(details, /https:\/\/example.com\/app\/profile/u);
+    assert.doesNotMatch(details, /\/home\/server|\/data\/specbook|at click/u);
     for (const failure of [
       "The browser could not confirm the current page address. Navigate to the application before continuing.",
       "The saved standard-user session restored, but the browser could not confirm or inspect the application page address. Could you restore browser access?",
@@ -582,6 +649,7 @@ describe("conversation failure messages", () => {
       await assert.rejects(
         withTurnTimeout(
           () =>
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
             new Promise<void>((_resolve, reject) => {
               controller.signal.addEventListener(
                 "abort",
@@ -592,8 +660,14 @@ describe("conversation failure messages", () => {
                 { once: true }
               );
             }),
-          async () => {
-            controller.abort();
+          () => {
+            try {
+              controller.abort();
+
+              return Promise.resolve();
+            } catch (error) {
+              return Promise.reject(error);
+            }
           },
           5
         ),
@@ -606,9 +680,21 @@ describe("conversation failure messages", () => {
     assert.equal(registry.isChatBusy(id), false);
     assert.equal(
       await withTurnTimeout(
-        async () => "finished",
-        async () => {
-          assert.fail("completed turns must not be aborted");
+        () => {
+          try {
+            return Promise.resolve("finished");
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
+        () => {
+          try {
+            assert.fail("completed turns must not be aborted");
+
+            return Promise.resolve();
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
         50
       ),
@@ -627,11 +713,11 @@ describe("conversation failure messages", () => {
     const response = await app.request("/broken");
     assert.equal(response.status, 500);
     const body = await response.json();
-    assert.match(body.errorId, /^[a-f0-9-]{36}$/);
-    assert.match(body.error, /Try again/);
+    assert.match(body.errorId, /^[a-f0-9-]{36}$/u);
+    assert.match(body.error, /Try again/u);
     assert.doesNotMatch(
       JSON.stringify(body),
-      /sqlite|private.db|\/home\/server/
+      /sqlite|private.db|\/home\/server/u
     );
   });
 });
@@ -716,7 +802,7 @@ describe("chat registry", () => {
       "https://example.com"
     );
     const chat = await createChat(project.id);
-    const manager = (await openSession(chat.id))!;
+    const manager = requireValue(await openSession(chat.id));
     manager.appendMessage({
       role: "user",
       content: "Inspect the sign-in page.",
@@ -805,7 +891,7 @@ describe("chat registry", () => {
     } as never);
     flushSessionFile(manager);
 
-    const view = (await getChatView(chat.id))!;
+    const view = requireValue(await getChatView(chat.id));
     assert.deepEqual(
       view.messages.map((message) => message.content),
       [
@@ -841,9 +927,15 @@ describe("chat registry", () => {
     ]);
     assert.doesNotMatch(
       JSON.stringify(view),
-      /Private tool output|Private snapshot|secret-ref/
+      /Private tool output|Private snapshot|secret-ref/u
     );
-    assert.deepEqual((await getChatView(chat.id))?.toolSteps, view.toolSteps);
+    assert.deepEqual(
+      await (async () => {
+        const awaitedResult28120 = await getChatView(chat.id);
+        return awaitedResult28120?.toolSteps;
+      })(),
+      view.toolSteps
+    );
 
     manager.appendMessage({
       role: "user",
@@ -884,7 +976,7 @@ describe("chat registry", () => {
       timestamp: 13_000,
     } as never);
     flushSessionFile(manager);
-    const secondTurn = (await getChatView(chat.id))!;
+    const secondTurn = requireValue(await getChatView(chat.id));
     assert.equal(secondTurn.toolSteps.length, 4);
     assert.deepEqual(
       secondTurn.toolSteps.slice(0, 3),
@@ -892,7 +984,7 @@ describe("chat registry", () => {
       "a repeated provider tool call id must not change the earlier action"
     );
     await branchSessionForTurn(chat.id, final);
-    const retried = (await getChatView(chat.id))!;
+    const retried = requireValue(await getChatView(chat.id));
     assert.deepEqual(
       retried.messages,
       view.messages,
@@ -943,7 +1035,7 @@ describe("chat registry", () => {
     assert.equal(registry.consumeAbortRequest("chat-4"), false);
     await assert.rejects(
       registry.queueChatFollowUp("chat-4", "x"),
-      /not currently replying/
+      /not currently replying/u
     );
   });
 });
@@ -963,8 +1055,12 @@ describe("browser tool execution", () => {
     };
     const mcp = {
       client: {
-        async callTool() {
-          return result;
+        callTool() {
+          try {
+            return Promise.resolve(result);
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       },
     } as unknown as BrowserMcp;
@@ -986,26 +1082,34 @@ describe("browser tool execution", () => {
     };
     await assert.rejects(
       () => getActiveTabUrl(mcp),
-      /could not inspect its open tabs:.*EROFS/s
+      /could not inspect its open tabs:.*EROFS/su
     );
     const unavailable = {
       client: {
-        async callTool() {
-          throw new Error("Request timed out");
+        callTool() {
+          try {
+            throw new Error("Request timed out");
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       },
     } as unknown as BrowserMcp;
     await assert.rejects(
       () => getActiveTabUrl(unavailable),
-      /could not inspect its open tabs: Request timed out/
+      /could not inspect its open tabs: Request timed out/u
     );
     const controller = new AbortController();
     const reason = new Error("User cancelled the conversation");
     const cancelled = {
       client: {
-        async callTool() {
-          controller.abort(reason);
-          throw new Error("Transport closed");
+        callTool() {
+          try {
+            controller.abort(reason);
+            throw new Error("Transport closed");
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       },
     } as unknown as BrowserMcp;
@@ -1028,21 +1132,34 @@ describe("browser tool execution", () => {
         },
       ],
       client: {
-        async callTool() {
-          called = true;
-          return { isError: true, content: [{ type: "text", text: rawError }] };
+        callTool() {
+          try {
+            called = true;
+            return Promise.resolve({
+              isError: true,
+              content: [{ type: "text", text: rawError }],
+            });
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       },
     } as unknown as BrowserMcp;
-    const tool = bridgeBrowserTools(mcp, "/tmp", {
-      afterCall: async () => {
-        cleaned = true;
-        throw new Error(
-          "The browser could not confirm the current page address."
-        );
-      },
-      sanitizeResult: (value) => value.replaceAll("secret-value", "••••"),
-    })[0]!;
+    const tool = requireValue(
+      bridgeBrowserTools(mcp, "/tmp", {
+        afterCall: () => {
+          try {
+            cleaned = true;
+            throw new Error(
+              "The browser could not confirm the current page address."
+            );
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
+        sanitizeResult: (value) => value.replaceAll("secret-value", "••••"),
+      })[0]
+    );
     const result = await tool.execute(
       "call",
       {},
@@ -1052,18 +1169,24 @@ describe("browser tool execution", () => {
     );
     assert.equal((result as { isError?: boolean }).isError, true);
     assert.ok(called && cleaned);
-    assert.match(JSON.stringify(result), /EROFS/);
+    assert.match(JSON.stringify(result), /EROFS/u);
     assert.match(
       JSON.stringify(result),
-      /could not confirm the current page address/
+      /could not confirm the current page address/u
     );
-    assert.doesNotMatch(JSON.stringify(result), /secret-value/);
+    assert.doesNotMatch(JSON.stringify(result), /secret-value/u);
     called = false;
-    const denied = bridgeBrowserTools(mcp, "/tmp", {
-      beforeCall: async () => {
-        throw new Error("Origin is not allowed");
-      },
-    })[0]!;
+    const denied = requireValue(
+      bridgeBrowserTools(mcp, "/tmp", {
+        beforeCall: () => {
+          try {
+            throw new Error("Origin is not allowed");
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
+      })[0]
+    );
     const deniedResult = await denied.execute(
       "call",
       {},
@@ -1073,20 +1196,17 @@ describe("browser tool execution", () => {
     );
     assert.equal((deniedResult as { isError?: boolean }).isError, true);
     assert.equal(called, false);
-    const failed = await bridgeBrowserTools(mcp, "/tmp")[0]!.execute(
-      "call",
-      {},
-      undefined,
-      undefined,
-      {} as never
-    );
+    const failed = await requireValue(
+      bridgeBrowserTools(mcp, "/tmp")[0]
+    ).execute("call", {}, undefined, undefined, {} as never);
     assert.equal((failed as { isError?: boolean }).isError, true);
-    assert.match(JSON.stringify(failed), /EROFS/);
+    assert.match(JSON.stringify(failed), /EROFS/u);
   });
 
   test("aborts an in-flight MCP request and still runs policy cleanup", async () => {
     const controller = new AbortController();
     let markStarted!: () => void;
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
     });
@@ -1099,29 +1219,45 @@ describe("browser tool execution", () => {
         },
       ],
       client: {
-        callTool: async (
+        callTool: (
           _params: unknown,
           _schema: unknown,
           options?: { signal?: AbortSignal }
         ) => {
-          assert.equal(options?.signal, controller.signal);
-          return new Promise((_resolve, reject) => {
-            options!.signal!.addEventListener(
-              "abort",
-              () => reject(options!.signal!.reason),
-              { once: true }
+          try {
+            assert.equal(options?.signal, controller.signal);
+            return Promise.resolve(
+              // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+              new Promise((_resolve, reject) => {
+                requireValue(requireValue(options).signal).addEventListener(
+                  "abort",
+                  () =>
+                    reject(requireValue(requireValue(options).signal).reason),
+                  { once: true }
+                );
+                markStarted();
+              })
             );
-            markStarted();
-          });
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       },
     } as unknown as BrowserMcp;
-    const tool = bridgeBrowserTools(mcp, "/tmp", {
-      afterCall: async (_name, _args, _result, signal) => {
-        assert.equal(signal?.aborted, true);
-        cleaned = true;
-      },
-    })[0]!;
+    const tool = requireValue(
+      bridgeBrowserTools(mcp, "/tmp", {
+        afterCall: (_name, _args, _result, signal) => {
+          try {
+            assert.equal(signal?.aborted, true);
+            cleaned = true;
+
+            return Promise.resolve();
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
+      })[0]
+    );
     const execution = tool.execute(
       "call",
       {},
@@ -1129,7 +1265,7 @@ describe("browser tool execution", () => {
       undefined,
       {} as never
     );
-    const rejected = assert.rejects(execution, /Job budget exhausted/);
+    const rejected = assert.rejects(execution, /Job budget exhausted/u);
     await started;
     controller.abort(new Error("Job budget exhausted"));
     await rejected;
@@ -1145,12 +1281,18 @@ describe("browser tool execution", () => {
         },
       ],
       client: {
-        callTool: async () => {
-          assert.fail("Cancelled action reached the browser");
+        callTool: () => {
+          try {
+            assert.fail("Cancelled action reached the browser");
+
+            return Promise.resolve();
+          } catch (error) {
+            return Promise.reject(error);
+          }
         },
       },
     } as unknown as BrowserMcp;
-    const tool = bridgeBrowserTools(mcp, "/tmp")[0]!;
+    const tool = requireValue(bridgeBrowserTools(mcp, "/tmp")[0]);
     await assert.rejects(
       tool.execute(
         "call",
@@ -1159,21 +1301,29 @@ describe("browser tool execution", () => {
         undefined,
         {} as never
       ),
-      /Cancelled/
+      /Cancelled/u
     );
   });
 
   test("cancelling a credential request removes its form and ends the wait", async () => {
     const controller = new AbortController();
-    const tool = createCredentialTools({
-      projectId: "project",
-      chatId: "cancel-credential",
-      baseUrl: "https://example.com",
-      mcp: null,
-      workDir: null,
-      scrub: async (value) => value,
-      notify: () => {},
-    }).find((tool) => tool.name === "request_credential")!;
+    const tool = requireValue(
+      createCredentialTools({
+        projectId: "project",
+        chatId: "cancel-credential",
+        baseUrl: "https://example.com",
+        mcp: null,
+        workDir: null,
+        scrub: (value) => {
+          try {
+            return Promise.resolve(value);
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
+        notify: () => {},
+      }).find((toolInTest) => toolInTest.name === "request_credential")
+    );
     const execution = tool.execute(
       "call",
       { profileName: "admin", fields: [{ key: "password" }] },
@@ -1181,7 +1331,7 @@ describe("browser tool execution", () => {
       undefined,
       {} as never
     );
-    const rejected = assert.rejects(execution, /Cancelled/);
+    const rejected = assert.rejects(execution, /Cancelled/u);
     assert.notEqual(getPendingCredentialRequest("cancel-credential"), null);
     controller.abort(new Error("Cancelled"));
     await rejected;

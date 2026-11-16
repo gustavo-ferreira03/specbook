@@ -35,6 +35,7 @@ import {
   registerTransientSecret,
 } from "../credentials/scrub";
 import { generateTotp } from "../credentials/totp";
+import { requireValue } from "../utils/require-value";
 import {
   registerCredentialRequest,
   resolveCredentialRequest,
@@ -45,48 +46,21 @@ import type {
   CredentialRequestKind,
 } from "./credential-requests";
 
-// Ported from Hermes Agent tools/browser_vault_tool.py (MIT, Copyright (c) 2025 Nous Research).
-
-const fillSecretSchema = z.object({
-  profile: z.string(),
-  field: z.string(),
-  element: z.string(),
-  target: z.string(),
-});
-
-const requestCredentialSchema = z.object({
-  profileName: z.string(),
-  fields: z.array(z.object({ key: z.string(), label: z.string().optional() })),
-});
-
-const vaultHandleSchema = z.object({ handle: z.string() });
-const vaultOptionalHandleSchema = z.object({ handle: z.string().optional() });
-const vaultSaveLoginSchema = z.object({
-  label: z.string().optional(),
-  replace: z.boolean().optional(),
-});
-
-const LOGIN_FIELDS: CredentialRequestField[] = [
-  { key: "username", label: "Email or username", sensitive: false },
-  { key: "password", label: "Password", sensitive: true },
-];
-const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
-
-function text(value: string) {
+const text = function text(value: string) {
   return {
     content: [{ type: "text" as const, text: value }],
     details: undefined,
     terminate: false,
   };
-}
+};
 
-const json = (value: unknown) => text(JSON.stringify(value));
-
-function publicFields(profile: CredentialProfileRow) {
+const publicFields = function publicFields(profile: CredentialProfileRow) {
   return publicProfile(profile).fields;
-}
+};
 
-function publicLoginFields(profile: CredentialProfileRow) {
+const publicLoginFields = function publicLoginFields(
+  profile: CredentialProfileRow
+) {
   const keys = loginFieldKeys(profile.fields.map((field) => field.key));
   return publicFields(profile)
     .filter(
@@ -99,35 +73,41 @@ function publicLoginFields(profile: CredentialProfileRow) {
             {
               key: field.key,
               value: field.value,
-              type:
-                field.key === keys.password
-                  ? "password"
-                  : field.value.includes("@")
-                    ? "email"
-                    : /^\+?[\d\s()-]+$/.test(field.value)
-                      ? "phone"
-                      : "username",
+              type: (() => {
+                if (field.key === keys.password) {
+                  return "password";
+                }
+                if (field.value.includes("@")) {
+                  return "email";
+                }
+                if (/^\+?[\d\s()-]+$/u.test(field.value)) {
+                  return "phone";
+                }
+                return "username";
+              })(),
             },
           ]
     );
-}
+};
 
-function handleFor(label: string, origin: string): string {
+const handleFor = function handleFor(label: string, origin: string): string {
   const source =
     label.trim() ||
-    new URL(origin).hostname.replace(/^www\./, "").split(".")[0];
+    new URL(origin).hostname.replace(/^www\./u, "").split(".")[0];
   const slug = source
     .normalize("NFKD")
-    .replaceAll(/[̀-ͯ]/g, "")
+    .replaceAll(/[̀-ͯ]/gu, "")
     .toLowerCase()
-    .replaceAll(/[^a-z0-9_-]+/g, "-")
-    .replaceAll(/^[^a-z]+|-+$/g, "")
+    .replaceAll(/[^a-z0-9_-]+/gu, "-")
+    .replaceAll(/^[^a-z]+|-+$/gu, "")
     .slice(0, 40);
   return SECRET_NAME_PATTERN.test(slug) ? slug : "login";
-}
+};
 
-function evaluationResult(output: string): unknown {
-  const section = output.match(/### Result\s*\n([\s\S]*?)(?:\n### |$)/);
+const evaluationResult = function evaluationResult(output: string): unknown {
+  const section = output.match(
+    /### Result\s*\n(?<capture1>[\s\S]*?)(?:\n### |$)/u
+  );
   if (!section) {
     return null;
   }
@@ -136,36 +116,24 @@ function evaluationResult(output: string): unknown {
   } catch {
     return null;
   }
-}
+};
 
-const recentVaultFills = new WeakMap<
-  BrowserMcp,
-  { origin: string; at: number }
->();
-
-export function consumeVaultSubmit(mcp: BrowserMcp, origin: string): boolean {
+export const consumeVaultSubmit = function consumeVaultSubmit(
+  mcp: BrowserMcp,
+  origin: string
+): boolean {
   const fill = recentVaultFills.get(mcp);
   if (!fill || fill.origin !== origin || Date.now() - fill.at > 120_000) {
     return false;
   }
   recentVaultFills.delete(mcp);
   return true;
-}
+};
 
-export interface CredentialToolOptions {
-  projectId: string;
-  baseUrl: string;
-  environment?: RunEnvironment;
-  chatId: string;
-  mcp: BrowserMcp | null;
-  workDir: string | null;
-  scrub: (value: string) => Promise<string>;
-  notify: () => void;
-  canPrompt?: boolean;
-}
-
-export function createCredentialTools(options: CredentialToolOptions) {
-  async function resolveProfile(
+export const createCredentialTools = function createCredentialTools(
+  options: CredentialToolOptions
+) {
+  const resolveProfile = async function resolveProfile(
     name: string
   ): Promise<{ profile: CredentialProfileRow; allowed: Set<string> } | string> {
     const resolved = await resolveCredentialProfile(
@@ -177,9 +145,11 @@ export function createCredentialTools(options: CredentialToolOptions) {
     return typeof resolved === "string"
       ? resolved
       : { profile: resolved.profile, allowed: resolved.fillOrigins };
-  }
+  };
 
-  async function activeOrigin(signal?: AbortSignal): Promise<string | null> {
+  const activeOrigin = async function activeOrigin(
+    signal?: AbortSignal
+  ): Promise<string | null> {
     if (!options.mcp) {
       return null;
     }
@@ -195,13 +165,13 @@ export function createCredentialTools(options: CredentialToolOptions) {
     } catch {
       return null;
     }
-  }
+  };
 
-  async function evaluate(
+  const evaluate = async function evaluate(
     fn: string,
     signal?: AbortSignal
   ): Promise<{ ok: true; value: unknown } | { ok: false }> {
-    const result = await options.mcp!.client.callTool(
+    const result = await requireValue(options.mcp).client.callTool(
       { name: "browser_evaluate", arguments: { function: fn } },
       undefined,
       { signal }
@@ -213,9 +183,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       ok: true,
       value: evaluationResult(extractMcpText(result as { content?: unknown })),
     };
-  }
+  };
 
-  async function fillPage(
+  const fillPage = async function fillPage(
     origin: string,
     pick: (
       controls: ReturnType<typeof parsePageControls>
@@ -250,12 +220,15 @@ export function createCredentialTools(options: CredentialToolOptions) {
     }
     const filled = Number(outcome?.filled ?? 0);
     if (filled > 0) {
-      recentVaultFills.set(options.mcp!, { origin, at: Date.now() });
+      recentVaultFills.set(requireValue(options.mcp), {
+        origin,
+        at: Date.now(),
+      });
     }
     return { filled, tokens: [...new Set(fills.map((fill) => fill.token))] };
-  }
+  };
 
-  async function waitForUser(
+  const waitForUser = async function waitForUser(
     kind: CredentialRequestKind,
     profileName: string,
     fields: CredentialRequestField[],
@@ -282,20 +255,24 @@ export function createCredentialTools(options: CredentialToolOptions) {
     options.notify();
     signal?.throwIfAborted();
     return outcome;
-  }
+  };
 
-  async function freeHandle(base: string, origin: string): Promise<string> {
-    for (let n = 1; n < 50; n++) {
+  const freeHandle = async function freeHandle(
+    base: string,
+    origin: string
+  ): Promise<string> {
+    for (let n = 1; n < 50; n += 1) {
       const candidate = n === 1 ? base : `${base.slice(0, 36)}-${n}`;
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const resolved = await resolveProfile(candidate);
       if (typeof resolved === "string" || resolved.allowed.has(origin)) {
         return candidate;
       }
     }
     return `${base.slice(0, 30)}-${crypto.randomBytes(3).toString("hex")}`;
-  }
+  };
 
-  async function vaultFill(
+  const vaultFill = async function vaultFill(
     handle: string,
     signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
@@ -389,12 +366,15 @@ export function createCredentialTools(options: CredentialToolOptions) {
         filled_fields: outcome.filled,
         kind: "login",
         origin,
-        next:
-          passwordFilled || !values.password
-            ? `Submit. If the site then asks for a verification code, call browser_vault_enter_code with this handle${twoFactor}.`
-            : loginFields.length > 0
-              ? "Type the non-sensitive login fields, continue to the password step, then call browser_vault_fill again."
-              : "Only the username or email field was on this page. Continue to the password step, then call browser_vault_fill again.",
+        next: (() => {
+          if (passwordFilled || !values.password) {
+            return `Submit. If the site then asks for a verification code, call browser_vault_enter_code with this handle${twoFactor}.`;
+          }
+          if (loginFields.length > 0) {
+            return "Type the non-sensitive login fields, continue to the password step, then call browser_vault_fill again.";
+          }
+          return "Only the username or email field was on this page. Continue to the password step, then call browser_vault_fill again.";
+        })(),
       };
     } catch (error) {
       signal?.throwIfAborted();
@@ -407,7 +387,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
         ),
       };
     }
-  }
+  };
 
   return [
     defineTool({
@@ -455,18 +435,22 @@ export function createCredentialTools(options: CredentialToolOptions) {
         const logins = items.filter(
           (item) => "kind" in item && item.kind === "login"
         );
-        const hint =
-          logins.length === 0
-            ? "No saved logins. On a login page, call browser_vault_save_login to ask the user to save one. Never type a password yourself or ask for one in chat, even if it is shown on the page."
-            : origin &&
-                !logins.some(
-                  (item) =>
-                    item.origin === origin ||
-                    ("allowed_origins" in item &&
-                      item.allowed_origins?.includes(origin))
-                )
-              ? `No saved login for ${origin}. On its login page, call browser_vault_save_login.`
-              : undefined;
+        const hint = (() => {
+          if (logins.length === 0) {
+            return "No saved logins. On a login page, call browser_vault_save_login to ask the user to save one. Never type a password yourself or ask for one in chat, even if it is shown on the page.";
+          }
+          if (
+            origin &&
+            !logins.some(
+              (item) =>
+                item.origin === origin ||
+                ("allowed_origins" in item &&
+                  item.allowed_origins?.includes(origin))
+            )
+          ) {
+            return `No saved login for ${origin}. On its login page, call browser_vault_save_login.`;
+          }
+        })();
         return json({
           success: true,
           current_origin: origin,
@@ -483,9 +467,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       parameters: Type.Unsafe<z.infer<typeof vaultSaveLoginSchema>>(
         vaultSaveLoginSchema.toJSONSchema()
       ),
-      async execute(_id, params, signal) {
+      async execute(_id, inputParams, signal) {
         signal?.throwIfAborted();
-        params = vaultSaveLoginSchema.parse(params ?? {});
+        const params = vaultSaveLoginSchema.parse(inputParams ?? {});
         if (!options.mcp) {
           return json({
             success: false,
@@ -568,9 +552,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       parameters: Type.Unsafe<z.infer<typeof vaultHandleSchema>>(
         vaultHandleSchema.toJSONSchema()
       ),
-      async execute(_id, params, signal) {
+      async execute(_id, inputParams, signal) {
         signal?.throwIfAborted();
-        params = vaultHandleSchema.parse(params);
+        const params = vaultHandleSchema.parse(inputParams);
         return json(await vaultFill(params.handle, signal));
       },
     }),
@@ -582,9 +566,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       parameters: Type.Unsafe<z.infer<typeof vaultOptionalHandleSchema>>(
         vaultOptionalHandleSchema.toJSONSchema()
       ),
-      async execute(_id, params, signal) {
+      async execute(_id, inputParams, signal) {
         signal?.throwIfAborted();
-        params = vaultOptionalHandleSchema.parse(params ?? {});
+        const params = vaultOptionalHandleSchema.parse(inputParams ?? {});
         if (!options.mcp) {
           return json({
             success: false,
@@ -656,7 +640,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 "The user did not enter a code. Do not ask again this turn.",
             });
           }
-          code = outcome.code.replaceAll(/[\s-]/g, "");
+          code = outcome.code.replaceAll(/[\s-]/gu, "");
         }
         registerTransientSecret(options.projectId, code);
         const value = code;
@@ -689,9 +673,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       parameters: Type.Unsafe<z.infer<typeof fillSecretSchema>>(
         fillSecretSchema.toJSONSchema()
       ),
-      async execute(_id, params, signal) {
+      async execute(_id, inputParams, signal) {
         signal?.throwIfAborted();
-        params = fillSecretSchema.parse(params);
+        const params = fillSecretSchema.parse(inputParams);
         if (!options.mcp || !options.workDir) {
           return text(
             "fill_secret failed: the agent browser is not available this turn."
@@ -762,9 +746,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       parameters: Type.Unsafe<z.infer<typeof requestCredentialSchema>>(
         requestCredentialSchema.toJSONSchema()
       ),
-      async execute(_id, params, signal) {
+      async execute(_id, inputParams, signal) {
         signal?.throwIfAborted();
-        params = requestCredentialSchema.parse(params);
+        const params = requestCredentialSchema.parse(inputParams);
         if (params.fields.length === 0) {
           return text("request_credential failed: request at least one field.");
         }
@@ -789,4 +773,50 @@ export function createCredentialTools(options: CredentialToolOptions) {
       },
     }),
   ];
+};
+
+// Ported from Hermes Agent tools/browser_vault_tool.py (MIT, Copyright (c) 2025 Nous Research).
+
+const fillSecretSchema = z.object({
+  profile: z.string(),
+  field: z.string(),
+  element: z.string(),
+  target: z.string(),
+});
+
+const requestCredentialSchema = z.object({
+  profileName: z.string(),
+  fields: z.array(z.object({ key: z.string(), label: z.string().optional() })),
+});
+
+const vaultHandleSchema = z.object({ handle: z.string() });
+const vaultOptionalHandleSchema = z.object({ handle: z.string().optional() });
+const vaultSaveLoginSchema = z.object({
+  label: z.string().optional(),
+  replace: z.boolean().optional(),
+});
+
+const LOGIN_FIELDS: CredentialRequestField[] = [
+  { key: "username", label: "Email or username", sensitive: false },
+  { key: "password", label: "Password", sensitive: true },
+];
+const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+
+const json = (value: unknown) => text(JSON.stringify(value));
+
+const recentVaultFills = new WeakMap<
+  BrowserMcp,
+  { origin: string; at: number }
+>();
+
+export interface CredentialToolOptions {
+  projectId: string;
+  baseUrl: string;
+  environment?: RunEnvironment;
+  chatId: string;
+  mcp: BrowserMcp | null;
+  workDir: string | null;
+  scrub: (value: string) => Promise<string>;
+  notify: () => void;
+  canPrompt?: boolean;
 }

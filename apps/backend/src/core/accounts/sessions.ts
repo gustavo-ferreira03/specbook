@@ -9,13 +9,7 @@ import type { User } from "../../infra/repositories/accounts";
 import { publicFrontendOrigin } from "../../infra/web/security";
 import { tokenHash } from "./tokens";
 
-export const SESSION_AGE_SECONDS = 7 * 24 * 60 * 60;
-export const authEvents = new EventEmitter();
-authEvents.setMaxListeners(0);
-export { tokenHash };
-export const randomToken = () => crypto.randomBytes(32).toString("hex");
-
-export function publicUser(user: User) {
+export const publicUser = function publicUser(user: User) {
   return {
     id: user.id,
     name: user.name,
@@ -23,13 +17,13 @@ export function publicUser(user: User) {
     role: user.role,
     disabledAt: user.disabledAt,
   };
-}
+};
 
-export function requestOrigin(c: Context): string {
+export const requestOrigin = function requestOrigin(c: Context): string {
   return publicFrontendOrigin(c) || new URL(c.req.url).origin;
-}
+};
 
-export function cookieToken(
+export const cookieToken = function cookieToken(
   headers: Headers,
   name = "specbook_session"
 ): string | null {
@@ -40,23 +34,29 @@ export function cookieToken(
     })
   );
   const token = cookies.get(`__Host-${name}`) ?? cookies.get(name);
-  return token && /^[a-f0-9]{64}$/.test(token) ? token : null;
-}
+  return token && /^[a-f0-9]{64}$/u.test(token) ? token : null;
+};
 
-export async function sessionFromHeaders(headers: Headers) {
+export const sessionFromHeaders = async function sessionFromHeaders(
+  headers: Headers
+) {
   const token = cookieToken(headers);
-  return token ? accountsRepository.session(tokenHash(token)) : null;
-}
+  return await (token ? accountsRepository.session(tokenHash(token)) : null);
+};
 
-export async function accessTokenFromHeaders(
+export const accessTokenFromHeaders = async function accessTokenFromHeaders(
   headers: Headers
 ): Promise<User | null> {
   const value = headers.get("authorization");
-  const token = value?.match(/^Bearer (sb_pat_[a-f0-9]{64})$/i)?.[1];
-  return token ? accountsRepository.accessTokenUser(tokenHash(token)) : null;
-}
+  const token = value?.match(
+    /^Bearer (?<capture1>sb_pat_[a-f0-9]{64})$/iu
+  )?.[1];
+  return await (token
+    ? accountsRepository.accessTokenUser(tokenHash(token))
+    : null);
+};
 
-export function writeCookie(
+export const writeCookie = function writeCookie(
   c: Context,
   name: string,
   value: string,
@@ -71,14 +71,17 @@ export function writeCookie(
     path: "/",
     maxAge: age,
   });
-}
+};
 
-export function clearCookies(c: Context, name = "specbook_session"): void {
+export const clearCookies = function clearCookies(
+  c: Context,
+  name = "specbook_session"
+): void {
   deleteCookie(c, name, { path: "/" });
   deleteCookie(c, `__Host-${name}`, { path: "/", secure: true });
-}
+};
 
-export async function startSession(
+export const startSession = async function startSession(
   c: Context,
   user: User,
   origin?: string
@@ -95,21 +98,25 @@ export async function startSession(
     new Date(Date.now() + SESSION_AGE_SECONDS * 1000).toISOString()
   );
   writeCookie(c, "specbook_session", token, SESSION_AGE_SECONDS, origin);
-}
+};
 
-export async function revokeUserSessions(userId: string): Promise<void> {
+export const revokeUserSessions = async function revokeUserSessions(
+  userId: string
+): Promise<void> {
   await accountsRepository.revokeUserSessions(userId);
   authEvents.emit("user", userId);
-}
+};
 
-export async function watchSession(
+export const watchSession = async function watchSession(
   headers: Headers,
   close: () => void
 ): Promise<() => void> {
   const initial = await sessionFromHeaders(headers);
   if (!initial) {
     close();
-    return () => {};
+    return () => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+    };
   }
   const userChanged = (id: string) => {
     if (id === initial.user.id) {
@@ -141,4 +148,11 @@ export async function watchSession(
     close();
   }
   return cleanup;
-}
+};
+
+export const SESSION_AGE_SECONDS = 7 * 24 * 60 * 60;
+// oxlint-disable-next-line unicorn/prefer-event-target -- The Node service uses EventEmitter listener and error-event semantics across its existing callers.
+export const authEvents = new EventEmitter();
+authEvents.setMaxListeners(0);
+export { tokenHash };
+export const randomToken = () => crypto.randomBytes(32).toString("hex");

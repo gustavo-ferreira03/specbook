@@ -1,4 +1,6 @@
-export async function copyText(text: string): Promise<boolean> {
+export const copyText = async function copyText(
+  text: string
+): Promise<boolean> {
   if (
     typeof navigator !== "undefined" &&
     navigator.clipboard &&
@@ -7,7 +9,9 @@ export async function copyText(text: string): Promise<boolean> {
     try {
       await navigator.clipboard.writeText(text);
       return true;
-    } catch {}
+    } catch {
+      // Keep the last usable state if this optional operation fails.
+    }
   }
   if (typeof document === "undefined") {
     return false;
@@ -35,9 +39,11 @@ export async function copyText(text: string): Promise<boolean> {
     textarea.remove();
     previousFocus?.focus();
   }
-}
+};
 
-export function selectElementText(element: HTMLElement | null): void {
+export const selectElementText = function selectElementText(
+  element: HTMLElement | null
+): void {
   if (!element) {
     return;
   }
@@ -49,4 +55,4 @@ export function selectElementText(element: HTMLElement | null): void {
   range.selectNodeContents(element);
   selection.removeAllRanges();
   selection.addRange(range);
-}
+};

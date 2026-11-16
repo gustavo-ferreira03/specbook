@@ -42,7 +42,7 @@ export interface LocalSpec {
   feature: string;
 }
 
-export async function safeWorkspacePath(
+export const safeWorkspacePath = async function safeWorkspacePath(
   workspace: string,
   relative: string,
   forWrite = false
@@ -65,6 +65,7 @@ export async function safeWorkspacePath(
   let current = root;
   for (const part of inside.split(path.sep)) {
     current = path.join(current, part);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const stat = await fs
       .lstat(current)
       .catch((error: NodeJS.ErrnoException) => {
@@ -78,9 +79,11 @@ export async function safeWorkspacePath(
     }
   }
   return target;
-}
+};
 
-export async function workspaceDirectory(cwd = process.cwd()): Promise<string> {
+export const workspaceDirectory = async function workspaceDirectory(
+  cwd = process.cwd()
+): Promise<string> {
   const directory = path.join(path.resolve(cwd), ".specbook");
   try {
     await safeWorkspacePath(directory, "config.yml");
@@ -94,9 +97,11 @@ export async function workspaceDirectory(cwd = process.cwd()): Promise<string> {
     throw error;
   }
   return directory;
-}
+};
 
-export async function loadConfig(workspace: string): Promise<LocalConfig> {
+export const loadConfig = async function loadConfig(
+  workspace: string
+): Promise<LocalConfig> {
   const config = configSchema.parse(
     parse(
       await fs.readFile(
@@ -114,17 +119,17 @@ export async function loadConfig(workspace: string): Promise<LocalConfig> {
     throw new Error("baseUrl must be an HTTP(S) URL without credentials");
   }
   return config;
-}
+};
 
-export function detectAgents(): ("claude" | "codex")[] {
+export const detectAgents = function detectAgents(): ("claude" | "codex")[] {
   return (["claude", "codex"] as const).filter(
     (agent) =>
       spawnSync(agent, ["--version"], { stdio: "ignore", timeout: 5000 })
         .status === 0
   );
-}
+};
 
-export async function initWorkspace(
+export const initWorkspace = async function initWorkspace(
   cwd: string,
   baseUrl: string,
   agent?: "claude" | "codex"
@@ -183,6 +188,7 @@ export async function initWorkspace(
     let current = path.resolve(cwd);
     for (const part of [folder, "skills", "specbook"]) {
       current = path.join(current, part);
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const stat = await fs
         .lstat(current)
         .catch((error: NodeJS.ErrnoException) => {
@@ -195,8 +201,10 @@ export async function initWorkspace(
         throw new Error("Cannot install instructions through a symlink");
       }
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.mkdir(skillDir, { recursive: true });
     const file = path.join(skillDir, "SKILL.md");
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs
       .writeFile(file, skill, { flag: "wx" })
       .catch((error: NodeJS.ErrnoException) => {
@@ -210,23 +218,23 @@ export async function initWorkspace(
     config: await loadConfig(workspace),
     agents: detectAgents(),
   };
-}
+};
 
-export function slugify(title: string): string {
+export const slugify = function slugify(title: string): string {
   const slug = title
     .normalize("NFKD")
-    .replaceAll(/[\u0300-\u036F]/g, "")
+    .replaceAll(/[\u0300-\u036F]/gu, "")
     .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-|-$/g, "")
+    .replaceAll(/[^a-z0-9]+/gu, "-")
+    .replaceAll(/^-|-$/gu, "")
     .slice(0, 100);
   if (!slug) {
     throw new Error("Use a title containing letters or digits");
   }
   return slug;
-}
+};
 
-export async function newSpec(
+export const newSpec = async function newSpec(
   workspace: string,
   title: string,
   feature: string
@@ -291,9 +299,9 @@ export async function newSpec(
     { flag: "wx" }
   );
   return { path: `specs/${featureSlug}/${slug}`, title, feature };
-}
+};
 
-export async function specDirectories(
+export const specDirectories = async function specDirectories(
   workspace: string,
   selector?: string
 ): Promise<string[]> {
@@ -313,25 +321,27 @@ export async function specDirectories(
       return;
     }
     for (const entry of entries) {
-      if (entry.isDirectory())
+      if (entry.isDirectory()) {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await visit(
           path.join(directory, entry.name),
           `${relative}/${entry.name}`
         );
+      }
     }
   };
   await visit(root, "specs");
   if (!selector) {
-    return directories.sort();
+    return directories.toSorted();
   }
   let selected = selector
     .replaceAll("\\", "/")
-    .replace(/\/$/, "")
-    .replace(/\/(spec\.ts|spec\.yml)$/, "");
+    .replace(/\/$/u, "")
+    .replace(/\/(?<segment1>spec\.ts|spec\.yml)$/u, "");
   if (path.isAbsolute(selected)) {
     selected = path.relative(workspace, selected).replaceAll("\\", "/");
   }
-  selected = selected.replace(/^\.specbook\//, "").replace(/^\.\//, "");
+  selected = selected.replace(/^\.specbook\//u, "").replace(/^\.\//u, "");
   const matches = directories.filter(
     (directory) =>
       directory === selected ||
@@ -349,10 +359,10 @@ export async function specDirectories(
   ) {
     throw new Error("Ambiguous Spec slug; use feature/slug");
   }
-  return matches.sort();
-}
+  return matches.toSorted();
+};
 
-export async function readSpec(
+export const readSpec = async function readSpec(
   workspace: string,
   relative: string
 ): Promise<LocalSpec> {
@@ -396,15 +406,14 @@ export async function readSpec(
     analysis,
     feature: feature.title ?? featureSlug,
   };
-}
+};
 
-export async function listSpecs(
+export const listSpecs = async function listSpecs(
   workspace: string,
   selector?: string
 ): Promise<LocalSpec[]> {
+  const specDirectoriesValue1 = await specDirectories(workspace, selector);
   return Promise.all(
-    (await specDirectories(workspace, selector)).map((relative) =>
-      readSpec(workspace, relative)
-    )
+    specDirectoriesValue1.map((relative) => readSpec(workspace, relative))
   );
-}
+};

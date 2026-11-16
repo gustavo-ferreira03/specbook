@@ -14,6 +14,96 @@ import { credentialsRepository } from "../../repositories/credentials";
 import { projectsRepository } from "../../repositories/projects";
 import { access } from "../access";
 
+const mapDomainError = function mapDomainError(error: unknown): never {
+  if (
+    error instanceof Error &&
+    /Invalid|Duplicate|already exists|collides|same environment name|needs a value|at least one field/u.test(
+      error.message
+    )
+  ) {
+    throw new HTTPException(400, { message: error.message });
+  }
+  throw error;
+};
+
+export const createCredentialsRouter =
+  function createCredentialsRouter(): Hono {
+    const router = new Hono();
+
+    router.get("/projects/:id/credentials", access("viewer"), async (c) => {
+      const project = await projectsRepository.getProject(c.req.param("id"));
+      if (!project) {
+        throw new HTTPException(404, { message: "Project not found" });
+      }
+      return c.json({ profiles: await listPublicProfiles(project.id) });
+    });
+
+    router.post(
+      "/projects/:id/credentials",
+      access("editor"),
+      zValidator("json", createSchema),
+      async (c) => {
+        const project = await projectsRepository.getProject(c.req.param("id"));
+        if (!project) {
+          throw new HTTPException(404, { message: "Project not found" });
+        }
+        const profile = await createProfile(
+          project.id,
+          c.req.valid("json")
+        ).catch(mapDomainError);
+        return c.json({ profile });
+      }
+    );
+
+    router.put(
+      "/credentials/:id",
+      access("editor"),
+      zValidator("json", updateSchema),
+      async (c) => {
+        const row = await credentialsRepository.getProfile(c.req.param("id"));
+        if (!row) {
+          throw new HTTPException(404, {
+            message: "Credential profile not found",
+          });
+        }
+        const profile = await updateProfile(row, c.req.valid("json")).catch(
+          mapDomainError
+        );
+        return c.json({ profile });
+      }
+    );
+
+    router.delete("/credentials/:id", access("editor"), async (c) => {
+      const row = await credentialsRepository.getProfile(c.req.param("id"));
+      if (!row) {
+        throw new HTTPException(404, {
+          message: "Credential profile not found",
+        });
+      }
+      await deleteProfile(row);
+      return c.body(null, 204);
+    });
+
+    router.post(
+      "/chats/:chatId/credential-requests/:requestId",
+      access("editor"),
+      zValidator("json", requestResolutionSchema),
+      async (c) => {
+        const chatId = c.req.param("chatId");
+        const requestId = c.req.param("requestId");
+        return c.json(
+          await submitChatCredentials(
+            chatId,
+            requestId,
+            c.req.valid("json")
+          ).catch(mapDomainError)
+        );
+      }
+    );
+
+    return router;
+  };
+
 const fieldSchema = z.object({
   key: z.string().min(1),
   value: z.string().optional(),
@@ -40,90 +130,3 @@ const requestResolutionSchema = z.union([
     allowedOrigins: z.array(z.string()).optional(),
   }),
 ]);
-
-function mapDomainError(error: unknown): never {
-  if (
-    error instanceof Error &&
-    /Invalid|Duplicate|already exists|collides|same environment name|needs a value|at least one field/.test(
-      error.message
-    )
-  ) {
-    throw new HTTPException(400, { message: error.message });
-  }
-  throw error;
-}
-
-export function createCredentialsRouter(): Hono {
-  const router = new Hono();
-
-  router.get("/projects/:id/credentials", access("viewer"), async (c) => {
-    const project = await projectsRepository.getProject(c.req.param("id"));
-    if (!project) {
-      throw new HTTPException(404, { message: "Project not found" });
-    }
-    return c.json({ profiles: await listPublicProfiles(project.id) });
-  });
-
-  router.post(
-    "/projects/:id/credentials",
-    access("editor"),
-    zValidator("json", createSchema),
-    async (c) => {
-      const project = await projectsRepository.getProject(c.req.param("id"));
-      if (!project) {
-        throw new HTTPException(404, { message: "Project not found" });
-      }
-      const profile = await createProfile(
-        project.id,
-        c.req.valid("json")
-      ).catch(mapDomainError);
-      return c.json({ profile });
-    }
-  );
-
-  router.put(
-    "/credentials/:id",
-    access("editor"),
-    zValidator("json", updateSchema),
-    async (c) => {
-      const row = await credentialsRepository.getProfile(c.req.param("id"));
-      if (!row) {
-        throw new HTTPException(404, {
-          message: "Credential profile not found",
-        });
-      }
-      const profile = await updateProfile(row, c.req.valid("json")).catch(
-        mapDomainError
-      );
-      return c.json({ profile });
-    }
-  );
-
-  router.delete("/credentials/:id", access("editor"), async (c) => {
-    const row = await credentialsRepository.getProfile(c.req.param("id"));
-    if (!row) {
-      throw new HTTPException(404, { message: "Credential profile not found" });
-    }
-    await deleteProfile(row);
-    return c.body(null, 204);
-  });
-
-  router.post(
-    "/chats/:chatId/credential-requests/:requestId",
-    access("editor"),
-    zValidator("json", requestResolutionSchema),
-    async (c) => {
-      const chatId = c.req.param("chatId");
-      const requestId = c.req.param("requestId");
-      return c.json(
-        await submitChatCredentials(
-          chatId,
-          requestId,
-          c.req.valid("json")
-        ).catch(mapDomainError)
-      );
-    }
-  );
-
-  return router;
-}

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 
-export function loadPrompt(name: string): string {
+export const loadPrompt = function loadPrompt(name: string): string {
   return readFileSync(
-    new URL(`./prompts/${name}`, import.meta.url),
+    new URL(`prompts/${name}`, import.meta.url),
     "utf-8"
   ).trimEnd();
-}
+};

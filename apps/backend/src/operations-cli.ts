@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-async function main(): Promise<void> {
+const main = async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const storageIndex = args.indexOf("--storage");
   if (storageIndex !== -1) {
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   } finally {
     await release();
   }
-}
+};
 
 await main().catch((error: unknown) => {
   process.stderr.write(

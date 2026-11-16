@@ -5,16 +5,16 @@ import type { Project } from "../infra/repositories/projects";
 import { repoBare } from "./repo/bare";
 import { repoGit } from "./repo/git";
 
-export function publicProject(project: Project) {
+export const publicProject = function publicProject(project: Project) {
   return {
     id: project.id,
     name: project.name,
     baseUrl: project.baseUrl,
     createdAt: project.createdAt,
   };
-}
+};
 
-export async function createProject(
+export const createProject = async function createProject(
   name: string,
   baseUrl: string
 ): Promise<Project> {
@@ -31,4 +31,4 @@ export async function createProject(
     throw error;
   }
   return project;
-}
+};

@@ -17,13 +17,8 @@ import { areSpecsLocked, withSpecLock } from "../specs/lifecycle";
 import { withFileQueue } from "./file-queue";
 import type { RetentionCleanup, RetentionSettings } from "./schemas";
 
-const DAY_MS = 86_400_000;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-let timer: NodeJS.Timeout | undefined;
-let processing: Promise<RetentionCleanup> | null = null;
-
-async function entries(directory: string) {
-  return fs
+const entries = async function entries(directory: string) {
+  return await fs
     .readdir(directory, { withFileTypes: true })
     .catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") {
@@ -31,9 +26,9 @@ async function entries(directory: string) {
       }
       throw error;
     });
-}
+};
 
-async function protectedRuns(): Promise<Set<string>> {
+const protectedRuns = async function protectedRuns(): Promise<Set<string>> {
   const [decisions, activeJobs] = await Promise.all([
     db.select().from(inboxItems).where(eq(inboxItems.status, "pending")),
     db
@@ -50,22 +45,24 @@ async function protectedRuns(): Promise<Set<string>> {
       .select()
       .from(jobs)
       .where(inArray(jobs.id, [...decisionJobs]))) {
-      if (job.runId) ids.add(job.runId);
+      if (job.runId) {
+        ids.add(job.runId);
+      }
     }
   }
   for (const item of decisions) {
     const references =
       JSON.stringify(item.payload).match(
-        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu
       ) ?? [];
     for (const id of references) {
       ids.add(id);
     }
   }
   return ids;
-}
+};
 
-async function removeVideos(
+const removeVideos = async function removeVideos(
   directory: string,
   cutoff: number
 ): Promise<number> {
@@ -73,14 +70,20 @@ async function removeVideos(
   for (const entry of await entries(directory)) {
     const file = path.join(directory, entry.name);
     if (entry.isDirectory()) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       removed += await removeVideos(file, cutoff);
     } else if (
       entry.isFile() &&
       entry.name.endsWith(".webm") &&
-      (await fs.stat(file)).mtimeMs < cutoff
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      (await (async () => {
+        const awaitedValue2511 = await fs.stat(file);
+        return awaitedValue2511.mtimeMs;
+      })()) < cutoff
     ) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await fs.rm(file);
-      removed++;
+      removed += 1;
     }
   }
   if (removed && path.basename(directory) === "report") {
@@ -92,6 +95,7 @@ async function removeVideos(
       const file = path.resolve(directory, manifest.video);
       const exists =
         file.startsWith(`${path.resolve(directory)}${path.sep}`) &&
+        // oxlint-disable-next-line promise/prefer-catch -- Only handle rejection of the original operation; errors in the success handler must still propagate.
         (await fs.lstat(file).then(
           (stat) => stat.isFile(),
           () => false
@@ -105,10 +109,13 @@ async function removeVideos(
     }
   }
   return removed;
-}
+};
 
-async function pruneMetrics(file: string, cutoff: number): Promise<number> {
-  return withFileQueue(file, async () => {
+const pruneMetrics = async function pruneMetrics(
+  file: string,
+  cutoff: number
+): Promise<number> {
+  return await withFileQueue(file, async () => {
     const text = await fs
       .readFile(file, "utf-8")
       .catch((error: NodeJS.ErrnoException) => {
@@ -125,10 +132,12 @@ async function pruneMetrics(file: string, cutoff: number): Promise<number> {
       try {
         const row = JSON.parse(line) as { at?: string; startedAt?: string };
         if (Date.parse(row.at ?? row.startedAt ?? "") < cutoff) {
-          removed++;
+          removed += 1;
           return false;
         }
-      } catch {}
+      } catch {
+        /* Cleanup is best effort after the operation has completed or failed. */
+      }
       return true;
     });
     if (removed) {
@@ -136,9 +145,10 @@ async function pruneMetrics(file: string, cutoff: number): Promise<number> {
     }
     return removed;
   });
-}
+};
 
-async function clean(
+// oxlint-disable-next-line complexity -- Keep the retention decision tree together so state transitions and error ordering remain explicit.
+const clean = async function clean(
   settings: RetentionSettings,
   now: number
 ): Promise<RetentionCleanup> {
@@ -157,6 +167,7 @@ async function clean(
   const batches = [];
   for (const entry of await entries(runBatchesDir)) {
     if (entry.isDirectory() && uuid.test(entry.name)) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const batch = await getRunBatch(entry.name);
       if (batch) {
         batches.push(batch);
@@ -184,7 +195,9 @@ async function clean(
     changed = false;
     for (const run of rows) {
       if (run.retryOf && (kept.has(run.id) || kept.has(run.retryOf))) {
-        if (!kept.has(run.id) || !kept.has(run.retryOf)) changed = true;
+        if (!kept.has(run.id) || !kept.has(run.retryOf)) {
+          changed = true;
+        }
         kept.add(run.id);
         kept.add(run.retryOf);
       }
@@ -195,11 +208,12 @@ async function clean(
         Date.parse(batch.startedAt) >= now - settings.batchDays * DAY_MS ||
         batch.specs.some((spec) => kept.has(spec.runId))
       ) {
-        for (const spec of batch.specs)
+        for (const spec of batch.specs) {
           if (!kept.has(spec.runId)) {
             kept.add(spec.runId);
             changed = true;
           }
+        }
       }
     }
   }
@@ -207,6 +221,7 @@ async function clean(
     if (areSpecsLocked([run.specId])) {
       continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await withSpecLock(run.specId, async () => {
       const currentProtection = await protectedRuns();
       if (
@@ -227,12 +242,15 @@ async function clean(
           .delete(runs)
           .where(and(eq(runs.id, run.id), eq(runs.status, run.status)));
         await fs.rm(directory, { recursive: true, force: true });
-        result.removedRuns++;
+        result.removedRuns += 1;
       }
     });
   }
   const remaining = new Set(
-    (await db.select({ id: runs.id }).from(runs)).map((run) => run.id)
+    await (async () => {
+      const awaitedValue6965 = await db.select({ id: runs.id }).from(runs);
+      return awaitedValue6965.map((run) => run.id);
+    })()
   );
   for (const batch of batches) {
     if (
@@ -246,9 +264,11 @@ async function clean(
       Date.parse(batch.startedAt) < now - settings.batchDays * DAY_MS &&
       batch.specs.every((spec) => !remaining.has(spec.runId))
     ) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await fs.rm(directory, { recursive: true, force: true });
-      result.removedBatches++;
+      result.removedBatches += 1;
     } else if (batch.specs.every((spec) => !protectedIds.has(spec.runId))) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       result.removedVideos += await removeVideos(
         directory,
         now - settings.videoDays * DAY_MS
@@ -256,6 +276,7 @@ async function clean(
     }
   }
   for (const name of ["chat-turns.jsonl", "agent-events.jsonl"]) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     result.removedMetrics += await pruneMetrics(
       path.join(storageRoot, "metrics", name),
       now - settings.metricDays * DAY_MS
@@ -267,43 +288,55 @@ async function clean(
     if (
       entry.isDirectory() &&
       uuid.test(entry.name) &&
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       (await removeInactiveBrowserData(
         entry.name,
         now - settings.browserProfileDays * DAY_MS
       ))
     ) {
-      result.removedBrowserProfiles++;
+      result.removedBrowserProfiles += 1;
     }
   }
   await settingsRepository.recordRetentionCleanup(result);
   return result;
-}
+};
 
-export function cleanupRetention(now = Date.now()): Promise<RetentionCleanup> {
+export const cleanupRetention = function cleanupRetention(
+  now = Date.now()
+): Promise<RetentionCleanup> {
   return (processing ??= settingsRepository
     .getRetention()
     .then(({ settings }) => clean(settings, now))
     .finally(() => {
       processing = null;
     }));
-}
+};
 
-export function startRetentionMonitor(): void {
+export const startRetentionMonitor = function startRetentionMonitor(): void {
   if (process.env.SPECBOOK_RETENTION_ENABLED === "false" || timer) {
     return;
   }
   timer = setInterval(
     () =>
-      void cleanupRetention().catch((error) =>
+      // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+      cleanupRetention().catch((error) =>
         logger.warn("retention cleanup failed", { error })
       ),
     60 * 60_000
   );
   timer.unref();
-}
+};
 
-export async function stopRetentionMonitor(): Promise<void> {
-  clearInterval(timer);
-  timer = undefined;
-  await processing?.catch(() => undefined);
-}
+export const stopRetentionMonitor =
+  async function stopRetentionMonitor(): Promise<void> {
+    clearInterval(timer);
+    timer = undefined;
+    await processing?.catch(() => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+    });
+  };
+
+const DAY_MS = 86_400_000;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+let timer: NodeJS.Timeout | undefined;
+let processing: Promise<RetentionCleanup> | null = null;

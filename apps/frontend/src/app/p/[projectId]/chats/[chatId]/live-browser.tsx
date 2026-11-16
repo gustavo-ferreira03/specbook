@@ -3,27 +3,29 @@
 import { Monitor } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 
-import { VncViewer } from "@/components/VncViewer";
-import type { VncStatus } from "@/components/VncViewer";
+import { VncViewer } from "@/components/vnc-viewer";
+import type { VncStatus } from "@/components/vnc-viewer";
 import { cn } from "@/lib/utils";
 
 const WIDE_QUERY = "(min-width: 1280px)";
 
-function subscribeWide(listener: () => void) {
+const subscribeWide = function subscribeWide(listener: () => void) {
   const query = window.matchMedia(WIDE_QUERY);
   query.addEventListener("change", listener);
   return () => query.removeEventListener("change", listener);
-}
+};
 
-export function useWideLayout(): boolean {
+export const useWideLayout = function useWideLayout(): boolean {
   return useSyncExternalStore(
     subscribeWide,
     () => window.matchMedia(WIDE_QUERY).matches,
     () => false
   );
-}
+};
 
-export function originOf(url: string | null | undefined): string {
+export const originOf = function originOf(
+  url: string | null | undefined
+): string {
   if (!url) {
     return "";
   }
@@ -32,7 +34,7 @@ export function originOf(url: string | null | undefined): string {
   } catch {
     return url;
   }
-}
+};
 
 const STATUS_COPY: Record<VncStatus, { label: string; dot: string }> = {
   connecting: { label: "Connecting", dot: "status-pulse bg-ink-subtle" },
@@ -40,7 +42,7 @@ const STATUS_COPY: Record<VncStatus, { label: string; dot: string }> = {
   error: { label: "Disconnected", dot: "bg-danger" },
 };
 
-export function LiveBrowser({
+export const LiveBrowser = function LiveBrowser({
   sessionId,
   origin,
   variant,
@@ -77,10 +79,7 @@ export function LiveBrowser({
             {origin}
           </span>
         )}
-        <span
-          className="text-meta text-ink-muted ml-auto flex shrink-0 items-center gap-1.5"
-          role="status"
-        >
+        <output className="text-meta text-ink-muted ml-auto flex shrink-0 items-center gap-1.5">
           <span
             className={cn("size-1.5 rounded-full", copy.dot)}
             aria-hidden="true"
@@ -88,7 +87,7 @@ export function LiveBrowser({
           <span className={status === "connected" ? "sr-only" : undefined}>
             {copy.label}
           </span>
-        </span>
+        </output>
       </header>
       <div
         className={cn(
@@ -103,4 +102,4 @@ export function LiveBrowser({
       </p>
     </section>
   );
-}
+};

@@ -25,57 +25,7 @@ import {
 import { settingsRepository } from "../../repositories/settings";
 import { access } from "../access";
 
-type OAuthStatus = "pending" | "done" | "error";
-type OAuthPrompt =
-  | {
-      type: "select";
-      message: string;
-      options: { id: string; label: string; description?: string }[];
-    }
-  | {
-      type: "text" | "secret" | "manual_code";
-      message: string;
-      placeholder?: string;
-    };
-
-interface OAuthSession {
-  provider: string;
-  status: OAuthStatus;
-  controller: AbortController;
-  timeout: NodeJS.Timeout;
-  url?: string;
-  userCode?: string;
-  verificationUri?: string;
-  error?: string;
-  prompt?: OAuthPrompt;
-  promptInput?: string;
-  resolvePromptInput?: (input: string) => void;
-}
-
-interface ProviderInfo {
-  id: string;
-  name: string;
-  configured: boolean;
-  authMethods: ("oauth" | "api_key")[];
-  models: { id: string; label: string }[];
-}
-
-const OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
-const OAUTH_RESULT_TTL_MS = 60 * 1000;
-const oauthSessions = new Map<string, OAuthSession>();
-const llmPatchSchema = z
-  .object({
-    provider: z.string().trim().optional(),
-    model: z.string().trim().optional(),
-  })
-  .strict();
-const apiKeySchema = z.object({ apiKey: z.string().trim().min(1) }).strict();
-const oauthInputSchema = z
-  .object({ sessionId: z.string().uuid(), input: z.string() })
-  .strict();
-const agentSettingsSchema = z.object({ paused: z.boolean() }).strict();
-
-function providerIds(
+const providerIds = function providerIds(
   modelRegistry: Awaited<typeof modelRegistryPromise>,
   modelRuntime: ModelRuntime
 ): Set<string> {
@@ -86,9 +36,9 @@ function providerIds(
       .filter((provider) => provider.auth.oauth)
       .map((provider) => provider.id),
   ]);
-}
+};
 
-function requireProvider(
+const requireProvider = function requireProvider(
   provider: string,
   modelRegistry: Awaited<typeof modelRegistryPromise>,
   modelRuntime: ModelRuntime
@@ -96,9 +46,9 @@ function requireProvider(
   if (!providerIds(modelRegistry, modelRuntime).has(provider)) {
     throw new HTTPException(400, { message: "Unknown LLM provider" });
   }
-}
+};
 
-function requireOAuthProvider(
+const requireOAuthProvider = function requireOAuthProvider(
   provider: string,
   modelRuntime: ModelRuntime
 ): string {
@@ -108,9 +58,12 @@ function requireOAuthProvider(
     });
   }
   return provider;
-}
+};
 
-function removeOAuthSession(id: string, abort: boolean): void {
+const removeOAuthSession = function removeOAuthSession(
+  id: string,
+  abort: boolean
+): void {
   const session = oauthSessions.get(id);
   if (!session) {
     return;
@@ -120,17 +73,21 @@ function removeOAuthSession(id: string, abort: boolean): void {
   if (abort) {
     session.controller.abort();
   }
-}
+};
 
-function removeProviderOAuthSessions(provider: string): void {
+const removeProviderOAuthSessions = function removeProviderOAuthSessions(
+  provider: string
+): void {
   for (const [id, session] of oauthSessions) {
     if (session.provider === provider) {
       removeOAuthSession(id, true);
     }
   }
-}
+};
 
-function createOAuthSession(provider: string): [string, OAuthSession] {
+const createOAuthSession = function createOAuthSession(
+  provider: string
+): [string, OAuthSession] {
   removeProviderOAuthSessions(provider);
   const id = crypto.randomUUID();
   const controller = new AbortController();
@@ -147,17 +104,20 @@ function createOAuthSession(provider: string): [string, OAuthSession] {
   };
   oauthSessions.set(id, session);
   return [id, session];
-}
+};
 
-function updateOAuthSession(id: string, update: Partial<OAuthSession>): void {
+const updateOAuthSession = function updateOAuthSession(
+  id: string,
+  update: Partial<OAuthSession>
+): void {
   const session = oauthSessions.get(id);
   if (!session) {
     return;
   }
   Object.assign(session, update);
-}
+};
 
-function finishOAuthSession(
+const finishOAuthSession = function finishOAuthSession(
   id: string,
   status: "done" | "error",
   error?: string
@@ -177,28 +137,37 @@ function finishOAuthSession(
     OAUTH_RESULT_TTL_MS
   );
   session.timeout.unref();
-}
+};
 
-async function saveOAuthCredentials(id: string): Promise<void> {
+// oxlint-disable-next-line require-await -- Keep synchronous callback failures as promise rejections for the OAuth completion API.
+const saveOAuthCredentials = async function saveOAuthCredentials(
+  id: string
+): Promise<void> {
   const session = oauthSessions.get(id);
   if (!session) {
     return;
   }
   finishOAuthSession(id, "done");
   discoverPendingProjectContexts();
-}
+};
 
-function failOAuthSession(id: string, error: unknown): void {
+const failOAuthSession = function failOAuthSession(
+  id: string,
+  error: unknown
+): void {
   finishOAuthSession(id, "error", oauthFailureMessage(error));
-}
+};
 
-function waitForPromptInput(session: OAuthSession): Promise<string> {
+const waitForPromptInput = function waitForPromptInput(
+  session: OAuthSession
+): Promise<string> {
   if (session.promptInput !== undefined) {
     const input = session.promptInput;
     delete session.promptInput;
     session.prompt = undefined;
     return Promise.resolve(input);
   }
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
   return new Promise((resolve, reject) => {
     const onAbort = () => reject(new Error("OAuth session expired"));
     if (session.controller.signal.aborted) {
@@ -215,9 +184,11 @@ function waitForPromptInput(session: OAuthSession): Promise<string> {
       once: true,
     });
   });
-}
+};
 
-function publicOAuthPrompt(prompt: AuthPrompt): OAuthPrompt {
+const publicOAuthPrompt = function publicOAuthPrompt(
+  prompt: AuthPrompt
+): OAuthPrompt {
   if (prompt.type === "select") {
     return {
       type: "select",
@@ -234,9 +205,12 @@ function publicOAuthPrompt(prompt: AuthPrompt): OAuthPrompt {
     message: prompt.message,
     ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
   };
-}
+};
 
-function handleOAuthEvent(id: string, event: AuthEvent): void {
+const handleOAuthEvent = function handleOAuthEvent(
+  id: string,
+  event: AuthEvent
+): void {
   if (event.type === "auth_url") {
     updateOAuthSession(id, { url: event.url });
   }
@@ -246,9 +220,9 @@ function handleOAuthEvent(id: string, event: AuthEvent): void {
       verificationUri: event.verificationUri,
     });
   }
-}
+};
 
-function createOAuthInteraction(
+const createOAuthInteraction = function createOAuthInteraction(
   id: string,
   session: OAuthSession
 ): AuthInteraction {
@@ -257,17 +231,17 @@ function createOAuthInteraction(
     notify: (event) => handleOAuthEvent(id, event),
     prompt: async (prompt: AuthPrompt) => {
       updateOAuthSession(id, { prompt: publicOAuthPrompt(prompt) });
-      return waitForPromptInput(session);
+      return await waitForPromptInput(session);
     },
   };
-}
+};
 
-function startOAuthLogin(
+const startOAuthLogin = function startOAuthLogin(
   id: string,
   session: OAuthSession,
   modelRuntime: ModelRuntime
 ): void {
-  void settingsRepository
+  settingsRepository
     .getLlmDeviceId()
     .then((deviceId) =>
       modelRuntime.login(
@@ -278,10 +252,11 @@ function startOAuthLogin(
       )
     )
     .then(() => saveOAuthCredentials(id))
+    // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
     .catch((error) => failOAuthSession(id, error));
-}
+};
 
-function listProviders(
+const listProviders = function listProviders(
   modelRegistry: Awaited<typeof modelRegistryPromise>,
   modelRuntime: ModelRuntime
 ): ProviderInfo[] {
@@ -299,11 +274,15 @@ function listProviders(
   return [...modelsByProvider.entries()]
     .map(([id, models]) => {
       const auth = modelRuntime.getProvider(id)?.auth;
-      const authMethods: ProviderInfo["authMethods"] = auth?.oauth
-        ? auth.apiKey
-          ? ["oauth", "api_key"]
-          : ["oauth"]
-        : ["api_key"];
+      const authMethods: ProviderInfo["authMethods"] = (() => {
+        if (auth?.oauth) {
+          if (auth.apiKey) {
+            return ["oauth", "api_key"];
+          }
+          return ["oauth"];
+        }
+        return ["api_key"];
+      })();
       return {
         id,
         name: modelRegistry.getProviderDisplayName(id),
@@ -312,7 +291,7 @@ function listProviders(
         models,
       };
     })
-    .sort((left, right) => {
+    .toSorted((left, right) => {
       if (left.configured !== right.configured) {
         return left.configured ? -1 : 1;
       }
@@ -323,9 +302,9 @@ function listProviders(
       }
       return left.name.localeCompare(right.name);
     });
-}
+};
 
-export function createSettingsRouter(): Hono {
+export const createSettingsRouter = function createSettingsRouter(): Hono {
   const router = new Hono();
 
   router.post("/settings/llm/test", access("admin"), async (c) => {
@@ -385,11 +364,7 @@ export function createSettingsRouter(): Hono {
       throw new HTTPException(400, { message: "Provide a valid pause state" });
     }
     const paused = await settingsRepository.setAgentPaused(body.data.paused);
-    if (paused) {
-      await pauseAgentJobs();
-    } else {
-      await resumeAgentJobs();
-    }
+    await (paused ? pauseAgentJobs() : resumeAgentJobs());
     return c.json({ paused });
   });
 
@@ -398,7 +373,8 @@ export function createSettingsRouter(): Hono {
     const current = await settingsRepository.getLlmSettings();
     const model =
       current.provider && current.model
-        ? modelRegistry.find(current.provider, current.model)
+        ? // oxlint-disable-next-line unicorn/no-array-method-this-argument -- ModelRegistry.find accepts provider and model identifiers; it is not Array.find.
+          modelRegistry.find(current.provider, current.model)
         : null;
     return c.json({
       ready: Boolean(model && modelRegistry.hasConfiguredAuth(model)),
@@ -433,6 +409,7 @@ export function createSettingsRouter(): Hono {
       return c.json(await settingsRepository.updateLlmSettings(updated));
     }
     requireProvider(updated.provider, modelRegistry, modelRuntime);
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument, unicorn/prefer-array-some -- ModelRegistry.find accepts provider and model identifiers; it is not Array.find. ModelRegistry.find looks up a model by two identifiers and has no Array.some equivalent.
     if (!modelRegistry.find(updated.provider, updated.model)) {
       throw new HTTPException(400, {
         message: "Unknown model for this provider",
@@ -458,10 +435,14 @@ export function createSettingsRouter(): Hono {
         throw new HTTPException(400, { message: "apiKey is required" });
       }
       removeProviderOAuthSessions(provider);
-      await llmCredentials.modify(provider, async () => ({
-        type: "api_key",
-        key: body.data.apiKey,
-      }));
+      await llmCredentials.modify(
+        provider,
+        async () =>
+          await {
+            type: "api_key",
+            key: body.data.apiKey,
+          }
+      );
       await modelRuntime.refresh({
         allowNetwork: false,
         providers: [provider],
@@ -577,4 +558,54 @@ export function createSettingsRouter(): Hono {
   );
 
   return router;
+};
+
+type OAuthStatus = "pending" | "done" | "error";
+type OAuthPrompt =
+  | {
+      type: "select";
+      message: string;
+      options: { id: string; label: string; description?: string }[];
+    }
+  | {
+      type: "text" | "secret" | "manual_code";
+      message: string;
+      placeholder?: string;
+    };
+
+interface OAuthSession {
+  provider: string;
+  status: OAuthStatus;
+  controller: AbortController;
+  timeout: NodeJS.Timeout;
+  url?: string;
+  userCode?: string;
+  verificationUri?: string;
+  error?: string;
+  prompt?: OAuthPrompt;
+  promptInput?: string;
+  resolvePromptInput?: (input: string) => void;
 }
+
+interface ProviderInfo {
+  id: string;
+  name: string;
+  configured: boolean;
+  authMethods: ("oauth" | "api_key")[];
+  models: { id: string; label: string }[];
+}
+
+const OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
+const OAUTH_RESULT_TTL_MS = 60 * 1000;
+const oauthSessions = new Map<string, OAuthSession>();
+const llmPatchSchema = z
+  .object({
+    provider: z.string().trim().optional(),
+    model: z.string().trim().optional(),
+  })
+  .strict();
+const apiKeySchema = z.object({ apiKey: z.string().trim().min(1) }).strict();
+const oauthInputSchema = z
+  .object({ sessionId: z.string().uuid(), input: z.string() })
+  .strict();
+const agentSettingsSchema = z.object({ paused: z.boolean() }).strict();

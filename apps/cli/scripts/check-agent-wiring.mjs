@@ -18,7 +18,7 @@ import { initWorkspace, newSpec } from "../src/workspace.ts";
 // Model requests go to this script's loopback stub; no paid agent request is made.
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "specbook-wiring-"));
 const previousSpecbookHome = process.env.SPECBOOK_HOME;
-const previousLauncher = process.argv[1];
+const [, previousLauncher] = process.argv;
 process.env.SPECBOOK_HOME = path.join(root, "credentials");
 process.argv[1] = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const app = path.join(root, "app");
@@ -43,6 +43,8 @@ test("Probe", async ({ page, step, secret }) => {
     await step("Open the app", async () => {
         await page.goto("/");
         await page.getByRole("textbox").fill(secret("missing", "password"));
+    });
+    await step("The app loads.", async () => {
         await expect(page.locator("body")).toBeVisible();
     });
 });
@@ -57,10 +59,15 @@ const transport = new StdioClientTransport({
 });
 const client = new Client({ name: "specbook-wiring-check", version: "1.0.0" });
 let server;
+const resultText = (result) =>
+  result.content
+    .map((item) => (item.type === "text" ? item.text : ""))
+    .join("");
+
 try {
   await client.connect(transport);
   const listed = await client.listTools();
-  const names = listed.tools.map((tool) => tool.name).sort();
+  const names = listed.tools.map((tool) => tool.name).toSorted();
   assert.equal(names.length, 17);
   for (const name of [
     "ask_question",
@@ -74,10 +81,7 @@ try {
       "object"
     );
   }
-  const resultText = (result) =>
-    result.content
-      .map((item) => (item.type === "text" ? item.text : ""))
-      .join("");
+
   const call = (name, args = {}) => client.callTool({ name, arguments: args });
   assert.equal(
     resultText(await call("credentials_list")).includes(sentinel),
@@ -88,37 +92,30 @@ try {
   );
   assert.equal(read.includes(sentinel), false);
   assert.equal(read.includes("[REDACTED]"), true);
-  assert.equal(
-    (await call("spec_write", { path: "../app.ts", content: "bad" })).isError,
-    true
-  );
-  assert.equal(
-    (
-      await call("spec_write", {
-        path: `${selectedPath}/spec.ts`,
-        content: sentinel,
-      })
-    ).isError,
-    true
-  );
+  const callValue1 = await call("spec_write", {
+    path: "../app.ts",
+    content: "bad",
+  });
+  assert.equal(callValue1.isError, true);
+  const callValue2 = await call("spec_write", {
+    path: `${selectedPath}/spec.ts`,
+    content: sentinel,
+  });
+  assert.equal(callValue2.isError, true);
   const lastRun = await call("run_spec", { path: selectedPath });
   assert.equal(lastRun.isError, true);
-  assert.match(resultText(lastRun), /not configured/);
+  assert.match(resultText(lastRun), /not configured/u);
   const rejectedRun = await call("run_spec", { path: selectedPath });
   assert.equal(rejectedRun.isError, true);
-  assert.match(resultText(rejectedRun), /three-run limit/);
+  assert.match(resultText(rejectedRun), /three-run limit/u);
   const outside = path.join(root, "outside");
   await fs.mkdir(outside);
   await fs.symlink(outside, path.join(workspace, "specs/probe/escape"), "dir");
-  assert.equal(
-    (
-      await call("spec_write", {
-        path: "specs/probe/escape/spec.ts",
-        content: "bad",
-      })
-    ).isError,
-    true
-  );
+  const callValue3 = await call("spec_write", {
+    path: "specs/probe/escape/spec.ts",
+    content: "bad",
+  });
+  assert.equal(callValue3.isError, true);
   assert.deepEqual(await fs.readdir(outside), []);
   await fs.unlink(path.join(workspace, "specs/probe/escape"));
   await assert.rejects(client.listResources());
@@ -149,47 +146,38 @@ try {
       arguments: { path: selectedPath },
     });
     assert.equal(retry.isError, true);
-    assert.match(resultText(retry), /three-run limit/);
+    assert.match(resultText(retry), /three-run limit/u);
     const resumedCall = (name, args = {}) =>
       restarted.callTool({ name, arguments: args });
-    assert.equal(
-      (
-        await resumedCall("request_credentials", {
-          message: "Need a login",
-          profile: "missing",
-          fields: ["password"],
-        })
-      ).isError,
-      true
-    );
+    const resumedCallValue4 = await resumedCall("request_credentials", {
+      message: "Need a login",
+      profile: "missing",
+      fields: ["password"],
+    });
+    assert.equal(resumedCallValue4.isError, true);
     await resumedCall("credentials_list");
-    assert.equal(
-      (
-        await resumedCall("request_credentials", {
-          message: "Need a login",
-          profile: "probe",
-          fields: ["password"],
-        })
-      ).isError,
-      true
+    const resumedCallValue5 = await resumedCall("request_credentials", {
+      message: "Need a login",
+      profile: "probe",
+      fields: ["password"],
+    });
+    assert.equal(resumedCallValue5.isError, true);
+    const resumedCallValue6 = await resumedCall("ask_question", {
+      message: sentinel,
+    });
+    assert.equal(resumedCallValue6.isError, true);
+    const readFileValue7 = await fs.readFile(
+      path.join(workspace, selectedPath, "spec.ts"),
+      "utf-8"
     );
-    assert.equal(
-      (await resumedCall("ask_question", { message: sentinel })).isError,
-      true
-    );
-    const source = (
-      await fs.readFile(path.join(workspace, selectedPath, "spec.ts"), "utf-8")
-    ).replace(`// ${sentinel}`, "");
-    for (let index = 0; index < 2; index++) {
-      assert.equal(
-        (
-          await resumedCall("spec_write", {
-            path: `${selectedPath}/spec.ts`,
-            content: source,
-          })
-        ).isError,
-        undefined
-      );
+    const source = readFileValue7.replace(`// ${sentinel}`, "");
+    for (let index = 0; index < 2; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      const resumedCallValue8 = await resumedCall("spec_write", {
+        path: `${selectedPath}/spec.ts`,
+        content: source,
+      });
+      assert.equal(resumedCallValue8.isError, undefined);
     }
     const saved = JSON.parse(
       await fs.readFile(path.join(session, "state.json"), "utf-8")
@@ -199,18 +187,14 @@ try {
       `${selectedPath}/spec.ts`,
       `${selectedPath}/spec.ts`,
     ]);
-    assert.equal(
-      (
-        await resumedCall("propose_specs", {
-          message: "Pick coverage",
-          proposals: [
-            { title: "Login", why: "Check sign in", feature: "Account" },
-            { title: "Cart", why: "Check cart contents", feature: "Shopping" },
-          ],
-        })
-      ).isError,
-      undefined
-    );
+    const resumedCallValue9 = await resumedCall("propose_specs", {
+      message: "Pick coverage",
+      proposals: [
+        { title: "Login", why: "Check sign in", feature: "Account" },
+        { title: "Cart", why: "Check cart contents", feature: "Shopping" },
+      ],
+    });
+    assert.equal(resumedCallValue9.isError, undefined);
     const outcome = JSON.parse(
       await fs.readFile(path.join(session, "outcome.json"), "utf-8")
     );
@@ -219,16 +203,14 @@ try {
       outcome.proposals.map((proposal) => proposal.number),
       [1, 2]
     );
-    assert.equal(
-      (await resumedCall("report_done", { message: "Cannot end twice" }))
-        .isError,
-      true
-    );
+    const resumedCallValue10 = await resumedCall("report_done", {
+      message: "Cannot end twice",
+    });
+    assert.equal(resumedCallValue10.isError, true);
     if (process.platform !== "win32") {
-      assert.equal(
-        (await fs.stat(path.join(session, "outcome.json"))).mode & 0o777,
-        0o600
-      );
+      const statValue11 = await fs.stat(path.join(session, "outcome.json"));
+      // oxlint-disable-next-line no-bitwise -- Combine the operating-system permission or open flags required by this operation.
+      assert.equal(statValue11.mode & 0o777, 0o600);
     }
   } finally {
     await restarted.close();
@@ -252,11 +234,11 @@ try {
         stderr: "pipe",
       })
     );
-    assert.equal(
-      (await completed.callTool({ name: "credentials_list", arguments: {} }))
-        .isError,
-      true
-    );
+    const callToolValue12 = await completed.callTool({
+      name: "credentials_list",
+      arguments: {},
+    });
+    assert.equal(callToolValue12.isError, true);
   } finally {
     await completed.close();
   }
@@ -302,6 +284,7 @@ try {
       })
     );
     for (const proposalNumber of [undefined, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const result = await selectionClient.callTool({
         name: "run_spec",
         arguments: {
@@ -310,20 +293,20 @@ try {
         },
       });
       assert.equal(result.isError, true);
-      assert.match(resultText(result), /Pass a proposalNumber/);
+      assert.match(resultText(result), /Pass a proposalNumber/u);
     }
     const combined = await selectionClient.callTool({
       name: "run_spec",
       arguments: { path: selectedPath, proposalNumber: 2 },
     });
     assert.equal(combined.isError, true);
-    assert.match(resultText(combined), /distinct Spec/);
+    assert.match(resultText(combined), /distinct Spec/u);
     const accepted = await selectionClient.callTool({
       name: "run_spec",
       arguments: { path: selectedPath, proposalNumber: 1 },
     });
     assert.equal(accepted.isError, true);
-    assert.match(resultText(accepted), /three-run limit/);
+    assert.match(resultText(accepted), /three-run limit/u);
     await fs.writeFile(
       path.join(selectionSession, "turn.json"),
       JSON.stringify({ id: randomUUID() }),
@@ -334,16 +317,12 @@ try {
       arguments: { path: "specs/probe/probe/spec.ts", content: "stale turn" },
     });
     assert.equal(stale.isError, true);
-    assert.match(resultText(stale), /turn was replaced/);
-    assert.equal(
-      (
-        await fs.readFile(
-          path.join(workspace, selectedPath, "spec.ts"),
-          "utf-8"
-        )
-      ).includes("stale turn"),
-      false
+    assert.match(resultText(stale), /turn was replaced/u);
+    const readFileValue13 = await fs.readFile(
+      path.join(workspace, selectedPath, "spec.ts"),
+      "utf-8"
     );
+    assert.equal(readFileValue13.includes("stale turn"), false);
   } finally {
     await selectionClient.close();
   }
@@ -373,7 +352,9 @@ try {
     ],
   ]) {
     const outcomeSession = path.join(root, tool);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.mkdir(outcomeSession, { mode: 0o700 });
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.writeFile(
       path.join(outcomeSession, "state.json"),
       JSON.stringify(emptyAgentState()),
@@ -384,6 +365,7 @@ try {
       version: "1.0.0",
     });
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await outcomeClient.connect(
         new StdioClientTransport({
           command: process.execPath,
@@ -399,16 +381,20 @@ try {
         })
       );
       if (tool === "request_credentials") {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await outcomeClient.callTool({
           name: "credentials_list",
           arguments: {},
         });
       }
-      assert.equal(
-        (await outcomeClient.callTool({ name: tool, arguments: args })).isError,
-        undefined
-      );
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      const callToolValue14 = await outcomeClient.callTool({
+        name: tool,
+        arguments: args,
+      });
+      assert.equal(callToolValue14.isError, undefined);
       const outcome = JSON.parse(
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fs.readFile(path.join(outcomeSession, "outcome.json"), "utf-8")
       );
       assert.equal(outcome.status, expectedStatus);
@@ -417,11 +403,16 @@ try {
           outcome.pendingAction.command,
           "specbook credentials add missing"
         );
-        assert.match(outcome.message, /Profile: missing/);
-        assert.match(outcome.message, /Fields: username, password/);
-        assert.match(outcome.message, /specbook credentials add missing/);
+        assert.equal(outcome.message, "Need a login");
+        assert.deepEqual(outcome.pendingAction, {
+          type: "credentials",
+          profile: "missing",
+          fields: ["username", "password"],
+          command: "specbook credentials add missing",
+        });
       }
     } finally {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await outcomeClient.close();
     }
   }
@@ -469,10 +460,13 @@ try {
           ? flattenTools(tool.tools, `${namespace + tool.name}__`)
           : [namespace + (tool.name ?? tool.type)]
       );
-    modelRequest = { body: parsed, tools: flattenTools(parsed.tools).sort() };
+    modelRequest = {
+      body: parsed,
+      tools: flattenTools(parsed.tools).toSorted(),
+    };
     if (expectedAgent === "claude") {
       const message = {
-        id: `msg_${++sequence}`,
+        id: `msg_${(sequence += 1)}`,
         type: "message",
         role: "assistant",
         model: parsed.model,
@@ -524,7 +518,7 @@ try {
     }
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     const item = {
-      id: `msg_${++sequence}`,
+      id: `msg_${(sequence += 1)}`,
       type: "message",
       role: "assistant",
       content: [{ type: "output_text", text: marker, annotations: [] }],
@@ -566,19 +560,24 @@ try {
       events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")
     );
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
+  await new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
   const address = `http://127.0.0.1:${server.address().port}`;
   for (const agent of ["codex", "claude"]) {
     expectedAgent = agent;
     const agentSession = path.join(root, agent);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.mkdir(agentSession, { mode: 0o700 });
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.writeFile(
       path.join(agentSession, "state.json"),
       JSON.stringify(emptyAgentState()),
       { mode: 0o600 }
     );
     let sessionId;
-    for (let turn = 0; turn < 2; turn++) {
+    for (let turn = 0; turn < 2; turn += 1) {
       modelRequest = undefined;
       let invocation;
       const previousKey =
@@ -587,6 +586,7 @@ try {
         agent === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
       process.env[keyName] = "probe";
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         invocation = await prepareAgentInvocation(
           agent,
           workspace,
@@ -603,7 +603,7 @@ try {
         throw error;
       } finally {
         if (previousKey === undefined) {
-          delete process.env[keyName];
+          Reflect.deleteProperty(process.env, keyName);
         } else {
           process.env[keyName] = previousKey;
         }
@@ -634,6 +634,7 @@ try {
       );
       let persistedId;
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         const result = await executeAgent(
           invocation,
           turn ? "What marker did you just say?" : "Say a marker.",
@@ -653,7 +654,7 @@ try {
         if (sessionId) {
           assert.equal(result.sessionId, sessionId);
         } else {
-          sessionId = result.sessionId;
+          ({ sessionId } = result);
         }
         assert.ok(modelRequest, `${agent} did not make a model request`);
         if (turn) {
@@ -674,7 +675,7 @@ try {
         const expected = [
           ...names.map((name) => `mcp__specbook__${name}`),
           ...resourceWrappers,
-        ].sort();
+        ].toSorted();
         assert.deepEqual(exposed, expected);
         console.log(
           JSON.stringify({
@@ -695,7 +696,14 @@ try {
   }
 } finally {
   await client.close();
-  await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
+  await new Promise((resolve) => {
+    if (server) {
+      server.close(resolve);
+    } else {
+      resolve();
+    }
+  });
   await fs.rm(root, { recursive: true, force: true });
   if (previousSpecbookHome === undefined) {
     delete process.env.SPECBOOK_HOME;

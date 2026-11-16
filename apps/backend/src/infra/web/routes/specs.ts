@@ -22,65 +22,7 @@ import { projectsRepository } from "../../repositories/projects";
 import { specsRepository } from "../../repositories/specs";
 import { access } from "../access";
 
-const editFilesSchema = z
-  .object({
-    yaml: z.string().optional(),
-    testSource: z.string().optional(),
-  })
-  .refine((body) => body.yaml !== undefined || body.testSource !== undefined, {
-    message: "Provide yaml and/or testSource content",
-  });
-
-const repoPathSchema = z
-  .string()
-  .max(500)
-  .regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/);
-const publishSchema = z
-  .object({
-    environment: z.string().trim().min(1).max(80).optional(),
-    specs: z
-      .array(
-        z
-          .object({
-            path: repoPathSchema,
-            baseRevision: z
-              .string()
-              .regex(/^[a-f0-9]{64}$/)
-              .nullable(),
-            files: z
-              .object({
-                "spec.yml": z.string().max(100_000),
-                "spec.ts": z.string().max(100_000),
-              })
-              .strict(),
-            feature: z
-              .object({ path: repoPathSchema, source: z.string().max(100_000) })
-              .strict(),
-          })
-          .strict()
-      )
-      .min(1)
-      .max(100),
-  })
-  .strict();
-
-const updateSpecSchema = z
-  .object({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
-    humanSpec: humanSpecSchema.optional(),
-  })
-  .refine(
-    (body) =>
-      body.title !== undefined ||
-      body.description !== undefined ||
-      body.humanSpec !== undefined,
-    {
-      message: "Provide at least one of title, description, or humanSpec",
-    }
-  );
-
-function mapManualError(error: unknown): never {
+const mapManualError = function mapManualError(error: unknown): never {
   if (error instanceof HTTPException) {
     throw error;
   }
@@ -95,14 +37,14 @@ function mapManualError(error: unknown): never {
   }
   if (
     error instanceof Error &&
-    /unfinished rebase|uncommitted changes/.test(error.message)
+    /unfinished rebase|uncommitted changes/u.test(error.message)
   ) {
     throw new HTTPException(409, { message: error.message });
   }
   throw error;
-}
+};
 
-export function createSpecsRouter(): Hono {
+export const createSpecsRouter = function createSpecsRouter(): Hono {
   const router = new Hono();
 
   router.get("/projects/:id/specs/files", access("viewer"), async (c) => {
@@ -171,6 +113,7 @@ export function createSpecsRouter(): Hono {
     if (!spec) {
       throw new HTTPException(404, { message: "Spec not found" });
     }
+    // oxlint-disable-next-line unicorn/prefer-number-coercion -- Retain parseInt numeric-prefix handling and its existing fallback for command and HTTP inputs.
     const limit = Number.parseInt(c.req.query("limit") ?? "", 10);
     return c.json(
       await specDetail(
@@ -223,4 +166,62 @@ export function createSpecsRouter(): Hono {
   });
 
   return router;
-}
+};
+
+const editFilesSchema = z
+  .object({
+    yaml: z.string().optional(),
+    testSource: z.string().optional(),
+  })
+  .refine((body) => body.yaml !== undefined || body.testSource !== undefined, {
+    message: "Provide yaml and/or testSource content",
+  });
+
+const repoPathSchema = z
+  .string()
+  .max(500)
+  .regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/u);
+const publishSchema = z
+  .object({
+    environment: z.string().trim().min(1).max(80).optional(),
+    specs: z
+      .array(
+        z
+          .object({
+            path: repoPathSchema,
+            baseRevision: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/u)
+              .nullable(),
+            files: z
+              .object({
+                "spec.yml": z.string().max(100_000),
+                "spec.ts": z.string().max(100_000),
+              })
+              .strict(),
+            feature: z
+              .object({ path: repoPathSchema, source: z.string().max(100_000) })
+              .strict(),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict();
+
+const updateSpecSchema = z
+  .object({
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+    humanSpec: humanSpecSchema.optional(),
+  })
+  .refine(
+    (body) =>
+      body.title !== undefined ||
+      body.description !== undefined ||
+      body.humanSpec !== undefined,
+    {
+      message: "Provide at least one of title, description, or humanSpec",
+    }
+  );

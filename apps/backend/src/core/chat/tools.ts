@@ -27,30 +27,28 @@ import { executeSpec } from "../runner/run";
 import { withSpecLock } from "../specs/lifecycle";
 import type { TurnMetricsRecorder, ValidatorRejection } from "./metrics";
 
-const RUN_SPEC_FAIL_REASON_LIMIT = 2000;
-
-function text(value: string) {
+const text = function text(value: string) {
   return {
     content: [{ type: "text" as const, text: value }],
     details: undefined,
     terminate: false,
   };
-}
+};
 
-function truncate(value: string, limit: number): string {
+const truncate = function truncate(value: string, limit: number): string {
   return value.length > limit
     ? `${value.slice(0, limit)}... (truncated)`
     : value;
-}
+};
 
-function failedStepOf(run: object): string | null {
+const failedStepOf = function failedStepOf(run: object): string | null {
   const { failedStep } = run as { failedStep?: unknown };
   return typeof failedStep === "string" && failedStep.trim()
     ? failedStep.trim()
     : null;
-}
+};
 
-function sourceRejection(
+const sourceRejection = function sourceRejection(
   testSource: string,
   humanSpec: HumanSpec
 ): { rule: ValidatorRejection["rule"]; error: string } | null {
@@ -60,20 +58,16 @@ function sourceRejection(
   }
   const stepsError = stepTitlesError(analysis.analysis.steps, humanSpec);
   return stepsError ? { rule: "named_steps", error: stepsError } : null;
-}
+};
 
-function rejectionText(tool: string, error: string): string {
+const rejectionText = function rejectionText(
+  tool: string,
+  error: string
+): string {
   return `The spec.ts source was rejected: ${error}\nOnly the Playwright subset described in your Playwright rules is allowed. Fix the file and call ${tool} again.`;
-}
+};
 
-export interface DomainToolOptions {
-  baseUrl?: string;
-  environment?: RunEnvironment;
-  scrub?: (value: string) => Promise<string>;
-  metrics?: TurnMetricsRecorder;
-}
-
-export function createDomainTools(
+export const createDomainTools = function createDomainTools(
   projectId: string,
   options: DomainToolOptions = {}
 ) {
@@ -219,7 +213,7 @@ export function createDomainTools(
         fixProposalSchema.toJSONSchema()
       ),
       async execute(_id, params) {
-        return withSpecLock(params.specId, async () => {
+        return await withSpecLock(params.specId, async () => {
           const spec = await specsRepository.getSpec(params.specId);
           if (!spec || spec.projectId !== projectId) {
             return text(`Spec ${params.specId} not found in this project.`);
@@ -330,4 +324,13 @@ export function createDomainTools(
       },
     }),
   ];
+};
+
+const RUN_SPEC_FAIL_REASON_LIMIT = 2000;
+
+export interface DomainToolOptions {
+  baseUrl?: string;
+  environment?: RunEnvironment;
+  scrub?: (value: string) => Promise<string>;
+  metrics?: TurnMetricsRecorder;
 }

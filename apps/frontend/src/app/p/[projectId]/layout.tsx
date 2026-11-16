@@ -1,7 +1,7 @@
-import { Sidebar } from "@/components/Sidebar";
-import { ProjectOverviewProvider } from "@/lib/projectOverview";
+import { Sidebar } from "@/components/sidebar";
+import { ProjectOverviewProvider } from "@/lib/project-overview";
 
-export default async function ProjectLayout({
+const ProjectLayout = async function ProjectLayout({
   children,
   params,
 }: {
@@ -26,4 +26,5 @@ export default async function ProjectLayout({
       </div>
     </ProjectOverviewProvider>
   );
-}
+};
+export default ProjectLayout;

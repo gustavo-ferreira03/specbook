@@ -4,7 +4,7 @@ import https from "node:https";
 import { httpTarget, resolveTarget } from "@specbook/runtime/network/targets";
 import type { AddressResolver } from "@specbook/runtime/network/targets";
 
-export async function postWebhook(
+export const postWebhook = async function postWebhook(
   value: string,
   payload: Record<string, unknown>,
   options: {
@@ -20,6 +20,7 @@ export async function postWebhook(
     options.resolver
   );
   const body = JSON.stringify(payload);
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
   return new Promise<number>((resolve, reject) => {
     const request = (url.protocol === "https:" ? https : http).request(
       url,
@@ -31,10 +32,13 @@ export async function postWebhook(
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body),
         },
+        // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
         lookup: (_hostname, lookupOptions, callback) =>
           lookupOptions.all
-            ? callback(null, [address])
-            : callback(null, address.address, address.family),
+            ? // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+              callback(null, [address])
+            : // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+              callback(null, address.address, address.family),
       },
       (response) => {
         resolve(response.statusCode ?? 502);
@@ -44,4 +48,4 @@ export async function postWebhook(
     request.on("error", reject);
     request.end(body);
   });
-}
+};

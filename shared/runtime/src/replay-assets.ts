@@ -13,7 +13,9 @@ export interface ReplayRecording {
   events: ReplayEvent[];
 }
 
-export function isReplayEvents(value: unknown): value is ReplayEvent[] {
+export const isReplayEvents = function isReplayEvents(
+  value: unknown
+): value is ReplayEvent[] {
   return (
     Array.isArray(value) &&
     value.length >= 2 &&
@@ -31,14 +33,16 @@ export function isReplayEvents(value: unknown): value is ReplayEvent[] {
     value.some((event) => event.type === 2) &&
     value.some((event) => event.type === 4)
   );
-}
+};
 
-export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
+export const restoreReplayEvents = function restoreReplayEvents(
+  value: unknown
+): ReplayEvent[] | null {
   // This function is also embedded in the offline report; keep it self-contained.
   const limit = 64 * 1024 * 1024;
   const maxEvents = 250_000;
   const encoder = new TextEncoder();
-  const image = /^data:image\/[^,\s]+,/i;
+  const image = /^data:image\/[^,\s]+,/iu;
   let bytes = 0;
   const packed = !Array.isArray(value);
   let source: unknown = value;
@@ -172,7 +176,7 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
       ) {
         return null;
       }
-      assets = recording.assets;
+      ({ assets } = recording);
       source = recording.events;
     }
     if (
@@ -204,9 +208,9 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
   } catch {
     return null;
   }
-}
+};
 
-export function packReplayEvents(
+export const packReplayEvents = function packReplayEvents(
   events: ReplayEvent[]
 ): ReplayRecording | null {
   const source = restoreReplayEvents(events);
@@ -226,12 +230,12 @@ export function packReplayEvents(
   };
   const pack = (value: unknown): unknown => {
     if (typeof value === "string") {
-      if (/^data:image\/[^,\s]+,/i.test(value)) {
+      if (/^data:image\/[^,\s]+,/iu.test(value)) {
         return asset(value);
       }
       const matches = [
         ...value.matchAll(
-          /data:image\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=]+/gi
+          /data:image\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=]+/giu
         ),
       ];
       if (!matches.length) {
@@ -240,11 +244,26 @@ export function packReplayEvents(
       const parts: (string | { __specbookReplayAsset: number })[] = [];
       let position = 0;
       for (const match of matches) {
-        if (match.index! > position) {
+        if (
+          (() => {
+            const presentValue = match.index;
+            if (presentValue === null || presentValue === undefined) {
+              throw new Error("Expected an existing value");
+            }
+            return presentValue;
+          })() > position
+        ) {
           parts.push(value.slice(position, match.index));
         }
         parts.push(asset(match[0]));
-        position = match.index! + match[0].length;
+        position =
+          (() => {
+            const presentValue = match.index;
+            if (presentValue === null || presentValue === undefined) {
+              throw new Error("Expected an existing value");
+            }
+            return presentValue;
+          })() + match[0].length;
       }
       if (position < value.length) {
         parts.push(value.slice(position));
@@ -272,4 +291,4 @@ export function packReplayEvents(
   } catch {
     return null;
   }
-}
+};

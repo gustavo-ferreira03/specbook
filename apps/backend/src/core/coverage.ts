@@ -19,29 +19,21 @@ import {
   specYamlFile,
 } from "./repo/writer";
 
-type CoverageStatus = "covered" | "partial" | "uncovered";
-export interface CoverageArea {
-  name: string;
-  routes: string[];
-  coverage: CoverageStatus;
-  reason: string;
-  featureId: string | null;
-  specs: { id: string; title: string }[];
-  uncoveredRoutes: string[];
-}
-
-function routePath(value: string): string | null {
+const routePath = function routePath(value: string): string | null {
   try {
     const url = new URL(value, "https://coverage.invalid");
     return ["http:", "https:"].includes(url.protocol)
-      ? `${url.pathname.replace(/\/$/, "") || "/"}${url.hash}`
+      ? `${url.pathname.replace(/\/$/u, "") || "/"}${url.hash}`
       : null;
   } catch {
     return null;
   }
-}
+};
 
-function matchesRoute(route: string, tested: string): boolean {
+const matchesRoute = function matchesRoute(
+  route: string,
+  tested: string
+): boolean {
   const expected = routePath(route)?.split("/");
   const actual = routePath(tested)?.split("/");
   return Boolean(
@@ -51,13 +43,14 @@ function matchesRoute(route: string, tested: string): boolean {
     expected.every(
       (part, index) =>
         part === actual[index] ||
-        (/^:[\w-]+$|^%7B[\w-]+%7D$/i.test(part) && Boolean(actual[index]))
+        (/^:[\w-]+$|^%7B[\w-]+%7D$/iu.test(part) && Boolean(actual[index]))
     )
   );
-}
+};
 
-function testedRoutes(source: string): string[] {
+const testedRoutes = function testedRoutes(source: string): string[] {
   const routes = new Set<string>();
+  // oxlint-disable-next-line complexity -- Keep the coverage decision tree together so state transitions and error ordering remain explicit.
   const visit = (node: t.Node) => {
     if (
       node.type === "CallExpression" &&
@@ -80,14 +73,19 @@ function testedRoutes(source: string): string[] {
         member.object.callee.name === "expect" &&
         member.object.arguments[0]?.type === "Identifier" &&
         member.object.arguments[0].name === "page";
-      const argument = node.arguments[0];
-      const value =
-        argument?.type === "StringLiteral"
-          ? argument.value
-          : argument?.type === "TemplateLiteral" &&
-              argument.expressions.length === 0
-            ? argument.quasis[0]?.value.cooked
-            : null;
+      const [argument] = node.arguments;
+      const value = (() => {
+        if (argument?.type === "StringLiteral") {
+          return argument.value;
+        }
+        if (
+          argument?.type === "TemplateLiteral" &&
+          argument.expressions.length === 0
+        ) {
+          return argument.quasis[0]?.value.cooked;
+        }
+        return null;
+      })();
       if ((fixtureCall || assertion) && value && routePath(value)) {
         routes.add(value);
       }
@@ -99,8 +97,9 @@ function testedRoutes(source: string): string[] {
             child &&
             typeof child === "object" &&
             typeof child.type === "string"
-          )
+          ) {
             visit(child);
+          }
         }
       } else if (
         value &&
@@ -114,18 +113,11 @@ function testedRoutes(source: string): string[] {
   };
   visit(parse(source, { sourceType: "module", plugins: ["typescript"] }));
   return [...routes];
-}
+};
 
-interface Implementation {
-  valid: boolean;
-  routes: string[];
-}
-const analyses = new Map<
-  string,
-  { sourceHash: string; markdownHash: string; result: Implementation }
->();
-
-async function implementation(spec: Spec): Promise<Implementation> {
+const implementation = async function implementation(
+  spec: Spec
+): Promise<Implementation> {
   if (spec.status === "invalid") {
     return { valid: false, routes: [] };
   }
@@ -159,20 +151,27 @@ async function implementation(spec: Spec): Promise<Implementation> {
   } catch {
     return { valid: false, routes: [] };
   }
-}
+};
 
-function subtree(rootId: string, features: Feature[]): Set<string> {
+const subtree = function subtree(
+  rootId: string,
+  features: Feature[]
+): Set<string> {
   const ids = new Set([rootId]);
   for (let size = 0; size !== ids.size;) {
-    size = ids.size;
+    ({ size } = ids);
     for (const feature of features) {
-      if (feature.parentId && ids.has(feature.parentId)) ids.add(feature.id);
+      if (feature.parentId && ids.has(feature.parentId)) {
+        ids.add(feature.id);
+      }
     }
   }
   return ids;
-}
+};
 
-export async function projectCoverage(projectId: string) {
+export const projectCoverage = async function projectCoverage(
+  projectId: string
+) {
   const [revision, features, specs] = await Promise.all([
     projectContextsRepository.getLatestConfirmedProjectContext(projectId),
     featuresRepository.listFeatures(projectId),
@@ -204,21 +203,30 @@ export async function projectCoverage(projectId: string) {
       const uncoveredRoutes = routes.filter(
         (route) => !valid.some((spec) => testsRoute(spec, route))
       );
-      const coverage: CoverageStatus = matched.length
-        ? valid.length && !uncoveredRoutes.length
-          ? "covered"
-          : "partial"
-        : "uncovered";
-      const reason =
-        coverage === "uncovered"
-          ? "No Specs yet"
-          : valid.length
-            ? coverage === "partial"
-              ? `${uncoveredRoutes.length} known route${uncoveredRoutes.length === 1 ? "" : "s"} without a Spec`
-              : routes.length
-                ? "Specs reach every known route"
-                : "Specs exist"
-            : "Specs need repairing";
+      const coverage: CoverageStatus = (() => {
+        if (matched.length) {
+          if (valid.length && !uncoveredRoutes.length) {
+            return "covered";
+          }
+          return "partial";
+        }
+        return "uncovered";
+      })();
+      const reason = (() => {
+        if (coverage === "uncovered") {
+          return "No Specs yet";
+        }
+        if (valid.length) {
+          if (coverage === "partial") {
+            return `${uncoveredRoutes.length} known route${uncoveredRoutes.length === 1 ? "" : "s"} without a Spec`;
+          }
+          if (routes.length) {
+            return "Specs reach every known route";
+          }
+          return "Specs exist";
+        }
+        return "Specs need repairing";
+      })();
       return {
         name,
         routes,
@@ -236,4 +244,24 @@ export async function projectCoverage(projectId: string) {
       "An area's Specs are the Specs in its feature and any Spec that opens one of its routes. They show where Specs exist, not complete behavioral coverage.",
     areas,
   };
+};
+
+type CoverageStatus = "covered" | "partial" | "uncovered";
+export interface CoverageArea {
+  name: string;
+  routes: string[];
+  coverage: CoverageStatus;
+  reason: string;
+  featureId: string | null;
+  specs: { id: string; title: string }[];
+  uncoveredRoutes: string[];
 }
+
+interface Implementation {
+  valid: boolean;
+  routes: string[];
+}
+const analyses = new Map<
+  string,
+  { sourceHash: string; markdownHash: string; result: Implementation }
+>();

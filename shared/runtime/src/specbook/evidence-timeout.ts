@@ -1,4 +1,4 @@
-export async function withEvidenceTimeout<T>(
+export const withEvidenceTimeout = async function withEvidenceTimeout<T>(
   operation: () => Promise<T>,
   timeoutMs: number
 ): Promise<T> {
@@ -6,6 +6,7 @@ export async function withEvidenceTimeout<T>(
   try {
     return await Promise.race([
       operation(),
+      // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
           () => reject(new Error("Browser evidence timed out")),
@@ -16,4 +17,4 @@ export async function withEvidenceTimeout<T>(
   } finally {
     clearTimeout(timer);
   }
-}
+};

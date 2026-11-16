@@ -16,23 +16,17 @@ import { currentActor, recordAudit } from "../../core/accounts/audit";
 import { publishChatUpdate } from "../../core/chat/chat-registry";
 import { recordAgentMetric } from "../../core/jobs/metrics";
 import { payloadOf, jobLimitsSchema } from "../../core/jobs/schemas";
+import { requireValue } from "../../core/utils/require-value";
 import { db } from "../db/client";
 import { inboxItems, jobActions, jobs } from "../db/schema";
 
-export type Job = typeof jobs.$inferSelect;
-export type InboxItem = typeof inboxItems.$inferSelect;
-type JobPatch = Partial<
-  Omit<Job, "id" | "projectId" | "chatId" | "status" | "updatedAt">
->;
-const now = () => new Date().toISOString();
-
-function notifyChat(job: Job): void {
+const notifyChat = function notifyChat(job: Job): void {
   if (job.sourceChatId) {
     publishChatUpdate(job.sourceChatId);
   }
-}
+};
 
-function requeuePatch(
+const requeuePatch = function requeuePatch(
   job: Job,
   patch: JobPatch & { pendingMessage: string },
   activeMs = 0
@@ -48,7 +42,14 @@ function requeuePatch(
     retryAt: null,
     ...patch,
   };
-}
+};
+
+export type Job = typeof jobs.$inferSelect;
+export type InboxItem = typeof inboxItems.$inferSelect;
+type JobPatch = Partial<
+  Omit<Job, "id" | "projectId" | "chatId" | "status" | "updatedAt">
+>;
+const now = () => new Date().toISOString();
 
 export const jobsRepository = {
   async create(
@@ -78,20 +79,34 @@ export const jobsRepository = {
         updatedAt: now(),
       })
       .returning();
-    await recordAgentMetric(job!, "created");
-    notifyChat(job!);
-    return job!;
+    await recordAgentMetric(requireValue(job), "created");
+    notifyChat(requireValue(job));
+    return requireValue(job);
   },
   async get(id: string) {
-    return (await db.select().from(jobs).where(eq(jobs.id, id)))[0] ?? null;
+    return (
+      (await (async () => {
+        const awaitedValue2167 = await db
+          .select()
+          .from(jobs)
+          .where(eq(jobs.id, id));
+        return awaitedValue2167[0];
+      })()) ?? null
+    );
   },
   async forChat(chatId: string) {
     return (
-      (await db.select().from(jobs).where(eq(jobs.chatId, chatId)))[0] ?? null
+      (await (async () => {
+        const awaitedValue2291 = await db
+          .select()
+          .from(jobs)
+          .where(eq(jobs.chatId, chatId));
+        return awaitedValue2291[0];
+      })()) ?? null
     );
   },
   async list(projectId: string) {
-    return db
+    return await db
       .select()
       .from(jobs)
       .where(eq(jobs.projectId, projectId))
@@ -109,7 +124,7 @@ export const jobsRepository = {
     return new Set(rows.map((row) => row.projectId));
   },
   async queued() {
-    return db
+    return await db
       .select()
       .from(jobs)
       .where(eq(jobs.status, "queued"))
@@ -138,7 +153,7 @@ export const jobsRepository = {
     patch: JobPatch & { pendingMessage: string },
     options: { to?: "queued" | "paused"; activeMs?: number } = {}
   ) {
-    return this.transition(
+    return await this.transition(
       job.id,
       from,
       options.to ?? "queued",
@@ -147,7 +162,13 @@ export const jobsRepository = {
   },
   async forRun(runId: string) {
     return (
-      (await db.select().from(jobs).where(eq(jobs.runId, runId)))[0] ?? null
+      (await (async () => {
+        const awaitedValue3864 = await db
+          .select()
+          .from(jobs)
+          .where(eq(jobs.runId, runId));
+        return awaitedValue3864[0];
+      })()) ?? null
     );
   },
   async update(
@@ -232,27 +253,44 @@ export const jobsRepository = {
       currentActor() ?? { id: jobId, name: "Specbook", kind: "agent" }
     );
     const decision =
-      /^inbox:(approve|reject|answer|dismiss|report_bug|ignore)$/.exec(
+      /^inbox:(?<capture1>approve|reject|answer|dismiss|report_bug|ignore)$/u.exec(
         action
       )?.[1];
     const verification =
       action === "proposal:verified"
-        ? /^([a-f0-9-]{36}): (passed|failed|error)$/.exec(detail)
+        ? /^(?<capture1>[a-f0-9-]{36}): (?<capture2>passed|failed|error)$/u.exec(
+            detail
+          )
         : null;
     if (action === "stopped" || decision || verification) {
       await recordAgentMetric(
         job,
-        decision ? "decision" : verification ? "verified" : "stopped",
-        decision
-          ? { decision, actor: "human", itemId: detail }
-          : verification
-            ? { itemId: verification[1], verificationStatus: verification[2] }
-            : {}
+        (() => {
+          if (decision) {
+            return "decision";
+          }
+          if (verification) {
+            return "verified";
+          }
+          return "stopped";
+        })(),
+        (() => {
+          if (decision) {
+            return { decision, actor: "human", itemId: detail };
+          }
+          if (verification) {
+            return {
+              itemId: verification[1],
+              verificationStatus: verification[2],
+            };
+          }
+          return {};
+        })()
       );
     }
   },
   async actions(jobId: string) {
-    return db
+    return await db
       .select()
       .from(jobActions)
       .where(eq(jobActions.jobId, jobId))
@@ -296,10 +334,10 @@ export const jobsRepository = {
         updatedAt: now(),
       })
       .returning();
-    if (job && item!.kind !== "note") {
+    if (job && requireValue(item).kind !== "note") {
       await recordAgentMetric(job, "item_created", {
-        itemId: item!.id,
-        itemKind: item!.kind,
+        itemId: requireValue(item).id,
+        itemKind: requireValue(item).kind,
       });
     }
     if (job) {
@@ -308,10 +346,10 @@ export const jobsRepository = {
     if (typeof payload.sourceChatId === "string") {
       publishChatUpdate(payload.sourceChatId);
     }
-    return item!;
+    return requireValue(item);
   },
   async inbox(projectId: string) {
-    return db
+    return await db
       .select()
       .from(inboxItems)
       .where(eq(inboxItems.projectId, projectId))
@@ -323,7 +361,7 @@ export const jobsRepository = {
     jobIds: string[],
     itemIds: string[]
   ) {
-    return db
+    return await db
       .select()
       .from(inboxItems)
       .where(
@@ -343,7 +381,7 @@ export const jobsRepository = {
     jobId: string,
     filters: { kind?: InboxItem["kind"]; statuses?: InboxItem["status"][] } = {}
   ) {
-    return db
+    return await db
       .select()
       .from(inboxItems)
       .where(
@@ -362,7 +400,7 @@ export const jobsRepository = {
     kind: InboxItem["kind"],
     statuses?: InboxItem["status"][]
   ) {
-    return db
+    return await db
       .select()
       .from(inboxItems)
       .where(
@@ -380,8 +418,8 @@ export const jobsRepository = {
     approvedOnly = false
   ) {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue10321 = await db
           .select()
           .from(inboxItems)
           .where(
@@ -393,8 +431,9 @@ export const jobsRepository = {
             )
           )
           .orderBy(desc(inboxItems.createdAt))
-          .limit(1)
-      )[0] ?? null
+          .limit(1);
+        return awaitedValue10321[0];
+      })()) ?? null
     );
   },
   async itemsForJobs(
@@ -405,7 +444,7 @@ export const jobsRepository = {
     if (!jobIds.length) {
       return [];
     }
-    return db
+    return await db
       .select()
       .from(inboxItems)
       .where(
@@ -421,7 +460,7 @@ export const jobsRepository = {
       .orderBy(desc(inboxItems.createdAt));
   },
   async decisions(projectId: string, limit = 12) {
-    return db
+    return await db
       .select()
       .from(inboxItems)
       .where(
@@ -435,19 +474,25 @@ export const jobsRepository = {
   },
   async item(id: string) {
     return (
-      (await db.select().from(inboxItems).where(eq(inboxItems.id, id)))[0] ??
-      null
+      (await (async () => {
+        const awaitedValue11929 = await db
+          .select()
+          .from(inboxItems)
+          .where(eq(inboxItems.id, id));
+        return awaitedValue11929[0];
+      })()) ?? null
     );
   },
   async claimItem(id: string) {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue12075 = await db
           .update(inboxItems)
           .set({ status: "applying", updatedAt: now() })
           .where(and(eq(inboxItems.id, id), eq(inboxItems.status, "pending")))
-          .returning()
-      )[0] ?? null
+          .returning();
+        return awaitedValue12075[0];
+      })()) ?? null
     );
   },
   async updateItem(
@@ -470,7 +515,9 @@ export const jobsRepository = {
         payloadOf(item).sourceChatId,
         payloadOf(item).discussionChatId,
       ]) {
-        if (typeof chatId === "string") publishChatUpdate(chatId);
+        if (typeof chatId === "string") {
+          publishChatUpdate(chatId);
+        }
       }
     }
   },
@@ -541,6 +588,7 @@ export const jobsRepository = {
           Date.parse(job.startedAt)
         : 0;
       const activeMs = Number.isFinite(interval) ? Math.max(0, interval) : 0;
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const [recovered] = await db
         .update(jobs)
         .set({
@@ -561,7 +609,9 @@ export const jobsRepository = {
         )
         .returning();
       if (recovered) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await recordAgentMetric(recovered, "status_changed");
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await this.log(
           job.id,
           "recovered",

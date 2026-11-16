@@ -7,6 +7,7 @@ import {
   withAccountsLock,
 } from "../../infra/repositories/accounts";
 import { decryptSecret, encryptSecret } from "../credentials/crypto";
+import { requireValue } from "../utils/require-value";
 import { recordAudit } from "./audit";
 import type { SsoSettings } from "./schemas";
 import {
@@ -19,13 +20,7 @@ import {
   writeCookie,
 } from "./sessions";
 
-let cached: {
-  fingerprint: string;
-  configuration: Promise<oidc.Configuration>;
-  expires: number;
-} | null = null;
-
-export function validateIssuer(issuer: string): URL {
+export const validateIssuer = function validateIssuer(issuer: string): URL {
   let url: URL;
   try {
     url = new URL(issuer);
@@ -52,9 +47,11 @@ export function validateIssuer(issuer: string): URL {
     });
   }
   return url;
-}
+};
 
-function configuration(settings: SsoSettings): Promise<oidc.Configuration> {
+const configuration = function configuration(
+  settings: SsoSettings
+): Promise<oidc.Configuration> {
   const fingerprint = tokenHash(JSON.stringify(settings));
   if (cached?.fingerprint === fingerprint && cached.expires > Date.now()) {
     return cached.configuration;
@@ -87,27 +84,30 @@ function configuration(settings: SsoSettings): Promise<oidc.Configuration> {
     }
   });
   return promise;
-}
+};
 
-export function verifiedEmail(
+export const verifiedEmail = function verifiedEmail(
   issuer: string,
   claims: Record<string, unknown>
 ): string | null {
   const email =
     typeof claims.email === "string" ? claims.email.trim().toLowerCase() : "";
   const entra =
-    /^https:\/\/login\.microsoftonline\.com\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/v2\.0$/i.test(
+    /^https:\/\/login\.microsoftonline\.com\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/v2\.0$/iu.test(
       issuer
     );
   if (claims.email_verified !== true && !(entra && claims.xms_edov === true)) {
     return null;
   }
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) && email.length <= 254
     ? email
     : null;
-}
+};
 
-export async function beginOidc(c: Context, link: boolean): Promise<string> {
+export const beginOidc = async function beginOidc(
+  c: Context,
+  link: boolean
+): Promise<string> {
   const settings = await accountsRepository.getSso();
   if (!settings.enabled) {
     throw new HTTPException(409, { message: "Single sign-on is not enabled." });
@@ -134,7 +134,7 @@ export async function beginOidc(c: Context, link: boolean): Promise<string> {
     redirectUri,
     issuer: settings.issuer,
     clientId: settings.clientId,
-    linkUserId: link ? user!.id : null,
+    linkUserId: link ? requireValue(user).id : null,
     expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
   });
   writeCookie(c, "specbook_oidc", browser, 600, origin);
@@ -147,12 +147,14 @@ export async function beginOidc(c: Context, link: boolean): Promise<string> {
     state,
     nonce,
   }).href;
-}
+};
 
-export async function finishOidc(c: Context): Promise<string> {
+export const finishOidc = async function finishOidc(
+  c: Context
+): Promise<string> {
   const state = c.req.query("state");
   const browser = cookieToken(c.req.raw.headers, "specbook_oidc");
-  if (!state || !/^[a-f0-9]{64}$/.test(state) || !browser) {
+  if (!state || !/^[a-f0-9]{64}$/u.test(state) || !browser) {
     throw new Error("The single sign-on request expired. Start again.");
   }
   const pending = await accountsRepository.takeOidcState(
@@ -222,15 +224,15 @@ export async function finishOidc(c: Context): Promise<string> {
       throw new Error("A verified email from an allowed domain is required.");
     }
     const verified = async (
-      user: Awaited<ReturnType<typeof accountsRepository.createSsoUser>>
+      userValue: Awaited<ReturnType<typeof accountsRepository.createSsoUser>>
     ) => {
       await accountsRepository.saveSso({
         ...currentSettings,
         verifiedUsers: [
-          ...new Set([...(currentSettings.verifiedUsers ?? []), user.id]),
+          ...new Set([...(currentSettings.verifiedUsers ?? []), userValue.id]),
         ],
       });
-      return user;
+      return userValue;
     };
     const known = await accountsRepository.identity(pending.issuer, claims.sub);
     if (pending.linkUserId) {
@@ -269,7 +271,8 @@ export async function finishOidc(c: Context): Promise<string> {
     const name =
       typeof profile.name === "string"
         ? profile.name
-            .replaceAll(/[\u0000-\u001F<>]/g, "")
+            // oxlint-disable-next-line no-control-regex -- Match control characters explicitly at the sanitization boundary.
+            .replaceAll(/[\u0000-\u001F<>]/gu, "")
             .trim()
             .slice(0, 80)
         : email;
@@ -291,4 +294,10 @@ export async function finishOidc(c: Context): Promise<string> {
     { id: user.id, name: user.name, email: user.email, kind: "user" }
   );
   return `${new URL(pending.redirectUri).origin}${pending.linkUserId && user.role === "admin" ? "/settings" : "/"}`;
-}
+};
+
+let cached: {
+  fingerprint: string;
+  configuration: Promise<oidc.Configuration>;
+  expires: number;
+} | null = null;

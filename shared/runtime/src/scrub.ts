@@ -1,4 +1,7 @@
-export function scrubJson<T>(value: T, scrub: (text: string) => string): T {
+export const scrubJson = function scrubJson<T>(
+  value: T,
+  scrub: (text: string) => string
+): T {
   if (typeof value === "string") {
     return scrub(value) as T;
   }
@@ -11,9 +14,9 @@ export function scrubJson<T>(value: T, scrub: (text: string) => string): T {
     ) as T;
   }
   return value;
-}
+};
 
-export function scrubJsonText(
+export const scrubJsonText = function scrubJsonText(
   text: string,
   scrub: (text: string) => string
 ): string {
@@ -27,4 +30,4 @@ export function scrubJsonText(
     return scrub(text);
   }
   return JSON.stringify(scrubJson(value, scrub));
-}
+};

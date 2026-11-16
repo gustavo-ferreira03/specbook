@@ -4,23 +4,13 @@ import type { RunEnvironment } from "../../infra/db/schema";
 import type { ProjectContextRevisionRow } from "../../infra/repositories/project-contexts";
 import { getActiveTabUrl, readBrowserSnapshot } from "../browser/mcp";
 import type { BrowserMcp, BrowserToolPolicy } from "../browser/mcp";
+import { requireValue } from "../utils/require-value";
 import { consumeVaultSubmit } from "./credential-tools";
 
-export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([
-  "browser_navigate",
-  "browser_navigate_back",
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_hover",
-  "browser_wait_for",
-  "browser_tabs",
-]);
-
-export const DESTRUCTIVE_CLICK_PATTERN =
-  /\b(add|create|delete|edit|remove|erase|destroy|save|confirm|pay|payment|purchase|buy|checkout|refund|unsubscribe|cancel|logout|log out|sign out|publish|submit|send|place order|adicionar|criar|editar|salvar|confirmar|excluir|apagar|remover|deletar|pagar|pagamento|comprar|estornar|reembolso|cancelar|sair|desconectar|encerrar|publicar|enviar|submeter|finalizar)\b/i;
-
-function withinOrigins(url: string, origins: Set<string>): boolean {
+const withinOrigins = function withinOrigins(
+  url: string,
+  origins: Set<string>
+): boolean {
   try {
     const parsed = new URL(url);
     return (
@@ -30,12 +20,15 @@ function withinOrigins(url: string, origins: Set<string>): boolean {
   } catch {
     return false;
   }
-}
+};
 
-export function snapshotClickTarget(snapshot: string, target: unknown): string {
+export const snapshotClickTarget = function snapshotClickTarget(
+  snapshot: string,
+  target: unknown
+): string {
   const ref =
     typeof target === "string"
-      ? /^(?:aria-ref=)?([a-z]+\d+)$/.exec(target)?.[1]
+      ? /^(?:aria-ref=)?(?<capture1>[a-z]+\d+)$/u.exec(target)?.[1]
       : undefined;
   if (!ref) {
     throw new Error(
@@ -51,22 +44,25 @@ export function snapshotClickTarget(snapshot: string, target: unknown): string {
       "Click rejected: the element reference is missing or ambiguous. Take a fresh browser snapshot."
     );
   }
-  const index = matches[0]!;
-  let indent = lines[index]!.search(/\S/);
+  const index = requireValue(matches[0]);
+  let indent = requireValue(lines[index]).search(/\S/u);
   const labels: string[] = [];
-  for (let i = index; i >= 0; i--) {
-    const line = lines[i]!;
-    const level = line.search(/\S/);
+  for (let i = index; i >= 0; i -= 1) {
+    const line = requireValue(lines[i]);
+    const level = line.search(/\S/u);
     if (i !== index && (level < 0 || level >= indent)) {
       continue;
     }
     indent = level;
-    const element = /^\s*-\s+(\w+)(?:\s+"((?:\\.|[^"\\])*)")?/.exec(line);
+    const element =
+      /^\s*-\s+(?<capture1>\w+)(?:\s+"(?<capture2>(?:\\.|[^"\\])*)")?/u.exec(
+        line
+      );
     if (
       !element ||
       (i !== index &&
-        !/^(button|link|menuitem|checkbox|switch|radio|option|tab)$/.test(
-          element[1]!
+        !/^(?<capture1>button|link|menuitem|checkbox|switch|radio|option|tab)$/u.test(
+          requireValue(element[1])
         ))
     ) {
       continue;
@@ -76,7 +72,7 @@ export function snapshotClickTarget(snapshot: string, target: unknown): string {
       try {
         name = JSON.parse(`"${element[2]}"`);
       } catch {
-        name = element[2];
+        ({ 2: name } = element);
       }
       labels.push(`${element[1]} ${name}`);
     }
@@ -87,11 +83,9 @@ export function snapshotClickTarget(snapshot: string, target: unknown): string {
     );
   }
   return labels.join("; ");
-}
+};
 
-// A tunnel only reaches the origins its environment lists. Any other chat browser may also follow a
-// sign-in to the origins trusted by the environment or bound to a saved credential, such as an identity provider.
-export function chatNavigationOrigins(
+export const chatNavigationOrigins = function chatNavigationOrigins(
   startUrl: string,
   environment: Pick<RunEnvironment, "executor" | "allowedOrigins"> | undefined,
   profiles: { allowedOrigins: string[] }[]
@@ -106,9 +100,9 @@ export function chatNavigationOrigins(
       ...profiles.flatMap((profile) => profile.allowedOrigins),
     ]),
   ];
-}
+};
 
-export function createOriginBrowserPolicy(
+export const createOriginBrowserPolicy = function createOriginBrowserPolicy(
   startUrl: string,
   mcp: BrowserMcp,
   allowedOrigins: string[] = [],
@@ -176,10 +170,14 @@ export function createOriginBrowserPolicy(
         .callTool({ name: "browser_navigate_back", arguments: {} }, undefined, {
           signal,
         })
-        .catch(() => undefined);
+        .catch(() => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+        });
       const afterBack = await getActiveTabUrl(mcp, signal);
       if (!afterBack || !withinOrigins(afterBack, origins)) {
-        await mcp.navigate(startUrl, signal).catch(() => undefined);
+        await mcp.navigate(startUrl, signal).catch(() => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+        });
       }
       signal?.throwIfAborted();
       throw new Error(
@@ -187,82 +185,101 @@ export function createOriginBrowserPolicy(
       );
     },
   };
-}
+};
 
-export function createDiscoveryBrowserPolicy(
-  revision: Pick<ProjectContextRevisionRow, "brief">,
-  mcp: BrowserMcp,
-  allowedOrigins: string[] = []
-): BrowserToolPolicy {
-  const policy = createOriginBrowserPolicy(
-    revision.brief.startUrl,
-    mcp,
-    allowedOrigins,
-    "discovery"
-  );
-  return {
-    ...policy,
-    allowedTools: DISCOVERY_BROWSER_TOOLS,
-    beforeCall: async (toolName, args, signal) => {
-      await policy.beforeCall?.(toolName, args, signal);
-      if (toolName === "browser_tabs" && args.action === "new") {
-        throw new Error("Opening new tabs is not allowed during discovery.");
-      }
-      if (toolName === "browser_type" && args.submit === true) {
-        throw new Error(
-          "Submitting a form needs a verified button and human authorization. Fill the field without submitting it."
-        );
-      }
-      if (toolName === "browser_click") {
-        const target = snapshotClickTarget(
-          await readBrowserSnapshot(mcp, signal),
-          args.target ?? args.ref
-        );
-        const match = target.match(DESTRUCTIVE_CLICK_PATTERN);
-        const active = match ? await getActiveTabUrl(mcp, signal) : null;
-        if (
-          match &&
-          active &&
-          /^button\b/.test(target) &&
-          consumeVaultSubmit(mcp, new URL(active).origin)
-        ) {
-          return;
+export const createDiscoveryBrowserPolicy =
+  function createDiscoveryBrowserPolicy(
+    revision: Pick<ProjectContextRevisionRow, "brief">,
+    mcp: BrowserMcp,
+    allowedOrigins: string[] = []
+  ): BrowserToolPolicy {
+    const policy = createOriginBrowserPolicy(
+      revision.brief.startUrl,
+      mcp,
+      allowedOrigins,
+      "discovery"
+    );
+    return {
+      ...policy,
+      allowedTools: DISCOVERY_BROWSER_TOOLS,
+      beforeCall: async (toolName, args, signal) => {
+        await policy.beforeCall?.(toolName, args, signal);
+        if (toolName === "browser_tabs" && args.action === "new") {
+          throw new Error("Opening new tabs is not allowed during discovery.");
         }
-        if (match) {
+        if (toolName === "browser_type" && args.submit === true) {
           throw new Error(
-            `Click rejected: the actual ${target} may change application data ("${match[0]}"). Ask the human before proceeding.`
+            "Submitting a form needs a verified button and human authorization. Fill the field without submitting it."
           );
         }
-      }
-    },
+        if (toolName === "browser_click") {
+          const target = snapshotClickTarget(
+            await readBrowserSnapshot(mcp, signal),
+            args.target ?? args.ref
+          );
+          const match = target.match(DESTRUCTIVE_CLICK_PATTERN);
+          const active = match ? await getActiveTabUrl(mcp, signal) : null;
+          if (
+            match &&
+            active &&
+            /^button\b/u.test(target) &&
+            consumeVaultSubmit(mcp, new URL(active).origin)
+          ) {
+            return;
+          }
+          if (match) {
+            throw new Error(
+              `Click rejected: the actual ${target} may change application data ("${match[0]}"). Ask the human before proceeding.`
+            );
+          }
+        }
+      },
+    };
   };
-}
 
-export function createAutonomousBrowserPolicy(
-  startUrl: string,
-  mcp: BrowserMcp,
-  allowedOrigins: string[] = []
-): BrowserToolPolicy {
-  const policy = createDiscoveryBrowserPolicy(
-    { brief: { startUrl } as ProjectContextRevisionRow["brief"] },
-    mcp,
-    allowedOrigins
-  );
-  const allowed = new Set([
-    ...DISCOVERY_BROWSER_TOOLS,
-    "browser_console_messages",
-    "browser_network_requests",
-    "browser_take_screenshot",
-  ]);
-  return {
-    beforeCall: async (name, args, signal) => {
-      if (!allowed.has(name)) {
-        throw new Error(
-          "This browser action needs human authorization. Explain the blocker in the Inbox before proceeding."
-        );
-      }
-      await policy.beforeCall?.(name, args, signal);
-    },
-    afterCall: policy.afterCall,
+export const createAutonomousBrowserPolicy =
+  function createAutonomousBrowserPolicy(
+    startUrl: string,
+    mcp: BrowserMcp,
+    allowedOrigins: string[] = []
+  ): BrowserToolPolicy {
+    const policy = createDiscoveryBrowserPolicy(
+      { brief: { startUrl } as ProjectContextRevisionRow["brief"] },
+      mcp,
+      allowedOrigins
+    );
+    const allowed = new Set([
+      ...DISCOVERY_BROWSER_TOOLS,
+      "browser_console_messages",
+      "browser_network_requests",
+      "browser_take_screenshot",
+    ]);
+    return {
+      beforeCall: async (name, args, signal) => {
+        if (!allowed.has(name)) {
+          throw new Error(
+            "This browser action needs human authorization. Explain the blocker in the Inbox before proceeding."
+          );
+        }
+        await policy.beforeCall?.(name, args, signal);
+      },
+      afterCall: policy.afterCall,
+    };
   };
-}
+
+export const DISCOVERY_BROWSER_TOOLS: ReadonlySet<string> = new Set([
+  "browser_navigate",
+  "browser_navigate_back",
+  "browser_snapshot",
+  "browser_click",
+  "browser_type",
+  "browser_hover",
+  "browser_wait_for",
+  "browser_tabs",
+]);
+
+export const DESTRUCTIVE_CLICK_PATTERN =
+  /\b(?<capture1>add|create|delete|edit|remove|erase|destroy|save|confirm|pay|payment|purchase|buy|checkout|refund|unsubscribe|cancel|logout|log out|sign out|publish|submit|send|place order|adicionar|criar|editar|salvar|confirmar|excluir|apagar|remover|deletar|pagar|pagamento|comprar|estornar|reembolso|cancelar|sair|desconectar|encerrar|publicar|enviar|submeter|finalizar)\b/iu;
+
+// A tunnel only reaches the origins its environment lists. Any other chat browser may also follow a
+// sign-in to the origins trusted by the environment or bound to a saved credential, such as an identity provider.

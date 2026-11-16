@@ -7,6 +7,8 @@ import {
 import { analyzeSpecSource } from "@specbook/runtime/validate";
 import type { Locator, Page } from "playwright-core";
 
+import { requiredValue } from "./values";
+
 const methods = new Set([...LOCATOR_FACTORIES, ...STATIC_LOCATOR_REFINERS]);
 
 export interface LocatorCheck {
@@ -18,7 +20,16 @@ export interface LocatorCheck {
 }
 
 // Interpret only validated locator syntax; never evaluate Spec code in the browser or Node.
-export async function checkPageLocators(
+const isLocatorCall = (
+  node: t.Node | null | undefined
+): node is t.CallExpression =>
+  node?.type === "CallExpression" &&
+  node.callee.type === "MemberExpression" &&
+  !node.callee.computed &&
+  node.callee.property.type === "Identifier" &&
+  methods.has(node.callee.property.name);
+
+export const checkPageLocators = async function checkPageLocators(
   page: Page,
   source: string
 ): Promise<LocatorCheck[]> {
@@ -32,22 +43,17 @@ export async function checkPageLocators(
     node: t.Node;
     bindings: Map<string, t.Node>;
   }[] = [];
-  const isLocatorCall = (
-    node: t.Node | null | undefined
-  ): node is t.CallExpression =>
-    node?.type === "CallExpression" &&
-    node.callee.type === "MemberExpression" &&
-    !node.callee.computed &&
-    node.callee.property.type === "Identifier" &&
-    methods.has(node.callee.property.name);
+
+  // oxlint-disable-next-line complexity -- Keep the locators decision tree together so state transitions and error ordering remain explicit.
   const walk = (
     node: t.Node,
-    bindings: Map<string, t.Node>,
+    inheritedBindings: Map<string, t.Node>,
     parent?: t.Node
   ) => {
-    if (node.type === "ArrowFunctionExpression") {
-      bindings = new Map(bindings);
-    }
+    const bindings =
+      node.type === "ArrowFunctionExpression"
+        ? new Map(inheritedBindings)
+        : inheritedBindings;
     if (
       node.type === "VariableDeclarator" &&
       node.id.type === "Identifier" &&
@@ -72,8 +78,9 @@ export async function checkPageLocators(
     for (const item of Object.values(node)) {
       if (Array.isArray(item)) {
         for (const child of item) {
-          if (child && typeof child.type === "string")
+          if (child && typeof child.type === "string") {
             walk(child as t.Node, bindings, node);
+          }
         }
       } else if (
         item &&
@@ -114,12 +121,15 @@ export async function checkPageLocators(
           if (property.type !== "ObjectProperty") {
             throw new Error("Unsupported locator option");
           }
-          const key =
-            property.key.type === "Identifier"
-              ? property.key.name
-              : property.key.type === "StringLiteral"
-                ? property.key.value
-                : "";
+          const key = (() => {
+            if (property.key.type === "Identifier") {
+              return property.key.name;
+            }
+            if (property.key.type === "StringLiteral") {
+              return property.key.value;
+            }
+            return "";
+          })();
           result[key] = value(property.value, bindings);
         }
         return result;
@@ -134,7 +144,7 @@ export async function checkPageLocators(
           return page;
         }
         if (bindings.has(node.name)) {
-          return value(bindings.get(node.name)!, bindings);
+          return value(requiredValue(bindings.get(node.name)), bindings);
         }
         break;
       }
@@ -146,9 +156,14 @@ export async function checkPageLocators(
         const target = value(callee.object, bindings) as Page | Locator;
         const method = (callee.property as t.Identifier).name;
         const args = node.arguments.map((item) => value(item, bindings));
-        return (
-          target as unknown as Record<string, (...args: unknown[]) => unknown>
-        )[method]!.apply(target, args);
+        return requiredValue(
+          (
+            target as unknown as Record<string, (...args: unknown[]) => unknown>
+          )[method]
+        ).apply(target, args);
+      }
+      default: {
+        break;
       }
     }
     throw new Error("Unsupported locator expression");
@@ -157,12 +172,21 @@ export async function checkPageLocators(
   for (const item of found) {
     const { locator } = item;
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       const count = await (value(item.node, item.bindings) as Locator).count();
       results.push({
         locator,
         line: item.node.loc?.start.line ?? 1,
         count,
-        status: count === 0 ? "missing" : count > 1 ? "ambiguous" : "matched",
+        status: (() => {
+          if (count === 0) {
+            return "missing";
+          }
+          if (count > 1) {
+            return "ambiguous";
+          }
+          return "matched";
+        })(),
       });
     } catch (error) {
       results.push({
@@ -175,4 +199,4 @@ export async function checkPageLocators(
     }
   }
   return results;
-}
+};

@@ -1,0 +1,40 @@
+import { statusMeta } from "@/lib/status";
+import { cn } from "@/lib/utils";
+
+export const StatusDot = function StatusDot({
+  status,
+  size = 14,
+  className,
+}: {
+  status: string;
+  size?: number;
+  className?: string;
+}) {
+  const meta = statusMeta(status);
+  const Icon = meta.icon;
+  return (
+    /* oxlint-disable jsx-a11y/prefer-tag-over-role -- This CSS-painted status marker has no image URL and exposes an accessible image label. */
+    <span
+      role="img"
+      aria-label={`Status: ${meta.label}`}
+      title={meta.label}
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center",
+        meta.iconColor,
+        className
+      )}
+    >
+      <Icon
+        size={size}
+        strokeWidth={2.25}
+        aria-hidden="true"
+        className={
+          status === "running"
+            ? "animate-spin motion-reduce:animate-none"
+            : undefined
+        }
+      />
+    </span>
+    /* oxlint-enable jsx-a11y/prefer-tag-over-role */
+  );
+};

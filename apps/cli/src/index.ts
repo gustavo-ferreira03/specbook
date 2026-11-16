@@ -37,6 +37,7 @@ import {
 import { generateReport } from "./report";
 import { runLocal } from "./run";
 import * as ui from "./ui";
+import { requiredValue } from "./values";
 import { CLI_VERSION } from "./version";
 import {
   initWorkspace,
@@ -64,15 +65,18 @@ const agentOption = () =>
   ).choices(["claude", "codex"]);
 
 // Human output and JSON share one call site so secrets are scrubbed on every path.
-async function print(result: unknown, render: () => string): Promise<void> {
+const print = async function print(
+  result: unknown,
+  render: () => string
+): Promise<void> {
   stdout.write(
     `${scrubCi(
       await scrubTokens(await scrub(json ? JSON.stringify(result) : render()))
     )}\n`
   );
-}
+};
 
-async function working<T>(
+const working = async function working<T>(
   label: string,
   task: (spinner?: ReturnType<typeof clack.spinner>) => Promise<T>,
   indicator: "dots" | "timer" = "dots"
@@ -84,7 +88,10 @@ async function working<T>(
     output: stderr,
     withGuide: false,
     indicator,
-    onCancel: () => {},
+    onCancel: () => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+      /* The caller owns cancellation or reports the failure separately. */
+    },
   });
   spinner.start(label);
   try {
@@ -95,23 +102,23 @@ async function working<T>(
     spinner.clear();
     throw error;
   }
-}
+};
 
-function answer<T>(value: T | symbol): Exclude<T, symbol> {
+const answer = function answer<T>(value: T | symbol): Exclude<T, symbol> {
   if (clack.isCancel(value)) {
     clack.cancel("Cancelled");
     process.exit(130);
   }
   return value as Exclude<T, symbol>;
-}
+};
 
-function needsInteractive(what: string): never {
+const needsInteractive = function needsInteractive(what: string): never {
   throw new Error(
     `${what} Pass it as an option when running non-interactively.`
   );
-}
+};
 
-async function credentialInput(): Promise<{
+const credentialInput = async function credentialInput(): Promise<{
   fields: Record<string, string>;
   origins?: string[];
 }> {
@@ -145,9 +152,11 @@ async function credentialInput(): Promise<{
     );
   }
   return { fields: flat.data };
-}
+};
 
-async function promptCredentials(name: string | undefined) {
+const promptCredentials = async function promptCredentials(
+  name: string | undefined
+) {
   if (!interactive) {
     throw new Error(
       "Use --stdin-json to provide credentials non-interactively"
@@ -162,7 +171,7 @@ async function promptCredentials(name: string | undefined) {
         placeholder: "admin",
         output: stderr,
         validate: (value) =>
-          /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(value ?? "")
+          /^[a-zA-Z][a-zA-Z0-9_-]*$/u.test(value ?? "")
             ? undefined
             : "Start with a letter; use letters, digits, - or _",
       })
@@ -184,6 +193,7 @@ async function promptCredentials(name: string | undefined) {
   const fields: Record<string, string> = {};
   for (const field of names) {
     fields[field] = answer(
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await clack.password({ message: field, output: stderr })
     );
   }
@@ -200,16 +210,16 @@ async function promptCredentials(name: string | undefined) {
     output: stderr,
   });
   return { profile, fields, sensitive };
-}
+};
 
-function exitWith(reply: ChatReply) {
+const exitWith = function exitWith(reply: ChatReply) {
   if (
     reply.status === "failed" ||
     reply.specs?.some((spec) => spec.status !== "passed")
   ) {
     process.exitCode = 1;
   }
-}
+};
 
 const program = new Command("specbook")
   .description(
@@ -227,11 +237,15 @@ const program = new Command("specbook")
     subcommandTerm: (command) =>
       [
         command.name(),
-        command.commands.length > 3
-          ? "<action>"
-          : command.commands.length
-            ? command.commands.map((child) => child.name()).join("|")
-            : "",
+        (() => {
+          if (command.commands.length > 3) {
+            return "<action>";
+          }
+          if (command.commands.length) {
+            return command.commands.map((child) => child.name()).join("|");
+          }
+          return "";
+        })(),
         ...command.registeredArguments.map((argument) =>
           argument.required
             ? `<${argument.name()}>`
@@ -254,7 +268,7 @@ const program = new Command("specbook")
       }
     },
     outputError: (text, write) =>
-      write(`${ui.failure(text.replace(/^error: /, ""))}\n`),
+      write(`${ui.failure(text.replace(/^error: /u, ""))}\n`),
   })
   .exitOverride()
   .addHelpText("before", `${pc.bold("specbook")} ${pc.dim(CLI_VERSION)}\n`)
@@ -316,11 +330,15 @@ ${pc.bold("Examples")}
           noWait: options.wait === false,
           select: options.select,
         });
-      const label = options.select
-        ? "Writing and running the selected Specs"
-        : options.wait === false
-          ? "Starting the turn"
-          : "Specbook is working";
+      const label = (() => {
+        if (options.select) {
+          return "Writing and running the selected Specs";
+        }
+        if (options.wait === false) {
+          return "Starting the turn";
+        }
+        return "Specbook is working";
+      })();
       const reply = chatReplySchema.parse(
         await working(label, send, options.wait === false ? "dots" : "timer")
       );
@@ -360,7 +378,7 @@ program
           output: stderr,
           validate: (value) => {
             try {
-              return /^https?:$/.test(new URL(value ?? "").protocol)
+              return /^https?:$/u.test(new URL(value ?? "").protocol)
                 ? undefined
                 : "Use an http(s) URL";
             } catch {
@@ -452,10 +470,11 @@ program
   )
   .action(
     async (
-      selected: string | undefined,
+      requestedProject: string | undefined,
       options: { server?: string; environment?: string }
     ) => {
       const workspace = await workspaceDirectory();
+      let selected = requestedProject;
       const { server, projects } = await working("Loading projects", () =>
         connectionChoices(options.server)
       );
@@ -483,7 +502,7 @@ program
       const matches = projects.filter(
         (project) =>
           project.id === selected ||
-          project.name.toLowerCase() === selected!.toLowerCase()
+          project.name.toLowerCase() === requiredValue(selected).toLowerCase()
       );
       if (matches.length !== 1) {
         throw new Error(
@@ -492,7 +511,7 @@ program
             : "Project not found or access denied"
         );
       }
-      const project = matches[0]!;
+      const project = requiredValue(matches[0]);
       const environments = await environmentChoices(server, project.id);
       const name = options.environment ?? "Production";
       const environment = environments.find(
@@ -670,7 +689,7 @@ program
             allowedOrigins: options.allowOrigin.length
               ? options.allowOrigin
               : process.env.SPECBOOK_RUNNER_ALLOWED_ORIGINS?.split(
-                  /[\s,]+/
+                  /[\s,]+/u
                 ).filter(Boolean),
             secretsCommand:
               options.secretsCommand ?? process.env.SPECBOOK_SECRETS_COMMAND,
@@ -752,7 +771,7 @@ program
             allowedOrigins: options.allowOrigin.length
               ? options.allowOrigin
               : process.env.SPECBOOK_TUNNEL_ALLOWED_ORIGINS?.split(
-                  /[\s,]+/
+                  /[\s,]+/u
                 ).filter(Boolean),
             signal: abort.signal,
           },
@@ -909,11 +928,11 @@ credentials
         input = await credentialInput();
       } else {
         const prompted = await promptCredentials(name);
-        profile = prompted.profile;
+        ({ profile } = prompted);
         input = { fields: prompted.fields, sensitive: prompted.sensitive };
       }
       const result = (await addProfile(
-        profile!,
+        requiredValue(profile),
         input.fields,
         options.origin ?? input.origins,
         options.sensitive ?? input.sensitive
@@ -943,7 +962,7 @@ const browseCommand = program
   .command("browse")
   .description("drive a persistent exploration browser")
   .helpGroup("Write Specs by hand:");
-async function browseAction(
+const browseAction = async function browseAction(
   action: string,
   args: {
     url?: string;
@@ -964,7 +983,7 @@ async function browseAction(
       ? await working("Opening the browser", task)
       : await task();
   await print(result, () => ui.renderBrowse(action, result));
-}
+};
 browseCommand
   .command("open")
   .description("open a page and print its snapshot")
@@ -1007,20 +1026,30 @@ browseCommand
 
 const hideHelpCommand = (command: Command): void => {
   command.helpCommand(false);
-  command.commands.forEach(hideHelpCommand);
+  for (const child of command.commands) {
+    hideHelpCommand(child);
+  }
 };
 hideHelpCommand(program);
 
-async function main(): Promise<void> {
+const main = async function main(): Promise<void> {
   const raw = process.argv.slice(2);
   if (raw[0] === "--browse-daemon") {
-    return startBrowserDaemon(raw[1]!, raw[2]!, raw.includes("--headed"));
+    return startBrowserDaemon(
+      requiredValue(raw[1]),
+      requiredValue(raw[2]),
+      raw.includes("--headed")
+    );
   }
   if (raw[0] === "--mcp") {
-    return runMcpServer(raw[1]!, raw[2]!);
+    return runMcpServer(requiredValue(raw[1]), requiredValue(raw[2]));
   }
   if (raw[0] === "--chat-worker") {
-    return runChatWorker(raw[1]!, raw[2]!, raw[3]!);
+    return runChatWorker(
+      requiredValue(raw[1]),
+      requiredValue(raw[2]),
+      requiredValue(raw[3])
+    );
   }
   if (
     json &&
@@ -1045,8 +1074,9 @@ async function main(): Promise<void> {
     return;
   }
   await program.parseAsync(process.argv);
-}
+};
 
+// oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires a callback or event handler and cannot consume a returned promise.
 main().catch(async (error) => {
   if (error instanceof CommanderError) {
     if (
@@ -1060,9 +1090,9 @@ main().catch(async (error) => {
     }
     process.exitCode = error.exitCode || 1;
     if (json) {
-      const message = error.message.replace(/^error: /, "");
+      const message = error.message.replace(/^error: /u, "");
       const id =
-        process.argv.slice(2).find((item) => /^c-[a-f0-9]{8}$/.test(item)) ??
+        process.argv.slice(2).find((item) => /^c-[a-f0-9]{8}$/u.test(item)) ??
         "";
       await print(
         isChatCommand
@@ -1095,7 +1125,7 @@ main().catch(async (error) => {
   }
   if (json) {
     const raw = process.argv.slice(2);
-    const id = raw.find((item) => /^c-[a-f0-9]{8}$/.test(item)) ?? "";
+    const id = raw.find((item) => /^c-[a-f0-9]{8}$/u.test(item)) ?? "";
     const detail = error instanceof RemoteError ? error.detail : undefined;
     stdout.write(
       `${scrubCi(

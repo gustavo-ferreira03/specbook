@@ -10,18 +10,9 @@ import { getActiveTabUrl } from "../browser/mcp";
 import type { BrowserMcp } from "../browser/mcp";
 import { DESTRUCTIVE_CLICK_PATTERN } from "./discovery-policy";
 
-const scanPageSchema = z.object({}).strict();
-const require = createRequire(import.meta.url);
-let axeSource: Promise<string> | undefined;
-
-interface ExplorationToolOptions {
-  baseUrl: string;
-  mcp: BrowserMcp | null;
-  scrub: (value: string) => Promise<string>;
-  recordEvidence?: (json: string) => Promise<string | undefined>;
-}
-
-function resultText(result: Record<string, unknown>): string {
+const resultText = function resultText(
+  result: Record<string, unknown>
+): string {
   return (Array.isArray(result.content) ? result.content : [])
     .filter(
       (item): item is { type: "text"; text: string } =>
@@ -29,23 +20,26 @@ function resultText(result: Record<string, unknown>): string {
     )
     .map((item) => item.text)
     .join("\n");
-}
+};
 
-function evaluationResult(result: Record<string, unknown>): unknown {
+const evaluationResult = function evaluationResult(
+  result: Record<string, unknown>
+): unknown {
   const text = resultText(result);
   if (result.isError || text.startsWith("### Error")) {
     throw new Error(text.slice(0, 1000));
   }
   const section =
-    text.match(/(?:^|\n)### Result\n([\s\S]*?)(?=\n### |$)/)?.[1] ?? text;
+    text.match(/(?:^|\n)### Result\n(?<capture1>[\s\S]*?)(?=\n### |$)/u)?.[1] ??
+    text;
   try {
     return JSON.parse(section.trim());
   } catch {
     throw new Error("The browser did not return a page scan result");
   }
-}
+};
 
-export async function scanPage(
+export const scanPage = async function scanPage(
   options: ExplorationToolOptions,
   signal?: AbortSignal
 ): Promise<string> {
@@ -153,7 +147,7 @@ export async function scanPage(
     consoleResult.status === "fulfilled"
       ? resultText(consoleResult.value)
           .split("\n")
-          .filter((line) => /\[ERROR\]|\[PAGEERROR\]|^Error:/.test(line))
+          .filter((line) => /\[ERROR\]|\[PAGEERROR\]|^Error:/u.test(line))
           .slice(0, 30)
           .map((line) => line.slice(0, 500))
       : ["Console diagnostics unavailable"];
@@ -161,7 +155,7 @@ export async function scanPage(
     networkResult.status === "fulfilled"
       ? resultText(networkResult.value)
           .split("\n")
-          .filter((line) => /[=]> \[(?:[45]\d\d|FAILED)\]/.test(line))
+          .filter((line) => /[=]> \[(?:[45]\d\d|FAILED)\]/u.test(line))
           .slice(0, 30)
           .map((line) => line.slice(0, 500))
       : ["Network diagnostics unavailable"];
@@ -181,22 +175,11 @@ export async function scanPage(
   const evidenceUrl = await options.recordEvidence?.(json);
   signal?.throwIfAborted();
   return JSON.stringify({ evidenceUrl, evidence: JSON.parse(json) });
-}
+};
 
-const inspectElementSchema = z
-  .object({
-    target: z
-      .string()
-      .trim()
-      .min(1)
-      .max(500)
-      .describe(
-        "Element reference from the latest browser_snapshot (like e43) or a unique CSS selector (like [data-shape-type='arrow'])"
-      ),
-  })
-  .strict();
-
-export function createExplorationTools(options: ExplorationToolOptions) {
+export const createExplorationTools = function createExplorationTools(
+  options: ExplorationToolOptions
+) {
   return [
     defineTool({
       name: "inspect_element",
@@ -284,4 +267,28 @@ export function createExplorationTools(options: ExplorationToolOptions) {
       },
     }),
   ];
+};
+
+const scanPageSchema = z.object({}).strict();
+const require = createRequire(import.meta.url);
+let axeSource: Promise<string> | undefined;
+
+interface ExplorationToolOptions {
+  baseUrl: string;
+  mcp: BrowserMcp | null;
+  scrub: (value: string) => Promise<string>;
+  recordEvidence?: (json: string) => Promise<string | undefined>;
 }
+
+const inspectElementSchema = z
+  .object({
+    target: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .describe(
+        "Element reference from the latest browser_snapshot (like e43) or a unique CSS selector (like [data-shape-type='arrow'])"
+      ),
+  })
+  .strict();

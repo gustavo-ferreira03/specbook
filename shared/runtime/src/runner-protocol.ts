@@ -34,7 +34,7 @@ const baseUrl = z
 export const runnerArtifactPathSchema = z
   .string()
   .regex(
-    /^(?:spec\.(?:ts|yml)|evidence\.json|evidence\/step-\d{2,3}\.(?:png|webp)|evidence\/execution\.webm|evidence\/replay\.json\.gz)$/
+    /^(?:spec\.(?:ts|yml)|evidence\.json|evidence\/step-\d{2,3}\.(?:png|webp)|evidence\/execution\.webm|evidence\/replay\.json\.gz)$/u
   );
 
 export const runnerPayloadSchema = z
@@ -99,7 +99,7 @@ const runnerVersionFields = {
   instanceId: id,
   version: z
     .string()
-    .regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/)
+    .regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/u)
     .max(100),
   protocolVersion: z.number().int().nonnegative(),
   concurrency: z.number().int().min(1).max(32),
@@ -162,7 +162,7 @@ export const runnerCompleteRequestSchema = z
                     content: z
                       .string()
                       .max(48 * 1024 * 1024)
-                      .regex(/^[A-Za-z0-9+/]*={0,2}$/)
+                      .regex(/^[A-Za-z0-9+/]*={0,2}$/u)
                       .refine(
                         (value) => value.length % 4 === 0,
                         "Use padded base64 artifact content"

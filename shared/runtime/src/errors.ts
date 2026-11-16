@@ -20,18 +20,20 @@ export const errorCodeSchema = z.enum([
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
 export class CodedError extends Error {
-  constructor(
-    public readonly code: ErrorCode,
-    message: string,
-    options?: ErrorOptions
-  ) {
+  override name = "CodedError";
+
+  public readonly code: ErrorCode;
+  constructor(code: ErrorCode, message: string, options?: ErrorOptions) {
     super(message, options);
+    this.code = code;
   }
 }
 
-export function errorCodeOf(error: unknown): ErrorCode | undefined {
+export const errorCodeOf = function errorCodeOf(
+  error: unknown
+): ErrorCode | undefined {
   if (!error || typeof error !== "object") {
-    return undefined;
+    return;
   }
   const value = error as {
     code?: unknown;
@@ -39,14 +41,17 @@ export function errorCodeOf(error: unknown): ErrorCode | undefined {
     cause?: unknown;
   };
   const parsed = errorCodeSchema.safeParse(value.errorCode ?? value.code);
-  return parsed.success
-    ? parsed.data
-    : value.cause && value.cause !== error
-      ? errorCodeOf(value.cause)
-      : undefined;
-}
+  if (parsed.success) {
+    return parsed.data;
+  }
+  if (value.cause && value.cause !== error) {
+    return errorCodeOf(value.cause);
+  }
+};
 
-export function providerErrorCode(error: unknown): ErrorCode {
+export const providerErrorCode = function providerErrorCode(
+  error: unknown
+): ErrorCode {
   const known = errorCodeOf(error);
   if (known) {
     return known;
@@ -74,13 +79,15 @@ export function providerErrorCode(error: unknown): ErrorCode {
     return "provider_connection";
   }
   return "provider_error";
-}
+};
 
-export function isInfrastructureCode(code: ErrorCode): boolean {
+export const isInfrastructureCode = function isInfrastructureCode(
+  code: ErrorCode
+): boolean {
   return code === "infrastructure" || code.startsWith("provider_");
-}
+};
 
-export function specErrorCode(error: unknown): ErrorCode {
+export const specErrorCode = function specErrorCode(error: unknown): ErrorCode {
   const known = errorCodeOf(error);
   if (known) {
     return known;
@@ -94,4 +101,4 @@ export function specErrorCode(error: unknown): ErrorCode {
     }
   }
   return "failed";
-}
+};

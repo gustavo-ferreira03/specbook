@@ -9,7 +9,21 @@ import { RUNNER_PROTOCOL_VERSION } from "@specbook/runtime/runner-protocol";
 import { Hono } from "hono";
 
 import type { RunBatch } from "../../src/core/runner/batch";
+import { requireValue } from "../../src/core/utils/require-value";
 import { HUMAN_SPEC, useTempStorage, VALID_SPEC } from "../helpers/storage";
+
+const chromiumAvailable = async function chromiumAvailable(): Promise<boolean> {
+  try {
+    const { chromium } = await import("@playwright/test");
+    await (async () => {
+      const awaitedValue644 = await chromium.launch({ headless: true });
+      return awaitedValue644.close();
+    })();
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 useTempStorage();
 const { runMigrations } = await import("../../src/infra/db/migrate");
@@ -30,16 +44,6 @@ const { createJobsRouter } = await import("../../src/infra/web/routes/jobs");
 const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
 const { enqueueIntent, processProjectSteward } =
   await import("../../src/core/steward/engine");
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import("@playwright/test");
-    await (await chromium.launch({ headless: true })).close();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 const available = await chromiumAvailable();
 let site: http.Server;
@@ -78,7 +82,10 @@ before(async () => {
       '<h1>Store</h1><label>Password <input type="password"></label>'
     );
   });
-  await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+  await new Promise<void>((resolve) => {
+    site.listen(0, "127.0.0.1", resolve);
+  });
   baseUrl = `http://127.0.0.1:${(site.address() as AddressInfo).port}/`;
 });
 
@@ -100,10 +107,10 @@ test("chat events disable compression and buffering in the frontend proxy", asyn
   const response = await chatApp.request(`/chats/${chat.id}/events`);
   assert.equal(response.headers.get("cache-control"), "no-cache, no-transform");
   assert.equal(response.headers.get("x-accel-buffering"), "no");
-  const reader = response.body!.getReader();
+  const reader = requireValue(response.body).getReader();
   try {
     const chunk = await reader.read();
-    assert.match(new TextDecoder().decode(chunk.value), /event: connected/);
+    assert.match(new TextDecoder().decode(chunk.value), /event: connected/u);
   } finally {
     await reader.cancel();
   }
@@ -142,7 +149,12 @@ test("runner dispatch keeps credential lookup local and survives backend recover
     fields: [{ key: "token", value: "1", sensitive: true }],
   });
   await repoGit.ensureProjectRepo(project.id, { create: true });
-  const production = (await environmentsRepository.list(project.id))[0]!;
+  const production = requireValue(
+    await (async () => {
+      const awaitedValue5647 = await environmentsRepository.list(project.id);
+      return awaitedValue5647[0];
+    })()
+  );
   await environmentsRepository.update(production, {
     ...production,
     executor: "runner",
@@ -173,9 +185,12 @@ test("runner dispatch keeps credential lookup local and survives backend recover
   });
   assert.equal(response.status, 202, await response.clone().text());
   const body = await response.json();
-  const queued = (await runnersRepository.pending()).find(
-    (job) => job.batchId === body.batchId
-  )!;
+  const queued = requireValue(
+    await (async () => {
+      const awaitedValue6711 = await runnersRepository.pending();
+      return awaitedValue6711.find((job) => job.batchId === body.batchId);
+    })()
+  );
   assert.ok(queued, "missing server credentials do not block runner dispatch");
   assert.equal(queued.payload.baseUrl, project.baseUrl);
   assert.equal(queued.payload.networkPolicy.allowPrivate, true);
@@ -183,19 +198,24 @@ test("runner dispatch keeps credential lookup local and survives backend recover
   assert.equal("credentialOverrides" in queued.payload, false);
   await runsRepository.markInterruptedRuns();
   await markInterruptedBatches();
-  assert.equal((await runsRepository.getRun(body.run.id))!.status, "running");
-  assert.equal((await getRunBatch(body.batchId))!.status, "running");
+  assert.equal(
+    requireValue(await runsRepository.getRun(body.run.id)).status,
+    "running"
+  );
+  assert.equal(requireValue(await getRunBatch(body.batchId)).status, "running");
   const issued = await issueRunnerToken("Recovery", "recovery");
-  const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+  const token = requireValue(
+    await authenticateRunnerToken(`Bearer ${issued.token}`)
+  );
   await runnersRepository.reportInstance(token.id, token.id, {
     version: "0.1.0",
     protocolVersion: RUNNER_PROTOCOL_VERSION,
     concurrency: 1,
   });
-  const lease = (await runnersRepository.claim(token, 60_000))!;
+  const lease = requireValue(await runnersRepository.claim(token, 60_000));
   const complete = (artifacts: { path: string; content: string }[]) =>
     completeRunnerWork(lease.id, token.id, {
-      leaseId: lease.leaseId!,
+      leaseId: requireValue(lease.leaseId),
       durationMs: 100,
       processFailure: null,
       results: [
@@ -217,7 +237,7 @@ test("runner dispatch keeps credential lookup local and survives backend recover
           content: Buffer.from("unsafe").toString("base64"),
         },
       ]),
-    /Invalid runner artifact path/
+    /Invalid runner artifact path/u
   );
   await assert.rejects(
     () =>
@@ -227,7 +247,7 @@ test("runner dispatch keeps credential lookup local and survives backend recover
           content: Buffer.from("invalid gzip").toString("base64"),
         },
       ]),
-    /Invalid runner replay/
+    /Invalid runner replay/u
   );
   await assert.rejects(
     () =>
@@ -237,57 +257,59 @@ test("runner dispatch keeps credential lookup local and survives backend recover
           content: Buffer.alloc(MAX_REPLAY_BYTES + 1).toString("base64"),
         },
       ]),
-    /compressed limit/
+    /compressed limit/u
   );
   const bomb = gzipSync(Buffer.alloc(MAX_REPLAY_RAW_BYTES + 1));
   await assert.rejects(
     () => complete([{ path: REPLAY_FILE, content: bomb.toString("base64") }]),
-    /Invalid runner replay/
+    /Invalid runner replay/u
   );
-  const replay = (await encodeReplay([
-    {
-      type: 4,
-      timestamp: 1000,
-      data: { href: "https://example.com", width: 800, height: 600 },
-    },
-    {
-      type: 2,
-      timestamp: 1001,
-      data: {
-        node: {
-          type: 0,
-          id: 1,
-          childNodes: [
-            {
-              type: 2,
-              id: 2,
-              tagName: "html",
-              attributes: {},
-              childNodes: [
-                {
-                  type: 2,
-                  id: 3,
-                  tagName: "head",
-                  attributes: {},
-                  childNodes: [],
-                },
-                {
-                  type: 2,
-                  id: 4,
-                  tagName: "body",
-                  attributes: {},
-                  childNodes: [
-                    { type: 3, id: 5, textContent: `${secretValue} 1` },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-        initialOffset: { left: 0, top: 0 },
+  const replay = requireValue(
+    await encodeReplay([
+      {
+        type: 4,
+        timestamp: 1000,
+        data: { href: "https://example.com", width: 800, height: 600 },
       },
-    },
-  ]))!;
+      {
+        type: 2,
+        timestamp: 1001,
+        data: {
+          node: {
+            type: 0,
+            id: 1,
+            childNodes: [
+              {
+                type: 2,
+                id: 2,
+                tagName: "html",
+                attributes: {},
+                childNodes: [
+                  {
+                    type: 2,
+                    id: 3,
+                    tagName: "head",
+                    attributes: {},
+                    childNodes: [],
+                  },
+                  {
+                    type: 2,
+                    id: 4,
+                    tagName: "body",
+                    attributes: {},
+                    childNodes: [
+                      { type: 3, id: 5, textContent: `${secretValue} 1` },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          initialOffset: { left: 0, top: 0 },
+        },
+      },
+    ])
+  );
   assert.ok(replay);
   const outside = await fs.mkdtemp(path.join(runsDir, ".outside-upload-"));
   const sentinel = path.join(outside, "keep.txt");
@@ -308,7 +330,10 @@ test("runner dispatch keeps credential lookup local and survives backend recover
       ).toString("base64"),
     },
   ]);
-  assert.equal((await runsRepository.getRun(body.run.id))!.status, "passed");
+  assert.equal(
+    requireValue(await runsRepository.getRun(body.run.id)).status,
+    "passed"
+  );
   assert.equal(
     await fs.readFile(sentinel, "utf-8"),
     secretValue,
@@ -334,7 +359,12 @@ test("runner dispatch keeps credential lookup local and survives backend recover
   assert.equal(manifest.replay.file, REPLAY_FILE);
   assert.equal(
     manifest.replay.bytes,
-    (await fs.stat(path.join(directory, REPLAY_FILE))).size
+    await (async () => {
+      const awaitedValue11662 = await fs.stat(
+        path.join(directory, REPLAY_FILE)
+      );
+      return awaitedValue11662.size;
+    })()
   );
   assert.ok(!JSON.stringify(manifest).includes(secretValue));
   const report = await app.request(`/runs/${body.run.id}/report`);
@@ -343,8 +373,8 @@ test("runner dispatch keeps credential lookup local and survives backend recover
   assert.ok(html.includes("Replay"));
   assert.ok(!html.includes(secretValue));
   assert.match(
-    report.headers.get("content-security-policy")!,
-    /script-src 'sha256-/
+    requireValue(report.headers.get("content-security-policy")),
+    /script-src 'sha256-/u
   );
 });
 
@@ -367,7 +397,12 @@ test("runner cancellation removes pending execution and isolated candidate verif
     "http://private-app.invalid:4300"
   );
   await repoGit.ensureProjectRepo(project.id, { create: true });
-  const production = (await environmentsRepository.list(project.id))[0]!;
+  const production = requireValue(
+    await (async () => {
+      const awaitedValue13203 = await environmentsRepository.list(project.id);
+      return awaitedValue13203[0];
+    })()
+  );
   await environmentsRepository.update(production, {
     ...production,
     executor: "runner",
@@ -403,19 +438,25 @@ test("runner cancellation removes pending execution and isolated candidate verif
         environment,
         directory,
       }),
-    /invalid/
+    /invalid/u
   );
   assert.deepEqual(await runsRepository.listRuns(spec.id), []);
   const pending = async () => {
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const job = (await runnersRepository.pending()).find(
-        (row) => row.projectId === project.id
-      );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const job = await (async () => {
+        const awaitedValue14369 = await runnersRepository.pending();
+        return awaitedValue14369.find((row) => row.projectId === project.id);
+      })();
       if (job) {
         return job;
       }
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
     }
+    /* oxlint-enable no-await-in-loop */
     throw new Error("Runner work was not queued");
   };
   const controller = new AbortController();
@@ -423,18 +464,22 @@ test("runner cancellation removes pending execution and isolated candidate verif
     environment,
     signal: controller.signal,
   });
-  const cancelledAssertion = assert.rejects(cancelled, /Stopped/);
+  const cancelledAssertion = assert.rejects(cancelled, /Stopped/u);
   await pending();
   controller.abort(new Error("Stopped by the user"));
   await cancelledAssertion;
   assert.equal(
-    (await runnersRepository.pending()).some(
-      (row) => row.projectId === project.id
-    ),
+    await (async () => {
+      const awaitedValue14966 = await runnersRepository.pending();
+      return awaitedValue14966.some((row) => row.projectId === project.id);
+    })(),
     false
   );
   assert.equal(
-    (await runsRepository.listRuns(spec.id))[0].errorCode,
+    await (async () => {
+      const awaitedValue15094 = await runsRepository.listRuns(spec.id);
+      return awaitedValue15094[0].errorCode;
+    })(),
     "cancelled"
   );
   const candidateAbort = new AbortController();
@@ -448,19 +493,23 @@ test("runner cancellation removes pending execution and isolated candidate verif
   });
   const candidateAssertion = assert.rejects(
     cancelledCandidate,
-    /Candidate stopped/
+    /Candidate stopped/u
   );
   await pending();
   candidateAbort.abort(new Error("Candidate stopped"));
   await candidateAssertion;
   assert.equal(
-    (await runnersRepository.pending()).some(
-      (row) => row.projectId === project.id
-    ),
+    await (async () => {
+      const awaitedValue15629 = await runnersRepository.pending();
+      return awaitedValue15629.some((row) => row.projectId === project.id);
+    })(),
     false
   );
   assert.equal(
-    (await runsRepository.listRuns(spec.id)).length,
+    await (async () => {
+      const awaitedValue15757 = await runsRepository.listRuns(spec.id);
+      return awaitedValue15757.length;
+    })(),
     1,
     "isolated candidates leave no public runs"
   );
@@ -473,16 +522,18 @@ test("runner cancellation removes pending execution and isolated candidate verif
   });
   const job = await pending();
   const issued = await issueRunnerToken("Candidate", "candidate");
-  const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+  const token = requireValue(
+    await authenticateRunnerToken(`Bearer ${issued.token}`)
+  );
   await runnersRepository.reportInstance(token.id, token.id, {
     version: "0.1.0",
     protocolVersion: RUNNER_PROTOCOL_VERSION,
     concurrency: 1,
   });
-  const lease = (await runnersRepository.claim(token, 60_000))!;
+  const lease = requireValue(await runnersRepository.claim(token, 60_000));
   assert.equal(lease.id, job.id);
   await completeRunnerWork(lease.id, token.id, {
-    leaseId: lease.leaseId!,
+    leaseId: requireValue(lease.leaseId),
     durationMs: 100,
     processFailure: null,
     results: [
@@ -498,8 +549,17 @@ test("runner cancellation removes pending execution and isolated candidate verif
   });
   const verified = await verifying;
   assert.equal(verified.status, "passed");
-  assert.equal((await specsRepository.getSpec(spec.id))!.status, "unverified");
-  assert.equal((await runsRepository.listRuns(spec.id)).length, 1);
+  assert.equal(
+    requireValue(await specsRepository.getSpec(spec.id)).status,
+    "unverified"
+  );
+  assert.equal(
+    await (async () => {
+      const awaitedValue16955 = await runsRepository.listRuns(spec.id);
+      return awaitedValue16955.length;
+    })(),
+    1
+  );
   assert.equal(
     await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
     VALID_SPEC
@@ -513,7 +573,7 @@ test("runner cancellation removes pending execution and isolated candidate verif
         startUrl: environment.baseUrl,
         safetyNotes: [],
       }),
-    /exploration is unavailable/
+    /exploration is unavailable/u
   );
   const { createProjectContextsRouter } =
     await import("../../src/infra/web/routes/project-contexts");
@@ -548,7 +608,12 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
     "http://private-app.invalid:4601"
   );
   await repoGit.ensureProjectRepo(project.id, { create: true });
-  const environment = (await environmentsRepository.list(project.id))[0]!;
+  const environment = requireValue(
+    await (async () => {
+      const awaitedValue18930 = await environmentsRepository.list(project.id);
+      return awaitedValue18930[0];
+    })()
+  );
   await environmentsRepository.update(environment, {
     ...environment,
     executor: "runner",
@@ -570,14 +635,20 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
   });
   const waiting = executeSpec(spec.id);
   let job;
-  for (let attempt = 0; attempt < 100 && !job; attempt++) {
-    job = (await runnersRepository.pending()).find(
-      (row) => row.projectId === project.id
-    );
+  /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+  for (let attempt = 0; attempt < 100 && !job; attempt += 1) {
+    job = await (async () => {
+      const awaitedValue19566 = await runnersRepository.pending();
+      return awaitedValue19566.find((row) => row.projectId === project.id);
+    })();
     if (!job) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
     }
   }
+  /* oxlint-enable no-await-in-loop */
   assert.ok(job);
   assert.equal(
     areSpecsLocked([spec.id]),
@@ -592,24 +663,27 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
   const expired = await waiting;
   assert.equal(expired.status, "error");
   assert.match(
-    expired.failReason!,
-    /Runner work expired.*waiting.*for a runner/
+    requireValue(expired.failReason),
+    /Runner work expired.*waiting.*for a runner/u
   );
   await runsRepository.acknowledgeAutomation(expired.id);
   assert.match(
-    (await getRunBatch(job.batchId))!.failReason!,
-    /Runner work expired/
+    requireValue(requireValue(await getRunBatch(job.batchId)).failReason),
+    /Runner work expired/u
   );
   const next = await startSpecBatch(project.id, [spec.id], "Abandoned leases");
   const issued = await issueRunnerToken("Deadline", "deadline");
-  const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+  const token = requireValue(
+    await authenticateRunnerToken(`Bearer ${issued.token}`)
+  );
   await runnersRepository.reportInstance(token.id, token.id, {
     version: "0.1.0",
     protocolVersion: RUNNER_PROTOCOL_VERSION,
     concurrency: 1,
   });
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const lease = (await runnersRepository.claim(token, 60_000))!;
+  /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const lease = requireValue(await runnersRepository.claim(token, 60_000));
     assert.equal(lease.batchId, next.id);
     await db
       .update(runnerJobs)
@@ -617,27 +691,30 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
       .where(eq(runnerJobs.id, lease.id));
     await maintainRunnerQueue();
   }
+  /* oxlint-enable no-await-in-loop */
   assert.equal(await runnersRepository.claim(token, 60_000), null);
   assert.match(
-    (await getRunBatch(next.id))!.failReason!,
-    /stopped after 3 attempts.*lease expired/
+    requireValue(requireValue(await getRunBatch(next.id)).failReason),
+    /stopped after 3 attempts.*lease expired/u
   );
   assert.equal(
-    (await runsRepository.getRun(next.specs[0].runId))!.status,
+    requireValue(await runsRepository.getRun(next.specs[0].runId)).status,
     "error"
   );
   await runsRepository.acknowledgeAutomation(next.specs[0].runId);
   const refused = await startSpecBatch(project.id, [spec.id], "Origin refusal");
-  const refusedLease = (await runnersRepository.claim(token, 60_000))!;
+  const refusedLease = requireValue(
+    await runnersRepository.claim(token, 60_000)
+  );
   await releaseRunnerWork(
     refusedLease.id,
     token.id,
-    refusedLease.leaseId!,
+    requireValue(refusedLease.leaseId),
     "Runner refused this job: its origins are outside the runner allowlist."
   );
   assert.match(
-    (await getRunBatch(refused.id))!.failReason!,
-    /outside the runner allowlist/
+    requireValue(requireValue(await getRunBatch(refused.id)).failReason),
+    /outside the runner allowlist/u
   );
   assert.equal(
     await runnersRepository.claim(token, 60_000),
@@ -670,7 +747,12 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     "http://private-app.invalid:4601"
   );
   await repoGit.ensureProjectRepo(project.id, { create: true });
-  const environment = (await environmentsRepository.list(project.id))[0]!;
+  const environment = requireValue(
+    await (async () => {
+      const awaitedValue23339 = await environmentsRepository.list(project.id);
+      return awaitedValue23339[0];
+    })()
+  );
   await environmentsRepository.update(environment, {
     ...environment,
     executor: "runner",
@@ -683,16 +765,18 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     ""
   );
   const makeSpec = async (title: string) =>
-    (
-      await writer.createSpecInRepo({
+    await (async () => {
+      const awaitedValue23675 = await writer.createSpecInRepo({
         projectId: project.id,
         featureId: feature.id,
         title,
         description: "",
         humanSpec: HUMAN_SPEC,
         testSource: VALID_SPEC.replace("Open the application", title),
-      })
-    ).spec;
+      });
+      return awaitedValue23675.spec;
+    })();
+  /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
   for (const corruption of [
     "missing batch",
     "invalid batch",
@@ -709,31 +793,41 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     let batch: RunBatch;
     if (waiting) {
       let pending;
-      for (let attempt = 0; attempt < 100 && !pending; attempt++) {
-        pending = (await runnersRepository.pending()).find((row) =>
-          row.payload.specs.some((entry) => entry.specId === spec.id)
-        );
+      for (let attempt = 0; attempt < 100 && !pending; attempt += 1) {
+        pending = await (async () => {
+          const awaitedValue24451 = await runnersRepository.pending();
+          return awaitedValue24451.find((row) =>
+            row.payload.specs.some((entry) => entry.specId === spec.id)
+          );
+        })();
         if (!pending) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 10);
+          });
         }
       }
       assert.ok(pending);
-      batch = (await getRunBatch(pending.batchId))!;
+      batch = requireValue(await getRunBatch(pending.batchId));
     } else {
       batch = await startSpecBatch(project.id, [spec.id], corruption);
     }
-    const job = (await runnersRepository.pending()).find(
-      (row) => row.batchId === batch.id
-    )!;
+    const job = requireValue(
+      await (async () => {
+        const awaitedValue24876 = await runnersRepository.pending();
+        return awaitedValue24876.find((row) => row.batchId === batch.id);
+      })()
+    );
     if (corruption === "missing Spec") {
       assert.equal(
-        (await runsRepository.getRun(batch.specs[0].runId))!.awaitingDeploy,
+        requireValue(await runsRepository.getRun(batch.specs[0].runId))
+          .awaitingDeploy,
         false
       );
       const published = await writer.readProjectSpecFiles(project.id);
-      const current = published.specs.find(
-        (entry) => entry.path === spec.path
-      )!;
+      const current = requireValue(
+        published.specs.find((entry) => entry.path === spec.path)
+      );
       await writer.publishSpecsInRepo(project.id, environment.id, [
         {
           path: spec.path,
@@ -759,8 +853,12 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     }
     const original = runsRepository.finishRun;
     if (corruption === "finish error") {
-      runsRepository.finishRun = async () => {
-        throw new Error("Simulated finish failure");
+      runsRepository.finishRun = () => {
+        try {
+          throw new Error("Simulated finish failure");
+        } catch (error) {
+          return Promise.reject(error);
+        }
       };
     }
     await db
@@ -772,9 +870,13 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     } finally {
       runsRepository.finishRun = original;
     }
-    const retired = (await runnersRepository.job(job.id))!;
+    const retired = requireValue(await runnersRepository.job(job.id));
     assert.equal(retired.status, "completed", corruption);
-    assert.match(retired.lastFailure!, /could not be finalized/, corruption);
+    assert.match(
+      requireValue(retired.lastFailure),
+      /could not be finalized/u,
+      corruption
+    );
     if (waiting) {
       const timeout = setTimeout(
         () => abort.abort(new Error("Terminal runner waiter did not finish")),
@@ -787,16 +889,25 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
           "error",
           "waiter must finish even when batch metadata cannot be repaired"
         );
-        assert.match(result.failReason!, /could not be finalized/);
+        assert.match(
+          requireValue(result.failReason),
+          /could not be finalized/u
+        );
       } finally {
         clearTimeout(timeout);
       }
       await fs.rm(batchFile, { recursive: true, force: true });
     } else {
-      assert.equal((await getRunBatch(batch.id))!.status, "error", corruption);
+      assert.equal(
+        requireValue(await getRunBatch(batch.id)).status,
+        "error",
+        corruption
+      );
     }
     if (corruption === "missing Spec") {
-      const recovered = (await runsRepository.getRun(batch.specs[0].runId))!;
+      const recovered = requireValue(
+        await runsRepository.getRun(batch.specs[0].runId)
+      );
       assert.equal(
         recovered.awaitingDeploy,
         true,
@@ -804,12 +915,15 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
       );
       assert.equal(recovered.automationPending, false);
       assert.equal(
-        (await getRunBatch(batch.id))!.specs[0].awaitingDeploy,
+        requireValue(await getRunBatch(batch.id)).specs[0].awaitingDeploy,
         true
       );
       const { projectOverview } = await import("../../src/core/jobs/overview");
       assert.equal(
-        (await projectOverview(project.id)).specHealth[spec.id].status,
+        await (async () => {
+          const awaitedValue27871 = await projectOverview(project.id);
+          return awaitedValue27871.specHealth[spec.id].status;
+        })(),
         "awaiting_deploy"
       );
     }
@@ -823,17 +937,23 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
       );
     }
   }
+  /* oxlint-enable no-await-in-loop */
   const healthy = await makeSpec("Healthy work");
   const batch = await startSpecBatch(project.id, [healthy.id], "Healthy work");
   const queue = await runnerQueueSnapshot();
-  assert.equal(queue.batchQueues.get(batch.id)!.queued, 1);
+  assert.equal(requireValue(queue.batchQueues.get(batch.id)).queued, 1);
   assert.equal(
-    queueMetrics(queue.queues).groups.find((entry) => entry.group === "broken")!
-      .queued,
+    requireValue(
+      queueMetrics(queue.queues).groups.find(
+        (entry) => entry.group === "broken"
+      )
+    ).queued,
     1
   );
   const issued = await issueRunnerToken("Healthy runner", "broken");
-  const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+  const token = requireValue(
+    await authenticateRunnerToken(`Bearer ${issued.token}`)
+  );
   await runnersRepository.reportInstance(token.id, token.id, {
     version: "0.1.0",
     protocolVersion: RUNNER_PROTOCOL_VERSION,
@@ -844,11 +964,11 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
     new AbortController().signal,
     token.id
   );
-  assert.equal(lease!.batchId, batch.id);
+  assert.equal(requireValue(lease).batchId, batch.id);
   await releaseRunnerWork(
-    lease!.id,
+    requireValue(lease).id,
     token.id,
-    lease!.leaseId!,
+    requireValue(requireValue(lease).leaseId),
     "Verification finished"
   );
   await runsRepository.acknowledgeAutomation(batch.specs[0].runId);
@@ -871,7 +991,12 @@ test("runner execution gets its full budget after waiting and stale completion r
     "http://private-app.invalid:4601"
   );
   await repoGit.ensureProjectRepo(project.id, { create: true });
-  const environment = (await environmentsRepository.list(project.id))[0]!;
+  const environment = requireValue(
+    await (async () => {
+      const awaitedValue30270 = await environmentsRepository.list(project.id);
+      return awaitedValue30270[0];
+    })()
+  );
   await environmentsRepository.update(environment, {
     ...environment,
     executor: "runner",
@@ -896,9 +1021,12 @@ test("runner execution gets its full budget after waiting and stale completion r
     [spec.id],
     "Recover completion"
   );
-  const job = (await runnersRepository.pending()).find(
-    (row) => row.batchId === batch.id
-  )!;
+  const job = requireValue(
+    await (async () => {
+      const awaitedValue30892 = await runnersRepository.pending();
+      return awaitedValue30892.find((row) => row.batchId === batch.id);
+    })()
+  );
   await db
     .update(runnerJobs)
     .set({
@@ -909,43 +1037,50 @@ test("runner execution gets its full budget after waiting and stale completion r
     })
     .where(eq(runnerJobs.id, job.id));
   const issued = await issueRunnerToken("Recovery runner", "stale");
-  const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+  const token = requireValue(
+    await authenticateRunnerToken(`Bearer ${issued.token}`)
+  );
   await runnersRepository.reportInstance(token.id, token.id, {
     version: "0.1.0",
     protocolVersion: RUNNER_PROTOCOL_VERSION,
     concurrency: 1,
   });
-  let lease = (await runnersRepository.claim(token, 60_000))!;
+  let lease = requireValue(await runnersRepository.claim(token, 60_000));
   assert.equal(lease.id, job.id, "queued time must not consume execution time");
   assert.ok(
     runnerJobDeadline(lease) >=
       Date.now() + lease.payload.timeoutMs + RUNNER_EXECUTION_GRACE_MS - 1000
   );
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+  await new Promise((resolve) => {
+    setTimeout(resolve, 250);
+  });
   assert.ok(
-    await heartbeatRunnerWork(lease.id, token.id, lease.leaseId!),
+    await heartbeatRunnerWork(lease.id, token.id, requireValue(lease.leaseId)),
     "execution remains valid after its queue TTL elapses"
   );
   await db
     .update(runnerJobs)
     .set({ queueExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString() })
     .where(eq(runnerJobs.id, lease.id));
-  for (let scaleDown = 0; scaleDown < 5; scaleDown++) {
-    await releaseRunnerWork(lease.id, token.id, lease.leaseId!);
-    lease = (await runnersRepository.claim(token, 60_000))!;
+  /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+  for (let scaleDown = 0; scaleDown < 5; scaleDown += 1) {
+    await releaseRunnerWork(lease.id, token.id, requireValue(lease.leaseId));
+    lease = requireValue(await runnersRepository.claim(token, 60_000));
     assert.equal(lease.attempts, 0);
   }
+  /* oxlint-enable no-await-in-loop */
   await runnersRepository.reserveCompletion(lease.id);
   await db
     .update(runnerJobs)
     .set({ completionStartedAt: new Date(0).toISOString() })
     .where(eq(runnerJobs.id, lease.id));
   await runnersRepository.reclaim();
-  lease = (await runnersRepository.claim(token, 60_000))!;
+  lease = requireValue(await runnersRepository.claim(token, 60_000));
   assert.equal(lease.attempts, 1);
   await runnersRepository.reserveCompletion(lease.id);
   await recoverRunnerCompletions();
-  lease = (await runnersRepository.claim(token, 60_000))!;
+  lease = requireValue(await runnersRepository.claim(token, 60_000));
   assert.equal(
     lease.attempts,
     2,
@@ -954,7 +1089,7 @@ test("runner execution gets its full budget after waiting and stale completion r
   await releaseRunnerWork(
     lease.id,
     token.id,
-    lease.leaseId!,
+    requireValue(lease.leaseId),
     "Verification finished"
   );
   await runsRepository.acknowledgeAutomation(batch.specs[0].runId);
@@ -971,7 +1106,12 @@ test("tunnel waits release Spec locks and expire with a clear reason", async () 
     "http://private-app.invalid:4601"
   );
   await repoGit.ensureProjectRepo(project.id, { create: true });
-  const environment = (await environmentsRepository.list(project.id))[0]!;
+  const environment = requireValue(
+    await (async () => {
+      const awaitedValue33777 = await environmentsRepository.list(project.id);
+      return awaitedValue33777[0];
+    })()
+  );
   await environmentsRepository.update(environment, {
     ...environment,
     executor: "tunnel",
@@ -994,6 +1134,7 @@ test("tunnel waits release Spec locks and expire with a clear reason", async () 
   const previous = process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS;
   process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS = "0.2";
   try {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const single of [false, true]) {
       const running = single
         ? executeSpec(spec.id)
@@ -1001,26 +1142,39 @@ test("tunnel waits release Spec locks and expire with a clear reason", async () 
       for (
         let attempt = 0;
         attempt < 50 &&
-        !(await tunnelQueueEntries()).some(
-          (entry) => entry.projectId === project.id
-        );
-        attempt++
+        !(await (async () => {
+          const awaitedValue34673 = await tunnelQueueEntries();
+          return awaitedValue34673.some(
+            (entry) => entry.projectId === project.id
+          );
+        })());
+        attempt += 1
       ) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5);
+        });
       }
       assert.equal(areSpecsLocked([spec.id]), false);
       assert.match(
-        (await tunnelQueueEntries()).find(
-          (entry) => entry.projectId === project.id
-        )!.reason!,
-        /No tunnel connected/
+        requireValue(
+          requireValue(
+            await (async () => {
+              const awaitedValue34956 = await tunnelQueueEntries();
+              return awaitedValue34956.find(
+                (entry) => entry.projectId === project.id
+              );
+            })()
+          ).reason
+        ),
+        /No tunnel connected/u
       );
       if (single) {
         const result = await running;
         assert.equal(result.status, "error");
         assert.match(
-          result.failReason!,
-          /Tunnel work expired.*No tunnel connected/
+          requireValue(result.failReason),
+          /Tunnel work expired.*No tunnel connected/u
         );
       } else {
         const batch = await running;
@@ -1028,20 +1182,27 @@ test("tunnel waits release Spec locks and expire with a clear reason", async () 
         for (
           let attempt = 0;
           attempt < 100 && complete?.status === "running";
-          attempt++
+          attempt += 1
         ) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 10);
+          });
           complete = await getRunBatch(batch.id);
         }
-        assert.equal(complete!.status, "error");
+        assert.equal(requireValue(complete).status, "error");
         assert.match(
-          complete!.failReason!,
-          /Tunnel work expired.*No tunnel connected/
+          requireValue(requireValue(complete).failReason),
+          /Tunnel work expired.*No tunnel connected/u
         );
       }
-      const run = (await runsRepository.listRuns(spec.id))[0];
+      const run = await (async () => {
+        const awaitedValue35885 = await runsRepository.listRuns(spec.id);
+        return awaitedValue35885[0];
+      })();
       await runsRepository.acknowledgeAutomation(run.id);
     }
+    /* oxlint-enable no-await-in-loop */
   } finally {
     if (previous === undefined) {
       delete process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS;
@@ -1074,7 +1235,12 @@ test("runner completion keeps heartbeats available and preserves deployment stat
     "http://private-app.invalid:4601"
   );
   await repoGit.ensureProjectRepo(project.id, { create: true });
-  const environment = (await environmentsRepository.list(project.id))[0]!;
+  const environment = requireValue(
+    await (async () => {
+      const awaitedValue37327 = await environmentsRepository.list(project.id);
+      return awaitedValue37327[0];
+    })()
+  );
   await environmentsRepository.update(environment, {
     ...environment,
     executor: "runner",
@@ -1096,13 +1262,15 @@ test("runner completion keeps heartbeats available and preserves deployment stat
   });
   const batch = await startSpecBatch(project.id, [spec.id], "Before publish");
   const issued = await issueRunnerToken("Completion", "completion");
-  const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+  const token = requireValue(
+    await authenticateRunnerToken(`Bearer ${issued.token}`)
+  );
   await runnersRepository.reportInstance(token.id, token.id, {
     version: "0.1.0",
     protocolVersion: RUNNER_PROTOCOL_VERSION,
     concurrency: 1,
   });
-  const lease = (await runnersRepository.claim(token, 60_000))!;
+  const lease = requireValue(await runnersRepository.claim(token, 60_000));
   const files = await writer.readProjectSpecFiles(project.id);
   await writer.publishSpecsInRepo(project.id, environment.id, [
     {
@@ -1115,9 +1283,11 @@ test("runner completion keeps heartbeats available and preserves deployment stat
   const original = fs.rename;
   let started!: () => void;
   let resume!: () => void;
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
   const moving = new Promise<void>((resolve) => {
     started = resolve;
   });
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
   const hold = new Promise<void>((resolve) => {
     resume = resolve;
   });
@@ -1129,7 +1299,7 @@ test("runner completion keeps heartbeats available and preserves deployment stat
     return original(source, destination);
   };
   const completing = completeRunnerWork(lease.id, token.id, {
-    leaseId: lease.leaseId!,
+    leaseId: requireValue(lease.leaseId),
     durationMs: 100,
     processFailure: null,
     results: [
@@ -1150,10 +1320,16 @@ test("runner completion keeps heartbeats available and preserves deployment stat
   });
   try {
     await moving;
-    assert.equal((await runnersRepository.job(lease.id))!.status, "completing");
+    assert.equal(
+      requireValue(await runnersRepository.job(lease.id)).status,
+      "completing"
+    );
     const heartbeat = await Promise.race([
-      heartbeatRunnerWork(lease.id, token.id, lease.leaseId!),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+      heartbeatRunnerWork(lease.id, token.id, requireValue(lease.leaseId)),
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 1000);
+      }),
     ]);
     assert.ok(heartbeat, "file moves must not hold the global queue lock");
     await db
@@ -1166,7 +1342,7 @@ test("runner completion keeps heartbeats available and preserves deployment stat
     await revokeRunnerToken(token.id);
     await maintainRunnerQueue();
     assert.equal(
-      (await runnersRepository.job(lease.id))!.status,
+      requireValue(await runnersRepository.job(lease.id)).status,
       "completing",
       "an accepted completion must finish once even if its token is revoked or its deadline elapses during storage"
     );
@@ -1175,7 +1351,7 @@ test("runner completion keeps heartbeats available and preserves deployment stat
     fs.rename = original;
   }
   await completing;
-  const run = (await runsRepository.getRun(batch.specs[0].runId))!;
+  const run = requireValue(await runsRepository.getRun(batch.specs[0].runId));
   assert.equal(run.awaitingDeploy, true);
   assert.equal(
     run.automationPending,
@@ -1183,7 +1359,7 @@ test("runner completion keeps heartbeats available and preserves deployment stat
     "a failure received after publish must not start triage"
   );
   assert.equal(
-    (await specsRepository.getSpec(spec.id))!.status,
+    requireValue(await specsRepository.getSpec(spec.id)).status,
     "awaiting_deploy"
   );
 });
@@ -1251,12 +1427,14 @@ test("historical evidence maps step kinds by title and falls back for unknown la
       failedStep: null,
     })
   );
+  /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
   for (const number of [1, 2, 3]) {
     await fs.writeFile(
       path.join(directory, "evidence", `step-0${number}.png`),
       "png"
     );
   }
+  /* oxlint-enable no-await-in-loop */
   const response = await app.request(`/runs/${run.id}/evidence`);
   assert.equal(response.status, 200);
   const evidence = await response.json();
@@ -1274,13 +1452,20 @@ test("historical evidence maps step kinds by title and falls back for unknown la
   assert.equal(evidence.replay, null);
   assert.equal(evidence.replayUnavailable, null);
   assert.equal(
-    (await app.request(`/runs/${run.id}/replay`)).status,
+    await (async () => {
+      const awaitedValue43337 = await app.request(`/runs/${run.id}/replay`);
+      return awaitedValue43337.status;
+    })(),
     404,
     "older runs have no replay"
   );
   assert.equal(
-    (await app.request("/runs/00000000-0000-4000-8000-000000000000/replay"))
-      .status,
+    await (async () => {
+      const awaitedValue43457 = await app.request(
+        "/runs/00000000-0000-4000-8000-000000000000/replay"
+      );
+      return awaitedValue43457.status;
+    })(),
     404
   );
   const screenshot = await app.request(
@@ -1318,9 +1503,10 @@ test("historical evidence maps step kinds by title and falls back for unknown la
       failedStep: null,
     })
   );
-  const duplicates = await (
-    await app.request(`/runs/${run.id}/evidence`)
-  ).json();
+  const duplicates = await (async () => {
+    const awaitedValue44843 = await app.request(`/runs/${run.id}/evidence`);
+    return awaitedValue44843.json();
+  })();
   assert.deepEqual(
     duplicates.steps.map((step: { kind: string; ordinal: number | null }) => [
       step.kind,
@@ -1338,87 +1524,89 @@ test("historical evidence maps step kinds by title and falls back for unknown la
     await import("@specbook/runtime/replay");
   const { readOfflineReplay } = await import("@specbook/runtime/replay-data");
   const image = "data:image/webp;base64,aW1hZ2U=";
-  const replay = (await encodeReplay([
-    {
-      type: 4,
-      timestamp: 1000,
-      data: { href: baseUrl, width: 800, height: 600 },
-    },
-    {
-      type: 2,
-      timestamp: 1001,
-      data: {
-        node: {
-          type: 0,
-          id: 1,
-          childNodes: [
+  const replay = requireValue(
+    await encodeReplay([
+      {
+        type: 4,
+        timestamp: 1000,
+        data: { href: baseUrl, width: 800, height: 600 },
+      },
+      {
+        type: 2,
+        timestamp: 1001,
+        data: {
+          node: {
+            type: 0,
+            id: 1,
+            childNodes: [
+              {
+                type: 2,
+                id: 2,
+                tagName: "img",
+                attributes: { src: image, onload: "alert('unsafe')" },
+                childNodes: [],
+              },
+              {
+                type: 2,
+                id: 3,
+                tagName: "img",
+                attributes: { src: image },
+                childNodes: [],
+              },
+              {
+                type: 2,
+                id: 4,
+                tagName: "input",
+                attributes: {
+                  type: "password",
+                  value: "********",
+                  "data-specbook-mask": "",
+                },
+                childNodes: [],
+              },
+              {
+                type: 2,
+                id: 5,
+                tagName: "iframe",
+                attributes: {
+                  src: "https://outside.invalid/",
+                  srcdoc: "<script>unsafe()</script>",
+                },
+                childNodes: [],
+              },
+              {
+                type: 3,
+                id: 6,
+                textContent:
+                  '@import "https://outside.invalid/style.css"; .page{background:url(https://outside.invalid/image.png)}',
+              },
+            ],
+          },
+          initialOffset: { left: 0, top: 0 },
+        },
+      },
+      {
+        type: 3,
+        timestamp: 1002,
+        data: {
+          source: 0,
+          texts: [],
+          removes: [],
+          adds: [],
+          attributes: [
             {
-              type: 2,
               id: 2,
-              tagName: "img",
-              attributes: { src: image, onload: "alert('unsafe')" },
-              childNodes: [],
-            },
-            {
-              type: 2,
-              id: 3,
-              tagName: "img",
-              attributes: { src: image },
-              childNodes: [],
-            },
-            {
-              type: 2,
-              id: 4,
-              tagName: "input",
               attributes: {
-                type: "password",
-                value: "********",
-                "data-specbook-mask": "",
+                src: image,
+                onclick: "unsafe()",
+                href: "https://outside.invalid/",
               },
-              childNodes: [],
-            },
-            {
-              type: 2,
-              id: 5,
-              tagName: "iframe",
-              attributes: {
-                src: "https://outside.invalid/",
-                srcdoc: "<script>unsafe()</script>",
-              },
-              childNodes: [],
-            },
-            {
-              type: 3,
-              id: 6,
-              textContent:
-                '@import "https://outside.invalid/style.css"; .page{background:url(https://outside.invalid/image.png)}',
             },
           ],
         },
-        initialOffset: { left: 0, top: 0 },
       },
-    },
-    {
-      type: 3,
-      timestamp: 1002,
-      data: {
-        source: 0,
-        texts: [],
-        removes: [],
-        adds: [],
-        attributes: [
-          {
-            id: 2,
-            attributes: {
-              src: image,
-              onclick: "unsafe()",
-              href: "https://outside.invalid/",
-            },
-          },
-        ],
-      },
-    },
-  ]))!;
+    ])
+  );
   await fs.writeFile(path.join(directory, REPLAY_FILE), replay);
   await fs.writeFile(
     path.join(directory, "evidence.json"),
@@ -1445,7 +1633,7 @@ test("historical evidence maps step kinds by title and falls back for unknown la
   assert.ok(recording);
   assert.equal(recording.version, 1);
   assert.deepEqual(recording.assets, [image]);
-  const events = restoreReplayEvents(recording)!;
+  const events = requireValue(restoreReplayEvents(recording));
   const nodes = (
     events[1].data as {
       node: {
@@ -1470,9 +1658,10 @@ test("historical evidence maps step kinds by title and falls back for unknown la
     ).attributes,
     [{ id: 2, attributes: { src: image } }]
   );
-  const withReplay = await (
-    await app.request(`/runs/${run.id}/evidence`)
-  ).json();
+  const withReplay = await (async () => {
+    const awaitedValue49045 = await app.request(`/runs/${run.id}/evidence`);
+    return awaitedValue49045.json();
+  })();
   assert.deepEqual(withReplay.replay, {
     file: REPLAY_FILE,
     bytes: replay.length,
@@ -1480,7 +1669,10 @@ test("historical evidence maps step kinds by title and falls back for unknown la
 
   await fs.writeFile(path.join(directory, REPLAY_FILE), "invalid gzip");
   assert.equal(
-    (await app.request(`/runs/${run.id}/replay`)).status,
+    await (async () => {
+      const awaitedValue49298 = await app.request(`/runs/${run.id}/replay`);
+      return awaitedValue49298.status;
+    })(),
     404,
     "invalid replay data fails closed"
   );
@@ -1490,7 +1682,10 @@ test("historical evidence maps step kinds by title and falls back for unknown la
     path.join(directory, REPLAY_FILE)
   );
   assert.equal(
-    (await app.request(`/runs/${run.id}/replay`)).status,
+    await (async () => {
+      const awaitedValue49576 = await app.request(`/runs/${run.id}/replay`);
+      return awaitedValue49576.status;
+    })(),
     404,
     "replay reads reject symlinks"
   );
@@ -1505,9 +1700,10 @@ test("historical evidence maps step kinds by title and falls back for unknown la
         "Replay omitted because it exceeded the recording limit.",
     })
   );
-  const unavailable = await (
-    await app.request(`/runs/${run.id}/evidence`)
-  ).json();
+  const unavailable = await (async () => {
+    const awaitedValue50007 = await app.request(`/runs/${run.id}/evidence`);
+    return awaitedValue50007.json();
+  })();
   assert.equal(unavailable.replay, null);
   assert.equal(
     unavailable.replayUnavailable,
@@ -1529,7 +1725,12 @@ test("an offline runner retry leaves other projects' failure processing availabl
   const createFailure = async (name: string, remote: boolean) => {
     const project = await projectsRepository.createProject(name, baseUrl);
     await repoGit.ensureProjectRepo(project.id, { create: true });
-    const production = (await environmentsRepository.list(project.id))[0]!;
+    const production = requireValue(
+      await (async () => {
+        const awaitedValue51160 = await environmentsRepository.list(project.id);
+        return awaitedValue51160[0];
+      })()
+    );
     if (remote) {
       await environmentsRepository.update(production, {
         ...production,
@@ -1588,6 +1789,7 @@ test("an offline runner retry leaves other projects' failure processing availabl
   let timeout: NodeJS.Timeout | undefined;
   const completed = await Promise.race([
     processRunFailures().then(() => true),
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
     new Promise<boolean>((resolve) => {
       timeout = setTimeout(() => resolve(false), 1000);
     }),
@@ -1599,39 +1801,61 @@ test("an offline runner retry leaves other projects' failure processing availabl
     "runner retries do not hold the shared failure monitor"
   );
   assert.equal(
-    (await runsRepository.getRun(local.run.id))!.automationPending,
+    requireValue(await runsRepository.getRun(local.run.id)).automationPending,
     false
   );
-  assert.equal((await runsRepository.getRun(local.run.id))!.flaky, true);
+  assert.equal(
+    requireValue(await runsRepository.getRun(local.run.id)).flaky,
+    true
+  );
   let job;
-  for (let attempt = 0; attempt < 150; attempt++) {
-    job = (await runnersRepository.pending()).find(
-      (row) => row.projectId === offline.project.id
-    );
+  /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    job = await (async () => {
+      const awaitedValue53502 = await runnersRepository.pending();
+      return awaitedValue53502.find(
+        (row) => row.projectId === offline.project.id
+      );
+    })();
     if (job) {
       break;
     }
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
   }
+  /* oxlint-enable no-await-in-loop */
   assert.ok(job);
   await processRunFailures();
   assert.equal(
-    (await runnersRepository.pending()).filter(
-      (row) => row.projectId === offline.project.id
-    ).length,
+    await (async () => {
+      const awaitedValue53770 = await runnersRepository.pending();
+      return awaitedValue53770.filter(
+        (row) => row.projectId === offline.project.id
+      ).length;
+    })(),
     1
   );
-  assert.equal((await runsRepository.listRuns(offline.spec.id)).length, 2);
+  assert.equal(
+    await (async () => {
+      const awaitedValue53906 = await runsRepository.listRuns(offline.spec.id);
+      return awaitedValue53906.length;
+    })(),
+    2
+  );
   const issued = await issueRunnerToken("Monitor", "monitor");
-  const token = (await authenticateRunnerToken(`Bearer ${issued.token}`))!;
+  const token = requireValue(
+    await authenticateRunnerToken(`Bearer ${issued.token}`)
+  );
   await runnersRepository.reportInstance(token.id, token.id, {
     version: "0.1.0",
     protocolVersion: RUNNER_PROTOCOL_VERSION,
     concurrency: 1,
   });
-  const lease = (await runnersRepository.claim(token, 60_000))!;
+  const lease = requireValue(await runnersRepository.claim(token, 60_000));
   await completeRunnerWork(lease.id, token.id, {
-    leaseId: lease.leaseId!,
+    leaseId: requireValue(lease.leaseId),
     durationMs: 100,
     processFailure: null,
     results: [
@@ -1647,10 +1871,13 @@ test("an offline runner retry leaves other projects' failure processing availabl
   });
   await processRunFailures();
   assert.equal(
-    (await runsRepository.getRun(offline.run.id))!.automationPending,
+    requireValue(await runsRepository.getRun(offline.run.id)).automationPending,
     false
   );
-  assert.equal((await runsRepository.getRun(offline.run.id))!.flaky, true);
+  assert.equal(
+    requireValue(await runsRepository.getRun(offline.run.id)).flaky,
+    true
+  );
 });
 
 describe(
@@ -1677,7 +1904,14 @@ describe(
           await import("../../src/core/jobs/overview");
         const { serializeSpecYaml } = await import("@specbook/runtime/yaml");
         const project = await createProject("Await deployment", baseUrl);
-        const environment = (await environmentsRepository.list(project.id))[0]!;
+        const environment = requireValue(
+          await (async () => {
+            const awaitedValue56010 = await environmentsRepository.list(
+              project.id
+            );
+            return awaitedValue56010[0];
+          })()
+        );
         const staging = await environmentsRepository.create(project.id, {
           name: "Staging",
           baseUrl,
@@ -1709,7 +1943,9 @@ describe(
           environment.id,
           [input]
         );
-        const spec = (await specsRepository.getSpec(published[0]!.id))!;
+        const spec = requireValue(
+          await specsRepository.getSpec(requireValue(published[0]).id)
+        );
         const failed = await executeSpec(spec.id, {
           baseUrl: `${baseUrl}flaky/await-deploy`,
           automate: true,
@@ -1722,7 +1958,10 @@ describe(
         assert.equal(await currentFailure(project.id, failed.id), null);
         assert.deepEqual(await jobsRepository.inbox(project.id), []);
         assert.equal(
-          (await specsRepository.getSpec(spec.id))?.status,
+          await (async () => {
+            const awaitedResult62143 = await specsRepository.getSpec(spec.id);
+            return awaitedResult62143?.status;
+          })(),
           "awaiting_deploy"
         );
         const overview = await projectOverview(project.id);
@@ -1737,7 +1976,10 @@ describe(
         assert.equal(otherFailure.status, "failed");
         assert.equal(otherFailure.awaitingDeploy, false);
         assert.equal(
-          (await specsRepository.getSpec(spec.id))?.status,
+          await (async () => {
+            const awaitedResult62872 = await specsRepository.getSpec(spec.id);
+            return awaitedResult62872?.status;
+          })(),
           "failed",
           "a failure outside the waiting environment remains a normal failure"
         );
@@ -1748,7 +1990,10 @@ describe(
         assert.equal(otherEnvironment.status, "passed");
         assert.equal(otherEnvironment.awaitingDeploy, false);
         assert.equal(
-          (await specsRepository.getSpec(spec.id))?.status,
+          await (async () => {
+            const awaitedResult63364 = await specsRepository.getSpec(spec.id);
+            return awaitedResult63364?.status;
+          })(),
           "awaiting_deploy",
           "another environment cannot promote the awaiting target"
         );
@@ -1757,7 +2002,10 @@ describe(
         });
         assert.equal(previewPass.status, "passed");
         assert.equal(
-          (await specsRepository.getSpec(spec.id))?.status,
+          await (async () => {
+            const awaitedResult63715 = await specsRepository.getSpec(spec.id);
+            return awaitedResult63715?.status;
+          })(),
           "awaiting_deploy",
           "a passing preview URL cannot promote the configured deployment"
         );
@@ -1769,7 +2017,10 @@ describe(
         assert.equal(passing.status, "passed");
         assert.equal(passing.awaitingDeploy, true);
         assert.equal(
-          (await specsRepository.getSpec(spec.id))?.status,
+          await (async () => {
+            const awaitedResult64187 = await specsRepository.getSpec(spec.id);
+            return awaitedResult64187?.status;
+          })(),
           "passed"
         );
         assert.equal(
@@ -1785,7 +2036,7 @@ describe(
         assert.equal(regularFailure.automationPending, true);
         const changed = {
           ...input,
-          baseRevision: published[0]!.revision,
+          baseRevision: requireValue(published[0]).revision,
           files: {
             ...input.files,
             "spec.yml": input.files["spec.yml"].replace(
@@ -1796,7 +2047,10 @@ describe(
         };
         await writer.publishSpecsInRepo(project.id, environment.id, [changed]);
         assert.equal(
-          (await specsRepository.getSpec(spec.id))?.status,
+          await (async () => {
+            const awaitedResult65152 = await specsRepository.getSpec(spec.id);
+            return awaitedResult65152?.status;
+          })(),
           "awaiting_deploy"
         );
       }
@@ -1841,7 +2095,7 @@ describe(
             executeSpec(spec.id, {
               signal: AbortSignal.abort(new Error("Cancelled before starting")),
             }),
-          /Cancelled before starting/
+          /Cancelled before starting/u
         );
         assert.deepEqual(await runsRepository.listRuns(spec.id), []);
         const original = await runsRepository.createRun({
@@ -1880,12 +2134,15 @@ describe(
             .raw(["rev-parse", "--verify", `refs/specbook/runs/${run.id}`])
         );
         assert.equal(
-          (await specsRepository.getSpec(spec.id))?.status,
+          await (async () => {
+            const awaitedResult68197 = await specsRepository.getSpec(spec.id);
+            return awaitedResult68197?.status;
+          })(),
           "unverified"
         );
-        const { createRun } = runsRepository;
-        runsRepository.createRun = async function (input) {
-          const created = await createRun.call(this, input);
+        const { createRun: originalCreateRun } = runsRepository;
+        runsRepository.createRun = async function createRun(input) {
+          const created = await originalCreateRun.call(this, input);
           await fs.mkdir(runsDir, { recursive: true });
           await fs.writeFile(
             path.join(runsDir, created.id),
@@ -1897,7 +2154,12 @@ describe(
           const blocked = await executeSpec(spec.id);
           assert.equal(blocked.status, "error");
           assert.equal(
-            (await runsRepository.getRun(blocked.id))?.status,
+            await (async () => {
+              const awaitedResult68824 = await runsRepository.getRun(
+                blocked.id
+              );
+              return awaitedResult68824?.status;
+            })(),
             "error",
             "artifact failures still finish the run"
           );
@@ -1905,7 +2167,7 @@ describe(
           assert.equal(blocked.healOnFailure, true);
           await fs.rm(path.join(runsDir, blocked.id));
         } finally {
-          runsRepository.createRun = createRun;
+          runsRepository.createRun = originalCreateRun;
         }
       }
     );
@@ -1916,20 +2178,22 @@ describe(
       async () => {
         let privateRequests = 0;
         const privateSite = http.createServer((_request, response) => {
-          privateRequests++;
+          privateRequests += 1;
           response.end("Internal service");
         });
-        await new Promise<void>((resolve) =>
-          privateSite.listen(0, "127.0.0.1", resolve)
-        );
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        await new Promise<void>((resolve) => {
+          privateSite.listen(0, "127.0.0.1", resolve);
+        });
         const destination = `http://127.0.0.1:${(privateSite.address() as AddressInfo).port}/`;
         const preview = http.createServer((_request, response) => {
           response.writeHead(302, { location: destination });
           response.end();
         });
-        await new Promise<void>((resolve) =>
-          preview.listen(0, "127.0.0.1", resolve)
-        );
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        await new Promise<void>((resolve) => {
+          preview.listen(0, "127.0.0.1", resolve);
+        });
         try {
           const project = await projectsRepository.createProject(
             "Redirect check",
@@ -1960,7 +2224,7 @@ describe(
           assert.equal(run.status, "failed", run.failReason ?? "");
           assert.match(
             run.failReason ?? "",
-            /BLOCKED_BY_CLIENT|blockedbyclient/i
+            /BLOCKED_BY_CLIENT|blockedbyclient/iu
           );
           assert.ok(
             (run.durationMs ?? Infinity) < 20_000,
@@ -1972,10 +2236,15 @@ describe(
             "the redirect target receives no browser request"
           );
         } finally {
+          /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
           for (const server of [preview, privateSite]) {
             server.closeAllConnections();
-            await new Promise<void>((resolve) => server.close(() => resolve()));
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise<void>((resolve) => {
+              server.close(() => resolve());
+            });
           }
+          /* oxlint-enable no-await-in-loop */
         }
       }
     );
@@ -1991,13 +2260,13 @@ describe(
             response: http.ServerResponse
           ) => void
         ) => {
-          const server = http.createServer(
-            (request, response) =>
-              void setTimeout(() => handler(request, response), delayMs)
-          );
-          await new Promise<void>((resolve) =>
-            server.listen(0, "127.0.0.1", resolve)
-          );
+          const server = http.createServer((request, response) => {
+            setTimeout(() => handler(request, response), delayMs);
+          });
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise<void>((resolve) => {
+            server.listen(0, "127.0.0.1", resolve);
+          });
           return {
             server,
             origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
@@ -2026,19 +2295,21 @@ describe(
         });
         const application = await listen((request, response) => {
           if (request.url === "/callback") {
-            return void response
+            response
               .writeHead(302, {
                 location: "/",
                 "set-cookie": "session=1; Path=/; HttpOnly",
               })
               .end();
+            return;
           }
           if (!request.headers.cookie?.includes("session=1")) {
-            return void response
+            response
               .writeHead(302, {
                 location: `${provider.origin}/realms/demo/auth`,
               })
               .end();
+            return;
           }
           response
             .writeHead(200, { "content-type": "text/html" })
@@ -2049,9 +2320,14 @@ describe(
             "Single sign-on",
             application.origin
           );
-          const production = (
-            await environmentsRepository.list(project.id)
-          )[0]!;
+          const production = requireValue(
+            await (async () => {
+              const awaitedValue70212 = await environmentsRepository.list(
+                project.id
+              );
+              return awaitedValue70212[0];
+            })()
+          );
           await repoGit.ensureProjectRepo(project.id, { create: true });
           await createProfile(project.id, {
             name: "member",
@@ -2105,7 +2381,7 @@ test("Single sign-on", async ({ page, step, secret }) => {
           assert.equal(blocked.failedStep, "Open the application");
           assert.match(
             blocked.failReason ?? "",
-            /BLOCKED_BY_CLIENT|blockedbyclient/i
+            /BLOCKED_BY_CLIENT|blockedbyclient/iu
           );
           await environmentsRepository.update(production, {
             ...production,
@@ -2121,10 +2397,15 @@ test("Single sign-on", async ({ page, step, secret }) => {
             "username=maria&password=sso-secret-value",
           ]);
         } finally {
+          /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
           for (const { server } of [application, provider]) {
             server.closeAllConnections();
-            await new Promise<void>((resolve) => server.close(() => resolve()));
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise<void>((resolve) => {
+              server.close(() => resolve());
+            });
           }
+          /* oxlint-enable no-await-in-loop */
         }
       }
     );
@@ -2135,19 +2416,21 @@ test("Single sign-on", async ({ page, step, secret }) => {
       async () => {
         const slow = http.createServer((request, response) => {
           if (request.url === "/slow.css") {
-            return void setTimeout(
+            setTimeout(
               () =>
                 response.writeHead(200, { "content-type": "text/css" }).end(""),
               40_000
             );
+            return;
           }
           response
             .writeHead(200, { "content-type": "text/html" })
             .end('<h1>Reports</h1><img src="/slow.css" alt="">');
         });
-        await new Promise<void>((resolve) =>
-          slow.listen(0, "127.0.0.1", resolve)
-        );
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        await new Promise<void>((resolve) => {
+          slow.listen(0, "127.0.0.1", resolve);
+        });
         try {
           const project = await projectsRepository.createProject(
             "Slow page",
@@ -2160,6 +2443,7 @@ test("Single sign-on", async ({ page, step, secret }) => {
             "Reports",
             ""
           );
+          // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
           const source = (
             goto: string,
             assertion: string
@@ -2187,19 +2471,24 @@ test("Open reports", async ({ page, step }) => {
           assert.equal(spec.status, "unverified", spec.invalidReason ?? "");
           const timedOut = await executeSpec(spec.id);
           assert.equal(timedOut.status, "failed");
-          assert.match(timedOut.failReason ?? "", /Timeout 30000ms exceeded/);
+          assert.match(timedOut.failReason ?? "", /Timeout 30000ms exceeded/u);
           assert.match(
             timedOut.failReason ?? "",
-            /it is slow, not unreachable/
+            /it is slow, not unreachable/u
           );
           assert.notEqual(
             timedOut.errorCode,
             "environment",
             "a slow page is not reported as an unreachable app"
           );
-          const production = (
-            await environmentsRepository.list(project.id)
-          )[0]!;
+          const production = requireValue(
+            await (async () => {
+              const awaitedValue75589 = await environmentsRepository.list(
+                project.id
+              );
+              return awaitedValue75589[0];
+            })()
+          );
           await environmentsRepository.update(production, {
             ...production,
             timeoutScale: 2,
@@ -2229,7 +2518,10 @@ test("Open reports", async ({ page, step }) => {
           assert.equal(run.status, "passed", run.failReason ?? "");
         } finally {
           slow.closeAllConnections();
-          await new Promise<void>((resolve) => slow.close(() => resolve()));
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise<void>((resolve) => {
+            slow.close(() => resolve());
+          });
         }
       }
     );
@@ -2287,15 +2579,18 @@ test("Store", async ({ page, step, secret }) => {
         assert.equal(run.failedStep, "See the store");
         assert.equal(run.errorCode, "assertion");
         assert.equal(run.sourceHash, spec.sourceHash);
-        assert.match(run.failReason ?? "", /toHaveText/);
+        assert.match(run.failReason ?? "", /toHaveText/u);
         assert.doesNotMatch(
           run.failReason ?? "",
-          /\/tmp\/specbook|node_modules|src\/core\/runner|\n\s+at /
+          /\/tmp\/specbook|node_modules|src\/core\/runner|\n\s+at /u
         );
 
-        const evidence = (await (
-          await app.request(`/runs/${run.id}/evidence`)
-        ).json()) as {
+        const evidence = (await (async () => {
+          const awaitedValue79019 = await app.request(
+            `/runs/${run.id}/evidence`
+          );
+          return awaitedValue79019.json();
+        })()) as {
           steps: { label: string; file: string }[];
           video: string | null;
           failedStep: string | null;
@@ -2319,7 +2614,10 @@ test("Store", async ({ page, step, secret }) => {
         const report = await app.request(`/runs/${run.id}/report`);
         assert.equal(report.status, 200);
         assert.ok(
-          !(await report.text()).includes("s3cret-value"),
+          !(await (async () => {
+            const awaitedValue79853 = await report.text();
+            return awaitedValue79853.includes("s3cret-value");
+          })()),
           "the report never contains secrets"
         );
         const screenshot = await app.request(
@@ -2331,22 +2629,31 @@ test("Store", async ({ page, step, secret }) => {
           "sandbox"
         );
 
-        const { files } = (await (
-          await app.request(`/runs/${run.id}/artifacts`)
-        ).json()) as { files: string[] };
+        const { files } = (await (async () => {
+          const awaitedValue80303 = await app.request(
+            `/runs/${run.id}/artifacts`
+          );
+          return awaitedValue80303.json();
+        })()) as { files: string[] };
         assert.ok(files.includes("results.json") && files.includes("spec.ts"));
         assert.ok(!files.some((file) => file.startsWith("work/")));
         const { runsDir } = await import("../../src/core/paths");
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
         for (const file of files.filter((name) =>
-          /\.(json|ts|yml)$/.test(name)
+          /\.(?<capture1>json|ts|yml)$/u.test(name)
         )) {
           assert.ok(
-            !(
-              await fs.readFile(path.join(runsDir, run.id, file), "utf-8")
-            ).includes("s3cret-value"),
+            !(await (async () => {
+              const awaitedValue80756 = await fs.readFile(
+                path.join(runsDir, run.id, file),
+                "utf-8"
+              );
+              return awaitedValue80756.includes("s3cret-value");
+            })()),
             file
           );
         }
+        /* oxlint-enable no-await-in-loop */
       }
     );
 
@@ -2361,9 +2668,23 @@ test("Store", async ({ page, step, secret }) => {
           "http://127.0.0.1:1"
         );
         await environmentsRepository.update(
-          (await environmentsRepository.list(project.id))[0]!,
+          requireValue(
+            await (async () => {
+              const awaitedValue81404 = await environmentsRepository.list(
+                project.id
+              );
+              return awaitedValue81404[0];
+            })()
+          ),
           {
-            ...(await environmentsRepository.list(project.id))[0]!,
+            ...requireValue(
+              await (async () => {
+                const awaitedValue81484 = await environmentsRepository.list(
+                  project.id
+                );
+                return awaitedValue81484[0];
+              })()
+            ),
             allowedOrigins: [new URL(baseUrl).origin],
           }
         );
@@ -2413,14 +2734,16 @@ test("Preview credentials", async ({ page, step, secret }) => {
         assert.equal(blocked.failedStep, "Enter password");
         assert.match(
           blocked.failReason ?? "",
-          /current page origin is not allowed/
+          /current page origin is not allowed/u
         );
         assert.deepEqual(
           previewCredentials,
           [],
           "neither typing events nor form submission may expose the saved secret"
         );
-        const profile = (await getProfileByName(project.id, "shopper"))!;
+        const profile = requireValue(
+          await getProfileByName(project.id, "shopper")
+        );
         await updateProfile(profile, {
           allowedOrigins: [new URL(baseUrl).origin],
           fields: [{ key: "password" }],
@@ -2436,7 +2759,12 @@ test("Preview credentials", async ({ page, step, secret }) => {
           "explicitly trusted preview receives the credential"
         );
         assert.equal(
-          (await projectsRepository.getProject(project.id))?.baseUrl,
+          await (async () => {
+            const awaitedResult89207 = await projectsRepository.getProject(
+              project.id
+            );
+            return awaitedResult89207?.baseUrl;
+          })(),
           "http://127.0.0.1:1",
           "a run override does not change the canonical trusted origin"
         );
@@ -2472,11 +2800,14 @@ test("Preview credentials", async ({ page, step, secret }) => {
             }
           })
         );
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
         for (const server of servers) {
-          await new Promise<void>((resolve) =>
-            server.listen(0, "127.0.0.1", resolve)
-          );
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise<void>((resolve) => {
+            server.listen(0, "127.0.0.1", resolve);
+          });
         }
+        /* oxlint-enable no-await-in-loop */
         const [stagingUrl, previewUrl] = servers.map(
           (server) =>
             `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -2497,8 +2828,8 @@ test("Preview credentials", async ({ page, step, secret }) => {
           });
           await environmentsRepository.create(project.id, {
             name: "Staging",
-            baseUrl: stagingUrl!,
-            allowedOrigins: [previewUrl!],
+            baseUrl: requireValue(stagingUrl),
+            allowedOrigins: [requireValue(previewUrl)],
             credentialOverrides: { shopper: stagingProfile.id },
           });
           const feature = await writer.createFeatureInRepo(
@@ -2547,19 +2878,18 @@ test("Preview credentials", async ({ page, step, secret }) => {
           assert.equal(blocked.status, "failed");
           assert.match(
             blocked.failReason ?? "",
-            /current page origin is not allowed/
+            /current page origin is not allowed/u
           );
           assert.deepEqual(
             receivers[1],
             [],
             "a network allowlist does not authorize a credential override on previews"
           );
-          const profile = (await getProfileByName(
-            project.id,
-            "staging-shopper"
-          ))!;
+          const profile = requireValue(
+            await getProfileByName(project.id, "staging-shopper")
+          );
           await updateProfile(profile, {
-            allowedOrigins: [previewUrl!],
+            allowedOrigins: [requireValue(previewUrl)],
             fields: [{ key: "password" }],
           });
           const allowed = await executeSpec(spec.id, {
@@ -2568,9 +2898,12 @@ test("Preview credentials", async ({ page, step, secret }) => {
           });
           assert.equal(allowed.status, "passed", allowed.failReason ?? "");
           assert.deepEqual(receivers[1], ["staging-secret-only"]);
-          const evidence = await (
-            await app.request(`/runs/${allowed.id}/evidence`)
-          ).json();
+          const evidence = await (async () => {
+            const awaitedValue89570 = await app.request(
+              `/runs/${allowed.id}/evidence`
+            );
+            return awaitedValue89570.json();
+          })();
           assert.equal(evidence.environment.name, "Staging");
           assert.ok(!JSON.stringify(evidence).includes("staging-secret-only"));
           const ci = new Hono().route("/", createCiRouter());
@@ -2587,11 +2920,15 @@ test("Preview credentials", async ({ page, step, secret }) => {
           assert.equal(started.status, 202, await started.clone().text());
           const initial = await started.json();
           assert.equal(initial.batch.environment.name, "Staging");
-          const completed = await (
-            await ci.request(`/ci/runs/${initial.batch.id}?wait=true`, {
-              headers,
-            })
-          ).json();
+          const completed = await (async () => {
+            const awaitedValue90482 = await ci.request(
+              `/ci/runs/${initial.batch.id}?wait=true`,
+              {
+                headers,
+              }
+            );
+            return awaitedValue90482.json();
+          })();
           assert.equal(completed.qualityGate.passed, true);
           assert.deepEqual(
             completed.results.map(
@@ -2606,14 +2943,24 @@ test("Preview credentials", async ({ page, step, secret }) => {
             "staging-secret-only",
           ]);
           assert.equal(
-            (await projectsRepository.getProject(project.id))?.baseUrl,
+            await (async () => {
+              const awaitedResult96331 = await projectsRepository.getProject(
+                project.id
+              );
+              return awaitedResult96331?.baseUrl;
+            })(),
             baseUrl
           );
         } finally {
+          /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
           for (const server of servers) {
             server.closeAllConnections();
-            await new Promise<void>((resolve) => server.close(() => resolve()));
+            // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+            await new Promise<void>((resolve) => {
+              server.close(() => resolve());
+            });
           }
+          /* oxlint-enable no-await-in-loop */
         }
       }
     );
@@ -2625,17 +2972,18 @@ describe(
   { skip: available ? false : "Chromium is not installed" },
   () => {
     test("verifies in the failed preview environment, preserves the contract, and applies on approval", async () => {
-      const { jobsRepository } =
+      const { jobsRepository: jobsRepositoryInTest } =
         await import("../../src/infra/repositories/jobs");
       const { specsRepository } =
         await import("../../src/infra/repositories/specs");
-      const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+      const { jobLimitsSchema: jobLimitsSchemaInTest } =
+        await import("../../src/core/jobs/schemas");
       const { proposeMutation, applyProposal } =
         await import("../../src/core/jobs/proposals");
       const { verifyProposal } =
         await import("../../src/core/jobs/verification");
-      const { reindexProject } = await import("../../src/core/repo/indexer");
-      const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+      const { VALID_SPEC: VALID_SPECInTest, HUMAN_SPEC: HUMAN_SPECInTest } =
+        await import("../helpers/storage");
       const project = await projectsRepository.createProject(
         "Candidate",
         baseUrl
@@ -2652,8 +3000,8 @@ describe(
         featureId: feature.id,
         title: "Candidate",
         description: "",
-        humanSpec: HUMAN_SPEC,
-        testSource: VALID_SPEC,
+        humanSpec: HUMAN_SPECInTest,
+        testSource: VALID_SPECInTest,
       });
       const directory = path.join(repoGit.getRepoDir(project.id), spec.path);
       const yaml = await fs.readFile(path.join(directory, "spec.yml"), "utf-8");
@@ -2675,13 +3023,27 @@ describe(
         baseUrl: "http://127.0.0.1:1",
       });
       await environmentsRepository.update(
-        (await environmentsRepository.list(project.id))[0]!,
+        requireValue(
+          await (async () => {
+            const awaitedValue93611 = await environmentsRepository.list(
+              project.id
+            );
+            return awaitedValue93611[0];
+          })()
+        ),
         {
-          ...(await environmentsRepository.list(project.id))[0]!,
+          ...requireValue(
+            await (async () => {
+              const awaitedValue93687 = await environmentsRepository.list(
+                project.id
+              );
+              return awaitedValue93687[0];
+            })()
+          ),
           allowedOrigins: [new URL(baseUrl).origin],
         }
       );
-      const job = await jobsRepository.create({
+      const job = await jobsRepositoryInTest.create({
         projectId: project.id,
         runId: originalRun.id,
         chatId: "candidate-test",
@@ -2689,26 +3051,31 @@ describe(
         kind: "failure_triage",
         specId: spec.id,
         goal: "Heal",
-        limits: jobLimitsSchema.parse({}),
+        limits: jobLimitsSchemaInTest.parse({}),
       });
-      const running = (await jobsRepository.claim(job.id))!;
-      await jobsRepository.update(job.id, { classification: "test_drift" });
+      const running = requireValue(await jobsRepositoryInTest.claim(job.id));
+      await jobsRepositoryInTest.update(job.id, {
+        classification: "test_drift",
+      });
       await assert.rejects(
         () =>
           proposeMutation(running, "update_spec", {
             specId: spec.id,
-            humanSpec: HUMAN_SPEC,
-            testSource: VALID_SPEC,
+            humanSpec: HUMAN_SPECInTest,
+            testSource: VALID_SPECInTest,
           }),
-        /implementation/
+        /implementation/u
       );
       const proposal = await proposeMutation(running, "update_spec", {
         specId: spec.id,
-        testSource: VALID_SPEC.replace('page.goto("/")', 'page.goto("/home")'),
+        testSource: VALID_SPECInTest.replace(
+          'page.goto("/")',
+          'page.goto("/home")'
+        ),
       });
       await assert.rejects(
         () => applyProposal(proposal),
-        /passing verification/
+        /passing verification/u
       );
       const head = await repoGit.getHeadSha(project.id);
       const result = await verifyProposal(running, proposal);
@@ -2717,22 +3084,27 @@ describe(
       assert.ok(result.screenshots.length);
       assert.equal(await repoGit.getHeadSha(project.id), head);
       assert.equal(
-        (await specsRepository.getSpec(spec.id))?.status,
+        await (async () => {
+          const awaitedResult100546 = await specsRepository.getSpec(spec.id);
+          return awaitedResult100546?.status;
+        })(),
         "unverified"
       );
       assert.equal(
         await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
-        VALID_SPEC
+        VALID_SPECInTest
       );
       await writer.createFeatureInRepo(project.id, null, "Unrelated", "");
-      await applyProposal((await jobsRepository.item(proposal.id))!);
+      await applyProposal(
+        requireValue(await jobsRepositoryInTest.item(proposal.id))
+      );
       assert.equal(
         await fs.readFile(path.join(directory, "spec.yml"), "utf-8"),
         yaml
       );
       assert.equal(
         await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
-        VALID_SPEC.replace('page.goto("/")', 'page.goto("/home")')
+        VALID_SPECInTest.replace('page.goto("/")', 'page.goto("/home")')
       );
     });
   }
@@ -2769,7 +3141,7 @@ describe("scheduled runs", () => {
       "0 0 30 2 *",
       "0 0 * * 8",
     ]) {
-      assert.throws(() => nextCronAt(cron), /Cron|cron/, cron);
+      assert.throws(() => nextCronAt(cron), /Cron|cron/u, cron);
     }
     assert.ok(
       automationSettingsSchema.safeParse({}).success,
@@ -2806,39 +3178,73 @@ describe("scheduled runs", () => {
         body: JSON.stringify(body),
       });
     assert.equal(
-      (await router.request("/projects/missing/automation")).status,
+      await (async () => {
+        const awaitedValue98051 = await router.request(
+          "/projects/missing/automation"
+        );
+        return awaitedValue98051.status;
+      })(),
       404
     );
-    const initial = await (await router.request(endpoint)).json();
+    const initial = await (async () => {
+      const awaitedValue98157 = await router.request(endpoint);
+      return awaitedValue98157.json();
+    })();
     assert.equal(initial.automation.cron, null);
     assert.equal(initial.automation.healFailures, true);
     assert.equal(initial.automation.allowPrivateWebhook, false);
     assert.deepEqual(initial.automation.specIds, []);
-    assert.equal((await update({})).status, 200);
-    assert.equal((await update({ cron: "no cron" })).status, 400);
     assert.equal(
-      (await update({ specIds: ["00000000-0000-4000-8000-000000000001"] }))
-        .status,
+      await (async () => {
+        const awaitedValue98440 = await update({});
+        return awaitedValue98440.status;
+      })(),
+      200
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue98490 = await update({ cron: "no cron" });
+        return awaitedValue98490.status;
+      })(),
       400
     );
     assert.equal(
-      (await update({ webhookUrl: baseUrl })).status,
+      await (async () => {
+        const awaitedValue98564 = await update({
+          specIds: ["00000000-0000-4000-8000-000000000001"],
+        });
+        return awaitedValue98564.status;
+      })(),
+      400
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue98692 = await update({ webhookUrl: baseUrl });
+        return awaitedValue98692.status;
+      })(),
       400,
       "local webhooks require explicit permission even for a local project"
     );
     assert.equal(
-      (await update({ webhookUrl: baseUrl, allowPrivateWebhook: true })).status,
+      await (async () => {
+        const awaitedValue98858 = await update({
+          webhookUrl: baseUrl,
+          allowPrivateWebhook: true,
+        });
+        return awaitedValue98858.status;
+      })(),
       200
     );
     const webhookUrl = "https://8.8.8.8/hooks/private-token";
-    const saved = await (
-      await update({
+    const saved = await (async () => {
+      const awaitedValue99036 = await update({
         cron: "0 12 * * *",
         webhookUrl,
         healFailures: false,
         allowPrivateWebhook: false,
-      })
-    ).json();
+      });
+      return awaitedValue99036.json();
+    })();
     assert.ok(
       Array.isArray(saved.notifications),
       "saving returns the same response shape as loading"
@@ -2853,7 +3259,10 @@ describe("scheduled runs", () => {
       .where(eq(projectAutomations.projectId, project.id));
     assert.ok(stored?.webhookUrl?.startsWith("v1:"));
     assert.ok(!stored?.webhookUrl?.includes("private-token"));
-    const disabled = await (await update({ cron: null })).json();
+    const disabled = await (async () => {
+      const awaitedValue99826 = await update({ cron: null });
+      return awaitedValue99826.json();
+    })();
     assert.equal(disabled.automation.nextRunAt, null);
     assert.equal(
       disabled.automation.webhookConfigured,
@@ -2861,7 +3270,10 @@ describe("scheduled runs", () => {
       "omitting the URL preserves it"
     );
     assert.equal(disabled.automation.healFailures, false);
-    const removed = await (await update({ webhookUrl: null })).json();
+    const removed = await (async () => {
+      const awaitedValue100125 = await update({ webhookUrl: null });
+      return awaitedValue100125.json();
+    })();
     assert.equal(removed.automation.webhookConfigured, false);
   });
 
@@ -2869,18 +3281,23 @@ describe("scheduled runs", () => {
     const { postWebhook } = await import("../../src/core/network/webhook");
     const requests: string[] = [];
     const webhook = http.createServer((request, response) => {
-      requests.push(request.url!);
+      requests.push(requireValue(request.url));
       response.writeHead(302, { location: "/internal" });
       response.end();
     });
-    await new Promise<void>((resolve) =>
-      webhook.listen(0, "127.0.0.1", resolve)
-    );
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+    await new Promise<void>((resolve) => {
+      webhook.listen(0, "127.0.0.1", resolve);
+    });
     const url = `http://webhook.invalid:${(webhook.address() as AddressInfo).port}/events`;
     let resolutions = 0;
-    const resolver = async () => {
-      resolutions++;
-      return [{ address: "127.0.0.1", family: 4 }];
+    const resolver = () => {
+      try {
+        resolutions += 1;
+        return Promise.resolve([{ address: "127.0.0.1", family: 4 }]);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     };
     try {
       await assert.rejects(
@@ -2890,7 +3307,7 @@ describe("scheduled runs", () => {
             { text: "status" },
             { allowPrivate: false, signal: AbortSignal.timeout(1000), resolver }
           ),
-        /not allowed/
+        /not allowed/u
       );
       assert.deepEqual(requests, []);
       assert.equal(
@@ -2913,7 +3330,10 @@ describe("scheduled runs", () => {
       );
     } finally {
       webhook.closeAllConnections();
-      await new Promise<void>((resolve) => webhook.close(() => resolve()));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        webhook.close(() => resolve());
+      });
     }
   });
 
@@ -2929,7 +3349,8 @@ describe("scheduled runs", () => {
         await import("../../src/core/jobs/schedules");
       const { getRunBatch } = await import("../../src/core/runner/batch");
       const { stopJobWorker } = await import("../../src/core/jobs/worker");
-      const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+      const { VALID_SPEC: VALID_SPECInTest, HUMAN_SPEC: HUMAN_SPECInTest } =
+        await import("../helpers/storage");
       stopJobWorker();
       const project = await projectsRepository.createProject(
         "Scheduled sign-in",
@@ -2943,7 +3364,7 @@ describe("scheduled runs", () => {
         "Sign in",
         ""
       );
-      const source = VALID_SPEC.replace(
+      const source = VALID_SPECInTest.replace(
         "({ page, step })",
         "({ page, step, secret })"
       ).replace(
@@ -2955,7 +3376,7 @@ describe("scheduled runs", () => {
         featureId: feature.id,
         title: "Scheduled sign-in",
         description: "",
-        humanSpec: HUMAN_SPEC,
+        humanSpec: HUMAN_SPECInTest,
         testSource: source,
       });
       const { spec: unselected } = await writer.createSpecInRepo({
@@ -2963,8 +3384,8 @@ describe("scheduled runs", () => {
         featureId: feature.id,
         title: "Unselected",
         description: "",
-        humanSpec: HUMAN_SPEC,
-        testSource: VALID_SPEC,
+        humanSpec: HUMAN_SPECInTest,
+        testSource: VALID_SPECInTest,
       });
       const head = await repoGit.getHeadSha(project.id);
       await updateAutomation(project.id, {
@@ -2981,28 +3402,42 @@ describe("scheduled runs", () => {
         await Promise.all([processSchedules(at), processSchedules(at)]);
         const questions = await jobsRepository.inbox(project.id);
         assert.equal(questions.length, 1);
-        const question = questions[0]!;
+        const question = requireValue(questions[0]);
         const [intent] = await stewardRepository.intents(project.id);
         assert.equal(intent?.source, "event");
         assert.equal(question.payload.waitingFor, "credentials");
         assert.equal(question.payload.runIntentId, intent?.id);
         assert.equal(
-          (await jobsRepository.get(question.jobId))?.status,
+          await (async () => {
+            const awaitedResult110985 = await jobsRepository.get(
+              question.jobId
+            );
+            return awaitedResult110985?.status;
+          })(),
           "blocked"
         );
         assert.deepEqual(await runsRepository.listRuns(spec.id), []);
         assert.deepEqual(
-          (await stewardRepository.signals(project.id)).map(
-            (signal) => signal.kind
-          ),
+          await (async () => {
+            const awaitedValue104909 = await stewardRepository.signals(
+              project.id
+            );
+            return awaitedValue104909.map((signal) => signal.kind);
+          })(),
           ["schedule"]
         );
         assert.equal(
-          (await schedulesRepository.get(project.id))?.lastBatchId,
+          await (async () => {
+            const awaitedResult111425 = await schedulesRepository.get(
+              project.id
+            );
+            return awaitedResult111425?.lastBatchId;
+          })(),
           null
         );
 
-        for (let index = 0; index < 301; index++) {
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+        for (let index = 0; index < 301; index += 1) {
           await stewardRepository.signal({
             projectId: project.id,
             key: `later-event:${index}`,
@@ -3011,11 +3446,25 @@ describe("scheduled runs", () => {
             body: "No requested work.",
           });
         }
-        assert.equal((await stewardRepository.signals(project.id)).length, 300);
+        /* oxlint-enable no-await-in-loop */
         assert.equal(
-          (await stewardRepository.signals(project.id)).some(
-            (signal) => signal.kind === "schedule"
-          ),
+          await (async () => {
+            const awaitedValue105492 = await stewardRepository.signals(
+              project.id
+            );
+            return awaitedValue105492.length;
+          })(),
+          300
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedValue105584 = await stewardRepository.signals(
+              project.id
+            );
+            return awaitedValue105584.some(
+              (signal) => signal.kind === "schedule"
+            );
+          })(),
           false,
           "the original occurrence is outside the presentation window"
         );
@@ -3026,11 +3475,22 @@ describe("scheduled runs", () => {
         await processSchedules(at);
         await processProjectSteward(project.id, false);
         assert.equal(
-          (await jobsRepository.inbox(project.id)).length,
+          await (async () => {
+            const awaitedValue106057 = await jobsRepository.inbox(project.id);
+            return awaitedValue106057.length;
+          })(),
           1,
           "missed ticks reuse the unresolved prerequisite"
         );
-        assert.equal((await stewardRepository.intents(project.id)).length, 1);
+        assert.equal(
+          await (async () => {
+            const awaitedValue106210 = await stewardRepository.intents(
+              project.id
+            );
+            return awaitedValue106210.length;
+          })(),
+          1
+        );
 
         await stewardRepository.update(project.id, { paused: true });
         await createProfile(project.id, {
@@ -3046,7 +3506,10 @@ describe("scheduled runs", () => {
         });
         await processProjectSteward(project.id, false);
         assert.equal(
-          (await jobsRepository.item(question.id))?.status,
+          await (async () => {
+            const awaitedResult113533 = await jobsRepository.item(question.id);
+            return awaitedResult113533?.status;
+          })(),
           "pending"
         );
         assert.deepEqual(await runsRepository.listRuns(spec.id), []);
@@ -3060,31 +3523,58 @@ describe("scheduled runs", () => {
           processProjectSteward(project.id, false),
           processProjectSteward(project.id, false),
         ]);
-        const resumed = (await stewardRepository.intents(project.id)).filter(
-          (row) => row.key.startsWith(`resume-run:${intent!.id}:`)
-        );
+        const resumed = await (async () => {
+          const awaitedValue107357 = await stewardRepository.intents(
+            project.id
+          );
+          return awaitedValue107357.filter((row) =>
+            row.key.startsWith(`resume-run:${requireValue(intent).id}:`)
+          );
+        })();
         assert.equal(resumed.length, 1);
         assert.equal(resumed[0]?.source, "event");
         assert.deepEqual(resumed[0]?.intent.specIds, [spec.id]);
-        let batch = await getRunBatch(resumed[0]!.batchId!);
+        let batch = await getRunBatch(
+          requireValue(requireValue(resumed[0]).batchId)
+        );
         assert.equal(batch?.trigger, "schedule");
         assert.equal(
-          (await schedulesRepository.get(project.id))?.lastBatchId,
+          await (async () => {
+            const awaitedResult114603 = await schedulesRepository.get(
+              project.id
+            );
+            return awaitedResult114603?.lastBatchId;
+          })(),
           batch?.id
         );
         assert.equal(
-          (await runsRepository.getRun(batch!.specs[0]!.runId))?.healOnFailure,
+          await (async () => {
+            const awaitedResult114724 = await runsRepository.getRun(
+              requireValue(requireValue(batch).specs[0]).runId
+            );
+            return awaitedResult114724?.healOnFailure;
+          })(),
           false
         );
         assert.equal(
-          (await jobsRepository.item(question.id))?.status,
+          await (async () => {
+            const awaitedResult114879 = await jobsRepository.item(question.id);
+            return awaitedResult114879?.status;
+          })(),
           "answered"
         );
         const deadline = Date.now() + 60_000;
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
         while (batch?.status === "running" && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          batch = await getRunBatch(resumed[0]!.batchId!);
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 100);
+          });
+          batch = await getRunBatch(
+            requireValue(requireValue(resumed[0]).batchId)
+          );
         }
+        /* oxlint-enable no-await-in-loop */
         assert.equal(batch?.status, "passed", batch?.failReason ?? "");
         assert.deepEqual(
           batch?.specs.map((entry) => entry.specId),
@@ -3094,23 +3584,55 @@ describe("scheduled runs", () => {
         await updateAutomation(project.id, { cron: null });
         await processSchedules();
         assert.equal(
-          (await schedulesRepository.get(project.id))?.lastBatchStatus,
+          await (async () => {
+            const awaitedResult115630 = await schedulesRepository.get(
+              project.id
+            );
+            return awaitedResult115630?.lastBatchStatus;
+          })(),
           "passed"
         );
         assert.equal(
-          (await schedulesRepository.get(project.id))?.lastError,
+          await (async () => {
+            const awaitedResult115754 = await schedulesRepository.get(
+              project.id
+            );
+            return awaitedResult115754?.lastError;
+          })(),
           null
         );
         assert.deepEqual(
-          (await schedulesRepository.notifications(project.id))
-            .map((row) => row.status)
-            .sort(),
+          await (async () => {
+            const awaitedValue109001 = await schedulesRepository.notifications(
+              project.id
+            );
+            return awaitedValue109001.map((row) => row.status).toSorted();
+          })(),
           ["passed", "running"]
         );
-        assert.equal((await jobsRepository.list(project.id)).length, 1);
-        assert.equal((await jobsRepository.get(question.jobId))?.tokensUsed, 0);
         assert.equal(
-          (await jobsRepository.get(question.jobId))?.actionsUsed,
+          await (async () => {
+            const awaitedValue109178 = await jobsRepository.list(project.id);
+            return awaitedValue109178.length;
+          })(),
+          1
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedResult116292 = await jobsRepository.get(
+              question.jobId
+            );
+            return awaitedResult116292?.tokensUsed;
+          })(),
+          0
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedResult116384 = await jobsRepository.get(
+              question.jobId
+            );
+            return awaitedResult116384?.actionsUsed;
+          })(),
           0
         );
         assert.equal(await repoGit.getHeadSha(project.id), head);
@@ -3137,7 +3659,8 @@ describe("scheduled runs", () => {
       } = await import("../../src/core/jobs/schedules");
       const { getRunBatch, getRunBatchDirectory, markInterruptedBatches } =
         await import("../../src/core/runner/batch");
-      const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+      const { VALID_SPEC: VALID_SPECInTest, HUMAN_SPEC: HUMAN_SPECInTest } =
+        await import("../helpers/storage");
       const { db } = await import("../../src/infra/db/client");
       const { webhookNotifications } =
         await import("../../src/infra/db/schema");
@@ -3151,12 +3674,13 @@ describe("scheduled runs", () => {
           body += chunk;
         }
         messages.push(JSON.parse(body));
-        response.statusCode = ++calls === 1 || alwaysReject ? 503 : 200;
+        response.statusCode = (calls += 1) === 1 || alwaysReject ? 503 : 200;
         response.end();
       });
-      await new Promise<void>((resolve) =>
-        webhook.listen(0, "127.0.0.1", resolve)
-      );
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise<void>((resolve) => {
+        webhook.listen(0, "127.0.0.1", resolve);
+      });
       try {
         const project = await projectsRepository.createProject(
           "Scheduled store",
@@ -3174,8 +3698,8 @@ describe("scheduled runs", () => {
           featureId: feature.id,
           title: "Store",
           description: "",
-          humanSpec: HUMAN_SPEC,
-          testSource: VALID_SPEC,
+          humanSpec: HUMAN_SPECInTest,
+          testSource: VALID_SPECInTest,
         });
         await specsRepository.createSpecRecord({
           projectId: project.id,
@@ -3198,22 +3722,35 @@ describe("scheduled runs", () => {
           nextRunAt: new Date(at.getTime() - 300_000).toISOString(),
         });
         await processSchedules(at);
-        const scheduled = (await schedulesRepository.get(project.id))!;
+        const scheduled = requireValue(
+          await schedulesRepository.get(project.id)
+        );
         assert.ok(scheduled.lastBatchId);
         assert.ok(
-          Date.parse(scheduled.nextRunAt!) > at.getTime(),
+          Date.parse(requireValue(scheduled.nextRunAt)) > at.getTime(),
           "missed occurrences become one batch"
         );
-        const batch = (await getRunBatch(scheduled.lastBatchId!))!;
+        const batch = requireValue(
+          await getRunBatch(requireValue(scheduled.lastBatchId))
+        );
         assert.equal(batch.specs.length, 1, "all means runnable Specs only");
         assert.equal(batch.specs[0]?.specId, spec.id);
         assert.equal(
-          (await runsRepository.getRun(batch.specs[0]!.runId))
-            ?.automationPending,
+          await (async () => {
+            const awaitedResult120093 = await runsRepository.getRun(
+              requireValue(batch.specs[0]).runId
+            );
+            return awaitedResult120093?.automationPending;
+          })(),
           true
         );
         assert.equal(
-          (await runsRepository.getRun(batch.specs[0]!.runId))?.healOnFailure,
+          await (async () => {
+            const awaitedResult120250 = await runsRepository.getRun(
+              requireValue(batch.specs[0]).runId
+            );
+            return awaitedResult120250?.healOnFailure;
+          })(),
           false
         );
         await schedulesRepository.update(project.id, {
@@ -3221,7 +3758,12 @@ describe("scheduled runs", () => {
         });
         await processSchedules(new Date(at.getTime() + 1));
         assert.equal(
-          (await schedulesRepository.get(project.id))?.lastBatchId,
+          await (async () => {
+            const awaitedResult120584 = await schedulesRepository.get(
+              project.id
+            );
+            return awaitedResult120584?.lastBatchId;
+          })(),
           batch.id,
           "active batch is retained"
         );
@@ -3232,12 +3774,14 @@ describe("scheduled runs", () => {
         const [rawNotification] = await db
           .select()
           .from(webhookNotifications)
-          .where(eq(webhookNotifications.id, retry!.id));
+          .where(eq(webhookNotifications.id, requireValue(retry).id));
         assert.ok(rawNotification?.webhookUrl.startsWith("v1:"));
         assert.ok(
           !JSON.stringify(rawNotification?.payload).includes("private-token")
         );
-        await deliverWebhookNotifications(new Date(retry!.nextAttemptAt!));
+        await deliverWebhookNotifications(
+          new Date(requireValue(requireValue(retry).nextAttemptAt))
+        );
         const [delivered] = await schedulesRepository.notifications(project.id);
         assert.equal(delivered?.attempts, 2);
         assert.ok(delivered?.deliveredAt);
@@ -3250,18 +3794,38 @@ describe("scheduled runs", () => {
           typeof messages[0]?.text === "string",
           "payload works with Slack incoming webhooks"
         );
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
         for (
           let attempt = 0;
-          attempt < 100 && (await getRunBatch(batch.id))?.status === "running";
-          attempt++
+          attempt < 100 &&
+          (await (async () => {
+            const awaitedResult121897 = await getRunBatch(batch.id);
+            return awaitedResult121897?.status;
+          })()) === "running";
+          attempt += 1
         ) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 100);
+          });
         }
-        assert.equal((await getRunBatch(batch.id))?.status, "passed");
+        /* oxlint-enable no-await-in-loop */
+        assert.equal(
+          await (async () => {
+            const awaitedResult122089 = await getRunBatch(batch.id);
+            return awaitedResult122089?.status;
+          })(),
+          "passed"
+        );
         await updateAutomation(project.id, { cron: null });
         await processSchedules(new Date(at.getTime() + 12_000));
         assert.equal(
-          (await schedulesRepository.get(project.id))?.lastBatchStatus,
+          await (async () => {
+            const awaitedResult122296 = await schedulesRepository.get(
+              project.id
+            );
+            return awaitedResult122296?.lastBatchStatus;
+          })(),
           "passed"
         );
         assert.equal(
@@ -3276,7 +3840,7 @@ describe("scheduled runs", () => {
         );
 
         const interrupted = {
-          ...(await getRunBatch(batch.id))!,
+          ...requireValue(await getRunBatch(batch.id)),
           id: crypto.randomUUID(),
           status: "running",
         };
@@ -3293,7 +3857,12 @@ describe("scheduled runs", () => {
         await markInterruptedBatches();
         await processSchedules(new Date(at.getTime() + 14_000));
         assert.equal(
-          (await schedulesRepository.get(project.id))?.lastBatchStatus,
+          await (async () => {
+            const awaitedResult123428 = await schedulesRepository.get(
+              project.id
+            );
+            return awaitedResult123428?.lastBatchStatus;
+          })(),
           "error"
         );
         assert.equal(
@@ -3308,25 +3877,36 @@ describe("scheduled runs", () => {
           failedDeliveryId,
           "failed",
           {
-            webhookUrl: (await schedulesRepository.get(project.id))!
-              .webhookUrl!,
+            webhookUrl: requireValue(
+              requireValue(await schedulesRepository.get(project.id)).webhookUrl
+            ),
             payload: { text: "Bounded retry" },
           }
         );
-        for (let attempt = 0; attempt < 6; attempt++) {
+        /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+        for (let attempt = 0; attempt < 6; attempt += 1) {
           await deliverWebhookNotifications(
             new Date(at.getTime() + (attempt + 1) * 600_001)
           );
         }
-        const exhausted = (
-          await schedulesRepository.notifications(project.id)
-        ).find((item) => item.batchId === failedDeliveryId);
+        /* oxlint-enable no-await-in-loop */
+        const exhausted = await (async () => {
+          const awaitedValue117059 = await schedulesRepository.notifications(
+            project.id
+          );
+          return awaitedValue117059.find(
+            (item) => item.batchId === failedDeliveryId
+          );
+        })();
         assert.equal(exhausted?.attempts, 5);
         assert.equal(exhausted?.nextAttemptAt, null);
         assert.equal(exhausted?.lastError, "Webhook returned HTTP 503");
       } finally {
         webhook.closeAllConnections();
-        await new Promise<void>((resolve) => webhook.close(() => resolve()));
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        await new Promise<void>((resolve) => {
+          webhook.close(() => resolve());
+        });
       }
     }
   );
@@ -3336,7 +3916,8 @@ describe(
   "failure retry",
   { skip: available ? false : "Chromium is not installed" },
   () => {
-    async function failingSpec(route: string) {
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
+    const failingSpec = async function failingSpec(route: string) {
       const project = await projectsRepository.createProject("Retry", baseUrl);
       await repoGit.ensureProjectRepo(project.id, { create: true });
       const feature = await writer.createFeatureInRepo(
@@ -3367,16 +3948,16 @@ test("Store", async ({ page, step }) => {
         testSource: source,
       });
       return { project, spec, source, humanSpec };
-    }
+    };
 
     test("pass on retry retains both attempts, marks flaky, and skips healing even after recovery", async () => {
       const { processRunFailures } =
         await import("../../src/core/jobs/failures");
       const { runsRepository } =
         await import("../../src/infra/repositories/runs");
-      const { jobsRepository } =
+      const { jobsRepository: jobsRepositoryInTest } =
         await import("../../src/infra/repositories/jobs");
-      const { stewardRepository } =
+      const { stewardRepository: stewardRepositoryInTest } =
         await import("../../src/infra/repositories/steward");
       const { db } = await import("../../src/infra/db/client");
       const { runs } = await import("../../src/infra/db/schema");
@@ -3387,13 +3968,34 @@ test("Store", async ({ page, step }) => {
       await processRunFailures();
       const history = await runsRepository.listRuns(spec.id);
       assert.equal(history.length, 2);
-      const retry = history.find((run) => run.retryOf === original.id)!;
+      const retry = requireValue(
+        history.find((run) => run.retryOf === original.id)
+      );
       assert.equal(retry.status, "passed", retry.failReason ?? "");
       assert.ok(history.every((run) => run.flaky));
-      assert.equal((await jobsRepository.list(project.id)).length, 0);
-      assert.equal((await stewardRepository.signals(project.id)).length, 0);
       assert.equal(
-        (await runsRepository.getRun(original.id))?.automationPending,
+        await (async () => {
+          const awaitedValue119878 = await jobsRepositoryInTest.list(
+            project.id
+          );
+          return awaitedValue119878.length;
+        })(),
+        0
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedValue119949 = await stewardRepositoryInTest.signals(
+            project.id
+          );
+          return awaitedValue119949.length;
+        })(),
+        0
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedResult127507 = await runsRepository.getRun(original.id);
+          return awaitedResult127507?.automationPending;
+        })(),
         false
       );
       await db
@@ -3401,8 +4003,22 @@ test("Store", async ({ page, step }) => {
         .set({ automationPending: true })
         .where(eq(runs.id, original.id));
       await processRunFailures();
-      assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
-      assert.equal((await jobsRepository.list(project.id)).length, 0);
+      assert.equal(
+        await (async () => {
+          const awaitedValue120295 = await runsRepository.listRuns(spec.id);
+          return awaitedValue120295.length;
+        })(),
+        2
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedValue120367 = await jobsRepositoryInTest.list(
+            project.id
+          );
+          return awaitedValue120367.length;
+        })(),
+        0
+      );
     });
 
     test("healer opt-out still retries once, while a changed contract skips both retry and healing", async () => {
@@ -3410,7 +4026,7 @@ test("Store", async ({ page, step }) => {
         await import("../../src/core/jobs/failures");
       const { runsRepository } =
         await import("../../src/infra/repositories/runs");
-      const { jobsRepository } =
+      const { jobsRepository: jobsRepositoryInTest } =
         await import("../../src/infra/repositories/jobs");
       const { project, spec } = await failingSpec("/always-fails");
       const original = await executeSpec(spec.id, {
@@ -3421,9 +4037,23 @@ test("Store", async ({ page, step }) => {
       const history = await runsRepository.listRuns(spec.id);
       assert.equal(history.length, 2);
       assert.ok(history.every((run) => run.status === "failed" && !run.flaky));
-      assert.equal((await jobsRepository.list(project.id)).length, 0);
+      assert.equal(
+        await (async () => {
+          const awaitedValue121236 = await jobsRepositoryInTest.list(
+            project.id
+          );
+          return awaitedValue121236.length;
+        })(),
+        0
+      );
       await processRunFailures();
-      assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
+      assert.equal(
+        await (async () => {
+          const awaitedValue121341 = await runsRepository.listRuns(spec.id);
+          return awaitedValue121341.length;
+        })(),
+        2
+      );
 
       const changed = await failingSpec("/changed-contract");
       const stale = await executeSpec(changed.spec.id, { automate: true });
@@ -3431,14 +4061,36 @@ test("Store", async ({ page, step }) => {
         humanSpec: { ...changed.humanSpec, expectedResult: "New behavior" },
       });
       await processRunFailures();
-      assert.equal((await runsRepository.listRuns(changed.spec.id)).length, 1);
       assert.equal(
-        (await runsRepository.getRun(stale.id))?.automationPending,
+        await (async () => {
+          const awaitedValue121730 = await runsRepository.listRuns(
+            changed.spec.id
+          );
+          return awaitedValue121730.length;
+        })(),
+        1
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedResult129716 = await runsRepository.getRun(stale.id);
+          return awaitedResult129716?.automationPending;
+        })(),
         false
       );
-      assert.equal((await jobsRepository.list(changed.project.id)).length, 0);
       assert.equal(
-        (await runsRepository.getRun(original.id))?.automationPending,
+        await (async () => {
+          const awaitedValue121921 = await jobsRepositoryInTest.list(
+            changed.project.id
+          );
+          return awaitedValue121921.length;
+        })(),
+        0
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedResult129991 = await runsRepository.getRun(original.id);
+          return awaitedResult129991?.automationPending;
+        })(),
         false
       );
     });
@@ -3451,6 +4103,7 @@ test("Store", async ({ page, step }) => {
       const { settingsRepository } =
         await import("../../src/infra/repositories/settings");
       const { ciResult } = await import("../../src/core/ci/results");
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const global of [false, true]) {
         const { project, spec } = await failingSpec(`/flaky-paused-${global}`);
         const original = await executeSpec(spec.id, { automate: true });
@@ -3458,10 +4111,17 @@ test("Store", async ({ page, step }) => {
         await settingsRepository.setAgentPaused(global);
         try {
           await processRunFailures();
-          const retry = (await runsRepository.retryFor(original.id))!;
+          const retry = requireValue(
+            await runsRepository.retryFor(original.id)
+          );
           assert.equal(retry.status, "passed", retry.failReason ?? "");
           assert.equal(
-            (await runsRepository.getRun(original.id))?.automationPending,
+            await (async () => {
+              const awaitedResult131119 = await runsRepository.getRun(
+                original.id
+              );
+              return awaitedResult131119?.automationPending;
+            })(),
             false
           );
           const result = await ciResult({
@@ -3490,11 +4150,18 @@ test("Store", async ({ page, step }) => {
           assert.equal(result.complete, true);
           assert.equal(result.qualityGate.flaky, 1);
           assert.equal(result.qualityGate.passed, true);
-          assert.equal((await jobsRepository.list(project.id)).length, 0);
+          assert.equal(
+            await (async () => {
+              const awaitedValue124179 = await jobsRepository.list(project.id);
+              return awaitedValue124179.length;
+            })(),
+            0
+          );
         } finally {
           await settingsRepository.setAgentPaused(false);
         }
       }
+      /* oxlint-enable no-await-in-loop */
     });
 
     test("failed retry emits one original-failure signal even after a crash before acknowledgement", async (t) => {
@@ -3502,7 +4169,7 @@ test("Store", async ({ page, step }) => {
         await import("../../src/core/jobs/failures");
       const { runsRepository } =
         await import("../../src/infra/repositories/runs");
-      const { stewardRepository } =
+      const { stewardRepository: stewardRepositoryInTest } =
         await import("../../src/infra/repositories/steward");
       const { project, spec } = await failingSpec("/failure-signal");
       const original = await executeSpec(spec.id, { automate: true });
@@ -3522,33 +4189,80 @@ test("Store", async ({ page, step }) => {
       );
       await processRunFailures();
       interruptedAck.mock.restore();
-      const retry = (await runsRepository.retryFor(original.id))!;
+      const retry = requireValue(await runsRepository.retryFor(original.id));
       assert.equal(retry.status, "failed");
       assert.equal(
-        (await stewardRepository.signals(project.id))[0]?.payload.runId,
+        await (async () => {
+          const awaitedResult133617 = await (async () => {
+            const awaitedValue125528 = await stewardRepositoryInTest.signals(
+              project.id
+            );
+            return awaitedValue125528[0];
+          })();
+          return awaitedResult133617?.payload.runId;
+        })(),
         retry.id
       );
       assert.equal(
-        (await stewardRepository.signals(project.id))[0]?.key,
+        await (async () => {
+          const awaitedResult133821 = await (async () => {
+            const awaitedValue125647 = await stewardRepositoryInTest.signals(
+              project.id
+            );
+            return awaitedValue125647[0];
+          })();
+          return awaitedResult133821?.key;
+        })(),
         `failure:${original.id}`
       );
       assert.equal(
-        (await stewardRepository.signals(project.id))[0]?.payload.originalRunId,
+        await (async () => {
+          const awaitedResult134031 = await (async () => {
+            const awaitedValue125772 = await stewardRepositoryInTest.signals(
+              project.id
+            );
+            return awaitedValue125772[0];
+          })();
+          return awaitedResult134031?.payload.originalRunId;
+        })(),
         original.id
       );
       assert.equal(
-        (await runsRepository.getRun(original.id))?.automationPending,
+        await (async () => {
+          const awaitedResult134246 = await runsRepository.getRun(original.id);
+          return awaitedResult134246?.automationPending;
+        })(),
         true
       );
       assert.equal(
-        (await runsRepository.getRun(retry.id))?.automationPending,
+        await (async () => {
+          const awaitedResult134359 = await runsRepository.getRun(retry.id);
+          return awaitedResult134359?.automationPending;
+        })(),
         false
       );
       await processRunFailures();
-      assert.equal((await stewardRepository.signals(project.id)).length, 1);
-      assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
       assert.equal(
-        (await runsRepository.getRun(original.id))?.automationPending,
+        await (async () => {
+          const awaitedValue126151 = await stewardRepositoryInTest.signals(
+            project.id
+          );
+          return awaitedValue126151.length;
+        })(),
+        1
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedValue126228 = await runsRepository.listRuns(spec.id);
+          return awaitedValue126228.length;
+        })(),
+        2
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedResult134823 = await runsRepository.getRun(original.id);
+          return awaitedResult134823?.automationPending;
+        })(),
         false
       );
 
@@ -3564,16 +4278,33 @@ test("Store", async ({ page, step }) => {
       await processRunFailures();
       await processRunFailures();
       assert.equal(
-        (await runsRepository.listRuns(recovered.spec.id)).length,
+        await (async () => {
+          const awaitedValue126894 = await runsRepository.listRuns(
+            recovered.spec.id
+          );
+          return awaitedValue126894.length;
+        })(),
         2
       );
       assert.equal(
-        (await stewardRepository.signals(recovered.project.id))[0]?.payload
-          .runId,
+        await (async () => {
+          const awaitedResult135599 = await (async () => {
+            const awaitedValue127000 = await stewardRepositoryInTest.signals(
+              recovered.project.id
+            );
+            return awaitedValue127000[0];
+          })();
+          return awaitedResult135599?.payload.runId;
+        })(),
         interrupted.id
       );
       assert.equal(
-        (await stewardRepository.signals(recovered.project.id)).length,
+        await (async () => {
+          const awaitedValue127146 = await stewardRepositoryInTest.signals(
+            recovered.project.id
+          );
+          return awaitedValue127146.length;
+        })(),
         1
       );
     });
@@ -3593,11 +4324,30 @@ test("Store", async ({ page, step }) => {
         await processRunFailures();
         assert.equal(await runsRepository.retryFor(original.id), null);
         assert.equal(
-          (await runsRepository.getRun(original.id))?.automationPending,
+          await (async () => {
+            const awaitedResult136827 = await runsRepository.getRun(
+              original.id
+            );
+            return awaitedResult136827?.automationPending;
+          })(),
           true
         );
-        assert.equal((await stewardRepository.signals(project.id)).length, 0);
-        assert.equal((await jobsRepository.list(project.id)).length, 0);
+        assert.equal(
+          await (async () => {
+            const awaitedValue128168 = await stewardRepository.signals(
+              project.id
+            );
+            return awaitedValue128168.length;
+          })(),
+          0
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedValue128247 = await jobsRepository.list(project.id);
+            return awaitedValue128247.length;
+          })(),
+          0
+        );
         now += 15_000;
         await processRunFailures();
         assert.equal(await runsRepository.retryFor(original.id), null);
@@ -3611,16 +4361,41 @@ test("Store", async ({ page, step }) => {
         );
         now += 15_000;
         await processRunFailures();
-        const retry = (await runsRepository.retryFor(original.id))!;
+        const retry = requireValue(await runsRepository.retryFor(original.id));
         assert.equal(retry.status, "passed", retry.failReason ?? "");
         assert.equal(retry.flaky, true);
         assert.equal(
-          (await runsRepository.getRun(original.id))?.automationPending,
+          await (async () => {
+            const awaitedResult137912 = await runsRepository.getRun(
+              original.id
+            );
+            return awaitedResult137912?.automationPending;
+          })(),
           false
         );
-        assert.equal((await stewardRepository.signals(project.id)).length, 0);
-        assert.equal((await jobsRepository.list(project.id)).length, 0);
-        assert.equal((await runsRepository.listRuns(spec.id)).length, 2);
+        assert.equal(
+          await (async () => {
+            const awaitedValue129073 = await stewardRepository.signals(
+              project.id
+            );
+            return awaitedValue129073.length;
+          })(),
+          0
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedValue129152 = await jobsRepository.list(project.id);
+            return awaitedValue129152.length;
+          })(),
+          0
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedValue129225 = await runsRepository.listRuns(spec.id);
+            return awaitedValue129225.length;
+          })(),
+          2
+        );
       } finally {
         t.mock.restoreAll();
         await fs.rm(unsaved, { force: true });
@@ -3639,14 +4414,28 @@ test("Store", async ({ page, step }) => {
         baseUrl: "http://127.0.0.1:1",
       });
       await environmentsRepository.update(
-        (await environmentsRepository.list(project.id))[0]!,
+        requireValue(
+          await (async () => {
+            const awaitedValue130024 = await environmentsRepository.list(
+              project.id
+            );
+            return awaitedValue130024[0];
+          })()
+        ),
         {
-          ...(await environmentsRepository.list(project.id))[0]!,
+          ...requireValue(
+            await (async () => {
+              const awaitedValue130100 = await environmentsRepository.list(
+                project.id
+              );
+              return awaitedValue130100[0];
+            })()
+          ),
           allowedOrigins: [new URL(baseUrl).origin],
         }
       );
       await processRunFailures();
-      const retry = (await runsRepository.retryFor(original.id))!;
+      const retry = requireValue(await runsRepository.retryFor(original.id));
       assert.equal(retry.status, "passed", retry.failReason ?? "");
       assert.equal(retry.baseUrl, baseUrl);
       assert.equal(retry.flaky, true);
@@ -3655,6 +4444,34 @@ test("Store", async ({ page, step }) => {
 );
 
 describe("autonomous pause and decisions", () => {
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
+  const projectWithWork = async function projectWithWork() {
+    const project = await projectsRepository.createProject(
+      "Continuation",
+      baseUrl
+    );
+    await stewardRepository.update(project.id, { autonomy: "propose" });
+    return project;
+  };
+
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this scenario helper or mutable completion callback scoped to its fixture.
+  const createWork = function createWork(projectId: string) {
+    try {
+      return Promise.resolve(
+        jobsRepository.create({
+          projectId,
+          chatId: crypto.randomUUID(),
+          trigger: "steward",
+          kind: "explore",
+          goal: "Investigate checkout",
+          limits: jobLimitsSchema.parse({}),
+        })
+      );
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  };
+
   const router = createJobsRouter();
   const post = (url: string, body?: unknown) =>
     router.request(url, {
@@ -3673,26 +4490,6 @@ describe("autonomous pause and decisions", () => {
     router.route("/", createStewardRouter());
     router.route("/", createSettingsRouter());
   });
-
-  async function projectWithWork() {
-    const project = await projectsRepository.createProject(
-      "Continuation",
-      baseUrl
-    );
-    await stewardRepository.update(project.id, { autonomy: "propose" });
-    return project;
-  }
-
-  async function createWork(projectId: string) {
-    return jobsRepository.create({
-      projectId,
-      chatId: crypto.randomUUID(),
-      trigger: "steward",
-      kind: "explore",
-      goal: "Investigate checkout",
-      limits: jobLimitsSchema.parse({}),
-    });
-  }
 
   const put = (url: string, body: unknown) =>
     router.request(url, {
@@ -3766,10 +4563,17 @@ describe("autonomous pause and decisions", () => {
         new URL("../../drizzle/0016_colossal_warpath.sql", import.meta.url),
         "utf-8"
       );
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const statement of migration.split("--> statement-breakpoint")) {
         await client.execute(statement.trim());
       }
-      const migrated = (await client.execute("SELECT * FROM jobs")).rows[0]!;
+      /* oxlint-enable no-await-in-loop */
+      const migrated = requireValue(
+        await (async () => {
+          const awaitedValue134789 = await client.execute("SELECT * FROM jobs");
+          return awaitedValue134789.rows[0];
+        })()
+      );
       assert.equal(migrated.status, "stalled");
       assert.equal(migrated.actions_used, 87);
       assert.equal(migrated.elapsed_ms, 650_000);
@@ -3783,26 +4587,52 @@ describe("autonomous pause and decisions", () => {
       assert.equal(migrated.safety_retries, 0);
       assert.equal("budget" in migrated, false);
       assert.equal("daily_usage" in migrated, false);
-      const settings = (await client.execute("SELECT * FROM app_settings"))
-        .rows[0]!;
+      const settings = requireValue(
+        await (async () => {
+          const awaitedValue135417 = await client.execute(
+            "SELECT * FROM app_settings"
+          );
+          return awaitedValue135417.rows[0];
+        })()
+      );
       assert.equal(settings.agent_paused, 0);
       assert.deepEqual(JSON.parse(String(settings.llm)), {
         provider: "saved",
         model: "selected",
       });
-      const steward = (await client.execute("SELECT * FROM project_stewards"))
-        .rows[0]!;
+      const steward = requireValue(
+        await (async () => {
+          const awaitedValue135680 = await client.execute(
+            "SELECT * FROM project_stewards"
+          );
+          return awaitedValue135680.rows[0];
+        })()
+      );
       assert.equal(steward.autonomy, "act");
       assert.equal(steward.paused, 0);
       assert.equal("extra_usage" in steward, false);
       assert.equal(
-        (await client.execute("SELECT detail FROM job_actions")).rows[0]
-          ?.detail,
+        await (async () => {
+          const awaitedResult145617 = await (async () => {
+            const awaitedValue135921 = await client.execute(
+              "SELECT detail FROM job_actions"
+            );
+            return awaitedValue135921.rows[0];
+          })();
+          return awaitedResult145617?.detail;
+        })(),
         "Checkout button changed"
       );
       assert.equal(
-        (await client.execute("SELECT status FROM inbox_items")).rows[0]
-          ?.status,
+        await (async () => {
+          const awaitedResult145858 = await (async () => {
+            const awaitedValue136077 = await client.execute(
+              "SELECT status FROM inbox_items"
+            );
+            return awaitedValue136077.rows[0];
+          })();
+          return awaitedResult145858?.status;
+        })(),
         "pending"
       );
     } finally {
@@ -3827,19 +4657,49 @@ describe("autonomous pause and decisions", () => {
       body: "Add access to continue.",
     });
     const endpoint = `/projects/${project.id}/steward`;
-    assert.deepEqual(await (await router.request(endpoint)).json(), {
-      autonomy: "propose",
-      paused: false,
-      globallyPaused: false,
-    });
-    assert.deepEqual(await (await put(endpoint, { paused: true })).json(), {
-      autonomy: "propose",
-      paused: true,
-      globallyPaused: false,
-    });
-    assert.equal((await jobsRepository.get(queued.id))?.status, "paused");
-    assert.equal((await jobsRepository.get(running.id))?.status, "paused");
-    assert.equal((await jobsRepository.get(blocked.id))?.status, "blocked");
+    assert.deepEqual(
+      await (async () => {
+        const awaitedValue137092 = await router.request(endpoint);
+        return awaitedValue137092.json();
+      })(),
+      {
+        autonomy: "propose",
+        paused: false,
+        globallyPaused: false,
+      }
+    );
+    assert.deepEqual(
+      await (async () => {
+        const awaitedValue137247 = await put(endpoint, { paused: true });
+        return awaitedValue137247.json();
+      })(),
+      {
+        autonomy: "propose",
+        paused: true,
+        globallyPaused: false,
+      }
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult147434 = await jobsRepository.get(queued.id);
+        return awaitedResult147434?.status;
+      })(),
+      "paused"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult147509 = await jobsRepository.get(running.id);
+        return awaitedResult147509?.status;
+      })(),
+      "paused"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult147585 = await jobsRepository.get(blocked.id);
+        return awaitedResult147585?.status;
+      })(),
+      "blocked"
+    );
     const intent = await enqueueIntent(
       project.id,
       {
@@ -3852,18 +4712,39 @@ describe("autonomous pause and decisions", () => {
     );
     await processProjectSteward(project.id, false);
     assert.equal(
-      (await stewardRepository.intents(project.id)).find(
-        (row) => row.id === intent.id
-      )?.status,
+      await (async () => {
+        const awaitedResult147945 = await (async () => {
+          const awaitedValue137909 = await stewardRepository.intents(
+            project.id
+          );
+          return awaitedValue137909.find((row) => row.id === intent.id);
+        })();
+        return awaitedResult147945?.status;
+      })(),
       "pending"
     );
     await jobsRepository.recover();
-    assert.equal((await jobsRepository.get(queued.id))?.status, "paused");
-    assert.equal((await stewardRepository.get(project.id)).paused, true);
+    assert.equal(
+      await (async () => {
+        const awaitedResult148213 = await jobsRepository.get(queued.id);
+        return awaitedResult148213?.status;
+      })(),
+      "paused"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue138167 = await stewardRepository.get(project.id);
+        return awaitedValue138167.paused;
+      })(),
+      true
+    );
     await put(endpoint, { autonomy: "observe" });
     await put(endpoint, { autonomy: "propose" });
     assert.equal(
-      (await stewardRepository.get(project.id)).paused,
+      await (async () => {
+        const awaitedValue138348 = await stewardRepository.get(project.id);
+        return awaitedValue138348.paused;
+      })(),
       true,
       "autonomy changes must not implicitly resume the agent"
     );
@@ -3874,18 +4755,47 @@ describe("autonomous pause and decisions", () => {
       paused: false,
       globallyPaused: false,
     });
-    const retained = (await jobsRepository.get(queued.id))!;
+    const retained = requireValue(await jobsRepository.get(queued.id));
     assert.equal(retained.status, "queued");
     assert.equal(retained.tokensUsed, 25_000);
     assert.equal(retained.elapsedMs, 60_000);
     assert.equal(retained.actionsUsed, 37);
     assert.deepEqual(retained.limits, queued.limits);
-    assert.equal((await jobsRepository.get(running.id))?.status, "queued");
-    assert.equal((await jobsRepository.get(blocked.id))?.status, "blocked");
-    assert.equal((await jobsRepository.item(question.id))?.status, "pending");
-    assert.equal((await jobsRepository.list(project.id)).length, 3);
     assert.equal(
-      (await post(`/projects/${project.id}/continue-now`)).status,
+      await (async () => {
+        const awaitedResult149324 = await jobsRepository.get(running.id);
+        return awaitedResult149324?.status;
+      })(),
+      "queued"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult149400 = await jobsRepository.get(blocked.id);
+        return awaitedResult149400?.status;
+      })(),
+      "blocked"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult149477 = await jobsRepository.item(question.id);
+        return awaitedResult149477?.status;
+      })(),
+      "pending"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue139254 = await jobsRepository.list(project.id);
+        return awaitedValue139254.length;
+      })(),
+      3
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue139330 = await post(
+          `/projects/${project.id}/continue-now`
+        );
+        return awaitedValue139330.status;
+      })(),
       404
     );
   });
@@ -3902,17 +4812,34 @@ describe("autonomous pause and decisions", () => {
       provider: "local-test",
       model: "no-provider-call",
     });
-    assert.deepEqual(await (await router.request("/settings/agent")).json(), {
-      paused: false,
-    });
+    assert.deepEqual(
+      await (async () => {
+        const awaitedValue140023 = await router.request("/settings/agent");
+        return awaitedValue140023.json();
+      })(),
+      {
+        paused: false,
+      }
+    );
     await put(`/projects/${local.id}/steward`, { paused: true });
     assert.deepEqual(
-      await (await put("/settings/agent", { paused: true })).json(),
+      await (async () => {
+        const awaitedValue140204 = await put("/settings/agent", {
+          paused: true,
+        });
+        return awaitedValue140204.json();
+      })(),
       { paused: true }
     );
     assert.equal(await isAgentPaused(local.id), true);
     assert.equal(await isAgentPaused(other.id), true);
-    assert.equal((await jobsRepository.get(otherJob.id))?.status, "paused");
+    assert.equal(
+      await (async () => {
+        const awaitedResult151060 = await jobsRepository.get(otherJob.id);
+        return awaitedResult151060?.status;
+      })(),
+      "paused"
+    );
     const stillPaused = await put(`/projects/${other.id}/steward`, {
       paused: false,
     });
@@ -3921,7 +4848,13 @@ describe("autonomous pause and decisions", () => {
       paused: false,
       globallyPaused: true,
     });
-    assert.equal((await jobsRepository.get(otherJob.id))?.status, "paused");
+    assert.equal(
+      await (async () => {
+        const awaitedResult151368 = await jobsRepository.get(otherJob.id);
+        return awaitedResult151368?.status;
+      })(),
+      "paused"
+    );
     await jobsRepository.recover();
     assert.equal(await settingsRepository.getAgentPaused(), true);
     await settingsRepository.updateLlmSettings({
@@ -3936,8 +4869,20 @@ describe("autonomous pause and decisions", () => {
     await put("/settings/agent", { paused: false });
     assert.equal(await isAgentPaused(local.id), true);
     assert.equal(await isAgentPaused(other.id), false);
-    assert.equal((await jobsRepository.get(localJob.id))?.status, "paused");
-    assert.equal((await jobsRepository.get(otherJob.id))?.status, "queued");
+    assert.equal(
+      await (async () => {
+        const awaitedResult151977 = await jobsRepository.get(localJob.id);
+        return awaitedResult151977?.status;
+      })(),
+      "paused"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult152054 = await jobsRepository.get(otherJob.id);
+        return awaitedResult152054?.status;
+      })(),
+      "queued"
+    );
     assert.deepEqual(await settingsRepository.getLlmSettings(), {
       provider: "local-test",
       model: "still-no-provider-call",
@@ -3966,21 +4911,32 @@ describe("autonomous pause and decisions", () => {
     const endpoint = `/projects/${project.id}/steward`;
     await put(endpoint, { paused: true });
     assert.equal(
-      (await jobsRepository.get(queued.id))?.pendingMessage,
+      await (async () => {
+        const awaitedResult153358 = await jobsRepository.get(queued.id);
+        return awaitedResult153358?.pendingMessage;
+      })(),
       triageInstructions
     );
-    const retained = (await jobsRepository.get(running.id))!.pendingMessage;
-    assert.match(retained, /The human paused/);
+    const retained = requireValue(
+      await jobsRepository.get(running.id)
+    ).pendingMessage;
+    assert.match(retained, /The human paused/u);
     assert.ok(retained.endsWith(followUp));
     await put(endpoint, { paused: false });
     assert.equal(
-      (await jobsRepository.get(queued.id))?.pendingMessage,
+      await (async () => {
+        const awaitedResult153694 = await jobsRepository.get(queued.id);
+        return awaitedResult153694?.pendingMessage;
+      })(),
       triageInstructions
     );
     await jobsRepository.claim(running.id);
     await put(endpoint, { paused: true });
     assert.equal(
-      (await jobsRepository.get(running.id))?.pendingMessage,
+      await (async () => {
+        const awaitedResult153892 = await jobsRepository.get(running.id);
+        return awaitedResult153892?.pendingMessage;
+      })(),
       retained,
       "repeated pauses must not duplicate the reminder or replace the original request"
     );
@@ -3998,7 +4954,7 @@ describe("autonomous pause and decisions", () => {
         await import("../../src/core/chat/chat-registry");
       const project = await projectWithWork();
       const chat = await createChat(project.id);
-      const session = (await openSession(chat.id))!;
+      const session = requireValue(await openSession(chat.id));
       session.appendCustomMessageEntry(
         "result",
         "The checkout investigation is ready for review.",
@@ -4016,6 +4972,7 @@ describe("autonomous pause and decisions", () => {
       const log = jobsRepository.log.bind(jobsRepository);
       let runningReads = 0;
       let notifyStopped!: () => void;
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
       const stopped = new Promise<void>((resolve) => {
         notifyStopped = resolve;
       });
@@ -4028,7 +4985,7 @@ describe("autonomous pause and decisions", () => {
         if (
           id === job.id &&
           snapshot?.status === "running" &&
-          ++runningReads === 2
+          (runningReads += 1) === 2
         ) {
           await stewardRepository.update(project.id, { paused: true });
           await jobsRepository.transition(job.id, "running", "paused");
@@ -4049,10 +5006,25 @@ describe("autonomous pause and decisions", () => {
       try {
         await startJobWorker();
         await stopped;
-        assert.equal((await read(job.id))?.status, "paused");
-        assert.equal((await read(job.id))?.startedAt, null);
         assert.equal(
-          (await jobsRepository.inbox(project.id)).length,
+          await (async () => {
+            const awaitedResult156374 = await read(job.id);
+            return awaitedResult156374?.status;
+          })(),
+          "paused"
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedResult156436 = await read(job.id);
+            return awaitedResult156436?.startedAt;
+          })(),
+          null
+        );
+        assert.equal(
+          await (async () => {
+            const awaitedValue145844 = await jobsRepository.inbox(project.id);
+            return awaitedValue145844.length;
+          })(),
           0,
           "a paused attempt must not publish a completion note"
         );
@@ -4077,7 +5049,7 @@ describe("autonomous pause and decisions", () => {
       pendingMessage: instructions,
       limits: jobLimitsSchema.parse({}),
     });
-    const running = (await jobsRepository.claim(job.id))!;
+    const running = requireValue(await jobsRepository.claim(job.id));
     const addItem = jobsRepository.addItem.bind(jobsRepository);
     let retained = "";
     t.mock.method(
@@ -4087,19 +5059,28 @@ describe("autonomous pause and decisions", () => {
         const item = await addItem(...args);
         if (item.jobId === job.id) {
           assert.equal(
-            (await put(`/projects/${project.id}/steward`, { paused: true }))
-              .status,
+            await (async () => {
+              const awaitedValue147107 = await put(
+                `/projects/${project.id}/steward`,
+                { paused: true }
+              );
+              return awaitedValue147107.status;
+            })(),
             200
           );
-          retained = (await jobsRepository.get(job.id))!.pendingMessage;
+          retained = requireValue(
+            await jobsRepository.get(job.id)
+          ).pendingMessage;
         }
         return item;
       }
     );
     let aborted = false;
-    const tool = createTriageTools(running, () => {
-      aborted = true;
-    }).find((tool) => tool.name === "triage_failure")!;
+    const tool = requireValue(
+      createTriageTools(running, () => {
+        aborted = true;
+      }).find((toolInTest) => toolInTest.name === "triage_failure")
+    );
     await tool.execute(
       "environment-result",
       {
@@ -4112,7 +5093,7 @@ describe("autonomous pause and decisions", () => {
       undefined,
       {} as never
     );
-    const paused = (await jobsRepository.get(job.id))!;
+    const paused = requireValue(await jobsRepository.get(job.id));
     assert.equal(paused.status, "paused");
     assert.equal(paused.retryAt, null);
     assert.equal(paused.pendingMessage, retained);
@@ -4124,28 +5105,72 @@ describe("autonomous pause and decisions", () => {
     const project = await projectWithWork();
     const job = await createWork(project.id);
     const endpoint = `/projects/${project.id}/steward`;
-    assert.equal((await put(endpoint, {})).status, 400);
-    assert.equal((await put(endpoint, { paused: "true" })).status, 400);
     assert.equal(
-      (await put(endpoint, { paused: true, extraUsage: 1000 })).status,
-      400
-    );
-    assert.equal((await put("/settings/agent", {})).status, 400);
-    assert.equal(
-      (await put("/settings/agent", { paused: "false" })).status,
+      await (async () => {
+        const awaitedValue148401 = await put(endpoint, {});
+        return awaitedValue148401.status;
+      })(),
       400
     );
     assert.equal(
-      (await put("/settings/agent", { paused: true, autonomy: "observe" }))
-        .status,
+      await (async () => {
+        const awaitedValue148458 = await put(endpoint, { paused: "true" });
+        return awaitedValue148458.status;
+      })(),
       400
     );
     assert.equal(
-      (await put("/projects/missing/steward", { paused: true })).status,
+      await (async () => {
+        const awaitedValue148538 = await put(endpoint, {
+          paused: true,
+          extraUsage: 1000,
+        });
+        return awaitedValue148538.status;
+      })(),
+      400
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue148638 = await put("/settings/agent", {});
+        return awaitedValue148638.status;
+      })(),
+      400
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue148711 = await put("/settings/agent", {
+          paused: "false",
+        });
+        return awaitedValue148711.status;
+      })(),
+      400
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue148812 = await put("/settings/agent", {
+          paused: true,
+          autonomy: "observe",
+        });
+        return awaitedValue148812.status;
+      })(),
+      400
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue148940 = await put("/projects/missing/steward", {
+          paused: true,
+        });
+        return awaitedValue148940.status;
+      })(),
       404
     );
     assert.equal(
-      (await router.request("/projects/missing/steward")).status,
+      await (async () => {
+        const awaitedValue149048 = await router.request(
+          "/projects/missing/steward"
+        );
+        return awaitedValue149048.status;
+      })(),
       404
     );
     await put(endpoint, { paused: true });
@@ -4157,14 +5182,40 @@ describe("autonomous pause and decisions", () => {
       results.map((response) => response.status),
       [200, 200]
     );
-    assert.equal((await jobsRepository.get(job.id))?.status, "queued");
-    assert.equal((await stewardRepository.get(project.id)).paused, false);
-    assert.equal((await jobsRepository.list(project.id)).length, 1);
-    assert.deepEqual((await jobsRepository.get(job.id))?.limits, job.limits);
     assert.equal(
-      (await jobsRepository.actions(job.id)).filter(
-        (entry) => entry.action === "resumed"
-      ).length,
+      await (async () => {
+        const awaitedResult160969 = await jobsRepository.get(job.id);
+        return awaitedResult160969?.status;
+      })(),
+      "queued"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue149481 = await stewardRepository.get(project.id);
+        return awaitedValue149481.paused;
+      })(),
+      false
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue149556 = await jobsRepository.list(project.id);
+        return awaitedValue149556.length;
+      })(),
+      1
+    );
+    assert.deepEqual(
+      await (async () => {
+        const awaitedResult161359 = await jobsRepository.get(job.id);
+        return awaitedResult161359?.limits;
+      })(),
+      job.limits
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue149710 = await jobsRepository.actions(job.id);
+        return awaitedValue149710.filter((entry) => entry.action === "resumed")
+          .length;
+      })(),
       1
     );
   });
@@ -4191,14 +5242,23 @@ describe("autonomous pause and decisions", () => {
       processProjectSteward(project.id, false),
       processProjectSteward(project.id, false),
     ]);
-    const next = (await jobsRepository.get(intent.id))!;
+    const next = requireValue(await jobsRepository.get(intent.id));
     assert.ok(next);
     assert.equal(next.status, "queued");
     assert.deepEqual(next.limits, { maxActions: 500, wallTimeMs: 3_600_000 });
     assert.equal(next.tokensUsed, 0);
-    assert.equal((await jobsRepository.list(project.id)).length, 2);
     assert.equal(
-      (await jobsRepository.get(previous.id))?.tokensUsed,
+      await (async () => {
+        const awaitedValue150818 = await jobsRepository.list(project.id);
+        return awaitedValue150818.length;
+      })(),
+      2
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult162805 = await jobsRepository.get(previous.id);
+        return awaitedResult162805?.tokensUsed;
+      })(),
       2_000_000
     );
   });
@@ -4216,28 +5276,35 @@ describe("autonomous pause and decisions", () => {
       "browser_click:error",
       "The Checkout button remains unavailable after signing in."
     );
-    for (let attempt = 0; attempt <= MAX_SAFETY_RETRIES; attempt++) {
-      const before = Date.now();
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (let attempt = 0; attempt <= MAX_SAFETY_RETRIES; attempt += 1) {
+      const beforeInTest = Date.now();
       await stallJob(
-        (await jobsRepository.get(job.id))!,
+        requireValue(await jobsRepository.get(job.id)),
         "No confirmed result"
       );
-      const stalled = (await jobsRepository.get(job.id))!;
+      const stalled = requireValue(await jobsRepository.get(job.id));
       assert.equal(stalled.status, "stalled");
       assert.equal(stalled.safetyRetries, attempt);
       assert.match(
         stalled.stopReason ?? "",
-        /Checkout button remains unavailable/
+        /Checkout button remains unavailable/u
       );
       await jobsRepository.update(job.id, { startedAt: null });
       if (attempt === MAX_SAFETY_RETRIES) {
         await Promise.all([retryStalledJob(stalled), retryStalledJob(stalled)]);
         break;
       }
-      assert.ok(Date.parse(stalled.retryAt!) >= before + 60_000 * 2 ** attempt);
+      assert.ok(
+        Date.parse(requireValue(stalled.retryAt)) >=
+          beforeInTest + 60_000 * 2 ** attempt
+      );
       await retryStalledJob(stalled);
       assert.equal(
-        (await jobsRepository.get(job.id))?.status,
+        await (async () => {
+          const awaitedResult164382 = await jobsRepository.get(job.id);
+          return awaitedResult164382?.status;
+        })(),
         "stalled",
         "a retry must respect its persisted backoff"
       );
@@ -4245,7 +5312,7 @@ describe("autonomous pause and decisions", () => {
         retryAt: "2000-01-01T00:00:00.000Z",
       });
       await Promise.all([retryStalledJob(stalled), retryStalledJob(stalled)]);
-      const next = (await jobsRepository.get(job.id))!;
+      const next = requireValue(await jobsRepository.get(job.id));
       assert.equal(next.status, "queued");
       assert.equal(next.safetyRetries, attempt + 1);
       assert.deepEqual(next.limits, {
@@ -4253,31 +5320,36 @@ describe("autonomous pause and decisions", () => {
         wallTimeMs: next.elapsedMs + 3_600_000,
       });
       assert.equal(next.tokensUsed, 900_000);
-      assert.match(next.pendingMessage, /different approach/);
+      assert.match(next.pendingMessage, /different approach/u);
       await jobsRepository.claim(job.id);
       await jobsRepository.update(job.id, {
         actionsUsed: next.limits.maxActions,
         elapsedMs: next.limits.wallTimeMs,
       });
     }
-    const blocked = (await jobsRepository.get(job.id))!;
+    /* oxlint-enable no-await-in-loop */
+    const blocked = requireValue(await jobsRepository.get(job.id));
     assert.equal(blocked.status, "blocked");
     await retryStalledJob(blocked);
-    const questions = (await jobsRepository.inbox(project.id)).filter(
-      (item) => item.kind === "question"
-    );
+    const questions = await (async () => {
+      const awaitedValue153491 = await jobsRepository.inbox(project.id);
+      return awaitedValue153491.filter((item) => item.kind === "question");
+    })();
     assert.equal(questions.length, 1);
     assert.equal(questions[0]?.payload.waitingFor, "investigation");
-    assert.match(questions[0]!.body, /Checkout button remains unavailable/);
+    assert.match(
+      requireValue(questions[0]).body,
+      /Checkout button remains unavailable/u
+    );
     const answer = await post(
-      `/projects/${project.id}/inbox/${questions[0]!.id}/review`,
+      `/projects/${project.id}/inbox/${requireValue(questions[0]).id}/review`,
       {
         action: "answer",
         answer: "Sign in with the manager profile before opening checkout.",
       }
     );
     assert.equal(answer.status, 200);
-    const resumed = (await jobsRepository.get(job.id))!;
+    const resumed = requireValue(await jobsRepository.get(job.id));
     assert.equal(resumed.status, "queued");
     assert.equal(resumed.tokensUsed, blocked.tokensUsed);
     assert.equal(resumed.actionsUsed, blocked.actionsUsed);
@@ -4288,9 +5360,14 @@ describe("autonomous pause and decisions", () => {
     });
     assert.equal(resumed.safetyRetries, 0);
     assert.equal(resumed.stopReason, null);
-    assert.match(resumed.pendingMessage, /manager profile/);
+    assert.match(resumed.pendingMessage, /manager profile/u);
     assert.equal(
-      (await jobsRepository.item(questions[0]!.id))?.status,
+      await (async () => {
+        const awaitedResult166715 = await jobsRepository.item(
+          requireValue(questions[0]).id
+        );
+        return awaitedResult166715?.status;
+      })(),
       "answered"
     );
 
@@ -4302,9 +5379,12 @@ describe("autonomous pause and decisions", () => {
     });
     await processProjectSteward(project.id, false);
     await processProjectSteward(project.id, false);
-    const recoveredQuestions = (await jobsRepository.inbox(project.id)).filter(
-      (item) => item.jobId === interrupted.id && item.kind === "question"
-    );
+    const recoveredQuestions = await (async () => {
+      const awaitedValue155097 = await jobsRepository.inbox(project.id);
+      return awaitedValue155097.filter(
+        (item) => item.jobId === interrupted.id && item.kind === "question"
+      );
+    })();
     assert.equal(
       recoveredQuestions.length,
       1,
@@ -4319,27 +5399,34 @@ describe("autonomous pause and decisions", () => {
       await import("../../src/infra/repositories/settings");
     const { Type } = await import("@earendil-works/pi-ai");
     const { z } = await import("zod");
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const scope of ["project", "global"]) {
       const project = await projectWithWork();
       const job = await createWork(project.id);
-      const running = (await jobsRepository.claim(job.id))!;
+      const running = requireValue(await jobsRepository.claim(job.id));
       let mutations = 0;
       let aborted = false;
       const policy = createJobPolicy(running, () => {
         aborted = true;
       });
-      const tool = policy.tools([
-        {
-          name: "local_test_mutation",
-          label: "Local test",
-          description: "Count a local mutation",
-          parameters: Type.Unsafe(z.object({}).toJSONSchema()),
-          async execute() {
-            mutations++;
-            return { content: [], details: undefined };
+      const tool = requireValue(
+        policy.tools([
+          {
+            name: "local_test_mutation",
+            label: "Local test",
+            description: "Count a local mutation",
+            parameters: Type.Unsafe(z.object({}).toJSONSchema()),
+            execute() {
+              try {
+                mutations += 1;
+                return Promise.resolve({ content: [], details: undefined });
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            },
           },
-        },
-      ])[0]!;
+        ])[0]
+      );
       policy.tokens(5_000_000);
       await policy.flush();
       await tool.execute("before-pause", {}, undefined, undefined, {} as never);
@@ -4349,19 +5436,17 @@ describe("autonomous pause and decisions", () => {
         "token accounting is audit, not a scheduling or tool limit"
       );
       try {
-        if (scope === "global") {
-          await settingsRepository.setAgentPaused(true);
-        } else {
-          await stewardRepository.update(project.id, { paused: true });
-        }
+        await (scope === "global"
+          ? settingsRepository.setAgentPaused(true)
+          : stewardRepository.update(project.id, { paused: true }));
         await assert.rejects(
           () =>
             tool.execute("after-pause", {}, undefined, undefined, {} as never),
-          /paused/i
+          /paused/iu
         );
         assert.equal(mutations, 1);
         assert.equal(aborted, true);
-        const paused = (await jobsRepository.get(job.id))!;
+        const paused = requireValue(await jobsRepository.get(job.id));
         assert.equal(paused.status, "paused");
         assert.equal(paused.tokensUsed, 5_000_000);
         assert.equal(paused.actionsUsed, 1);
@@ -4370,6 +5455,7 @@ describe("autonomous pause and decisions", () => {
         await settingsRepository.setAgentPaused(false);
       }
     }
+    /* oxlint-enable no-await-in-loop */
   });
 
   test("backend recovery counts recorded active time once and excludes downtime", async () => {
@@ -4402,35 +5488,70 @@ describe("autonomous pause and decisions", () => {
       startedAt,
     });
     await jobsRepository.recover();
-    const recovered = (await jobsRepository.get(job.id))!;
+    const recovered = requireValue(await jobsRepository.get(job.id));
     assert.equal(recovered.status, "queued");
     assert.equal(recovered.startedAt, null);
     assert.equal(recovered.heartbeatAt, null);
     assert.equal(recovered.elapsedMs, 35_000);
     assert.equal(recovered.tokensUsed, 1500);
-    const interruptedStall = (await jobsRepository.get(stalled.id))!;
+    const interruptedStall = requireValue(await jobsRepository.get(stalled.id));
     assert.equal(interruptedStall.status, "stalled");
     assert.equal(interruptedStall.startedAt, null);
     assert.equal(interruptedStall.elapsedMs, 20_000);
-    assert.equal((await jobsRepository.get(paused.id))?.status, "paused");
-    assert.equal((await jobsRepository.get(paused.id))?.elapsedMs, 10_000);
     assert.equal(
-      (await jobsRepository.get(missingHeartbeat.id))?.elapsedMs,
+      await (async () => {
+        const awaitedResult171641 = await jobsRepository.get(paused.id);
+        return awaitedResult171641?.status;
+      })(),
+      "paused"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult171716 = await jobsRepository.get(paused.id);
+        return awaitedResult171716?.elapsedMs;
+      })(),
+      10_000
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult171799 = await jobsRepository.get(
+          missingHeartbeat.id
+        );
+        return awaitedResult171799?.elapsedMs;
+      })(),
       0,
       "unknown active time must not include a day of backend downtime"
     );
     await retryStalledJob(interruptedStall);
-    assert.equal((await jobsRepository.get(stalled.id))?.status, "queued");
-    assert.equal((await jobsRepository.get(stalled.id))?.safetyRetries, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedResult172008 = await jobsRepository.get(stalled.id);
+        return awaitedResult172008?.status;
+      })(),
+      "queued"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult172084 = await jobsRepository.get(stalled.id);
+        return awaitedResult172084?.safetyRetries;
+      })(),
+      1
+    );
     await jobsRepository.recover();
     assert.equal(
-      (await jobsRepository.get(job.id))?.elapsedMs,
+      await (async () => {
+        const awaitedResult172203 = await jobsRepository.get(job.id);
+        return awaitedResult172203?.elapsedMs;
+      })(),
       recovered.elapsedMs
     );
     assert.equal(
-      (await jobsRepository.actions(job.id)).filter(
-        (entry) => entry.action === "recovered"
-      ).length,
+      await (async () => {
+        const awaitedValue160062 = await jobsRepository.actions(job.id);
+        return awaitedValue160062.filter(
+          (entry) => entry.action === "recovered"
+        ).length;
+      })(),
       1
     );
   });
@@ -4438,40 +5559,68 @@ describe("autonomous pause and decisions", () => {
   test("execution checkpoints cannot charge twice or update a later attempt", async () => {
     const project = await projectWithWork();
     const job = await createWork(project.id);
-    const running = (await jobsRepository.claim(job.id))!;
+    const running = requireValue(await jobsRepository.claim(job.id));
     assert.equal(running.heartbeatAt, running.startedAt);
     await Promise.all([
       jobsRepository.recordUsage(job.id, 20),
       jobsRepository.recordUsage(job.id, 30),
     ]);
-    await jobsRepository.heartbeat(job.id, running.startedAt!);
+    await jobsRepository.heartbeat(job.id, requireValue(running.startedAt));
     assert.ok(
-      Date.parse((await jobsRepository.get(job.id))!.heartbeatAt!) >=
-        Date.parse(running.startedAt!)
+      Date.parse(
+        requireValue(requireValue(await jobsRepository.get(job.id)).heartbeatAt)
+      ) >= Date.parse(requireValue(running.startedAt))
     );
-    await jobsRepository.finishExecution(job.id, running.startedAt!, 1500);
-    await jobsRepository.finishExecution(job.id, running.startedAt!, 1500);
-    await jobsRepository.heartbeat(job.id, running.startedAt!);
-    const finished = (await jobsRepository.get(job.id))!;
+    await jobsRepository.finishExecution(
+      job.id,
+      requireValue(running.startedAt),
+      1500
+    );
+    await jobsRepository.finishExecution(
+      job.id,
+      requireValue(running.startedAt),
+      1500
+    );
+    await jobsRepository.heartbeat(job.id, requireValue(running.startedAt));
+    const finished = requireValue(await jobsRepository.get(job.id));
     assert.equal(finished.elapsedMs, 1500);
     assert.equal(finished.tokensUsed, 50);
     assert.equal(finished.startedAt, null);
     assert.equal(finished.heartbeatAt, null);
     const nextStartedAt = new Date(
-      Date.parse(running.startedAt!) + 10_000
+      Date.parse(requireValue(running.startedAt)) + 10_000
     ).toISOString();
     await jobsRepository.update(job.id, {
       startedAt: nextStartedAt,
       heartbeatAt: nextStartedAt,
     });
-    await jobsRepository.finishExecution(job.id, running.startedAt!, 1500);
-    await jobsRepository.heartbeat(job.id, running.startedAt!);
-    assert.equal((await jobsRepository.get(job.id))?.startedAt, nextStartedAt);
+    await jobsRepository.finishExecution(
+      job.id,
+      requireValue(running.startedAt),
+      1500
+    );
+    await jobsRepository.heartbeat(job.id, requireValue(running.startedAt));
     assert.equal(
-      (await jobsRepository.get(job.id))?.heartbeatAt,
+      await (async () => {
+        const awaitedResult174121 = await jobsRepository.get(job.id);
+        return awaitedResult174121?.startedAt;
+      })(),
       nextStartedAt
     );
-    assert.equal((await jobsRepository.get(job.id))?.elapsedMs, 1500);
+    assert.equal(
+      await (async () => {
+        const awaitedResult174208 = await jobsRepository.get(job.id);
+        return awaitedResult174208?.heartbeatAt;
+      })(),
+      nextStartedAt
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult174301 = await jobsRepository.get(job.id);
+        return awaitedResult174301?.elapsedMs;
+      })(),
+      1500
+    );
   });
 
   test("infrastructure failures persist a delayed retry and scrub details without asking the human", async () => {
@@ -4482,29 +5631,45 @@ describe("autonomous pause and decisions", () => {
       fields: [{ key: "password", value: "infrastructure-secret-value" }],
     });
     const job = await createWork(project.id);
-    const running = (await jobsRepository.claim(job.id))!;
-    const before = Date.now();
+    const running = requireValue(await jobsRepository.claim(job.id));
+    const beforeInTest = Date.now();
     await retryInfrastructure(
       running,
       "Browser unavailable: infrastructure-secret-value"
     );
-    const queued = (await jobsRepository.get(job.id))!;
+    const queued = requireValue(await jobsRepository.get(job.id));
     assert.equal(queued.status, "queued");
     assert.equal(queued.infrastructureRetries, 1);
-    assert.ok(Date.parse(queued.retryAt!) >= before + 15_000);
+    assert.ok(
+      Date.parse(requireValue(queued.retryAt)) >= beforeInTest + 15_000
+    );
     assert.ok(!queued.systemError?.includes("infrastructure-secret-value"));
-    assert.match(queued.pendingMessage ?? "", /not a question for the human/);
+    assert.match(queued.pendingMessage ?? "", /not a question for the human/u);
     await jobsRepository.recover();
     await retryInfrastructure(running, "Duplicate callback");
-    assert.equal((await jobsRepository.get(job.id))?.retryAt, queued.retryAt);
-    assert.equal((await jobsRepository.get(job.id))?.infrastructureRetries, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedResult175512 = await jobsRepository.get(job.id);
+        return awaitedResult175512?.retryAt;
+      })(),
+      queued.retryAt
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult175591 = await jobsRepository.get(job.id);
+        return awaitedResult175591?.infrastructureRetries;
+      })(),
+      1
+    );
     await retryInfrastructure(
-      (await jobsRepository.claim(job.id))!,
+      requireValue(await jobsRepository.claim(job.id)),
       "LLM provider temporarily unavailable"
     );
-    const second = (await jobsRepository.get(job.id))!;
+    const second = requireValue(await jobsRepository.get(job.id));
     assert.equal(second.infrastructureRetries, 2);
-    assert.ok(Date.parse(second.retryAt!) >= before + 30_000);
+    assert.ok(
+      Date.parse(requireValue(second.retryAt)) >= beforeInTest + 30_000
+    );
     assert.deepEqual(await jobsRepository.inbox(project.id), []);
     const actions = await jobsRepository.actions(job.id);
     assert.equal(
@@ -4515,7 +5680,8 @@ describe("autonomous pause and decisions", () => {
   });
 
   test("report bug rejects a suggested fix once, leaves both files untouched and enforces project isolation", async () => {
-    const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+    const { VALID_SPEC: VALID_SPECInTest, HUMAN_SPEC: HUMAN_SPECInTest } =
+      await import("../helpers/storage");
     const { proposeMutation } = await import("../../src/core/jobs/proposals");
     const project = await projectWithWork();
     const other = await projectWithWork();
@@ -4531,13 +5697,13 @@ describe("autonomous pause and decisions", () => {
       featureId: feature.id,
       title: "Checkout",
       description: "",
-      humanSpec: HUMAN_SPEC,
-      testSource: VALID_SPEC,
+      humanSpec: HUMAN_SPECInTest,
+      testSource: VALID_SPECInTest,
     });
     const job = await createWork(project.id);
     const item = await proposeMutation(job, "update_spec", {
       specId: spec.id,
-      testSource: VALID_SPEC.replace(
+      testSource: VALID_SPECInTest.replace(
         'page.goto("/")',
         'page.goto("/checkout")'
       ),
@@ -4547,34 +5713,57 @@ describe("autonomous pause and decisions", () => {
     const head = await repoGit.getHeadSha(project.id);
     const endpoint = `/projects/${project.id}/inbox/${item.id}/review`;
     assert.equal(
-      (
-        await post(`/projects/${other.id}/inbox/${item.id}/review`, {
-          action: "report_bug",
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue165083 = await post(
+          `/projects/${other.id}/inbox/${item.id}/review`,
+          {
+            action: "report_bug",
+          }
+        );
+        return awaitedValue165083.status;
+      })(),
       404
     );
-    assert.equal((await jobsRepository.item(item.id))?.status, "pending");
+    assert.equal(
+      await (async () => {
+        const awaitedResult177883 = await jobsRepository.item(item.id);
+        return awaitedResult177883?.status;
+      })(),
+      "pending"
+    );
     const responses = await Promise.all([
       post(endpoint, { action: "report_bug" }),
       post(endpoint, { action: "report_bug" }),
     ]);
     assert.deepEqual(
-      responses.map((response) => response.status).sort(),
+      responses.map((response) => response.status).toSorted(),
       [200, 409]
     );
-    assert.equal((await jobsRepository.item(item.id))?.status, "rejected");
-    assert.equal((await post(endpoint, { action: "approve" })).status, 409);
-    const reports = (await jobsRepository.inbox(project.id)).filter(
-      (row) => row.kind === "bug_report"
+    assert.equal(
+      await (async () => {
+        const awaitedResult178209 = await jobsRepository.item(item.id);
+        return awaitedResult178209?.status;
+      })(),
+      "rejected"
     );
+    assert.equal(
+      await (async () => {
+        const awaitedValue165650 = await post(endpoint, { action: "approve" });
+        return awaitedValue165650.status;
+      })(),
+      409
+    );
+    const reports = await (async () => {
+      const awaitedValue165730 = await jobsRepository.inbox(project.id);
+      return awaitedValue165730.filter((row) => row.kind === "bug_report");
+    })();
     assert.equal(reports.length, 1);
     assert.equal(reports[0]?.payload.sourceItemId, item.id);
     assert.equal(reports[0]?.payload.specId, spec.id);
     assert.deepEqual(await jobsRepository.inbox(other.id), []);
     assert.equal(
       await fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
-      VALID_SPEC
+      VALID_SPECInTest
     );
     assert.equal(
       await fs.readFile(path.join(directory, "spec.yml"), "utf-8"),
@@ -4584,7 +5773,8 @@ describe("autonomous pause and decisions", () => {
   });
 
   test("ignore stops requested work and automatic repairs of the same Spec version", async () => {
-    const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+    const { VALID_SPEC: VALID_SPECInTest, HUMAN_SPEC: HUMAN_SPECInTest } =
+      await import("../helpers/storage");
     const project = await projectWithWork();
     await repoGit.ensureProjectRepo(project.id, { create: true });
     const feature = await writer.createFeatureInRepo(
@@ -4598,8 +5788,8 @@ describe("autonomous pause and decisions", () => {
       featureId: feature.id,
       title: "Checkout",
       description: "",
-      humanSpec: HUMAN_SPEC,
-      testSource: VALID_SPEC,
+      humanSpec: HUMAN_SPECInTest,
+      testSource: VALID_SPECInTest,
     });
     const input = {
       kind: "regenerate",
@@ -4614,7 +5804,12 @@ describe("autonomous pause and decisions", () => {
       "user"
     );
     await processProjectSteward(project.id, false);
-    const job = (await jobsRepository.list(project.id))[0]!;
+    const job = requireValue(
+      await (async () => {
+        const awaitedValue167313 = await jobsRepository.list(project.id);
+        return awaitedValue167313[0];
+      })()
+    );
     assert.equal(job.id, intent.id);
     await jobsRepository.update(job.id, { status: "stalled" });
     const item = await jobsRepository.addItem({
@@ -4625,30 +5820,57 @@ describe("autonomous pause and decisions", () => {
       body: "The update still does not work.",
     });
     assert.equal(
-      (
-        await post(`/projects/${project.id}/inbox/${item.id}/review`, {
-          action: "ignore",
-        })
-      ).status,
+      await (async () => {
+        const awaitedValue167704 = await post(
+          `/projects/${project.id}/inbox/${item.id}/review`,
+          {
+            action: "ignore",
+          }
+        );
+        return awaitedValue167704.status;
+      })(),
       200
     );
-    assert.equal((await jobsRepository.get(job.id))?.status, "cancelled");
     assert.equal(
-      (await jobsRepository.item(item.id))?.payload.ignoredCheck,
+      await (async () => {
+        const awaitedResult180853 = await jobsRepository.get(job.id);
+        return awaitedResult180853?.status;
+      })(),
+      "cancelled"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult180935 = await jobsRepository.item(item.id);
+        return awaitedResult180935?.payload.ignoredCheck;
+      })(),
       true
     );
     assert.equal(
-      (await post(`/projects/${project.id}/continue-now`)).status,
+      await (async () => {
+        const awaitedValue168051 = await post(
+          `/projects/${project.id}/continue-now`
+        );
+        return awaitedValue168051.status;
+      })(),
       404
     );
     const next = await enqueueIntent(project.id, input, "later-check");
     await processProjectSteward(project.id, false);
-    const ignored = (await stewardRepository.intents(project.id)).find(
-      (row) => row.id === next.id
-    )!;
+    const ignored = requireValue(
+      await (async () => {
+        const awaitedValue168273 = await stewardRepository.intents(project.id);
+        return awaitedValue168273.find((row) => row.id === next.id);
+      })()
+    );
     assert.equal(ignored.status, "ignored");
-    assert.match(ignored.reason, /human rejected/i);
-    assert.equal((await jobsRepository.list(project.id)).length, 1);
+    assert.match(ignored.reason, /human rejected/iu);
+    assert.equal(
+      await (async () => {
+        const awaitedValue168483 = await jobsRepository.list(project.id);
+        return awaitedValue168483.length;
+      })(),
+      1
+    );
   });
 
   test("scope migration retires unsolicited work while retaining human requests and findings", async () => {
@@ -4690,14 +5912,15 @@ describe("autonomous pause and decisions", () => {
         ],
         ["past-planner", "planner", "steward", "completed", "planner:past"],
       ];
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const [id, kind, trigger, status, key] of rows) {
         await client.execute({
           sql: "INSERT INTO jobs VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
           args: [
-            id!,
-            kind!,
-            trigger!,
-            status!,
+            requireValue(id),
+            requireValue(kind),
+            requireValue(trigger),
+            requireValue(status),
             "2026-10-06T00:00:00.000Z",
             "2026-10-01T00:00:00.000Z",
             12_345,
@@ -4707,12 +5930,12 @@ describe("autonomous pause and decisions", () => {
           await client.execute({
             sql: "INSERT INTO steward_intents VALUES (?, ?, ?, ?, ?, ?, ?)",
             args: [
-              id!,
+              requireValue(id),
               key,
               JSON.stringify({
                 kind: kind === "failure_triage" ? "triage" : kind,
               }),
-              id!,
+              requireValue(id),
               status === "completed" ? "completed" : "running",
               "Original request",
               "2026-10-01T00:00:00.000Z",
@@ -4723,12 +5946,13 @@ describe("autonomous pause and decisions", () => {
           sql: "INSERT INTO inbox_items VALUES (?, ?, 'question', 'pending', ?, ?)",
           args: [
             `question-${id}`,
-            id!,
+            requireValue(id),
             JSON.stringify({ evidence: "preserved" }),
             "2026-10-01T00:00:00.000Z",
           ],
         });
       }
+      /* oxlint-enable no-await-in-loop */
       await client.execute(
         "UPDATE steward_intents SET job_id = NULL WHERE id = 'interrupted-chat'"
       );
@@ -4748,37 +5972,52 @@ describe("autonomous pause and decisions", () => {
         new URL("../../drizzle/0017_rapid_sunspot.sql", import.meta.url),
         "utf-8"
       );
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const statement of migration.split("--> statement-breakpoint")) {
         await client.execute(statement.trim());
       }
-      const jobs = (await client.execute("SELECT * FROM jobs")).rows;
+      /* oxlint-enable no-await-in-loop */
+      const jobs = await (async () => {
+        const awaitedValue173191 = await client.execute("SELECT * FROM jobs");
+        return awaitedValue173191.rows;
+      })();
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const id of ["planner", "coverage", "explore"]) {
         assert.equal(
           jobs.find((row) => row.id === id)?.status,
           "cancelled",
           id
         );
-        const question = (
-          await client.execute({
-            sql: "SELECT * FROM inbox_items WHERE id = ?",
-            args: [`question-${id}`],
-          })
-        ).rows[0]!;
+        const question = requireValue(
+          await (async () => {
+            const awaitedValue173450 = await client.execute({
+              sql: "SELECT * FROM inbox_items WHERE id = ?",
+              args: [`question-${id}`],
+            });
+            return awaitedValue173450.rows[0];
+          })()
+        );
         assert.equal(question.status, "dismissed");
         assert.deepEqual(JSON.parse(String(question.payload)), {
           evidence: "preserved",
           retiredByScope: true,
         });
         assert.equal(
-          (
-            await client.execute({
-              sql: "SELECT status FROM steward_intents WHERE id = ?",
-              args: [id],
-            })
-          ).rows[0]?.status,
+          await (async () => {
+            const awaitedResult187365 = await (async () => {
+              const awaitedValue173841 = await client.execute({
+                sql: "SELECT status FROM steward_intents WHERE id = ?",
+                args: [id],
+              });
+              return awaitedValue173841.rows[0];
+            })();
+            return awaitedResult187365?.status;
+          })(),
           "ignored"
         );
       }
+      /* oxlint-enable no-await-in-loop */
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const id of [
         "manual",
         "chat",
@@ -4793,15 +6032,21 @@ describe("autonomous pause and decisions", () => {
           id
         );
         assert.equal(
-          (
-            await client.execute({
-              sql: "SELECT status FROM inbox_items WHERE id = ?",
-              args: [`question-${id}`],
-            })
-          ).rows[0]?.status,
+          await (async () => {
+            const awaitedResult187986 = await (async () => {
+              const awaitedValue174377 = await client.execute({
+                sql: "SELECT status FROM inbox_items WHERE id = ?",
+                args: [`question-${id}`],
+              });
+              return awaitedValue174377.rows[0];
+            })();
+            return awaitedResult187986?.status;
+          })(),
           "pending"
         );
       }
+      /* oxlint-enable no-await-in-loop */
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       for (const id of [
         "chat",
         "interrupted-chat",
@@ -4810,57 +6055,83 @@ describe("autonomous pause and decisions", () => {
         "resume",
       ]) {
         assert.equal(
-          (
-            await client.execute({
-              sql: "SELECT source FROM steward_intents WHERE id = ?",
-              args: [id],
-            })
-          ).rows[0]?.source,
+          await (async () => {
+            const awaitedResult188474 = await (async () => {
+              const awaitedValue174780 = await client.execute({
+                sql: "SELECT source FROM steward_intents WHERE id = ?",
+                args: [id],
+              });
+              return awaitedValue174780.rows[0];
+            })();
+            return awaitedResult188474?.source;
+          })(),
           "user",
           id
         );
       }
+      /* oxlint-enable no-await-in-loop */
       assert.equal(
         jobs.find((row) => row.id === "past-planner")?.status,
         "completed"
       );
       assert.ok(jobs.every((row) => row.tokens_used === 12_345));
       assert.equal(
-        (
-          await client.execute(
-            "SELECT detail FROM job_actions WHERE action = 'inspected'"
-          )
-        ).rows[0]?.detail,
+        await (async () => {
+          const awaitedResult188992 = await (async () => {
+            const awaitedValue175213 = await client.execute(
+              "SELECT detail FROM job_actions WHERE action = 'inspected'"
+            );
+            return awaitedValue175213.rows[0];
+          })();
+          return awaitedResult188992?.detail;
+        })(),
         "Evidence from checkout"
       );
       assert.equal(
-        (
-          await client.execute(
-            "SELECT count(*) AS count FROM job_actions WHERE action = 'retired'"
-          )
-        ).rows[0]?.count,
+        await (async () => {
+          const awaitedResult189292 = await (async () => {
+            const awaitedValue175428 = await client.execute(
+              "SELECT count(*) AS count FROM job_actions WHERE action = 'retired'"
+            );
+            return awaitedValue175428.rows[0];
+          })();
+          return awaitedResult189292?.count;
+        })(),
         3
       );
       assert.equal(
-        (
-          await client.execute(
-            "SELECT status FROM inbox_items WHERE id = 'bug'"
-          )
-        ).rows[0]?.status,
+        await (async () => {
+          const awaitedResult189577 = await (async () => {
+            const awaitedValue175628 = await client.execute(
+              "SELECT status FROM inbox_items WHERE id = 'bug'"
+            );
+            return awaitedValue175628.rows[0];
+          })();
+          return awaitedResult189577?.status;
+        })(),
         "pending"
       );
       assert.equal(
-        (
-          await client.execute(
-            "SELECT payload FROM inbox_items WHERE id = 'proposal'"
-          )
-        ).rows[0]?.payload,
+        await (async () => {
+          const awaitedResult189852 = await (async () => {
+            const awaitedValue175818 = await client.execute(
+              "SELECT payload FROM inbox_items WHERE id = 'proposal'"
+            );
+            return awaitedValue175818.rows[0];
+          })();
+          return awaitedResult189852?.payload;
+        })(),
         '{"testSource":"preserved"}'
       );
       assert.equal(
-        (await client.execute("PRAGMA table_info(project_stewards)")).rows.some(
-          (row) => row.name === "last_planner_at"
-        ),
+        await (async () => {
+          const awaitedValue176034 = await client.execute(
+            "PRAGMA table_info(project_stewards)"
+          );
+          return awaitedValue176034.rows.some(
+            (row) => row.name === "last_planner_at"
+          );
+        })(),
         false
       );
     } finally {
@@ -4875,6 +6146,7 @@ describe("autonomous pause and decisions", () => {
     assert.deepEqual(await stewardRepository.signals(project.id), []);
     assert.deepEqual(await stewardRepository.intents(project.id), []);
     assert.deepEqual(await jobsRepository.list(project.id), []);
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const kind of [
       "empty_project",
       "context_changed",
@@ -4888,13 +6160,17 @@ describe("autonomous pause and decisions", () => {
         body: "Previously queued automatic work",
       });
     }
+    /* oxlint-enable no-await-in-loop */
     await processProjectSteward(project.id, false);
     assert.deepEqual(await stewardRepository.intents(project.id), []);
     assert.deepEqual(await jobsRepository.list(project.id), []);
     assert.ok(
-      (await stewardRepository.signals(project.id)).every(
-        (signal) => signal.status === "handled"
-      )
+      await (async () => {
+        const awaitedValue177229 = await stewardRepository.signals(project.id);
+        return awaitedValue177229.every(
+          (signal) => signal.status === "handled"
+        );
+      })()
     );
   });
 
@@ -4915,11 +6191,28 @@ describe("autonomous pause and decisions", () => {
     );
     assert.deepEqual(first, duplicate);
     assert.equal(first.status, "queued");
-    const intent = (await stewardRepository.intents(project.id))[0]!;
+    const intent = requireValue(
+      await (async () => {
+        const awaitedValue178077 = await stewardRepository.intents(project.id);
+        return awaitedValue178077[0];
+      })()
+    );
     assert.equal(intent.id, first.intentId);
     assert.equal(intent.source, "user");
-    assert.equal((await jobsRepository.get(intent.id))?.kind, "coverage");
-    assert.equal((await jobsRepository.list(project.id)).length, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedResult192616 = await jobsRepository.get(intent.id);
+        return awaitedResult192616?.kind;
+      })(),
+      "coverage"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue178306 = await jobsRepository.list(project.id);
+        return awaitedValue178306.length;
+      })(),
+      1
+    );
     await jobsRepository.update(intent.id, { status: "completed" });
     await processProjectSteward(project.id, false);
     const next = await post(endpoint, { kind: "coverage" });
@@ -4931,7 +6224,10 @@ describe("autonomous pause and decisions", () => {
       "an explicit request must bypass the automatic cooldown"
     );
     assert.equal(
-      (await jobsRepository.get(repeated.intentId))?.status,
+      await (async () => {
+        const awaitedResult193248 = await jobsRepository.get(repeated.intentId);
+        return awaitedResult193248?.status;
+      })(),
       "queued"
     );
     await jobsRepository.update(repeated.intentId, { status: "completed" });
@@ -4941,14 +6237,30 @@ describe("autonomous pause and decisions", () => {
     });
     const exploration = await explore.json();
     assert.equal(
-      (await jobsRepository.get(exploration.intentId))?.kind,
+      await (async () => {
+        const awaitedResult193599 = await jobsRepository.get(
+          exploration.intentId
+        );
+        return awaitedResult193599?.kind;
+      })(),
       "explore"
     );
     assert.match(
-      (await jobsRepository.get(exploration.intentId))?.goal ?? "",
-      /guest account/
+      (await (async () => {
+        const awaitedResult193702 = await jobsRepository.get(
+          exploration.intentId
+        );
+        return awaitedResult193702?.goal;
+      })()) ?? "",
+      /guest account/u
     );
-    assert.equal((await stewardRepository.get(project.id)).autonomy, "observe");
+    assert.equal(
+      await (async () => {
+        const awaitedValue179341 = await stewardRepository.get(project.id);
+        return awaitedValue179341.autonomy;
+      })(),
+      "observe"
+    );
   });
 
   test("requested tasks persist through local and global pause without required setup", async () => {
@@ -4967,7 +6279,15 @@ describe("autonomous pause and decisions", () => {
     assert.equal(pending.status, "paused");
     assert.deepEqual(await jobsRepository.list(project.id), []);
     assert.equal(
-      (await stewardRepository.intents(project.id))[0]?.source,
+      await (async () => {
+        const awaitedResult194628 = await (async () => {
+          const awaitedValue180073 = await stewardRepository.intents(
+            project.id
+          );
+          return awaitedValue180073[0];
+        })();
+        return awaitedResult194628?.source;
+      })(),
       "user"
     );
     await jobsRepository.recover();
@@ -4976,15 +6296,34 @@ describe("autonomous pause and decisions", () => {
       await put(`/projects/${project.id}/steward`, { paused: false });
       assert.deepEqual(await jobsRepository.list(project.id), []);
       assert.equal(
-        (await stewardRepository.intents(project.id))[0]?.status,
+        await (async () => {
+          const awaitedResult195057 = await (async () => {
+            const awaitedValue180417 = await stewardRepository.intents(
+              project.id
+            );
+            return awaitedValue180417[0];
+          })();
+          return awaitedResult195057?.status;
+        })(),
         "pending"
       );
       await put("/settings/agent", { paused: false });
       assert.equal(
-        (await jobsRepository.get(pending.intentId))?.status,
+        await (async () => {
+          const awaitedResult195310 = await jobsRepository.get(
+            pending.intentId
+          );
+          return awaitedResult195310?.status;
+        })(),
         "queued"
       );
-      assert.equal((await jobsRepository.list(project.id)).length, 1);
+      assert.equal(
+        await (async () => {
+          const awaitedValue180684 = await jobsRepository.list(project.id);
+          return awaitedValue180684.length;
+        })(),
+        1
+      );
     } finally {
       await settingsRepository.setAgentPaused(false);
     }
@@ -4993,6 +6332,7 @@ describe("autonomous pause and decisions", () => {
   test("task requests reject internal kinds and enforce project boundaries", async () => {
     const project = await projectWithWork();
     const endpoint = `/projects/${project.id}/tasks`;
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const body of [
       {},
       { kind: "planner" },
@@ -5001,20 +6341,42 @@ describe("autonomous pause and decisions", () => {
       { kind: "explore", goal: " " },
       { kind: "coverage", specIds: [] },
     ]) {
-      assert.equal((await post(endpoint, body)).status, 400);
+      assert.equal(
+        await (async () => {
+          const awaitedValue181247 = await post(endpoint, body);
+          return awaitedValue181247.status;
+        })(),
+        400
+      );
     }
+    /* oxlint-enable no-await-in-loop */
     assert.equal(
-      (await post("/projects/missing/tasks", { kind: "explore" })).status,
+      await (async () => {
+        const awaitedValue181320 = await post("/projects/missing/tasks", {
+          kind: "explore",
+        });
+        return awaitedValue181320.status;
+      })(),
       404
     );
     assert.deepEqual(await stewardRepository.intents(project.id), []);
     assert.deepEqual(await jobsRepository.list(project.id), []);
     assert.equal(
-      (await router.request(`/projects/${project.id}/activity`)).status,
+      await (async () => {
+        const awaitedValue181566 = await router.request(
+          `/projects/${project.id}/activity`
+        );
+        return awaitedValue181566.status;
+      })(),
       404
     );
     assert.equal(
-      (await router.request(`/projects/${project.id}/inbox`)).status,
+      await (async () => {
+        const awaitedValue181674 = await router.request(
+          `/projects/${project.id}/inbox`
+        );
+        return awaitedValue181674.status;
+      })(),
       404
     );
   });
@@ -5037,7 +6399,9 @@ describe("autonomous pause and decisions", () => {
     assert.equal(intents.length, 1);
     assert.equal(intents[0]?.source, "user");
     await processProjectSteward(project.id, false);
-    const job = (await jobsRepository.get(intents[0]!.id))!;
+    const job = requireValue(
+      await jobsRepository.get(requireValue(intents[0]).id)
+    );
     const policy = createJobPolicy(job, () => {});
     assert.equal(
       policy
@@ -5051,14 +6415,21 @@ describe("autonomous pause and decisions", () => {
         .some((candidate) => candidate.name === "propose_intents"),
       false
     );
-    assert.equal((await jobsRepository.list(project.id)).length, 1);
+    assert.equal(
+      await (async () => {
+        const awaitedValue183166 = await jobsRepository.list(project.id);
+        return awaitedValue183166.length;
+      })(),
+      1
+    );
   });
 
   test(
     "missing run credentials ask once and the answer resumes the same selection without an agent turn",
     { skip: available ? false : "Chromium is not installed", timeout: 120_000 },
     async () => {
-      const { VALID_SPEC, HUMAN_SPEC } = await import("../helpers/storage");
+      const { VALID_SPEC: VALID_SPECInTest, HUMAN_SPEC: HUMAN_SPECInTest } =
+        await import("../helpers/storage");
       const { getRunBatch } = await import("../../src/core/runner/batch");
       const { runsRepository } =
         await import("../../src/infra/repositories/runs");
@@ -5067,9 +6438,23 @@ describe("autonomous pause and decisions", () => {
         "http://127.0.0.1:1"
       );
       await environmentsRepository.update(
-        (await environmentsRepository.list(project.id))[0]!,
+        requireValue(
+          await (async () => {
+            const awaitedValue183866 = await environmentsRepository.list(
+              project.id
+            );
+            return awaitedValue183866[0];
+          })()
+        ),
         {
-          ...(await environmentsRepository.list(project.id))[0]!,
+          ...requireValue(
+            await (async () => {
+              const awaitedValue183942 = await environmentsRepository.list(
+                project.id
+              );
+              return awaitedValue183942[0];
+            })()
+          ),
           allowedOrigins: [new URL(baseUrl).origin],
         }
       );
@@ -5081,7 +6466,7 @@ describe("autonomous pause and decisions", () => {
         "Sign in",
         ""
       );
-      const source = VALID_SPEC.replace(
+      const source = VALID_SPECInTest.replace(
         "({ page, step })",
         "({ page, step, secret })"
       ).replace(
@@ -5093,7 +6478,7 @@ describe("autonomous pause and decisions", () => {
         featureId: feature.id,
         title: "Sign in",
         description: "",
-        humanSpec: HUMAN_SPEC,
+        humanSpec: HUMAN_SPECInTest,
         testSource: source,
       });
       const { spec: unselected } = await writer.createSpecInRepo({
@@ -5101,8 +6486,8 @@ describe("autonomous pause and decisions", () => {
         featureId: feature.id,
         title: "Unselected check",
         description: "",
-        humanSpec: HUMAN_SPEC,
-        testSource: VALID_SPEC,
+        humanSpec: HUMAN_SPECInTest,
+        testSource: VALID_SPECInTest,
       });
       const head = await repoGit.getHeadSha(project.id);
       const intent = await enqueueIntent(
@@ -5118,7 +6503,7 @@ describe("autonomous pause and decisions", () => {
         "user"
       );
       await processProjectSteward(project.id, false);
-      const blocked = (await jobsRepository.get(intent.id))!;
+      const blocked = requireValue(await jobsRepository.get(intent.id));
       assert.equal(blocked.kind, "review");
       assert.equal(blocked.status, "blocked");
       assert.ok(blocked.stopReason);
@@ -5133,7 +6518,10 @@ describe("autonomous pause and decisions", () => {
       assert.equal(questions[0]?.payload.runIntentId, intent.id);
       assert.equal(questions[0]?.payload.waitingFor, "credentials");
       assert.deepEqual(
-        (await jobsRepository.list(project.id)).map((job) => job.kind),
+        await (async () => {
+          const awaitedValue186230 = await jobsRepository.list(project.id);
+          return awaitedValue186230.map((job) => job.kind);
+        })(),
         ["review"]
       );
       await createProfile(project.id, {
@@ -5142,28 +6530,46 @@ describe("autonomous pause and decisions", () => {
         fields: [{ key: "password", value: "local-test-secret" }],
       });
       const answer = await post(
-        `/projects/${project.id}/inbox/${questions[0]!.id}/review`,
+        `/projects/${project.id}/inbox/${requireValue(questions[0]).id}/review`,
         { action: "answer", answer: "The shopper profile is available now." }
       );
       assert.equal(answer.status, 200);
-      assert.equal((await jobsRepository.get(intent.id))?.status, "completed");
+      assert.equal(
+        await (async () => {
+          const awaitedResult202322 = await jobsRepository.get(intent.id);
+          return awaitedResult202322?.status;
+        })(),
+        "completed"
+      );
       await Promise.all([
         processProjectSteward(project.id, false),
         processProjectSteward(project.id, false),
       ]);
-      const resumed = (await stewardRepository.intents(project.id)).filter(
-        (row) => row.key.startsWith(`resume-run:${intent.id}:`)
-      );
+      const resumed = await (async () => {
+        const awaitedValue186981 = await stewardRepository.intents(project.id);
+        return awaitedValue186981.filter((row) =>
+          row.key.startsWith(`resume-run:${intent.id}:`)
+        );
+      })();
       assert.equal(resumed.length, 1);
       assert.equal(resumed[0]?.source, "user");
       assert.deepEqual(resumed[0]?.intent.specIds, [spec.id]);
       assert.equal(resumed[0]?.intent.baseUrl, baseUrl);
-      let batch = await getRunBatch(resumed[0]!.batchId!);
+      let batch = await getRunBatch(
+        requireValue(requireValue(resumed[0]).batchId)
+      );
       const deadline = Date.now() + 60_000;
+      /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
       while (batch?.status === "running" && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        batch = await getRunBatch(resumed[0]!.batchId!);
+        // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+        await new Promise((resolve) => {
+          setTimeout(resolve, 100);
+        });
+        batch = await getRunBatch(
+          requireValue(requireValue(resumed[0]).batchId)
+        );
       }
+      /* oxlint-enable no-await-in-loop */
       assert.equal(batch?.status, "passed", batch?.failReason ?? "");
       assert.deepEqual(
         batch?.specs.map((entry) => entry.specId),
@@ -5171,8 +6577,20 @@ describe("autonomous pause and decisions", () => {
       );
       assert.equal(batch?.baseUrl, baseUrl);
       assert.deepEqual(await runsRepository.listRuns(unselected.id), []);
-      assert.equal((await jobsRepository.list(project.id)).length, 1);
-      assert.equal((await jobsRepository.get(intent.id))?.tokensUsed, 0);
+      assert.equal(
+        await (async () => {
+          const awaitedValue187928 = await jobsRepository.list(project.id);
+          return awaitedValue187928.length;
+        })(),
+        1
+      );
+      assert.equal(
+        await (async () => {
+          const awaitedResult203786 = await jobsRepository.get(intent.id);
+          return awaitedResult203786?.tokensUsed;
+        })(),
+        0
+      );
       assert.equal(await repoGit.getHeadSha(project.id), head);
     }
   );
@@ -5204,7 +6622,12 @@ describe("autonomous pause and decisions", () => {
     });
     assert.deepEqual(await listChats(project.id), []);
     assert.equal(
-      (await post(`/projects/${other.id}/inbox/${item.id}/discuss`)).status,
+      await (async () => {
+        const awaitedValue189266 = await post(
+          `/projects/${other.id}/inbox/${item.id}/discuss`
+        );
+        return awaitedValue189266.status;
+      })(),
       404
     );
     const endpoint = `/projects/${project.id}/inbox/${item.id}/discuss`;
@@ -5213,25 +6636,60 @@ describe("autonomous pause and decisions", () => {
     const { chatId } = await response.json();
     assert.notEqual(chatId, internal.id);
     const repeated = await post(endpoint);
-    assert.equal((await repeated.json()).chatId, chatId);
+    assert.equal(
+      await (async () => {
+        const awaitedValue189658 = await repeated.json();
+        return awaitedValue189658.chatId;
+      })(),
+      chatId
+    );
     const deadline = Date.now() + 5000;
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     while (isChatBusy(chatId) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
     }
+    /* oxlint-enable no-await-in-loop */
     assert.equal(isChatBusy(chatId), false);
     assert.deepEqual(
-      (await listChats(project.id)).map((chat) => chat.id),
+      await (async () => {
+        const awaitedValue189939 = await listChats(project.id);
+        return awaitedValue189939.map((chat) => chat.id);
+      })(),
       [chatId]
     );
     assert.deepEqual(await listChats(other.id), []);
     const messages = await getChatMessages(chatId);
     const context = messages?.filter((message) => message.role === "user");
     assert.equal(context?.length, 1);
-    assert.match(context![0]!.content, /Should checkout allow guests/);
-    assert.match(context![0]!.content, /Guest checkout is unavailable/);
-    assert.match(context![0]!.content, /Do not change files unless I ask/);
-    assert.equal((await jobsRepository.item(item.id))?.status, "pending");
-    assert.equal((await jobsRepository.list(project.id)).length, 1);
+    assert.match(
+      requireValue(requireValue(context)[0]).content,
+      /Should checkout allow guests/u
+    );
+    assert.match(
+      requireValue(requireValue(context)[0]).content,
+      /Guest checkout is unavailable/u
+    );
+    assert.match(
+      requireValue(requireValue(context)[0]).content,
+      /Do not change files unless I ask/u
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedResult206600 = await jobsRepository.item(item.id);
+        return awaitedResult206600?.status;
+      })(),
+      "pending"
+    );
+    assert.equal(
+      await (async () => {
+        const awaitedValue190550 = await jobsRepository.list(project.id);
+        return awaitedValue190550.length;
+      })(),
+      1
+    );
   });
 });
 
@@ -5280,13 +6738,16 @@ describe(
       );
       await fs.writeFile(sourceFile, changed);
       const head = await repoGit.getHeadSha(project.id);
-      await assert.rejects(() => executeSpec(spec.id), /pending file edits/);
+      await assert.rejects(() => executeSpec(spec.id), /pending file edits/u);
       assert.equal(await repoGit.getHeadSha(project.id), head);
       await repoGit.withRepoLock(project.id, () =>
         repoGit.commitAll(project.id, "External edit")
       );
       assert.equal(
-        (await specsRepository.getSpec(spec.id))?.sourceHash,
+        await (async () => {
+          const awaitedResult208749 = await specsRepository.getSpec(spec.id);
+          return awaitedResult208749?.sourceHash;
+        })(),
         spec.sourceHash,
         "the index is still the old version"
       );
@@ -5304,7 +6765,10 @@ describe(
       assert.equal(run.status, "passed", run.failReason ?? "");
       assert.equal(run.sourceHash, writer.sourceHashOf(changed));
       assert.equal(
-        (await specsRepository.getSpec(spec.id))?.sourceHash,
+        await (async () => {
+          const awaitedResult209335 = await specsRepository.getSpec(spec.id);
+          return awaitedResult209335?.sourceHash;
+        })(),
         run.sourceHash
       );
     });

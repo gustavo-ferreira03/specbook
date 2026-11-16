@@ -21,6 +21,8 @@ import { executionPlan } from "./types.ts";
 import type { HumanSpec, RunStatus } from "./types.ts";
 import type { SpecAnalysis } from "./validate.ts";
 
+const file = (spec: SuiteSpec) => `${spec.key}.spec.ts`;
+
 const require = createRequire(import.meta.url);
 
 export const SPEC_VIEWPORT = { width: 1280, height: 720 };
@@ -60,11 +62,11 @@ export interface SuiteOptions {
   scrub: (text: string) => string;
 }
 
-function playwrightCli(): string {
+const playwrightCli = function playwrightCli(): string {
   return require.resolve("@playwright/test/cli");
-}
+};
 
-export function specbookModulePath(): string {
+export const specbookModulePath = function specbookModulePath(): string {
   const candidates = [
     new URL("specbook-fixtures.mjs", import.meta.url),
     new URL("specbook/fixtures.ts", import.meta.url),
@@ -77,22 +79,21 @@ export function specbookModulePath(): string {
     );
   }
   return found;
-}
+};
 
-export function executableSource(
+export const executableSource = function executableSource(
   source: string,
   analysis: SpecAnalysis,
   modulePath: string
 ): string {
   const { start, end } = analysis.importSource;
   return `${source.slice(0, start)}${JSON.stringify(modulePath)}${source.slice(end)}`;
-}
+};
 
-function playwrightConfig(
+const playwrightConfig = function playwrightConfig(
   options: SuiteOptions,
   proxyServer?: string
 ): Record<string, unknown> {
-  const file = (spec: SuiteSpec) => `${spec.key}.spec.ts`;
   const plain = options.specs
     .filter((spec) => spec.analysis.secretRefs.length === 0)
     .map(file);
@@ -168,9 +169,9 @@ function playwrightConfig(
     },
     projects,
   };
-}
+};
 
-async function writeWorkDir(
+const writeWorkDir = async function writeWorkDir(
   workDir: string,
   options: SuiteOptions,
   proxyServer?: string
@@ -201,13 +202,16 @@ async function writeWorkDir(
       )
     ),
   ]);
-}
+};
 
-function statusOf(result: SpecFileResult): Exclude<RunStatus, "running"> {
+const statusOf = function statusOf(
+  result: SpecFileResult
+): Exclude<RunStatus, "running"> {
   return result.status;
-}
+};
 
-export async function runPlaywrightSuite(
+// oxlint-disable-next-line complexity -- Keep run evidence collection and cleanup ordered within the same lifecycle.
+export const runPlaywrightSuite = async function runPlaywrightSuite(
   options: SuiteOptions
 ): Promise<SuiteOutcome> {
   const { directory } = options;
@@ -310,7 +314,9 @@ export async function runPlaywrightSuite(
           }
         : null;
       const status = safeResult ? statusOf(safeResult) : "error";
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       await fs.mkdir(spec.outputDir, { recursive: true });
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       await writeRunEvidence(
         spec.outputDir,
         status,
@@ -334,9 +340,9 @@ export async function runPlaywrightSuite(
     }
   } finally {
     await proxy?.close();
-    await fs
-      .rm(workDir, { recursive: true, force: true })
-      .catch(() => undefined);
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {
+      /* Intentionally no work for this callback. */
+    });
   }
   return { results, processFailure };
-}
+};

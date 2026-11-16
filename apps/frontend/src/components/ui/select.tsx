@@ -12,7 +12,7 @@ const Select = SelectPrimitive.Root;
 const SelectGroup = SelectPrimitive.Group;
 const SelectValue = SelectPrimitive.Value;
 
-function SelectTrigger({
+const SelectTrigger = function SelectTrigger({
   className,
   children,
   ...props
@@ -33,9 +33,9 @@ function SelectTrigger({
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
-}
+};
 
-function SelectContent({
+const SelectContent = function SelectContent({
   className,
   children,
   position = "popper",
@@ -68,9 +68,9 @@ function SelectContent({
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );
-}
+};
 
-function SelectLabel({
+const SelectLabel = function SelectLabel({
   className,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Label>) {
@@ -84,9 +84,9 @@ function SelectLabel({
       {...props}
     />
   );
-}
+};
 
-function SelectItem({
+const SelectItem = function SelectItem({
   className,
   children,
   ...props
@@ -110,9 +110,9 @@ function SelectItem({
       </SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   );
-}
+};
 
-function SelectSeparator({
+const SelectSeparator = function SelectSeparator({
   className,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Separator>) {
@@ -123,9 +123,9 @@ function SelectSeparator({
       {...props}
     />
   );
-}
+};
 
-function SelectScrollUpButton({
+const SelectScrollUpButton = function SelectScrollUpButton({
   className,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.ScrollUpButton>) {
@@ -141,9 +141,9 @@ function SelectScrollUpButton({
       <ChevronUp className="size-3.5" />
     </SelectPrimitive.ScrollUpButton>
   );
-}
+};
 
-function SelectScrollDownButton({
+const SelectScrollDownButton = function SelectScrollDownButton({
   className,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.ScrollDownButton>) {
@@ -159,7 +159,7 @@ function SelectScrollDownButton({
       <ChevronDown className="size-3.5" />
     </SelectPrimitive.ScrollDownButton>
   );
-}
+};
 
 export {
   Select,

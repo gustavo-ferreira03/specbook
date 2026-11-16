@@ -21,52 +21,38 @@ import {
 } from "./vnc";
 import type { VncSession } from "./vnc";
 
-const BROWSER_IDLE_MS = 10 * 60 * 1000;
+export const removeInactiveBrowserData =
+  async function removeInactiveBrowserData(
+    chatId: string,
+    before: number
+  ): Promise<boolean> {
+    const directory = path.join(storageRoot, "chat", "browser", chatId);
+    const stat = await fs.lstat(directory).catch(() => null);
+    if (
+      !stat?.isDirectory() ||
+      stat.mtimeMs >= before ||
+      browsers.has(chatId) ||
+      pending.has(chatId) ||
+      closing.has(chatId) ||
+      deletingChats.has(chatId)
+    ) {
+      return false;
+    }
+    if (!tryReserveChatTurn(chatId)) {
+      return false;
+    }
+    try {
+      await fs.rm(directory, { recursive: true, force: true });
+      return true;
+    } finally {
+      releaseChatTurn(chatId);
+    }
+  };
 
-interface ChatBrowser {
-  vnc: VncSession;
-  mcp: BrowserMcp;
-  workDir: string;
-  idleTimer: NodeJS.Timeout;
-  lastHealthCheck: number;
-  activeTools: Map<string, number>;
-  navigationPolicy: string;
-  proxy?: Awaited<ReturnType<typeof createEnvironmentTunnelProxy>>;
-}
-
-const browsers = new Map<string, ChatBrowser>();
-const pending = new Map<string, Promise<ChatBrowser>>();
-const closing = new Map<string, Promise<void>>();
-const deletingChats = new Set<string>();
-
-export async function removeInactiveBrowserData(
+const touchChatBrowser = function touchChatBrowser(
   chatId: string,
-  before: number
-): Promise<boolean> {
-  const directory = path.join(storageRoot, "chat", "browser", chatId);
-  const stat = await fs.lstat(directory).catch(() => null);
-  if (
-    !stat?.isDirectory() ||
-    stat.mtimeMs >= before ||
-    browsers.has(chatId) ||
-    pending.has(chatId) ||
-    closing.has(chatId) ||
-    deletingChats.has(chatId)
-  ) {
-    return false;
-  }
-  if (!tryReserveChatTurn(chatId)) {
-    return false;
-  }
-  try {
-    await fs.rm(directory, { recursive: true, force: true });
-    return true;
-  } finally {
-    releaseChatTurn(chatId);
-  }
-}
-
-function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
+  browser: ChatBrowser
+): void {
   clearTimeout(browser.idleTimer);
   browser.idleTimer = setTimeout(() => {
     if (
@@ -76,13 +62,13 @@ function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
     ) {
       touchChatBrowser(chatId, browser);
     } else {
-      void closeChatBrowser(chatId);
+      closeChatBrowser(chatId);
     }
   }, BROWSER_IDLE_MS);
   browser.idleTimer.unref();
-}
+};
 
-export async function getChatBrowser(
+export const getChatBrowser = async function getChatBrowser(
   chatId: string
 ): Promise<ChatBrowser | null> {
   if (deletingChats.has(chatId)) {
@@ -95,7 +81,7 @@ export async function getChatBrowser(
   const turnActive = isChatBusy(chatId);
   if (!getVncSession(browser.vnc.id)) {
     if (!turnActive) {
-      void closeChatBrowser(chatId);
+      closeChatBrowser(chatId);
     }
     return null;
   }
@@ -110,9 +96,9 @@ export async function getChatBrowser(
   }
   touchChatBrowser(chatId, browser);
   return browser;
-}
+};
 
-export async function getOrCreateChatBrowser(
+export const getOrCreateChatBrowser = async function getOrCreateChatBrowser(
   chatId: string,
   navigationOrigins: string[],
   environment?: RunEnvironment
@@ -121,7 +107,7 @@ export async function getOrCreateChatBrowser(
   if (deletingChats.has(chatId)) {
     throw new Error("Chat is being deleted");
   }
-  const navigationPolicy = `${environment?.executor === "tunnel" ? environment.id : "server"}:${[...new Set(navigationOrigins)].sort().join(";")}`;
+  const navigationPolicy = `${environment?.executor === "tunnel" ? environment.id : "server"}:${[...new Set(navigationOrigins)].toSorted().join(";")}`;
   const existing = browsers.get(chatId);
   if (existing) {
     if (
@@ -172,7 +158,9 @@ export async function getOrCreateChatBrowser(
         await stopVncStack(vnc.id);
         throw new Error("Chat is being deleted");
       }
-      const idleTimer = setTimeout(() => undefined, BROWSER_IDLE_MS);
+      const idleTimer = setTimeout(() => {
+        /* No action is needed until this callback is replaced or invoked by its owner. */
+      }, BROWSER_IDLE_MS);
       idleTimer.unref();
       const record: ChatBrowser = {
         vnc,
@@ -204,9 +192,11 @@ export async function getOrCreateChatBrowser(
   } finally {
     pending.delete(chatId);
   }
-}
+};
 
-export async function closeChatBrowser(chatId: string): Promise<void> {
+export const closeChatBrowser = async function closeChatBrowser(
+  chatId: string
+): Promise<void> {
   const inFlight = closing.get(chatId);
   if (inFlight) {
     return inFlight;
@@ -233,9 +223,12 @@ export async function closeChatBrowser(chatId: string): Promise<void> {
     closing.delete(chatId);
     publishChatUpdate(chatId);
   }
-}
+};
 
-export function beginChatBrowserTool(chatId: string, toolName: string): void {
+export const beginChatBrowserTool = function beginChatBrowserTool(
+  chatId: string,
+  toolName: string
+): void {
   const browser = browsers.get(chatId);
   if (!browser) {
     return;
@@ -245,9 +238,12 @@ export function beginChatBrowserTool(chatId: string, toolName: string): void {
     (browser.activeTools.get(toolName) ?? 0) + 1
   );
   touchChatBrowser(chatId, browser);
-}
+};
 
-export function endChatBrowserTool(chatId: string, toolName: string): void {
+export const endChatBrowserTool = function endChatBrowserTool(
+  chatId: string,
+  toolName: string
+): void {
   const browser = browsers.get(chatId);
   if (!browser) {
     return;
@@ -259,29 +255,56 @@ export function endChatBrowserTool(chatId: string, toolName: string): void {
     browser.activeTools.set(toolName, count - 1);
   }
   touchChatBrowser(chatId, browser);
-}
+};
 
-export async function blockChatBrowser(chatId: string): Promise<void> {
+export const blockChatBrowser = async function blockChatBrowser(
+  chatId: string
+): Promise<void> {
   deletingChats.add(chatId);
-  await pending.get(chatId)?.catch(() => undefined);
+  await pending.get(chatId)?.catch(() => {
+    /* No action is needed until this callback is replaced or invoked by its owner. */
+  });
   await closeChatBrowser(chatId);
-}
+};
 
-export function cancelChatBrowserDeletion(chatId: string): void {
+export const cancelChatBrowserDeletion = function cancelChatBrowserDeletion(
+  chatId: string
+): void {
   deletingChats.delete(chatId);
-}
+};
 
-export async function removeChatBrowserData(chatId: string): Promise<void> {
+export const removeChatBrowserData = async function removeChatBrowserData(
+  chatId: string
+): Promise<void> {
   const root = path.resolve(storageRoot, "chat", "browser");
   const directory = path.resolve(root, chatId);
   if (path.dirname(directory) !== root) {
     throw new Error("Invalid chat browser directory");
   }
   await fs.rm(directory, { recursive: true, force: true });
+};
+
+export const closeAllChatBrowsers =
+  async function closeAllChatBrowsers(): Promise<void> {
+    await Promise.allSettled(pending.values());
+    await Promise.all([...browsers.keys()].map(closeChatBrowser));
+    await Promise.allSettled(closing.values());
+  };
+
+const BROWSER_IDLE_MS = 10 * 60 * 1000;
+
+interface ChatBrowser {
+  vnc: VncSession;
+  mcp: BrowserMcp;
+  workDir: string;
+  idleTimer: NodeJS.Timeout;
+  lastHealthCheck: number;
+  activeTools: Map<string, number>;
+  navigationPolicy: string;
+  proxy?: Awaited<ReturnType<typeof createEnvironmentTunnelProxy>>;
 }
 
-export async function closeAllChatBrowsers(): Promise<void> {
-  await Promise.allSettled(pending.values());
-  await Promise.all([...browsers.keys()].map(closeChatBrowser));
-  await Promise.allSettled(closing.values());
-}
+const browsers = new Map<string, ChatBrowser>();
+const pending = new Map<string, Promise<ChatBrowser>>();
+const closing = new Map<string, Promise<void>>();
+const deletingChats = new Set<string>();

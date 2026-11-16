@@ -13,17 +13,20 @@ const instances = new WeakMap<
 >();
 let library: Promise<ReplayPlayerOptions["Player"]> | undefined;
 
-async function decompress(value: string): Promise<string> {
+const decompress = async function decompress(value: string): Promise<string> {
   const bytes = Uint8Array.from(atob(value.trim()), (character) =>
+    // oxlint-disable-next-line unicorn/prefer-code-point -- atob returns bytes; decode individual UTF-16 code units into a byte array.
     character.charCodeAt(0)
   );
   const stream = new Blob([bytes])
     .stream()
     .pipeThrough(new DecompressionStream("gzip"));
-  return new Response(stream).text();
-}
+  return await new Response(stream).text();
+};
 
-function loadLibrary(): Promise<ReplayPlayerOptions["Player"]> {
+const loadLibrary = function loadLibrary(): Promise<
+  ReplayPlayerOptions["Player"]
+> {
   return (library ??= (async () => {
     const element = document.querySelector("#specbook-replay-library");
     const script = document.createElement("script");
@@ -34,15 +37,23 @@ function loadLibrary(): Promise<ReplayPlayerOptions["Player"]> {
     }
     return window.rrwebPlayer.default;
   })());
-}
+};
 
-function load(section: HTMLDetailsElement): Promise<ReplayController | null> {
+const load = function load(
+  section: HTMLDetailsElement
+): Promise<ReplayController | null> {
   const existing = instances.get(section);
   if (existing) {
     return existing;
   }
   const task = (async () => {
-    const replay = section.querySelector<HTMLElement>(".replay")!;
+    const replay = (() => {
+      const presentValue = section.querySelector<HTMLElement>(".replay");
+      if (presentValue === null || presentValue === undefined) {
+        throw new Error("Expected an existing value");
+      }
+      return presentValue;
+    })();
     try {
       const Player = await loadLibrary();
       const recording = JSON.parse(
@@ -56,7 +67,14 @@ function load(section: HTMLDetailsElement): Promise<ReplayController | null> {
         waitMs: Number(replay.dataset.waitMs),
       });
     } catch {
-      const status = replay.querySelector<HTMLElement>(".replay-status")!;
+      const status = (() => {
+        const presentValue =
+          replay.querySelector<HTMLElement>(".replay-status");
+        if (presentValue === null || presentValue === undefined) {
+          throw new Error("Expected an existing value");
+        }
+        return presentValue;
+      })();
       status.textContent =
         "Replay could not be loaded. Open this report in a current browser.";
       status.setAttribute("role", "status");
@@ -65,7 +83,7 @@ function load(section: HTMLDetailsElement): Promise<ReplayController | null> {
   })();
   instances.set(section, task);
   return task;
-}
+};
 
 for (const section of document.querySelectorAll<HTMLDetailsElement>(
   ".spec:has(.replay)"
@@ -98,13 +116,13 @@ for (const section of document.querySelectorAll<HTMLDetailsElement>(
     if (!controls?.seekToStep(Number(link.dataset.replayStep))) {
       return;
     }
-    section
-      .querySelectorAll<HTMLElement>("[data-replay-step]")
-      .forEach((entry) =>
-        entry.classList.toggle(
-          "is-current",
-          entry.dataset.replayStep === link.dataset.replayStep
-        )
+    for (const entry of section.querySelectorAll<HTMLElement>(
+      "[data-replay-step]"
+    )) {
+      entry.classList.toggle(
+        "is-current",
+        entry.dataset.replayStep === link.dataset.replayStep
       );
+    }
   });
 }

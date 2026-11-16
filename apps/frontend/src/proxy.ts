@@ -7,7 +7,7 @@ import {
   matchesOriginHost,
 } from "../../../shared/http-origin";
 
-export function proxy(request: NextRequest) {
+export const proxy = function proxy(request: NextRequest) {
   const host = request.headers.get("host") ?? "";
   if (!isAllowedHost(buildHostAllowlist(4001), host)) {
     return NextResponse.json(
@@ -25,6 +25,7 @@ export function proxy(request: NextRequest) {
   target.pathname = request.nextUrl.pathname.slice("/api".length) || "/";
   target.search = request.nextUrl.search;
   const headers = new Headers(request.headers);
+  // oxlint-disable-next-line unicorn/no-useless-spread -- Snapshot the collection before callbacks or deletions can change it during iteration.
   for (const name of [...headers.keys()]) {
     if (
       name.startsWith("x-forwarded-") ||
@@ -43,6 +44,6 @@ export function proxy(request: NextRequest) {
       : request.nextUrl.protocol.slice(0, -1)
   );
   return NextResponse.rewrite(target, { request: { headers } });
-}
+};
 
 export const config = { matcher: "/api/:path*" };

@@ -35,6 +35,7 @@ import {
   tokenHash,
 } from "../../../core/accounts/sessions";
 import { encryptSecret } from "../../../core/credentials/crypto";
+import { requireValue } from "../../../core/utils/require-value";
 import { logger } from "../../logger";
 import {
   accountsRepository,
@@ -48,56 +49,35 @@ import {
   requireRole,
 } from "../access";
 
-const attempts = new Map<string, { count: number; resets: number }>();
-function attempt(key: string): { count: number; resets: number } {
+const attempt = function attempt(key: string): {
+  count: number;
+  resets: number;
+} {
   const now = Date.now();
   for (const [entry, value] of attempts) {
-    if (value.resets <= now) attempts.delete(entry);
+    if (value.resets <= now) {
+      attempts.delete(entry);
+    }
   }
   while (attempts.size >= 10_000) {
-    attempts.delete(attempts.keys().next().value!);
+    attempts.delete(requireValue(attempts.keys().next().value));
   }
   const entry = attempts.get(key) ?? { count: 0, resets: now + 60_000 };
   attempts.set(key, entry);
   return entry;
-}
-const tooMany = () =>
-  new HTTPException(429, {
-    message: "Too many sign-in attempts. Wait a minute and try again.",
-  });
-function limit(key: string, maximum = 10): void {
+};
+
+const limit = function limit(key: string, maximum = 10): void {
   const entry = attempt(key);
-  entry.count++;
+  entry.count += 1;
   if (entry.count > maximum) {
     throw tooMany();
   }
-}
-
-const actor = (user: User) => ({
-  id: user.id,
-  name: user.name,
-  email: user.email,
-  kind: "user" as const,
-});
-const publicInvitation = ({
-  id,
-  email,
-  role,
-  expiresAt,
-}: {
-  id: string;
-  email: string;
-  role: string;
-  expiresAt: string;
-}) => ({ id, email, role, expiresAt });
-const publicSso = (
-  sso: Awaited<ReturnType<typeof accountsRepository.getSso>>
-) => {
-  const { clientSecret, verifiedUsers: _verifiedUsers, ...settings } = sso;
-  return { ...settings, hasClientSecret: Boolean(clientSecret) };
 };
 
-async function passwordHash(password: string): Promise<string> {
+const passwordHash = async function passwordHash(
+  password: string
+): Promise<string> {
   try {
     return await hashPassword(password);
   } catch {
@@ -106,9 +86,9 @@ async function passwordHash(password: string): Promise<string> {
         "Another sign-in is being processed. Wait a moment and try again.",
     });
   }
-}
+};
 
-export function createAccountsRouter(): Hono {
+export const createAccountsRouter = function createAccountsRouter(): Hono {
   const router = new Hono();
 
   router.get("/auth/options", access("public"), async (c) => {
@@ -227,7 +207,12 @@ export function createAccountsRouter(): Hono {
       if (failures.count >= 10) {
         throw tooMany();
       }
-      if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
+      if (
+        !(await (async () => {
+          const awaitedValue5870 = await accountsRepository.getSso();
+          return awaitedValue5870.passwordLoginEnabled;
+        })())
+      ) {
         throw new HTTPException(403, {
           message: "Password sign-in is disabled. Use single sign-on.",
         });
@@ -243,7 +228,7 @@ export function createAccountsRouter(): Hono {
         });
       }
       if (!valid || !user || user.disabledAt) {
-        failures.count++;
+        failures.count += 1;
         await recordAudit("auth.login.failed", {});
         throw new HTTPException(401, {
           message: "Email or password is incorrect.",
@@ -254,7 +239,10 @@ export function createAccountsRouter(): Hono {
         if (
           !latest ||
           latest.disabledAt ||
-          !(await accountsRepository.getSso()).passwordLoginEnabled
+          !(await (async () => {
+            const awaitedValue6852 = await accountsRepository.getSso();
+            return awaitedValue6852.passwordLoginEnabled;
+          })())
         ) {
           throw new HTTPException(401, {
             message: "Sign-in is no longer available for this account.",
@@ -282,10 +270,14 @@ export function createAccountsRouter(): Hono {
 
   router.get("/settings/members", access("admin"), async (c) =>
     c.json({
-      members: (await accountsRepository.listUsers()).map(publicUser),
-      invitations: (await accountsRepository.invitations()).map(
-        publicInvitation
-      ),
+      members: await (async () => {
+        const awaitedValue7762 = await accountsRepository.listUsers();
+        return awaitedValue7762.map(publicUser);
+      })(),
+      invitations: await (async () => {
+        const awaitedValue7837 = await accountsRepository.invitations();
+        return awaitedValue7837.map(publicInvitation);
+      })(),
     })
   );
   router.post(
@@ -293,7 +285,12 @@ export function createAccountsRouter(): Hono {
     access("admin"),
     zValidator("json", invitationSchema),
     async (c) => {
-      if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
+      if (
+        !(await (async () => {
+          const awaitedValue8066 = await accountsRepository.getSso();
+          return awaitedValue8066.passwordLoginEnabled;
+        })())
+      ) {
         throw new HTTPException(409, {
           message:
             "Password invitations are disabled. New members can use single sign-on; you can then change their role in Members.",
@@ -379,7 +376,12 @@ export function createAccountsRouter(): Hono {
     zValidator("json", acceptInvitationSchema),
     async (c) => {
       limit("invite-accept", 30);
-      if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
+      if (
+        !(await (async () => {
+          const awaitedValue10867 = await accountsRepository.getSso();
+          return awaitedValue10867.passwordLoginEnabled;
+        })())
+      ) {
         throw new HTTPException(403, {
           message:
             "Password sign-up is disabled. Use single sign-on or ask an administrator for help.",
@@ -388,7 +390,12 @@ export function createAccountsRouter(): Hono {
       const input = c.req.valid("json");
       const hash = await passwordHash(input.password);
       const user = await withAccountsLock(async () => {
-        if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
+        if (
+          !(await (async () => {
+            const awaitedValue11268 = await accountsRepository.getSso();
+            return awaitedValue11268.passwordLoginEnabled;
+          })())
+        ) {
           throw new HTTPException(403, {
             message:
               "Password sign-up is disabled. Use single sign-on or ask an administrator for help.",
@@ -439,7 +446,7 @@ export function createAccountsRouter(): Hono {
     access("admin"),
     zValidator("json", ssoSchema),
     async (c) =>
-      withAccountsLock(async () => {
+      await withAccountsLock(async () => {
         const input = c.req.valid("json");
         if (input.enabled) {
           validateIssuer(input.issuer);
@@ -470,12 +477,15 @@ export function createAccountsRouter(): Hono {
         }
         if (
           !input.enabled &&
-          !(await accountsRepository.listUsers()).some(
-            (member) =>
-              member.role === "admin" &&
-              !member.disabledAt &&
-              member.passwordHash
-          )
+          !(await (async () => {
+            const awaitedValue14282 = await accountsRepository.listUsers();
+            return awaitedValue14282.some(
+              (member) =>
+                member.role === "admin" &&
+                !member.disabledAt &&
+                member.passwordHash
+            );
+          })())
         ) {
           throw new HTTPException(409, {
             message:
@@ -526,7 +536,7 @@ export function createAccountsRouter(): Hono {
     }
   });
   router.get("/settings/audit", access("admin"), async (c) => {
-    const limit = Math.floor(
+    const limitValue = Math.floor(
       Math.min(100, Math.max(1, Number(c.req.query("limit")) || 50))
     );
     let before: { createdAt: string; id: string } | null = null;
@@ -537,19 +547,22 @@ export function createAccountsRouter(): Hono {
           .strict()
           .parse(
             JSON.parse(
-              Buffer.from(c.req.query("before")!, "base64url").toString("utf-8")
+              Buffer.from(
+                requireValue(c.req.query("before")),
+                "base64url"
+              ).toString("utf-8")
             )
           );
       } catch {
         throw new HTTPException(400, { message: "Invalid audit page." });
       }
     }
-    const events = await accountsRepository.auditPage(before, limit);
+    const events = await accountsRepository.auditPage(before, limitValue);
     const last = events.at(-1);
     return c.json({
       events,
       nextBefore:
-        events.length === limit && last
+        events.length === limitValue && last
           ? Buffer.from(
               JSON.stringify({ createdAt: last.createdAt, id: last.id })
             ).toString("base64url")
@@ -557,4 +570,35 @@ export function createAccountsRouter(): Hono {
     });
   });
   return router;
-}
+};
+
+const attempts = new Map<string, { count: number; resets: number }>();
+
+const tooMany = () =>
+  new HTTPException(429, {
+    message: "Too many sign-in attempts. Wait a minute and try again.",
+  });
+
+const actor = (user: User) => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  kind: "user" as const,
+});
+const publicInvitation = ({
+  id,
+  email,
+  role,
+  expiresAt,
+}: {
+  id: string;
+  email: string;
+  role: string;
+  expiresAt: string;
+}) => ({ id, email, role, expiresAt });
+const publicSso = (
+  sso: Awaited<ReturnType<typeof accountsRepository.getSso>>
+) => {
+  const { clientSecret, verifiedUsers: _verifiedUsers, ...settings } = sso;
+  return { ...settings, hasClientSecret: Boolean(clientSecret) };
+};

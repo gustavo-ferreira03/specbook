@@ -35,70 +35,79 @@ import {
   withSpecLock,
   withSpecLocks,
 } from "../specs/lifecycle";
+import { requireValue } from "../utils/require-value";
 import { repoGit } from "./git";
+// oxlint-disable-next-line import/no-cycle -- These service modules call each other after initialization; keep the existing orchestration boundary.
 import { reindexProjectUnlocked } from "./indexer";
 import { uniqueSlug } from "./slug";
+import { SpecPublishValidationError } from "./spec-publish-validation-error";
 
-export type SpecValidation = SpecSourceValidation;
+export { SpecPublishValidationError } from "./spec-publish-validation-error";
 
-export function sourceHashOf(source: string): string {
-  return crypto.createHash("sha256").update(source).digest("hex");
-}
+class SpecRevisionConflictError extends Error {
+  readonly conflicts: { path: string; revision: string | null }[];
 
-export function specRevision(yaml: string, testSource: string): string {
-  return sourceHashOf(JSON.stringify([yaml, testSource]));
-}
+  name = "SpecRevisionConflictError";
 
-export class SpecRevisionConflict extends Error {
-  constructor(readonly conflicts: { path: string; revision: string | null }[]) {
+  constructor(conflicts: { path: string; revision: string | null }[]) {
     super(
       "The remote Spec changed. Run specbook pull before publishing again."
     );
+    this.conflicts = conflicts;
   }
 }
 
-export class SpecPublishValidationError extends Error {}
+export const sourceHashOf = function sourceHashOf(source: string): string {
+  return crypto.createHash("sha256").update(source).digest("hex");
+};
 
-export interface PublishedSpecInput {
-  path: string;
-  baseRevision: string | null;
-  files: { "spec.yml": string; "spec.ts": string };
-  feature: { path: string; source: string };
-}
+export const specRevision = function specRevision(
+  yaml: string,
+  testSource: string
+): string {
+  return sourceHashOf(JSON.stringify([yaml, testSource]));
+};
 
-export async function readProjectSpecFiles(projectId: string) {
-  return repoGit.withRepoLock(projectId, async () => {
+export const readProjectSpecFiles = async function readProjectSpecFiles(
+  projectId: string
+) {
+  return await repoGit.withRepoLock(projectId, async () => {
     const features = await Promise.all(
-      (await featuresRepository.listFeatures(projectId)).map(
-        async (feature) => ({
+      await (async () => {
+        const awaitedValue2012 =
+          await featuresRepository.listFeatures(projectId);
+        return awaitedValue2012.map(async (feature) => ({
           path: feature.path,
           source: await readFile(projectId, featureYamlFile(feature.path)),
-        })
-      )
+        }));
+      })()
     );
     const specs = await Promise.all(
-      (await specsRepository.listSpecs(projectId)).map(async (spec) => {
-        const yaml = await readFile(projectId, specYamlFile(spec.path));
-        const source = await readFile(projectId, specTestFile(spec.path));
-        return {
-          path: spec.path,
-          revision: specRevision(yaml, source),
-          files: { "spec.yml": yaml, "spec.ts": source },
-        };
-      })
+      await (async () => {
+        const awaitedValue2273 = await specsRepository.listSpecs(projectId);
+        return awaitedValue2273.map(async (spec) => {
+          const yaml = await readFile(projectId, specYamlFile(spec.path));
+          const source = await readFile(projectId, specTestFile(spec.path));
+          return {
+            path: spec.path,
+            revision: specRevision(yaml, source),
+            files: { "spec.yml": yaml, "spec.ts": source },
+          };
+        });
+      })()
     );
     return { features, specs };
   });
-}
+};
 
-export async function publishSpecsInRepo(
+export const publishSpecsInRepo = async function publishSpecsInRepo(
   projectId: string,
   environmentId: string,
   inputs: PublishedSpecInput[]
 ) {
   for (const input of inputs) {
     if (
-      !/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/.test(input.path)
+      !/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/u.test(input.path)
     ) {
       throw new SpecPublishValidationError(
         "Use a Spec path inside specs/<feature>/<slug>"
@@ -133,9 +142,10 @@ export async function publishSpecsInRepo(
       "Publish each Spec only once per request"
     );
   }
-  const existing = (await specsRepository.listSpecs(projectId)).filter((spec) =>
-    paths.has(spec.path)
-  );
+  const existing = await (async () => {
+    const awaitedValue4085 = await specsRepository.listSpecs(projectId);
+    return awaitedValue4085.filter((spec) => paths.has(spec.path));
+  })();
   const lockedIds = new Set(existing.map((spec) => spec.id));
   return withSpecLocks(
     existing.map((spec) => spec.id),
@@ -143,33 +153,41 @@ export async function publishSpecsInRepo(
       repoGit.withRepoLock(projectId, async () => {
         await repoGit.assertRepoWritableUnlocked(projectId);
         if (
-          !(await environmentsRepository.list(projectId)).some(
-            (environment) => environment.id === environmentId
-          )
+          !(await (async () => {
+            const awaitedValue4447 =
+              await environmentsRepository.list(projectId);
+            return awaitedValue4447.some(
+              (environment) => environment.id === environmentId
+            );
+          })())
         ) {
           throw new SpecPublishValidationError(
             "The target environment was removed. Connect to an existing environment before publishing."
           );
         }
-        const conflicts: SpecRevisionConflict["conflicts"] = [];
+        const conflicts: SpecRevisionConflictError["conflicts"] = [];
         const changed = new Set<string>();
         const existingFeatures = new Set(
-          (await featuresRepository.listFeatures(projectId)).map(
-            (feature) => feature.path
-          )
+          await (async () => {
+            const awaitedValue4921 =
+              await featuresRepository.listFeatures(projectId);
+            return awaitedValue4921.map((feature) => feature.path);
+          })()
         );
         const currentSpecs = new Map(
-          (await specsRepository.listSpecs(projectId)).map((spec) => [
-            spec.path,
-            spec,
-          ])
+          await (async () => {
+            const awaitedValue5086 = await specsRepository.listSpecs(projectId);
+            return awaitedValue5086.map((spec) => [spec.path, spec]);
+          })()
         );
         for (const input of inputs) {
           const current = currentSpecs.get(input.path);
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           const yaml = await readOptionalFile(
             projectId,
             specYamlFile(input.path)
           );
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           const source = await readOptionalFile(
             projectId,
             specTestFile(input.path)
@@ -208,7 +226,7 @@ export async function publishSpecsInRepo(
           }
         }
         if (conflicts.length) {
-          throw new SpecRevisionConflict(conflicts);
+          throw new SpecRevisionConflictError(conflicts);
         }
         if (
           inputs.some((input) => {
@@ -244,20 +262,25 @@ export async function publishSpecsInRepo(
                         title: path.posix.basename(parent),
                         description: "",
                       });
+                // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
                 await fs.mkdir(await safePath(projectId, parent), {
                   recursive: true,
                 });
+                // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
                 await writeFile(projectId, featureYamlFile(parent), yaml);
                 existingFeatures.add(parent);
               }
+              // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
               await fs.mkdir(await safePath(projectId, input.path), {
                 recursive: true,
               });
+              // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
               await writeFile(
                 projectId,
                 specYamlFile(input.path),
                 input.files["spec.yml"]
               );
+              // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
               await writeFile(
                 projectId,
                 specTestFile(input.path),
@@ -281,16 +304,23 @@ export async function publishSpecsInRepo(
         );
         const specs = [];
         for (const { input, spec } of result) {
-          const state = (await specEnvironmentsRepository.list(spec)).find(
-            (row) => row.environmentId === environmentId
-          );
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+          const state = await (async () => {
+            const awaitedValue9232 =
+              await specEnvironmentsRepository.list(spec);
+            return awaitedValue9232.find(
+              (row) => row.environmentId === environmentId
+            );
+          })();
           if (changed.has(input.path) || !state) {
+            // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
             await specEnvironmentsRepository.set(
               spec,
               environmentId,
               "awaiting_deploy"
             );
           }
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           const updated = await specsRepository.getSpec(spec.id);
           specs.push({
             id: spec.id,
@@ -299,7 +329,7 @@ export async function publishSpecsInRepo(
               input.files["spec.yml"],
               input.files["spec.ts"]
             ),
-            status: updated!.status,
+            status: requireValue(updated).status,
           });
         }
         const features = await Promise.all(
@@ -313,47 +343,58 @@ export async function publishSpecsInRepo(
         return { commitSha, specs, features };
       })
   );
-}
+};
 
-export function specYamlFile(specPath: string): string {
+export const specYamlFile = function specYamlFile(specPath: string): string {
   return `${specPath}/spec.yml`;
-}
+};
 
-export function specTestFile(specPath: string): string {
+export const specTestFile = function specTestFile(specPath: string): string {
   return `${specPath}/spec.ts`;
-}
+};
 
-export function featureYamlFile(featurePath: string): string {
+export const featureYamlFile = function featureYamlFile(
+  featurePath: string
+): string {
   return `${featurePath}/feature.yml`;
-}
+};
 
-export function markdownHashOf(source: string): string {
+export const markdownHashOf = function markdownHashOf(source: string): string {
   return crypto.createHash("sha256").update(source).digest("hex");
-}
+};
 
-function absolute(projectId: string, relative: string): string {
+const absolute = function absolute(
+  projectId: string,
+  relative: string
+): string {
   const root = repoGit.getRepoDir(projectId);
   const resolved = path.resolve(root, relative);
   if (!resolved.startsWith(root + path.sep) && resolved !== root) {
     throw new Error("Path escapes project repo");
   }
   return resolved;
-}
+};
 
-async function safePath(projectId: string, relative: string): Promise<string> {
+const safePath = async function safePath(
+  projectId: string,
+  relative: string
+): Promise<string> {
   const target = absolute(projectId, relative);
   await assertRepoPathSafe(repoGit.getRepoDir(projectId), target);
   return target;
-}
+};
 
-async function readFile(projectId: string, relative: string): Promise<string> {
-  return readRepoFile(
+const readFile = async function readFile(
+  projectId: string,
+  relative: string
+): Promise<string> {
+  return await readRepoFile(
     repoGit.getRepoDir(projectId),
     absolute(projectId, relative)
   );
-}
+};
 
-async function writeFile(
+const writeFile = async function writeFile(
   projectId: string,
   relative: string,
   content: string
@@ -363,9 +404,9 @@ async function writeFile(
     absolute(projectId, relative),
     content
   );
-}
+};
 
-async function siblingNames(
+const siblingNames = async function siblingNames(
   projectId: string,
   dirRelative: string
 ): Promise<Set<string>> {
@@ -375,41 +416,42 @@ async function siblingNames(
   const names = new Set<string>(["feature", "context"]);
   for (const entry of entries) {
     names.add(
-      entry.isDirectory() ? entry.name : entry.name.replace(/\.(yml|ts)$/, "")
+      entry.isDirectory()
+        ? entry.name
+        : entry.name.replace(/\.(?<capture1>yml|ts)$/u, "")
     );
   }
   return names;
-}
+};
 
-function isUnder(candidate: string, prefix: string): boolean {
+const isUnder = function isUnder(candidate: string, prefix: string): boolean {
   return candidate.startsWith(`${prefix}/`);
-}
+};
 
-function movedPath(candidate: string, from: string, to: string): string {
+const movedPath = function movedPath(
+  candidate: string,
+  from: string,
+  to: string
+): string {
   return `${to}${candidate.slice(from.length)}`;
-}
+};
 
-export function validateSpec(
+export const validateSpec = function validateSpec(
   source: string,
   humanSpec: HumanSpec | null
 ): SpecValidation {
   return validateSpecSource(source, humanSpec);
-}
+};
 
-async function rollbackWorkingTree(projectId: string): Promise<void> {
+const rollbackWorkingTree = async function rollbackWorkingTree(
+  projectId: string
+): Promise<void> {
   const git = repoGit.getProjectGit(projectId);
   await git.raw(["reset", "--hard", "--quiet", "HEAD"]);
   await git.raw(["clean", "-fd", "--quiet"]);
-}
+};
 
-export interface RepoMutationOptions {
-  expectedHead?: string;
-  expectedSpec?: { yaml: string; testSource: string | null };
-  commitMessage?: string;
-  checkPolicy?: () => Promise<void>;
-}
-
-async function mutateRepoUnlocked<T>(
+const mutateRepoUnlocked = async function mutateRepoUnlocked<T>(
   projectId: string,
   message: string,
   work: () => Promise<T>,
@@ -446,16 +488,16 @@ async function mutateRepoUnlocked<T>(
     options.commitMessage ?? message
   );
   return { result, commitSha };
-}
+};
 
-export async function createFeatureInRepo(
+export const createFeatureInRepo = async function createFeatureInRepo(
   projectId: string,
   parentId: string | null,
   title: string,
   description: string,
   options: RepoMutationOptions = {}
 ): Promise<Feature> {
-  return repoGit.withRepoLock(projectId, async () => {
+  return await repoGit.withRepoLock(projectId, async () => {
     const { result } = await mutateRepoUnlocked(
       projectId,
       `feature: create "${title}"`,
@@ -495,16 +537,20 @@ export async function createFeatureInRepo(
     );
     return result;
   });
-}
+};
 
-export async function createAreaFeatures(
+export const createAreaFeatures = async function createAreaFeatures(
   projectId: string,
   context: ProjectContext
 ): Promise<void> {
   const titles = new Set(
-    (await featuresRepository.listFeatures(projectId)).map((feature) =>
-      feature.title.trim().toLowerCase()
-    )
+    await (async () => {
+      const awaitedValue15634 =
+        await featuresRepository.listFeatures(projectId);
+      return awaitedValue15634.map((feature) =>
+        feature.title.trim().toLowerCase()
+      );
+    })()
   );
   for (const area of context.areas) {
     const key = area.name.trim().toLowerCase();
@@ -512,6 +558,7 @@ export async function createAreaFeatures(
       continue;
     }
     titles.add(key);
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await createFeatureInRepo(
       projectId,
       null,
@@ -519,9 +566,9 @@ export async function createAreaFeatures(
       area.description
     );
   }
-}
+};
 
-export async function createSpecInRepo(
+export const createSpecInRepo = async function createSpecInRepo(
   input: {
     id?: string;
     projectId: string;
@@ -534,7 +581,7 @@ export async function createSpecInRepo(
   options: RepoMutationOptions = {}
 ): Promise<{ spec: Spec; commitSha: string }> {
   const validation = validateSpec(input.testSource, input.humanSpec);
-  return repoGit.withRepoLock(input.projectId, async () => {
+  return await repoGit.withRepoLock(input.projectId, async () => {
     const { result: spec, commitSha } = await mutateRepoUnlocked(
       input.projectId,
       `spec: create "${input.title}"`,
@@ -586,18 +633,23 @@ export async function createSpecInRepo(
     );
     return { spec, commitSha };
   });
-}
+};
 
-export async function updateFeatureInRepo(
+export const updateFeatureInRepo = async function updateFeatureInRepo(
   feature: Feature,
   patch: { title?: string; description?: string }
 ): Promise<Feature> {
   const descendantSpecIds =
     patch.title === undefined
       ? []
-      : (await specsRepository.listSpecs(feature.projectId))
-          .filter((spec) => isUnder(spec.path, feature.path))
-          .map((spec) => spec.id);
+      : await (async () => {
+          const awaitedValue18512 = await specsRepository.listSpecs(
+            feature.projectId
+          );
+          return awaitedValue18512
+            .filter((spec) => isUnder(spec.path, feature.path))
+            .map((spec) => spec.id);
+        })();
   if (areSpecsLocked(descendantSpecIds)) {
     throw new ResourceBusyError(
       "Wait for active Spec operations in this Feature to finish before renaming it"
@@ -692,39 +744,32 @@ export async function updateFeatureInRepo(
   } finally {
     await release();
   }
-}
+};
 
-export async function readSpecFiles(
+export const readSpecFiles = async function readSpecFiles(
   spec: Spec
 ): Promise<{ humanSpec: HumanSpec; testSource: string }> {
   const markdown = await readFile(spec.projectId, specYamlFile(spec.path));
   const testSource = await readFile(spec.projectId, specTestFile(spec.path));
   return { humanSpec: parseSpecYaml(markdown).humanSpec, testSource };
-}
+};
 
-async function readOptionalFile(
+const readOptionalFile = async function readOptionalFile(
   projectId: string,
   relative: string
 ): Promise<string | null> {
-  return readOptionalRepoFile(
+  return await readOptionalRepoFile(
     repoGit.getRepoDir(projectId),
     absolute(projectId, relative)
   );
-}
+};
 
-export interface SpecPatchInput {
-  title?: string;
-  description?: string;
-  humanSpec?: HumanSpec;
-  testSource?: string;
-}
-
-export async function updateSpecInRepo(
+export const updateSpecInRepo = async function updateSpecInRepo(
   spec: Spec,
   patch: SpecPatchInput,
   options: RepoMutationOptions = {}
 ): Promise<{ spec: Spec; commitSha: string }> {
-  return repoGit.withRepoLock(spec.projectId, async () => {
+  return await repoGit.withRepoLock(spec.projectId, async () => {
     const { commitSha } = await mutateRepoUnlocked(
       spec.projectId,
       `spec: update "${patch.title ?? spec.title}"`,
@@ -800,8 +845,8 @@ export async function updateSpecInRepo(
           status = "invalid";
           invalidReason = validation.error;
         } else if (contentUnchanged && current.status !== "invalid") {
-          status = current.status;
-          invalidReason = current.invalidReason;
+          ({ status } = current);
+          ({ invalidReason } = current);
         }
         await specsRepository.updateSpecRecord(current.id, {
           title,
@@ -821,22 +866,24 @@ export async function updateSpecInRepo(
     }
     return { spec: updated, commitSha };
   });
-}
+};
 
-export async function updateSpecWithLock(
+export const updateSpecWithLock = async function updateSpecWithLock(
   specId: string,
   patch: SpecPatchInput
 ): Promise<{ spec: Spec; commitSha: string } | null> {
-  return withSpecLock(specId, async () => {
+  return await withSpecLock(specId, async () => {
     const spec = await specsRepository.getSpec(specId);
     if (!spec) {
       return null;
     }
     return updateSpecInRepo(spec, patch);
   });
-}
+};
 
-export async function deleteSpecFiles(spec: Spec): Promise<void> {
+export const deleteSpecFiles = async function deleteSpecFiles(
+  spec: Spec
+): Promise<void> {
   await repoGit.withRepoLock(spec.projectId, async () => {
     await repoGit.assertRepoWritableUnlocked(spec.projectId);
     await fs.rm(await safePath(spec.projectId, spec.path), {
@@ -845,9 +892,9 @@ export async function deleteSpecFiles(spec: Spec): Promise<void> {
     });
     await repoGit.commitAll(spec.projectId, `spec: delete "${spec.title}"`);
   });
-}
+};
 
-export async function deleteFeatureDirectory(
+export const deleteFeatureDirectory = async function deleteFeatureDirectory(
   projectId: string,
   featurePath: string,
   title: string
@@ -860,14 +907,14 @@ export async function deleteFeatureDirectory(
     });
     await repoGit.commitAll(projectId, `feature: delete "${title}"`);
   });
-}
+};
 
-export async function writeContextToRepo(
+export const writeContextToRepo = async function writeContextToRepo(
   projectId: string,
   context: ProjectContext,
   options: { confirmRevisionId?: string } = {}
 ): Promise<ProjectContextRevisionRow | null> {
-  return repoGit.withRepoLock(projectId, async () => {
+  return await repoGit.withRepoLock(projectId, async () => {
     const { result } = await mutateRepoUnlocked(
       projectId,
       "context: update",
@@ -886,4 +933,29 @@ export async function writeContextToRepo(
     );
     return result;
   });
+};
+
+export type SpecValidation = SpecSourceValidation;
+
+export interface PublishedSpecInput {
+  path: string;
+  baseRevision: string | null;
+  files: { "spec.yml": string; "spec.ts": string };
+  feature: { path: string; source: string };
 }
+
+export interface RepoMutationOptions {
+  expectedHead?: string;
+  expectedSpec?: { yaml: string; testSource: string | null };
+  commitMessage?: string;
+  checkPolicy?: () => Promise<void>;
+}
+
+export interface SpecPatchInput {
+  title?: string;
+  description?: string;
+  humanSpec?: HumanSpec;
+  testSource?: string;
+}
+
+export { SpecRevisionConflictError as SpecRevisionConflict };

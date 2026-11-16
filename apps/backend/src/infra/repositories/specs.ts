@@ -7,27 +7,8 @@ import type { DbQuery } from "../db/client";
 import { runs, specs } from "../db/schema";
 import type { SpecStatus } from "../db/schema";
 
-export type Spec = typeof specs.$inferSelect;
-export type DeleteSpecResult =
-  | { status: "not_found" }
-  | { status: "busy" }
-  | { status: "deleted"; runIds: string[] };
-
-export type SpecPatch = Partial<
-  Pick<
-    Spec,
-    | "title"
-    | "description"
-    | "path"
-    | "sourceHash"
-    | "markdownHash"
-    | "status"
-    | "invalidReason"
-    | "featureId"
-  >
->;
-
 class SpecsRepository {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async createSpecRecord(input: {
     id?: string;
     projectId: string;
@@ -59,23 +40,27 @@ class SpecsRepository {
     return row;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async createSpecRecordRow(row: Spec): Promise<void> {
     await db.insert(specs).values(row);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async listSpecs(projectId: string): Promise<Spec[]> {
-    return db
+    return await db
       .select()
       .from(specs)
       .where(eq(specs.projectId, projectId))
       .orderBy(asc(specs.createdAt), asc(specs.id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getSpec(id: string): Promise<Spec | null> {
     const rows = await db.select().from(specs).where(eq(specs.id, id));
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getSpecByPath(projectId: string, path: string): Promise<Spec | null> {
     const rows = await db
       .select()
@@ -84,6 +69,7 @@ class SpecsRepository {
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async updateSpecRecord(id: string, patch: SpecPatch): Promise<void> {
     await db
       .update(specs)
@@ -99,6 +85,7 @@ class SpecsRepository {
     await this.updateSpecRecord(id, { status, invalidReason });
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async updateSpecStatusForContent(
     id: string,
     sourceHash: string,
@@ -117,14 +104,17 @@ class SpecsRepository {
       );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async deleteSpecRecord(id: string): Promise<void> {
     await db.delete(specs).where(eq(specs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   insertSpecQuery(row: Spec): DbQuery {
     return db.insert(specs).values(row);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   updateSpecQuery(id: string, patch: SpecPatch): DbQuery {
     return db
       .update(specs)
@@ -132,6 +122,7 @@ class SpecsRepository {
       .where(eq(specs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   deleteSpecsQueries(ids: string[]): DbQuery[] {
     if (ids.length === 0) {
       return [];
@@ -161,5 +152,25 @@ class SpecsRepository {
     return { status: "deleted", runIds: runRows.map((run) => run.id) };
   }
 }
+
+export type Spec = typeof specs.$inferSelect;
+export type DeleteSpecResult =
+  | { status: "not_found" }
+  | { status: "busy" }
+  | { status: "deleted"; runIds: string[] };
+
+export type SpecPatch = Partial<
+  Pick<
+    Spec,
+    | "title"
+    | "description"
+    | "path"
+    | "sourceHash"
+    | "markdownHash"
+    | "status"
+    | "invalidReason"
+    | "featureId"
+  >
+>;
 
 export const specsRepository = new SpecsRepository();

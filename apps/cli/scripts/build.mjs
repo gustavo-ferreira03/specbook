@@ -6,7 +6,7 @@ const manifest = JSON.parse(
   await fs.readFile(new URL("../package.json", import.meta.url), "utf-8")
 );
 const uiChecksum = process.env.SPECBOOK_UI_RELEASE_SHA256 ?? "";
-if (uiChecksum && !/^[a-f0-9]{64}$/.test(uiChecksum)) {
+if (uiChecksum && !/^[a-f0-9]{64}$/u.test(uiChecksum)) {
   throw new Error(
     "SPECBOOK_UI_RELEASE_SHA256 must be the trusted UI artifact SHA-256"
   );

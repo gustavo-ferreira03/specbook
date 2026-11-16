@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import { Hono } from "hono";
 
+import { requireValue } from "../../src/core/utils/require-value";
 import { useTempStorage } from "../helpers/storage";
 
 const storage = useTempStorage();
@@ -20,10 +21,10 @@ test("CLI downloads are public and read-only, with actionable missing-package er
   const missing = await app.request("/cli/specbook.tgz");
   assert.equal(missing.status, 404);
   const { error } = await missing.json();
-  assert.match(error, /CLI package is not built/);
+  assert.match(error, /CLI package is not built/u);
   assert.match(
     error,
-    /pnpm --dir apps\/cli pack --out \.\.\/backend\/dist\/specbook.tgz/
+    /pnpm --dir apps\/cli pack --out \.\.\/backend\/dist\/specbook.tgz/u
   );
 
   const archive = Buffer.from([0x1f, 0x8b, 0x08, 0x00]);
@@ -39,12 +40,13 @@ test("CLI downloads are public and read-only, with actionable missing-package er
   assert.equal(download.headers.get("X-Content-Type-Options"), "nosniff");
   assert.deepEqual(Buffer.from(await download.arrayBuffer()), archive);
   assert.notEqual(
-    (
-      await app.request("/cli/specbook.tgz", {
+    await (async () => {
+      const awaitedValue1633 = await app.request("/cli/specbook.tgz", {
         method: "POST",
         body: "replacement",
-      })
-    ).status,
+      });
+      return awaitedValue1633.status;
+    })(),
     200
   );
   assert.deepEqual(await fs.readFile(file), archive);
@@ -59,6 +61,7 @@ test("every endpoint declares access and protected routes deny anonymous request
   }
   const middleware = new Set(["ALL *", "ALL /*", "ALL /projects/:id/jobs/*"]);
   let checked = 0;
+  /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
   for (const [key, routes] of groups) {
     if (middleware.has(key)) {
       continue;
@@ -71,13 +74,18 @@ test("every endpoint declares access and protected routes deny anonymous request
       1,
       `${key} must declare exactly one access policy`
     );
-    checked++;
-    if (["public", "git-token", "ci-token"].includes(policies[0]!)) {
+    checked += 1;
+    if (
+      ["public", "git-token", "ci-token"].includes(requireValue(policies[0]))
+    ) {
       continue;
     }
-    const route = routes[0];
+    const [route] = routes;
     const pathname = route.path
-      .replaceAll(/:\w+(?:\{[^}]+\})?/g, "00000000-0000-4000-8000-000000000000")
+      .replaceAll(
+        /:\w+(?:\{[^}]+\})?/gu,
+        "00000000-0000-4000-8000-000000000000"
+      )
       .replaceAll("*", "file");
     const response = await app.request(`http://localhost:4000${pathname}`, {
       method: route.method,
@@ -89,15 +97,20 @@ test("every endpoint declares access and protected routes deny anonymous request
       `${key} leaked through the authorization gate`
     );
   }
+  /* oxlint-enable no-await-in-loop */
   assert.ok(checked >= 100);
   const incomplete = createApp();
   incomplete.get("/forgotten-policy", (c) => c.json({ leaked: true }));
   assert.equal(
-    (
-      await incomplete.request("http://localhost:4000/forgotten-policy", {
-        headers: { host: "localhost:4000" },
-      })
-    ).status,
+    await (async () => {
+      const awaitedValue3322 = await incomplete.request(
+        "http://localhost:4000/forgotten-policy",
+        {
+          headers: { host: "localhost:4000" },
+        }
+      );
+      return awaitedValue3322.status;
+    })(),
     401
   );
 });

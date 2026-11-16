@@ -16,15 +16,15 @@ import {
   specYamlFile,
 } from "./writer";
 
-async function commitAndReindex(
+const commitAndReindex = async function commitAndReindex(
   projectId: string,
   message: string
 ): Promise<void> {
   await repoGit.commitAll(projectId, message);
   await reindexProjectUnlocked(projectId);
-}
+};
 
-export async function readSpecRawFiles(
+export const readSpecRawFiles = async function readSpecRawFiles(
   spec: Spec
 ): Promise<{ yaml: string | null; testSource: string | null }> {
   const root = repoGit.getRepoDir(spec.projectId);
@@ -33,9 +33,9 @@ export async function readSpecRawFiles(
     readOptionalRepoFile(root, path.join(root, specTestFile(spec.path))),
   ]);
   return { yaml, testSource };
-}
+};
 
-export function manualSpecTemplate(title: string): {
+export const manualSpecTemplate = function manualSpecTemplate(title: string): {
   testSource: string;
   steps: string[];
 } {
@@ -52,21 +52,23 @@ export function manualSpecTemplate(title: string): {
     "",
   ].join("\n");
   return { testSource, steps: [step] };
-}
+};
 
-export async function readFeatureRaw(feature: Feature): Promise<string | null> {
+export const readFeatureRaw = async function readFeatureRaw(
+  feature: Feature
+): Promise<string | null> {
   const root = repoGit.getRepoDir(feature.projectId);
-  return readOptionalRepoFile(
+  return await readOptionalRepoFile(
     root,
     path.join(root, featureYamlFile(feature.path))
   );
-}
+};
 
-export async function editSpecFiles(
+export const editSpecFiles = async function editSpecFiles(
   spec: Spec,
   input: { yaml?: string; testSource?: string }
 ): Promise<Spec> {
-  return withSpecLock(spec.id, () =>
+  return await withSpecLock(spec.id, () =>
     repoGit.withRepoLock(spec.projectId, async () => {
       await repoGit.assertRepoWritableUnlocked(spec.projectId);
       const root = repoGit.getRepoDir(spec.projectId);
@@ -92,9 +94,9 @@ export async function editSpecFiles(
       return updated;
     })
   );
-}
+};
 
-export async function createManualSpec(
+export const createManualSpec = async function createManualSpec(
   projectId: string,
   featureId: string,
   title: string
@@ -114,13 +116,13 @@ export async function createManualSpec(
     testSource: template.testSource,
   });
   return spec;
-}
+};
 
-export async function editFeatureFile(
+export const editFeatureFile = async function editFeatureFile(
   feature: Feature,
   yaml: string
 ): Promise<Feature> {
-  return repoGit.withRepoLock(feature.projectId, async () => {
+  return await repoGit.withRepoLock(feature.projectId, async () => {
     await repoGit.assertRepoWritableUnlocked(feature.projectId);
     const root = repoGit.getRepoDir(feature.projectId);
     await writeRepoFile(
@@ -138,4 +140,4 @@ export async function editFeatureFile(
     }
     return updated;
   });
-}
+};

@@ -1,24 +1,15 @@
-type LogLevel = "debug" | "info" | "warn" | "error";
-type LogFields = Record<string, unknown>;
-
-const LEVELS: Record<LogLevel, number> = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40,
-};
-
-function configuredLevel(): number {
+const configuredLevel = function configuredLevel(): number {
   const value = process.env.LOG_LEVEL?.toLowerCase();
   if (value === "silent") {
     return Number.POSITIVE_INFINITY;
   }
   return value && value in LEVELS ? LEVELS[value as LogLevel] : LEVELS.info;
-}
+};
 
-const threshold = configuredLevel();
-
-function serializeError(error: unknown, depth = 0): unknown {
+const serializeError = function serializeError(
+  error: unknown,
+  depth = 0
+): unknown {
   if (!(error instanceof Error)) {
     return error;
   }
@@ -30,9 +21,13 @@ function serializeError(error: unknown, depth = 0): unknown {
       ? { cause: serializeError(error.cause, depth + 1) }
       : {}),
   };
-}
+};
 
-function write(level: LogLevel, message: string, fields?: LogFields): void {
+const write = function write(
+  level: LogLevel,
+  message: string,
+  fields?: LogFields
+): void {
   if (LEVELS[level] < threshold) {
     return;
   }
@@ -64,7 +59,18 @@ function write(level: LogLevel, message: string, fields?: LogFields): void {
     ? process.stderr
     : process.stdout
   ).write(`${line}\n`);
-}
+};
+type LogLevel = "debug" | "info" | "warn" | "error";
+type LogFields = Record<string, unknown>;
+
+const LEVELS: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+};
+
+const threshold = configuredLevel();
 
 export const logger = {
   debug: (message: string, fields?: LogFields) =>

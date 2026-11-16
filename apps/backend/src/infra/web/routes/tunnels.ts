@@ -13,7 +13,7 @@ import { environmentsRepository } from "../../repositories/environments";
 import { access } from "../access";
 import { loadProject } from "../load-project";
 
-async function verifyTunnel(c: Context): Promise<true> {
+const verifyTunnel = async function verifyTunnel(c: Context): Promise<true> {
   const runner = await authenticateRunnerToken(c.req.header("authorization"));
   if (!runner) {
     throw new HTTPException(401, {
@@ -23,9 +23,9 @@ async function verifyTunnel(c: Context): Promise<true> {
   }
   c.set("runner", runner);
   return true;
-}
+};
 
-export function createTunnelsRouter(): Hono {
+export const createTunnelsRouter = function createTunnelsRouter(): Hono {
   const router = new Hono();
   router.get("/tunnels", access("admin"), (c) =>
     c.json({ tunnels: publicTunnels() })
@@ -69,4 +69,4 @@ export function createTunnelsRouter(): Hono {
     }
   );
   return router;
-}
+};

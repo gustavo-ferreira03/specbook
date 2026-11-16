@@ -56,7 +56,9 @@ for (const value of [
   process.env.SPECBOOK_GITLAB_TOKEN,
   process.env.CI_JOB_TOKEN,
 ]) {
-  if (value) tokens.add(value);
+  if (value) {
+    tokens.add(value);
+  }
 }
 for (const [index, arg] of process.argv.entries()) {
   if (arg === "--token" && process.argv[index + 1]) {
@@ -66,32 +68,37 @@ for (const [index, arg] of process.argv.entries()) {
     tokens.add(arg.slice(8));
   }
 }
-export function rememberToken(token: string): void {
+export const rememberToken = function rememberToken(token: string): void {
   tokens.add(token);
-}
-export function redactTokens(text: string): string {
+};
+export const redactTokens = function redactTokens(text: string): string {
   const values = [...tokens]
     .flatMap((token) => [
       token,
       encodeURIComponent(token),
       JSON.stringify(token).slice(1, -1),
     ])
-    .sort((a, b) => b.length - a.length);
-  return redactProxyCredentials(
-    values.reduce(
-      (safe, value) => (value ? safe.split(value).join("[REDACTED]") : safe),
-      text
-    )
-  );
-}
-export async function scrubTokens(text: string): Promise<string> {
+    .toSorted((a, b) => b.length - a.length);
+  let safe = text;
+  for (const value of values) {
+    if (value) {
+      safe = safe.split(value).join("[REDACTED]");
+    }
+  }
+  return redactProxyCredentials(safe);
+};
+export const scrubTokens = async function scrubTokens(
+  text: string
+): Promise<string> {
   for (const server of await readServers()) {
     rememberToken(server.token);
   }
   return redactTokens(text);
-}
+};
 
-export function normalizeServerUrl(value: string): string {
+export const normalizeServerUrl = function normalizeServerUrl(
+  value: string
+): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -109,10 +116,10 @@ export function normalizeServerUrl(value: string): string {
       "Use an HTTP(S) server URL without credentials, query or fragment"
     );
   }
-  return url.href.replace(/\/$/, "");
-}
+  return url.href.replace(/\/$/u, "");
+};
 
-async function readServers(): Promise<Server[]> {
+const readServers = async function readServers(): Promise<Server[]> {
   const file = path.join(configHome(), "servers.json");
   try {
     const stat = await fs.lstat(file);
@@ -121,6 +128,7 @@ async function readServers(): Promise<Server[]> {
     }
     if (
       process.platform !== "win32" &&
+      // oxlint-disable-next-line no-bitwise -- Combine the operating-system permission or open flags required by this operation.
       (stat.mode & 0o077 || stat.uid !== process.getuid?.())
     ) {
       throw new Error(
@@ -148,9 +156,11 @@ async function readServers(): Promise<Server[]> {
     }
     throw error;
   }
-}
+};
 
-async function writeServers(servers: Server[]): Promise<void> {
+const writeServers = async function writeServers(
+  servers: Server[]
+): Promise<void> {
   const directory = configHome();
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const stat = await fs.lstat(directory);
@@ -167,23 +177,27 @@ async function writeServers(servers: Server[]): Promise<void> {
   } finally {
     await fs.rm(temporary, { force: true });
   }
+};
+
+interface RemoteErrorDetail {
+  code: string;
+  conflicts: { path: string; revision: string | null }[];
+  command: string;
 }
 
 export class RemoteError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly detail?: {
-      code: string;
-      conflicts: { path: string; revision: string | null }[];
-      command: string;
-    }
-  ) {
+  readonly status: number;
+  readonly detail?: RemoteErrorDetail;
+
+  constructor(message: string, status: number, detail?: RemoteErrorDetail) {
     super(message);
+    this.name = "RemoteError";
+    this.status = status;
+    this.detail = detail;
   }
 }
 
-export async function request(
+export const request = async function request(
   server: Server,
   route: string,
   options: {
@@ -231,6 +245,7 @@ export async function request(
     try {
       data = JSON.parse(body);
     } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
       /* A proxy error may be HTML. */
     }
     const parsed = z
@@ -264,9 +279,9 @@ export async function request(
     );
   }
   return response;
-}
+};
 
-export async function responseJson<T>(
+export const responseJson = async function responseJson<T>(
   response: Response,
   schema: z.ZodType<T>
 ): Promise<T> {
@@ -281,11 +296,13 @@ export async function responseJson<T>(
     throw new Error("Specbook returned an unexpected response");
   }
   return parsed.data;
-}
+};
 
 const equivalent = (left: string, right: string) =>
   left === right || left === `${right}/api` || `${left}/api` === right;
-export async function savedServer(url?: string): Promise<Server> {
+export const savedServer = async function savedServer(
+  url?: string
+): Promise<Server> {
   const normalized = url ? normalizeServerUrl(url) : undefined;
   const servers = await readServers();
   const server = normalized
@@ -299,11 +316,11 @@ export async function savedServer(url?: string): Promise<Server> {
     );
   }
   return server;
-}
+};
 
-export async function login(url: string, token: string) {
+export const login = async function login(url: string, token: string) {
   rememberToken(token);
-  if (!token || /\s/.test(token) || token.length > 4096) {
+  if (!token || /\s/u.test(token) || token.length > 4096) {
     throw new Error("Provide one personal access token");
   }
   const normalized = normalizeServerUrl(url);
@@ -322,15 +339,16 @@ export async function login(url: string, token: string) {
     })
   );
   const apiUrl = response.url.slice(0, -"/auth/me".length);
-  const servers = (await readServers()).filter(
+  const readServersValue1 = await readServers();
+  const servers = readServersValue1.filter(
     (server) => !equivalent(server.url, normalized)
   );
   servers.push({ url: apiUrl, token });
   await writeServers(servers);
   return { url: apiUrl, user, default: true };
-}
+};
 
-export async function logout(url?: string) {
+export const logout = async function logout(url?: string) {
   const servers = await readServers();
   const normalized = url ? normalizeServerUrl(url) : servers.at(-1)?.url;
   const next = normalized
@@ -342,28 +360,32 @@ export async function logout(url?: string) {
     removed: next.length !== servers.length,
     defaultUrl: next.at(-1)?.url ?? null,
   };
-}
+};
 
-export async function connectionChoices(url?: string) {
+export const connectionChoices = async function connectionChoices(
+  url?: string
+) {
   const server = await savedServer(url);
   const { projects } = await responseJson(
     await request(server, "/projects"),
     z.object({ projects: z.array(projectSchema) })
   );
   return { server, projects };
-}
-export async function environmentChoices(server: Server, projectId: string) {
-  return (
-    await responseJson(
-      await request(
-        server,
-        `/projects/${encodeURIComponent(projectId)}/environments`
-      ),
-      z.object({ environments: z.array(environmentSchema) })
-    )
-  ).environments;
-}
-export async function connect(
+};
+export const environmentChoices = async function environmentChoices(
+  server: Server,
+  projectId: string
+) {
+  const responseJsonValue2 = await responseJson(
+    await request(
+      server,
+      `/projects/${encodeURIComponent(projectId)}/environments`
+    ),
+    z.object({ environments: z.array(environmentSchema) })
+  );
+  return responseJsonValue2.environments;
+};
+export const connect = async function connect(
   workspace: string,
   server: Server,
   project: RemoteProject,
@@ -385,9 +407,9 @@ export async function connect(
     environment: environment.name,
     workspace,
   };
-}
+};
 
-async function connected(workspace: string) {
+const connected = async function connected(workspace: string) {
   const config = await loadConfig(workspace);
   if (!config.remote) {
     throw new Error("Connect this workspace with specbook connect first");
@@ -396,8 +418,8 @@ async function connected(workspace: string) {
     remote: config.remote,
     server: await savedServer(config.remote.url),
   };
-}
-async function readState(
+};
+const readState = async function readState(
   workspace: string,
   remote: NonNullable<LocalConfig["remote"]>
 ): Promise<RemoteState> {
@@ -429,8 +451,8 @@ async function readState(
     }
     throw error;
   }
-}
-async function writeState(
+};
+const writeState = async function writeState(
   workspace: string,
   state: RemoteState
 ): Promise<void> {
@@ -447,7 +469,7 @@ async function writeState(
   } finally {
     await fs.rm(file, { force: true });
   }
-}
+};
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const hashes = (files: z.infer<typeof fileSchema>) => ({
   specTs: hash(files["spec.ts"]),
@@ -457,7 +479,10 @@ const equalHashes = (
   left: z.infer<typeof hashesSchema> | undefined,
   right: z.infer<typeof hashesSchema>
 ) => left?.specTs === right.specTs && left.specYaml === right.specYaml;
-async function localFiles(workspace: string, relative: string) {
+const localFiles = async function localFiles(
+  workspace: string,
+  relative: string
+) {
   const read = async (name: string) => {
     try {
       return await fs.readFile(
@@ -476,27 +501,27 @@ async function localFiles(workspace: string, relative: string) {
   return source === null || yaml === null
     ? null
     : { "spec.ts": source, "spec.yml": yaml };
-}
-function specPath(relative: string): void {
+};
+const specPath = function specPath(relative: string): void {
   if (
-    !/^specs\/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/)+[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(
+    !/^specs\/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/)+[a-zA-Z0-9][a-zA-Z0-9_-]*$/u.test(
       relative
     )
   ) {
     throw new Error("Specbook returned an invalid Spec path");
   }
-}
-function featurePath(relative: string): void {
+};
+const featurePath = function featurePath(relative: string): void {
   if (
-    !/^specs\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]*)*$/.test(
+    !/^specs\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]*)*$/u.test(
       relative
     )
   ) {
     throw new Error("Specbook returned an invalid Feature path");
   }
-}
+};
 
-export async function pull(workspace: string) {
+export const pull = async function pull(workspace: string) {
   const { remote, server } = await connected(workspace);
   const snapshot = await responseJson(
     await request(server, `/projects/${remote.projectId}/specs/files`),
@@ -504,19 +529,24 @@ export async function pull(workspace: string) {
   );
   for (const feature of snapshot.features) {
     featurePath(feature.path);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await safeWorkspacePath(workspace, `${feature.path}/feature.yml`, true);
   }
   for (const spec of snapshot.specs) {
     specPath(spec.path);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await safeWorkspacePath(workspace, `${spec.path}/spec.ts`, true);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await safeWorkspacePath(workspace, `${spec.path}/spec.yml`, true);
   }
   const state = await readState(workspace, remote);
   const pulled: { path: string; revision: string }[] = [];
   const conflicts: { path: string; reason: string }[] = [];
   for (const feature of snapshot.features) {
-    const featurePath = `${feature.path}/feature.yml`;
-    const file = await safeWorkspacePath(workspace, featurePath, true);
+    const featureFilePath = `${feature.path}/feature.yml`;
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+    const file = await safeWorkspacePath(workspace, featureFilePath, true);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const previous = await fs
       .readFile(file, "utf-8")
       .catch((error: NodeJS.ErrnoException) => {
@@ -528,21 +558,26 @@ export async function pull(workspace: string) {
     if (
       (previous !== null &&
         hash(previous) !==
-          (state.features[featurePath] ?? hash(feature.source))) ||
-      (previous === null && state.features[featurePath])
+          (state.features[featureFilePath] ?? hash(feature.source))) ||
+      (previous === null && state.features[featureFilePath])
     ) {
-      conflicts.push({ path: featurePath, reason: "local_changes" });
+      conflicts.push({ path: featureFilePath, reason: "local_changes" });
       continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.mkdir(path.dirname(file), { recursive: true });
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.writeFile(file, feature.source);
-    state.features[featurePath] = hash(feature.source);
+    state.features[featureFilePath] = hash(feature.source);
   }
   for (const spec of snapshot.specs) {
     specPath(spec.path);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const local = await localFiles(workspace, spec.path);
     const previous = state.specs[spec.path];
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const anyFile = await fs
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       .lstat(await safeWorkspacePath(workspace, spec.path, true))
       .catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") {
@@ -559,10 +594,14 @@ export async function pull(workspace: string) {
       conflicts.push({ path: spec.path, reason: "local_changes" });
       continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const directory = await safeWorkspacePath(workspace, spec.path, true);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.mkdir(directory, { recursive: true });
     for (const [name, source] of Object.entries(spec.files)) {
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await fs.writeFile(
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await safeWorkspacePath(workspace, `${spec.path}/${name}`, true),
         source
       );
@@ -575,9 +614,12 @@ export async function pull(workspace: string) {
   }
   await writeState(workspace, state);
   return { url: remote.url, projectId: remote.projectId, pulled, conflicts };
-}
+};
 
-async function verifiedRuns(workspace: string, paths: string[]) {
+const verifiedRuns = async function verifiedRuns(
+  workspace: string,
+  paths: string[]
+) {
   const latest = new Map<
     string,
     { runId: string; result: LocalRun["results"][number] }
@@ -585,11 +627,12 @@ async function verifiedRuns(workspace: string, paths: string[]) {
   let entries: string[];
   try {
     const runs = await safeWorkspacePath(workspace, "runs");
-    entries = (await fs.readdir(runs, { withFileTypes: true }))
+    const readdirValue3 = await fs.readdir(runs, { withFileTypes: true });
+    entries = readdirValue3
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
-      .sort()
-      .reverse();
+      .toSorted()
+      .toReversed();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return latest;
@@ -600,7 +643,9 @@ async function verifiedRuns(workspace: string, paths: string[]) {
     let run: LocalRun;
     try {
       run = JSON.parse(
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fs.readFile(
+          // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
           await safeWorkspacePath(workspace, `runs/${id}/run.json`),
           "utf-8"
         )
@@ -612,17 +657,18 @@ async function verifiedRuns(workspace: string, paths: string[]) {
       throw new Error("A local run record could not be read", { cause: error });
     }
     for (const result of run.results ?? []) {
-      if (paths.includes(result.path) && !latest.has(result.path))
+      if (paths.includes(result.path) && !latest.has(result.path)) {
         latest.set(result.path, { runId: id, result });
+      }
     }
     if (latest.size === paths.length) {
       break;
     }
   }
   return latest;
-}
+};
 
-export async function publish(
+export const publish = async function publish(
   workspace: string,
   selector?: string,
   options: { run?: boolean; environment?: string } = {}
@@ -658,12 +704,15 @@ export async function publish(
         `${spec.path} needs a passing run of its current files. Run specbook run ${spec.path}, or publish with --run`
       );
     }
-    const featurePath = path.posix.dirname(spec.path);
+    const featureFilePath = path.posix.dirname(spec.path);
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const source = await fs.readFile(
-      await safeWorkspacePath(workspace, `${featurePath}/feature.yml`),
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      await safeWorkspacePath(workspace, `${featureFilePath}/feature.yml`),
       "utf-8"
     );
     const text = JSON.stringify({ files, source });
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     if ((await containsSecret(text)) || (await scrubTokens(text)) !== text) {
       throw new Error(
         "Spec files contain a stored secret; remove tokens and use secret() references for credentials before publishing"
@@ -673,7 +722,7 @@ export async function publish(
       path: spec.path,
       baseRevision: state.specs[spec.path]?.revision ?? null,
       files,
-      feature: { path: featurePath, source },
+      feature: { path: featureFilePath, source },
     });
     verified.push({ path: spec.path, runId: run.runId });
   }
@@ -723,4 +772,4 @@ export async function publish(
     specs: result.specs,
     verified,
   };
-}
+};

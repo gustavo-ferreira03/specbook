@@ -1,10 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const moduleDir = import.meta.dirname;
-
-function findBackendRoot(start: string): string {
+const findBackendRoot = function findBackendRoot(start: string): string {
   let current = start;
   while (!existsSync(path.join(current, "package.json"))) {
     const parent = path.dirname(current);
@@ -14,7 +11,9 @@ function findBackendRoot(start: string): string {
     current = parent;
   }
   return current;
-}
+};
+
+const moduleDir = import.meta.dirname;
 
 export const backendRoot = findBackendRoot(moduleDir);
 export const storageRoot =

@@ -11,14 +11,14 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, use, useEffect, useRef, useState } from "react";
 
-import { useAuth } from "@/components/AuthProvider";
-import { ChatSettingsDialog } from "@/components/ChatSettingsDialog";
-import { EmptyState } from "@/components/EmptyState";
-import { LogoMark } from "@/components/LogoMark";
-import { PageHeader } from "@/components/PageHeader";
-import { RunnerExplorationNotice } from "@/components/RunnerExplorationNotice";
-import { SpecGrid } from "@/components/SpecGrid";
-import { TunnelConnectionNotice } from "@/components/TunnelConnectionNotice";
+import { useAuth } from "@/components/auth-provider";
+import { ChatSettingsDialog } from "@/components/chat-settings-dialog";
+import { EmptyState } from "@/components/empty-state";
+import { LogoMark } from "@/components/logo-mark";
+import { PageHeader } from "@/components/page-header";
+import { RunnerExplorationNotice } from "@/components/runner-exploration-notice";
+import { SpecGrid } from "@/components/spec-grid";
+import { TunnelConnectionNotice } from "@/components/tunnel-connection-notice";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/tooltip";
 import { errorMessage, getLlmRuntimeStatus, startProjectChat } from "@/lib/api";
 import { onInvalidate } from "@/lib/invalidation";
-import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
+import { useRunnerEnvironment } from "@/lib/use-runner-environment";
 import { cn } from "@/lib/utils";
 
 const suggestions = [
@@ -51,23 +51,35 @@ const suggestions = [
   },
 ];
 
-function initialText(specId: string | null, intent: string | null): string {
+const initialText = function initialText(
+  specId: string | null,
+  intent: string | null
+): string {
   if (!specId) {
     return "";
   }
   return intent === "repair"
     ? `Repair the executable check for Spec ${specId}, keeping its saved steps and expected result unchanged. `
     : `I want to change the Spec ${specId}. `;
-}
+};
 
-function NewChatContent({ projectId }: { projectId: string }) {
+const NewChatContent = function NewChatContent({
+  projectId,
+}: {
+  projectId: string;
+}) {
   const { canEdit, isAdmin } = useAuth();
   const runnerEnvironment = useRunnerEnvironment(projectId);
   const router = useRouter();
   const searchParams = useSearchParams();
   const specId = searchParams.get("specId");
   const intent = searchParams.get("intent");
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => initialText(specId, intent));
+  const [draftOrigin, setDraftOrigin] = useState({ specId, intent });
+  if (draftOrigin.specId !== specId || draftOrigin.intent !== intent) {
+    setDraftOrigin({ specId, intent });
+    setText(initialText(specId, intent));
+  }
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [modelReady, setModelReady] = useState<boolean | null>(null);
@@ -76,9 +88,15 @@ function NewChatContent({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     const check = () =>
-      getLlmRuntimeStatus()
-        .then((status) => setModelReady(status.ready))
-        .catch(() => setModelReady(null));
+      (async () => {
+        try {
+          const resolvedValue = await getLlmRuntimeStatus();
+          const status = resolvedValue;
+          return setModelReady(status.ready);
+        } catch {
+          return setModelReady(null);
+        }
+      })();
     check();
     return onInvalidate((event) => {
       if (!event.resource || event.resource === "settings") {
@@ -88,16 +106,13 @@ function NewChatContent({ projectId }: { projectId: string }) {
   }, []);
 
   useEffect(() => {
-    setText(initialText(specId, intent));
-  }, [specId, intent]);
-
-  useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) {
       return;
     }
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
   }, [text]);
 
   const modelMissing = modelReady === false;
@@ -105,7 +120,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
     (suggestion) => !runnerEnvironment || !suggestion.requiresExploration
   );
 
-  async function send(event: React.FormEvent<HTMLFormElement>) {
+  const send = async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = text.trim();
     if (!value || sending) {
@@ -120,7 +135,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
       setSendError(errorMessage(error));
       setSending(false);
     }
-  }
+  };
 
   if (!canEdit) {
     return (
@@ -177,6 +192,7 @@ function NewChatContent({ projectId }: { projectId: string }) {
               {visibleSuggestions.map((suggestion) => (
                 <button
                   key={suggestion.title}
+                  aria-label={suggestion.title}
                   type="button"
                   disabled={modelMissing || sending}
                   onClick={() => {
@@ -279,13 +295,15 @@ function NewChatContent({ projectId }: { projectId: string }) {
                 rows={1}
                 autoFocus
                 disabled={modelMissing || sending}
-                placeholder={
-                  runnerEnvironment
-                    ? "Discuss a Spec or its run evidence…"
-                    : modelMissing
-                      ? "Describe a behavior to verify…"
-                      : "Describe what to explore or verify…"
-                }
+                placeholder={(() => {
+                  if (runnerEnvironment) {
+                    return "Discuss a Spec or its run evidence…";
+                  }
+                  if (modelMissing) {
+                    return "Describe a behavior to verify…";
+                  }
+                  return "Describe what to explore or verify…";
+                })()}
                 className="text-body block max-h-[200px] min-h-12 resize-none rounded-none border-0 bg-transparent px-4 pt-3.5 pb-1 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent disabled:opacity-100"
               />
             </Label>
@@ -323,31 +341,32 @@ function NewChatContent({ projectId }: { projectId: string }) {
           tab="model"
           onClose={() => {
             setModelSetupOpen(false);
-            getLlmRuntimeStatus()
-              .then((status) => setModelReady(status.ready))
-              .catch(() => undefined);
+            (async () => {
+              try {
+                const resolvedValue = await getLlmRuntimeStatus();
+                const status = resolvedValue;
+                return setModelReady(status.ready);
+              } catch {
+                // Keep the last usable state if this optional operation fails.
+              }
+            })();
           }}
         />
       )}
     </div>
   );
-}
+};
 
-export default function NewChat({
+const NewChat = function NewChat({
   params,
 }: {
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
   return (
-    <Suspense
-      fallback={
-        <span className="sr-only" role="status">
-          Loading
-        </span>
-      }
-    >
+    <Suspense fallback={<output className="sr-only">Loading</output>}>
       <NewChatContent projectId={projectId} />
     </Suspense>
   );
-}
+};
+export default NewChat;

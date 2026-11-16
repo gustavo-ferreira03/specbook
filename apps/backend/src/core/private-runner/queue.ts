@@ -33,24 +33,17 @@ import { issuePrefixedToken } from "../accounts/tokens";
 import { projectSecretScrubber } from "../credentials/scrub";
 import { createKeyedLock } from "../operations/keyed-lock";
 import { runsDir } from "../paths";
+import { requireValue } from "../utils/require-value";
 import { publicRunner } from "./tokens";
 
-const withQueueLock = createKeyedLock().run;
-const jobLocks = createKeyedLock();
-const activeCompletions = new Set<string>();
-const events = new EventEmitter();
-events.setMaxListeners(0);
-let monitor: NodeJS.Timeout | undefined;
-let maintenance: Promise<void> | undefined;
-
-export function runnerLeaseMs(): number {
+export const runnerLeaseMs = function runnerLeaseMs(): number {
   const seconds = Number(process.env.SPECBOOK_RUNNER_LEASE_SECONDS ?? 60);
   return Number.isFinite(seconds)
     ? Math.min(300, Math.max(5, seconds)) * 1000
     : 60_000;
-}
+};
 
-export async function enqueueRunnerBatch(
+export const enqueueRunnerBatch = async function enqueueRunnerBatch(
   batchId: string,
   projectId: string,
   group: string | null | undefined,
@@ -62,19 +55,31 @@ export async function enqueueRunnerBatch(
   }
   await runnersRepository.enqueue(batchId, projectId, group || null, work);
   events.emit("work");
-}
+};
 
-export async function pendingRunnerBatchIds(): Promise<string[]> {
-  return (await runnersRepository.pending()).map((job) => job.batchId);
-}
+export const pendingRunnerBatchIds =
+  async function pendingRunnerBatchIds(): Promise<string[]> {
+    return await (async () => {
+      const awaitedValue1941 = await runnersRepository.pending();
+      return awaitedValue1941.map((job) => job.batchId);
+    })();
+  };
 
-export async function pendingRunnerRunIds(): Promise<string[]> {
-  return (await runnersRepository.pending()).flatMap((job) =>
-    job.payload.specs.map((spec) => spec.runId)
-  );
-}
+export const pendingRunnerRunIds =
+  async function pendingRunnerRunIds(): Promise<string[]> {
+    return await (async () => {
+      const awaitedValue2116 = await runnersRepository.pending();
+      return awaitedValue2116.flatMap((job) =>
+        job.payload.specs.map((spec) => spec.runId)
+      );
+    })();
+  };
 
-function waitForWork(signal: AbortSignal, milliseconds: number): Promise<void> {
+const waitForWork = function waitForWork(
+  signal: AbortSignal,
+  milliseconds: number
+): Promise<void> {
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
   return new Promise((resolve) => {
     const finish = () => {
       clearTimeout(timer);
@@ -89,16 +94,18 @@ function waitForWork(signal: AbortSignal, milliseconds: number): Promise<void> {
       finish();
     }
   });
-}
+};
 
-export async function claimRunnerWork(
+export const claimRunnerWork = async function claimRunnerWork(
   runner: RunnerToken,
   signal: AbortSignal,
   instanceId: string
 ): Promise<RunnerJob | null> {
   const deadline = Date.now() + 25_000;
   while (!signal.aborted) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await maintainRunnerQueue();
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const job = await withQueueLock("queue", async () => {
       const current = await runnersRepository.get(runner.id);
       if (!current) {
@@ -131,13 +138,14 @@ export async function claimRunnerWork(
     if (remaining <= 0) {
       break;
     }
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await waitForWork(signal, Math.min(1000, remaining));
   }
   await runnersRepository.touch(runner.id);
   return null;
-}
+};
 
-export async function reportRunnerInstance(
+export const reportRunnerInstance = async function reportRunnerInstance(
   runner: RunnerToken,
   input: {
     instanceId: string;
@@ -157,9 +165,9 @@ export async function reportRunnerInstance(
     await runnersRepository.touch(runner.id, input);
     await runnersRepository.reportInstance(runner.id, input.instanceId, input);
   });
-}
+};
 
-export async function disconnectRunnerInstance(
+export const disconnectRunnerInstance = async function disconnectRunnerInstance(
   runner: RunnerToken,
   instanceId: string
 ): Promise<void> {
@@ -171,17 +179,17 @@ export async function disconnectRunnerInstance(
     await runnersRepository.disconnect(runner.id, instanceId);
   });
   events.emit("work");
-}
+};
 
-function leaseMatches(
+const leaseMatches = function leaseMatches(
   job: RunnerJob | null,
   runnerId: string,
   leaseId: string
 ): job is RunnerJob {
   return Boolean(job && job.runnerId === runnerId && job.leaseId === leaseId);
-}
+};
 
-function requireLease(
+const requireLease = function requireLease(
   job: RunnerJob | null,
   runnerId: string,
   leaseId: string
@@ -198,14 +206,14 @@ function requireLease(
     });
   }
   return job;
-}
+};
 
-export async function heartbeatRunnerWork(
+export const heartbeatRunnerWork = async function heartbeatRunnerWork(
   jobId: string,
   runnerId: string,
   leaseId: string
 ): Promise<string> {
-  return withQueueLock("queue", async () => {
+  return await withQueueLock("queue", async () => {
     if (!(await runnersRepository.get(runnerId))) {
       throw new HTTPException(401, { message: "Runner token was revoked" });
     }
@@ -222,9 +230,9 @@ export async function heartbeatRunnerWork(
     }
     return expiresAt;
   });
-}
+};
 
-export async function releaseRunnerWork(
+export const releaseRunnerWork = async function releaseRunnerWork(
   jobId: string,
   runnerId: string,
   leaseId: string,
@@ -235,7 +243,7 @@ export async function releaseRunnerWork(
       if (!(await runnersRepository.get(runnerId))) {
         throw new HTTPException(401, { message: "Runner token was revoked" });
       }
-      const job = requireLease(
+      const jobValue = requireLease(
         await runnersRepository.job(jobId),
         runnerId,
         leaseId
@@ -246,7 +254,7 @@ export async function releaseRunnerWork(
       } else {
         await runnersRepository.release(jobId, leaseId, runnerId);
       }
-      return job;
+      return jobValue;
     });
     if (reason) {
       try {
@@ -257,13 +265,14 @@ export async function releaseRunnerWork(
     }
   });
   events.emit("work");
-}
+};
 
-export async function completeRunnerWork(
+export const completeRunnerWork = async function completeRunnerWork(
   jobId: string,
   runnerId: string,
   completion: RunnerCompletion
 ): Promise<void> {
+  // oxlint-disable-next-line complexity -- Keep the queue decision tree together so state transitions and error ordering remain explicit.
   await jobLocks.run(jobId, async () => {
     const job = await withQueueLock("queue", async () => {
       if (!(await runnersRepository.get(runnerId))) {
@@ -276,8 +285,10 @@ export async function completeRunnerWork(
       ) {
         return null;
       }
-      const job = requireLease(row, runnerId, completion.leaseId);
-      const expected = new Set(job.payload.specs.map((spec) => spec.runId));
+      const jobValue = requireLease(row, runnerId, completion.leaseId);
+      const expected = new Set(
+        jobValue.payload.specs.map((spec) => spec.runId)
+      );
       const reported = new Set(
         completion.results.map((result) => result.runId)
       );
@@ -293,7 +304,7 @@ export async function completeRunnerWork(
       // Accepted uploads finish once even if their token is revoked during storage.
       await runnersRepository.reserveCompletion(jobId);
       activeCompletions.add(jobId);
-      return job;
+      return jobValue;
     });
     if (!job) {
       return;
@@ -366,12 +377,14 @@ export async function completeRunnerWork(
                 message: "Runner replay exceeds the compressed limit",
               });
             }
+            // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
             const events = await decodeReplay(content);
             if (!events) {
               throw new HTTPException(400, {
                 message: "Invalid runner replay recording",
               });
             }
+            // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
             const safe = await encodeReplay(scrubJson(events, scrub));
             if (!safe) {
               replayUnavailable =
@@ -403,7 +416,9 @@ export async function completeRunnerWork(
             });
           }
           const file = path.join(staging, result.runId, artifact.path);
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           await fs.writeFile(file, content, { mode: 0o600, flag: "wx" });
         }
         if (replayBytes !== null || replayUnavailable) {
@@ -412,6 +427,7 @@ export async function completeRunnerWork(
             result.runId,
             "evidence.json"
           );
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           const text = await fs
             .readFile(manifestFile, "utf-8")
             .catch(() => null);
@@ -442,7 +458,8 @@ export async function completeRunnerWork(
             delete manifest.replayUnavailable;
           }
           const updated = JSON.stringify(manifest);
-          storedBytes += Buffer.byteLength(updated) - Buffer.byteLength(text!);
+          storedBytes +=
+            Buffer.byteLength(updated) - Buffer.byteLength(requireValue(text));
           if (
             storedBytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES ||
             Buffer.byteLength(updated) > 32 * 1024 * 1024
@@ -451,25 +468,30 @@ export async function completeRunnerWork(
               message: "Runner artifacts exceed the upload limit",
             });
           }
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           await fs.writeFile(manifestFile, updated, { mode: 0o600 });
         }
       }
       for (const result of completion.results) {
         const target = path.join(runsDir, result.runId);
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs.mkdir(target, { recursive: true });
-        const [root, actual] = await Promise.all([
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        const [rootValue, actual] = await Promise.all([
           fs.realpath(runsDir),
           fs.realpath(target),
         ]);
-        if (actual !== path.join(root, result.runId)) {
+        if (actual !== path.join(rootValue, result.runId)) {
           throw new HTTPException(400, {
             message: "Invalid runner artifact directory",
           });
         }
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs.rm(path.join(target, "evidence"), {
           recursive: true,
           force: true,
         });
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs.rm(path.join(target, "evidence.json"), { force: true });
         for (const artifact of result.artifacts) {
           if (artifact.path === "spec.ts" || artifact.path === "spec.yml") {
@@ -478,12 +500,15 @@ export async function completeRunnerWork(
           const source = path.join(staging, result.runId, artifact.path);
           if (
             artifact.path === REPLAY_FILE &&
+            // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
             !(await fs.lstat(source).catch(() => null))
           ) {
             continue;
           }
           const destination = path.join(target, artifact.path);
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           await fs.mkdir(path.dirname(destination), { recursive: true });
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           await fs.rename(source, destination);
         }
       }
@@ -500,9 +525,11 @@ export async function completeRunnerWork(
       await fs.rm(staging, { recursive: true, force: true });
     }
   });
-}
+};
 
-export async function revokeRunnerToken(id: string): Promise<boolean> {
+export const revokeRunnerToken = async function revokeRunnerToken(
+  id: string
+): Promise<boolean> {
   const revoked = await withQueueLock("queue", () =>
     runnersRepository.revoke(id)
   );
@@ -510,9 +537,9 @@ export async function revokeRunnerToken(id: string): Promise<boolean> {
   closeRunnerTunnels(id);
   events.emit("work");
   return revoked;
-}
+};
 
-export async function rotateRunnerToken(id: string) {
+export const rotateRunnerToken = async function rotateRunnerToken(id: string) {
   const issued = issuePrefixedToken("sb_runner_");
   const runner = await withQueueLock("queue", () =>
     runnersRepository.rotate(id, issued.hash)
@@ -524,21 +551,24 @@ export async function rotateRunnerToken(id: string) {
   closeRunnerTunnels(id);
   events.emit("work");
   return { token: issued.token, runner: publicRunner(runner) };
-}
+};
 
-export async function cancelRunnerBatch(batchId: string): Promise<boolean> {
-  const job = (await runnersRepository.pending()).find(
-    (row) => row.batchId === batchId
-  );
+export const cancelRunnerBatch = async function cancelRunnerBatch(
+  batchId: string
+): Promise<boolean> {
+  const job = await (async () => {
+    const awaitedValue17413 = await runnersRepository.pending();
+    return awaitedValue17413.find((row) => row.batchId === batchId);
+  })();
   if (!job) {
     return false;
   }
   return jobLocks.run(job.id, () =>
     withQueueLock("queue", () => runnersRepository.cancelBatch(batchId))
   );
-}
+};
 
-async function failRunnerJob(
+const failRunnerJob = async function failRunnerJob(
   job: RunnerJob,
   reason: string,
   failedAttempt = false
@@ -569,15 +599,18 @@ async function failRunnerJob(
       error,
     });
     await runnersRepository.recordFailure(job.id, failure);
-    await failBrokenRunnerBatch(job, failure).catch((error: unknown) =>
-      logger.error("could not recover runner batch", { jobId: job.id, error })
+    await failBrokenRunnerBatch(job, failure).catch((error_: unknown) =>
+      logger.error("could not recover runner batch", {
+        jobId: job.id,
+        error: error_,
+      })
     );
   } finally {
     await runnersRepository.complete(job.id, true);
   }
-}
+};
 
-function failureReason(job: RunnerJob): string | null {
+const failureReason = function failureReason(job: RunnerJob): string | null {
   if (runnerJobDeadline(job) <= Date.now()) {
     return job.status === "queued"
       ? `Runner work expired after waiting ${Math.round(runnerQueueTimeoutMs() / 1000)}s for a runner${job.group ? ` in group ${job.group}` : ""}.${job.lastFailure ? ` ${job.lastFailure}` : ""}`
@@ -587,94 +620,117 @@ function failureReason(job: RunnerJob): string | null {
     return `Runner work stopped after ${MAX_RUNNER_ATTEMPTS} attempts.${job.lastFailure ? ` ${job.lastFailure}` : " Runners repeatedly disconnected before completion."}`;
   }
   return null;
-}
+};
 
-export function maintainRunnerQueue(): Promise<void> {
-  if (maintenance) {
-    return maintenance;
-  }
-  maintenance = (async () => {
-    await withQueueLock("queue", () =>
-      runnersRepository.reclaim(new Date().toISOString(), [
-        ...activeCompletions,
-      ])
-    );
-    const jobs = (await runnersRepository.pending()).filter(
-      (job) =>
-        !activeCompletions.has(job.id) &&
-        !jobLocks.has(job.id) &&
-        failureReason(job)
-    );
-    const results = await Promise.allSettled(
-      jobs.map((job) =>
-        jobLocks.run(job.id, async () => {
-          const current = await withQueueLock("queue", async () => {
-            const row = await runnersRepository.job(job.id);
-            if (!row || row.status === "completed" || !failureReason(row)) {
-              return null;
+export const maintainRunnerQueue =
+  function maintainRunnerQueue(): Promise<void> {
+    if (maintenance) {
+      return maintenance;
+    }
+    maintenance = (async () => {
+      await withQueueLock("queue", () =>
+        runnersRepository.reclaim(new Date().toISOString(), [
+          ...activeCompletions,
+        ])
+      );
+      const jobs = await (async () => {
+        const awaitedValue20131 = await runnersRepository.pending();
+        return awaitedValue20131.filter(
+          (job) =>
+            !activeCompletions.has(job.id) &&
+            !jobLocks.has(job.id) &&
+            failureReason(job)
+        );
+      })();
+      const results = await Promise.allSettled(
+        jobs.map((job) =>
+          jobLocks.run(job.id, async () => {
+            const current = await withQueueLock("queue", async () => {
+              const row = await runnersRepository.job(job.id);
+              if (!row || row.status === "completed" || !failureReason(row)) {
+                return null;
+              }
+              await runnersRepository.reserveCompletion(row.id);
+              return row;
+            });
+            if (current) {
+              await failRunnerJob(
+                current,
+                requireValue(failureReason(current))
+              );
             }
-            await runnersRepository.reserveCompletion(row.id);
-            return row;
-          });
-          if (current) {
-            await failRunnerJob(current, failureReason(current)!);
-          }
-        })
+          })
+        )
+      );
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index];
+        if (result.status !== "rejected") {
+          continue;
+        }
+        const job = jobs[index];
+        logger.error("runner maintenance could not finish work", {
+          jobId: job.id,
+          error: result.reason,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        await runnersRepository
+          .recordFailure(
+            job.id,
+            "Runner work could not be finalized during queue maintenance."
+          )
+          .then(() => runnersRepository.complete(job.id, true))
+          .catch((error: unknown) =>
+            logger.error("could not retire runner work", {
+              jobId: job.id,
+              error,
+            })
+          );
+      }
+      events.emit("work");
+    })().finally(() => {
+      maintenance = undefined;
+    });
+    return maintenance;
+  };
+
+export const recoverRunnerCompletions =
+  async function recoverRunnerCompletions(): Promise<void> {
+    await withQueueLock("queue", () =>
+      runnersRepository.reclaim(
+        new Date().toISOString(),
+        [...activeCompletions],
+        true
       )
     );
-    for (let index = 0; index < results.length; index++) {
-      const result = results[index];
-      if (result.status !== "rejected") {
-        continue;
-      }
-      const job = jobs[index];
-      logger.error("runner maintenance could not finish work", {
-        jobId: job.id,
-        error: result.reason,
-      });
-      await runnersRepository
-        .recordFailure(
-          job.id,
-          "Runner work could not be finalized during queue maintenance."
-        )
-        .then(() => runnersRepository.complete(job.id, true))
-        .catch((error: unknown) =>
-          logger.error("could not retire runner work", { jobId: job.id, error })
-        );
+    await maintainRunnerQueue();
+  };
+
+export const startRunnerLeaseMonitor =
+  function startRunnerLeaseMonitor(): void {
+    if (monitor) {
+      return;
     }
-    events.emit("work");
-  })().finally(() => {
-    maintenance = undefined;
-  });
-  return maintenance;
-}
+    monitor = setInterval(() => {
+      // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+      maintainRunnerQueue().catch((error: unknown) =>
+        logger.error("could not reclaim runner leases", { error })
+      );
+    }, 1000);
+    monitor.unref();
+  };
 
-export async function recoverRunnerCompletions(): Promise<void> {
-  await withQueueLock("queue", () =>
-    runnersRepository.reclaim(
-      new Date().toISOString(),
-      [...activeCompletions],
-      true
-    )
-  );
-  await maintainRunnerQueue();
-}
-
-export function startRunnerLeaseMonitor(): void {
-  if (monitor) {
-    return;
-  }
-  monitor = setInterval(() => {
-    void maintainRunnerQueue().catch((error: unknown) =>
-      logger.error("could not reclaim runner leases", { error })
-    );
-  }, 1000);
-  monitor.unref();
-}
-
-export function stopRunnerLeaseMonitor(): void {
+export const stopRunnerLeaseMonitor = function stopRunnerLeaseMonitor(): void {
   if (monitor) {
     clearInterval(monitor);
   }
   monitor = undefined;
-}
+};
+
+const withQueueLock = createKeyedLock().run;
+const jobLocks = createKeyedLock();
+const activeCompletions = new Set<string>();
+// oxlint-disable-next-line unicorn/prefer-event-target -- The Node service uses EventEmitter listener and error-event semantics across its existing callers.
+const events = new EventEmitter();
+events.setMaxListeners(0);
+let monitor: NodeJS.Timeout | undefined;
+let maintenance: Promise<void> | undefined;

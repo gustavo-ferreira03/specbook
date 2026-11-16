@@ -3,9 +3,8 @@ import path from "node:path";
 
 import type { NextConfig } from "next";
 
-const configuredPushLimit = Number.parseInt(
-  process.env.SPECBOOK_GIT_MAX_PUSH_BYTES ?? "",
-  10
+const configuredPushLimit = Math.trunc(
+  Number(process.env.SPECBOOK_GIT_MAX_PUSH_BYTES ?? "")
 );
 const maxPushBytes =
   Number.isFinite(configuredPushLimit) && configuredPushLimit > 0

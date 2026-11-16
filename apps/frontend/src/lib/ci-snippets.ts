@@ -8,7 +8,7 @@ export const CI_PROVIDERS = [
 
 export type CiProvider = (typeof CI_PROVIDERS)[number][0];
 
-export function ciSnippet(
+export const ciSnippet = function ciSnippet(
   provider: CiProvider,
   apiUrl: string,
   projectId: string,
@@ -17,7 +17,7 @@ export function ciSnippet(
   environment = "production"
 ): string {
   const env = {
-    SPECBOOK_URL: apiUrl.replace(/\/+$/, ""),
+    SPECBOOK_URL: apiUrl.replace(/\/+$/u, ""),
     SPECBOOK_PROJECT: projectId,
     SPECBOOK_ENVIRONMENT: environment,
     SPECBOOK_FAIL_ON_FLAKY: String(failOnFlaky),
@@ -195,5 +195,8 @@ ${Object.entries(env)
   }
 }`;
     }
+    default: {
+      throw new Error("Unsupported CI provider");
+    }
   }
-}
+};

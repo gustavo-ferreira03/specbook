@@ -3,14 +3,15 @@ import type { ReplayRecording } from "./replay-assets.ts";
 import { readReplay } from "./replay.ts";
 import type { ReplayEvent } from "./replay.ts";
 
-export function offlineReplay(value: unknown): unknown {
+// oxlint-disable-next-line complexity -- Validate all recording limits before accepting untrusted replay data.
+export const offlineReplay = function offlineReplay(value: unknown): unknown {
   if (typeof value === "string") {
     return value
-      .replaceAll(/@import\s+(?:url\([^)]*\)|["'][^"']*["'])[^;]*;?/gi, "")
+      .replaceAll(/@import\s+(?:url\([^)]*\)|["'][^"']*["'])[^;]*;?/giu, "")
       .replaceAll(
-        /url\(\s*(["']?)(.*?)\1\s*\)/gi,
+        /url\(\s*(?<capture1>["']?)(?<capture2>.*?)\1\s*\)/giu,
         (_match, _quote, url: string) =>
-          /^(?:data:|#)/i.test(url.trim())
+          /^(?:data:|#)/iu.test(url.trim())
             ? `url("${url.trim().replaceAll('"', "%22")}")`
             : 'url("data:,")'
       );
@@ -49,7 +50,7 @@ export function offlineReplay(value: unknown): unknown {
             name !== "srcdoc" &&
             name !== "srcset" &&
             typeof attribute === "string" &&
-            /^data:(?:image|font|audio|video)\//i.test(attribute)
+            /^data:(?:image|font|audio|video)\//iu.test(attribute)
           ) {
             attributes[name] = attribute;
           }
@@ -70,13 +71,13 @@ export function offlineReplay(value: unknown): unknown {
     }
   }
   return result;
-}
+};
 
-export async function readOfflineReplay(
+export const readOfflineReplay = async function readOfflineReplay(
   directory: string
 ): Promise<ReplayRecording | null> {
   const events = await readReplay(directory);
   return events
     ? packReplayEvents(offlineReplay(events) as ReplayEvent[])
     : null;
-}
+};

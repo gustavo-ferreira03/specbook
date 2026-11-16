@@ -2,36 +2,39 @@ import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export class UnsafeRepoPathError extends Error {}
+export class UnsafeRepoPathError extends Error {
+  override name = "UnsafeRepoPathError";
+}
 
-export function isInside(
+export const isInside = function isInside(
   parent: string,
   child: string,
-  options: { allowRoot: boolean; rejectDotPrefix?: boolean } = {
-    allowRoot: true,
-  }
+  options?: { allowRoot: boolean; rejectDotPrefix?: boolean }
 ): boolean {
   const relative = path.relative(parent, child);
   if (relative === "") {
-    return options.allowRoot;
+    return options?.allowRoot ?? true;
   }
   return (
     !path.isAbsolute(relative) &&
-    (options.rejectDotPrefix
+    (options?.rejectDotPrefix
       ? !relative.startsWith("..")
       : relative !== ".." && !relative.startsWith(`..${path.sep}`))
   );
-}
+};
 
-function assertInside(root: string, target: string): void {
+const assertInside = function assertInside(root: string, target: string): void {
   if (!isInside(root, target, { allowRoot: false, rejectDotPrefix: true })) {
     throw new UnsafeRepoPathError(
       `Path escapes the project repository: ${target}`
     );
   }
-}
+};
 
-async function assertNoSymlinks(root: string, target: string): Promise<void> {
+const assertNoSymlinks = async function assertNoSymlinks(
+  root: string,
+  target: string
+): Promise<void> {
   const resolvedRoot = path.resolve(root);
   const resolvedTarget = path.resolve(target);
   assertInside(resolvedRoot, resolvedTarget);
@@ -41,6 +44,7 @@ async function assertNoSymlinks(root: string, target: string): Promise<void> {
     current = path.join(current, part);
     let stat;
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       stat = await fs.lstat(current);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -54,15 +58,16 @@ async function assertNoSymlinks(root: string, target: string): Promise<void> {
       );
     }
   }
-}
+};
 
-export async function readRepoFile(
+export const readRepoFile = async function readRepoFile(
   root: string,
   target: string
 ): Promise<string> {
   await assertNoSymlinks(root, target);
   const handle = await fs.open(
     target,
+    // oxlint-disable-next-line no-bitwise -- These are native OS flags or network address bit fields, which require bitwise operations.
     constants.O_RDONLY | constants.O_NOFOLLOW
   );
   try {
@@ -70,9 +75,9 @@ export async function readRepoFile(
   } finally {
     await handle.close();
   }
-}
+};
 
-export async function readOptionalRepoFile(
+export const readOptionalRepoFile = async function readOptionalRepoFile(
   root: string,
   target: string
 ): Promise<string | null> {
@@ -84,9 +89,9 @@ export async function readOptionalRepoFile(
     }
     throw error;
   }
-}
+};
 
-export async function writeRepoFile(
+export const writeRepoFile = async function writeRepoFile(
   root: string,
   target: string,
   content: string
@@ -94,6 +99,7 @@ export async function writeRepoFile(
   await assertNoSymlinks(root, target);
   const handle = await fs.open(
     target,
+    // oxlint-disable-next-line no-bitwise -- These are native OS flags or network address bit fields, which require bitwise operations.
     constants.O_WRONLY |
       constants.O_CREAT |
       constants.O_TRUNC |
@@ -105,11 +111,11 @@ export async function writeRepoFile(
   } finally {
     await handle.close();
   }
-}
+};
 
-export async function assertRepoPathSafe(
+export const assertRepoPathSafe = async function assertRepoPathSafe(
   root: string,
   target: string
 ): Promise<void> {
   await assertNoSymlinks(root, target);
-}
+};

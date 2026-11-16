@@ -7,23 +7,7 @@ import type { Job } from "../../infra/repositories/jobs";
 import { withFileQueue } from "../operations/file-queue";
 import { storageRoot } from "../paths";
 
-export const jobMetricsPath = path.join(
-  storageRoot,
-  "metrics",
-  "agent-events.jsonl"
-);
-
-export interface AgentMetricDetails {
-  itemId?: string;
-  itemKind?: string;
-  decision?: string;
-  actor?: "human" | "agent";
-  verificationStatus?: string;
-}
-
-let writes: Promise<void> = Promise.resolve();
-
-export async function recordAgentMetric(
+export const recordAgentMetric = async function recordAgentMetric(
   job: Job,
   event: string,
   details: AgentMetricDetails = {}
@@ -57,8 +41,25 @@ export async function recordAgentMetric(
       );
     })
   );
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
   writes = write.catch((error) =>
     logger.warn("agent evaluation metric could not be written", { error })
   );
   await writes;
+};
+
+export const jobMetricsPath = path.join(
+  storageRoot,
+  "metrics",
+  "agent-events.jsonl"
+);
+
+export interface AgentMetricDetails {
+  itemId?: string;
+  itemKind?: string;
+  decision?: string;
+  actor?: "human" | "agent";
+  verificationStatus?: string;
 }
+
+let writes: Promise<void> = Promise.resolve();

@@ -9,21 +9,31 @@ import { tokenHash } from "../accounts/tokens";
 import { resolveRunEnvironment } from "../environments";
 import { startSpecBatch } from "../runner/batch";
 import { ResourceBusyError } from "../specs/lifecycle";
+import { requireValue } from "../utils/require-value";
 import { knownBugSpecIds } from "./results";
 import type { ciRunSchema } from "./schemas";
 import { projectRunPolicy } from "./targets";
 
 export class CiRequestError extends Error {
+  readonly retryAfter?: number;
+
+  readonly status: 400 | 401 | 404 | 409 | 429;
+
+  name = "CiRequestError";
+
   constructor(
     message: string,
-    readonly status: 400 | 401 | 404 | 409 | 429,
-    readonly retryAfter?: number
+    status: 400 | 401 | 404 | 409 | 429,
+    retryAfter?: number
   ) {
     super(message);
+    this.retryAfter = retryAfter;
+
+    this.status = status;
   }
 }
 
-export async function acceptCiTrigger(
+export const acceptCiTrigger = async function acceptCiTrigger(
   projectId: string,
   authorization: string,
   target?: string,
@@ -60,9 +70,9 @@ export async function acceptCiTrigger(
     }
     throw error;
   }
-}
+};
 
-export async function startCiRun(
+export const startCiRun = async function startCiRun(
   projectId: string,
   authorization: string,
   input: z.infer<typeof ciRunSchema>,
@@ -92,7 +102,9 @@ export async function startCiRun(
         400
       );
     }
-    specs = specs.filter((spec) => input.specIds!.includes(spec.id));
+    specs = specs.filter((spec) =>
+      requireValue(input.specIds).includes(spec.id)
+    );
   }
   if (!input.specIds) {
     specs = specs.filter((spec) => spec.status !== "invalid");
@@ -121,4 +133,4 @@ export async function startCiRun(
       error instanceof ResourceBusyError ? 409 : 400
     );
   }
-}
+};

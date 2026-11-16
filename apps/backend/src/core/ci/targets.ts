@@ -16,9 +16,7 @@ import { projectsRepository } from "../../infra/repositories/projects";
 import type { Project } from "../../infra/repositories/projects";
 import { resolveRunEnvironment } from "../environments";
 
-export type { RunNetworkPolicy } from "@specbook/runtime/network/targets";
-
-export async function projectRunPolicy(
+export const projectRunPolicy = async function projectRunPolicy(
   project: Project,
   baseUrl: string,
   resolver?: AddressResolver,
@@ -39,15 +37,15 @@ export async function projectRunPolicy(
   if (selected.executor === "runner" || selected.executor === "tunnel") {
     return { origins, allowPrivate: true };
   }
-  const hostname = base.hostname.replaceAll(/^\[|\]$/g, "");
+  const hostname = base.hostname.replaceAll(/^\[|\]$/gu, "");
   const allowPrivate = isIP(hostname)
     ? isPrivateAddress(hostname)
     : hostname === "localhost" || hostname.endsWith(".localhost");
   await resolveTarget(target, allowPrivate, resolver);
   return { origins, allowPrivate };
-}
+};
 
-export async function runNetworkPolicy(
+export const runNetworkPolicy = async function runNetworkPolicy(
   projectId: string,
   baseUrl: string,
   environment?: RunEnvironment
@@ -57,4 +55,6 @@ export async function runNetworkPolicy(
     throw new NetworkTargetError("Project not found");
   }
   return projectRunPolicy(project, baseUrl, undefined, environment);
-}
+};
+
+export type { RunNetworkPolicy } from "@specbook/runtime/network/targets";

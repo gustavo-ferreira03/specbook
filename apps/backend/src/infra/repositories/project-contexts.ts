@@ -8,9 +8,6 @@ import type { DbQuery } from "../db/client";
 import { EMPTY_PROJECT_CONTEXT, projectContextRevisions } from "../db/schema";
 import type { DiscoveryBrief, ProjectContext } from "../db/schema";
 
-export type ProjectContextRevisionRow =
-  typeof projectContextRevisions.$inferSelect;
-
 class ProjectContextsRepository {
   private draftLocks = createKeyedLock();
 
@@ -18,9 +15,10 @@ class ProjectContextsRepository {
     projectId: string,
     work: () => Promise<T>
   ): Promise<T> {
-    return this.draftLocks.run(projectId, work);
+    return await this.draftLocks.run(projectId, work);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async createProjectContextDraft(
     projectId: string,
     brief: DiscoveryBrief
@@ -41,6 +39,7 @@ class ProjectContextsRepository {
     return row;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async attachContextChat(revisionId: string, chatId: string): Promise<void> {
     await db
       .update(projectContextRevisions)
@@ -48,6 +47,7 @@ class ProjectContextsRepository {
       .where(eq(projectContextRevisions.id, revisionId));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getProjectContextRevision(
     revisionId: string
   ): Promise<ProjectContextRevisionRow | null> {
@@ -58,6 +58,7 @@ class ProjectContextsRepository {
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getProjectContextForChat(
     chatId: string
   ): Promise<ProjectContextRevisionRow | null> {
@@ -72,6 +73,7 @@ class ProjectContextsRepository {
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async hasRevisions(projectId: string): Promise<boolean> {
     const rows = await db
       .select({ id: projectContextRevisions.id })
@@ -81,6 +83,7 @@ class ProjectContextsRepository {
     return rows.length > 0;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getLatestConfirmedProjectContext(
     projectId: string
   ): Promise<ProjectContextRevisionRow | null> {
@@ -100,6 +103,7 @@ class ProjectContextsRepository {
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getActiveProjectContextDraft(
     projectId: string
   ): Promise<ProjectContextRevisionRow | null> {
@@ -135,6 +139,7 @@ class ProjectContextsRepository {
     return this.getProjectContextRevision(revisionId);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   private confirmedRevisionRow(
     projectId: string,
     brief: DiscoveryBrief,
@@ -174,6 +179,7 @@ class ProjectContextsRepository {
       .values(this.confirmedRevisionRow(projectId, brief, context));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   deleteAllForProjectQuery(projectId: string): DbQuery {
     return db
       .delete(projectContextRevisions)
@@ -211,6 +217,7 @@ class ProjectContextsRepository {
     return this.getProjectContextRevision(revisionId);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async discardDraftForChat(chatId: string): Promise<void> {
     await db
       .update(projectContextRevisions)
@@ -223,6 +230,7 @@ class ProjectContextsRepository {
       );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async deleteProjectContextDraft(revisionId: string): Promise<void> {
     await db
       .delete(projectContextRevisions)
@@ -234,11 +242,15 @@ class ProjectContextsRepository {
       );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async deleteAllForProject(projectId: string): Promise<void> {
     await db
       .delete(projectContextRevisions)
       .where(eq(projectContextRevisions.projectId, projectId));
   }
 }
+
+export type ProjectContextRevisionRow =
+  typeof projectContextRevisions.$inferSelect;
 
 export const projectContextsRepository = new ProjectContextsRepository();

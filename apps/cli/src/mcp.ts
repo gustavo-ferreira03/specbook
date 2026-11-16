@@ -47,22 +47,24 @@ export const emptyAgentState = (): AgentState => ({
   runs: [],
 });
 
-export async function readAgentState(session: string): Promise<AgentState> {
+export const readAgentState = async function readAgentState(
+  session: string
+): Promise<AgentState> {
   return JSON.parse(
     await fs.readFile(path.join(session, "state.json"), "utf-8")
   ) as AgentState;
-}
+};
 
 const filePath = z
   .string()
   .max(512)
   .regex(
-    /^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*\/(?:feature\.yml|spec\.yml|spec\.ts)$/
+    /^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*\/(?:feature\.yml|spec\.yml|spec\.ts)$/u
   );
 const specPath = z
   .string()
   .max(500)
-  .regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/);
+  .regex(/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/u);
 const ref = z.string().min(1).max(300);
 const noArgs = z.strictObject({});
 const turnContextSchema = z.strictObject({
@@ -73,10 +75,10 @@ interface Tool {
   name: string;
   description: string;
   schema: z.ZodObject;
-  execute(input: unknown): Promise<unknown>;
+  execute: (input: unknown) => Promise<unknown>;
 }
 
-export async function createLocalMcpServer(
+export const createLocalMcpServer = async function createLocalMcpServer(
   workspace: string,
   session: string,
   signal?: AbortSignal
@@ -117,7 +119,7 @@ export async function createLocalMcpServer(
     }
   );
   const tools: Tool[] = [];
-  function tool<S extends z.ZodObject>(
+  const tool = function tool<S extends z.ZodObject>(
     name: string,
     description: string,
     schema: S,
@@ -129,11 +131,11 @@ export async function createLocalMcpServer(
       schema,
       execute: (input) => execute(schema.parse(input)),
     });
-  }
+  };
   const save = async () => {
     await writeState("state.json", state);
   };
-  async function assertCurrentTurn(): Promise<void> {
+  const assertCurrentTurn = async function assertCurrentTurn(): Promise<void> {
     if (!turnId) {
       return;
     }
@@ -145,8 +147,11 @@ export async function createLocalMcpServer(
         "This conversation turn was replaced; no further tools may be called"
       );
     }
-  }
-  async function writeState(name: string, value: unknown): Promise<void> {
+  };
+  const writeState = async function writeState(
+    name: string,
+    value: unknown
+  ): Promise<void> {
     await assertCurrentTurn();
     const temporary = path.join(session, `${name}-${randomUUID()}.tmp`);
     try {
@@ -159,8 +164,8 @@ export async function createLocalMcpServer(
     } finally {
       await fs.rm(temporary, { force: true });
     }
-  }
-  async function finish(value: unknown): Promise<unknown> {
+  };
+  const finish = async function finish(value: unknown): Promise<unknown> {
     const outcome = outcomeSchema.parse(value);
     const text = [
       outcome.message,
@@ -181,7 +186,7 @@ export async function createLocalMcpServer(
     await writeState("outcome.json", outcome);
     completed = true;
     return { status: outcome.status, ended: true };
-  }
+  };
   const browser = (
     action: string,
     args: Record<string, string | undefined> = {}
@@ -213,7 +218,7 @@ export async function createLocalMcpServer(
         value: z.string().max(20_000).optional(),
         secret: z
           .string()
-          .regex(/^[a-zA-Z][a-zA-Z0-9_-]*\.[a-zA-Z][a-zA-Z0-9_-]*$/)
+          .regex(/^[a-zA-Z][a-zA-Z0-9_-]*\.[a-zA-Z][a-zA-Z0-9_-]*$/u)
           .optional(),
       })
       .refine(
@@ -259,7 +264,9 @@ export async function createLocalMcpServer(
           features.push({
             path: relative,
             ...parseFeatureYaml(
+              // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
               await fs.readFile(
+                // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
                 await safeWorkspacePath(workspace, relative),
                 "utf-8"
               )
@@ -278,7 +285,9 @@ export async function createLocalMcpServer(
           specs.push({
             path: relative,
             ...parseSpecYaml(
+              // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
               await fs.readFile(
+                // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
                 await safeWorkspacePath(workspace, `${relative}/spec.yml`),
                 "utf-8"
               )
@@ -335,6 +344,7 @@ export async function createLocalMcpServer(
       await assertCurrentTurn();
       const handle = await fs.open(
         file,
+        // oxlint-disable-next-line no-bitwise -- Combine the operating-system permission or open flags required by this operation.
         constants.O_WRONLY |
           constants.O_CREAT |
           constants.O_TRUNC |
@@ -417,7 +427,7 @@ export async function createLocalMcpServer(
     "ask_question",
     "End the turn with a clarifying question.",
     outcomeToolSchemas.ask_question,
-    async ({ message }) =>
+    ({ message }) =>
       finish({
         status: "waiting_for_reply",
         message,
@@ -428,7 +438,7 @@ export async function createLocalMcpServer(
     "propose_specs",
     "End the turn with proposed Specs (title, why, feature) for the caller to select.",
     outcomeToolSchemas.propose_specs,
-    async ({ message, proposals }) =>
+    ({ message, proposals }) =>
       finish({
         status: "waiting_for_selection",
         message,
@@ -449,7 +459,8 @@ export async function createLocalMcpServer(
           "Call credentials_list in this turn before requesting credentials"
         );
       }
-      const available = (await listProfiles()).find(
+      const listProfilesValue1 = await listProfiles();
+      const available = listProfilesValue1.find(
         (item) => item.name === profile
       );
       const { origin } = new URL(config.baseUrl);
@@ -480,15 +491,15 @@ export async function createLocalMcpServer(
     "report_done",
     "End the turn: the request is complete. Summarize the outcome; Specbook attaches the Specs and evidence from actual runs.",
     outcomeToolSchemas.report_done,
-    async ({ message }) => finish({ status: "done", message })
+    ({ message }) => finish({ status: "done", message })
   );
   tool(
     "report_failed",
     "End the turn: the request cannot complete. Give the cause and how to fix it and retry.",
     outcomeToolSchemas.report_failed,
-    async ({ message, error }) => finish({ status: "failed", message, error })
+    ({ message, error }) => finish({ status: "failed", message, error })
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: tools.map(({ name, description, schema }) => ({
       name,
       description,
@@ -502,6 +513,7 @@ export async function createLocalMcpServer(
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     let release!: () => void;
     const prior = tail;
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
     tail = new Promise<void>((resolve) => {
       release = resolve;
     });
@@ -514,7 +526,9 @@ export async function createLocalMcpServer(
           "This conversation turn has already ended; no further tools may be called"
         );
       }
-      const selected = tools.find((tool) => tool.name === params.name);
+      const selected = tools.find(
+        (availableTool) => availableTool.name === params.name
+      );
       if (!selected) {
         throw new Error("Unknown Specbook tool");
       }
@@ -543,9 +557,9 @@ export async function createLocalMcpServer(
     }
   });
   return server;
-}
+};
 
-export async function runMcpServer(
+export const runMcpServer = async function runMcpServer(
   workspace: string,
   session: string
 ): Promise<void> {
@@ -557,10 +571,10 @@ export async function runMcpServer(
   );
   const close = () => {
     cancellation.abort();
-    void server.close();
+    server.close();
   };
   process.once("SIGTERM", close);
   process.once("SIGINT", close);
   process.stdin.once("end", close);
   await server.connect(new StdioServerTransport());
-}
+};

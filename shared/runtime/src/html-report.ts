@@ -10,6 +10,18 @@ import { executionPlan } from "./types.ts";
 import type { ExecutionStepKind, HumanSpec } from "./types.ts";
 import { analyzeSpecSource, sameStepTitle } from "./validate.ts";
 
+const face = async (family: string, file: string, weight: string) => {
+  const font = await fs
+    .readFile(new URL(`assets/${file}`, import.meta.url))
+    .catch(() => null);
+  return font
+    ? `@font-face{font-family:"${family}";font-weight:${weight};font-display:swap;src:url(data:font/woff2;base64,${font.toString("base64")}) format("woff2")}`
+    : "";
+};
+
+const inlineScript = (script: string) =>
+  script.replaceAll(/<\/script/giu, "<\\/script");
+
 const MAX_IMAGE_BYTES = 5_000_000;
 const MAX_VIDEO_BYTES = 8_000_000;
 const IMAGE_TYPES: Record<string, string> = {
@@ -94,24 +106,32 @@ const ZOOM_SCRIPT = `(() => {
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
 })();`;
 
-function escape(value: string): string {
-  return value.replaceAll(
-    /[&<>"']/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        char
-      ]!
+const escape = function escape(value: string): string {
+  return value.replaceAll(/[&<>"']/gu, (char) =>
+    (() => {
+      const escaped = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char];
+      if (escaped === null || escaped === undefined) {
+        throw new Error("Expected an existing value");
+      }
+      return escaped;
+    })()
   );
-}
+};
 
-function duration(ms: number | null | undefined): string {
-  if (ms == null) {
+const duration = function duration(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) {
     return "";
   }
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
-}
+};
 
-async function embed(
+const embed = async function embed(
   directory: string,
   file: string,
   type: string | undefined,
@@ -128,8 +148,9 @@ async function embed(
   if (!stat?.isFile() || stat.size > maxBytes) {
     return null;
   }
-  return `data:${type};base64,${(await fs.readFile(source)).toString("base64")}`;
-}
+  const bytes = await fs.readFile(source);
+  return `data:${type};base64,${bytes.toString("base64")}`;
+};
 
 const image = (directory: string, file: string) =>
   embed(
@@ -139,14 +160,16 @@ const image = (directory: string, file: string) =>
     MAX_IMAGE_BYTES
   );
 
-async function replayData(directory: string): Promise<string | null> {
+const replayData = async function replayData(
+  directory: string
+): Promise<string | null> {
   const recording = await readOfflineReplay(directory);
   return recording
     ? gzipSync(JSON.stringify(recording)).toString("base64")
     : null;
-}
+};
 
-function toneOf(item: Item): Tone {
+const toneOf = function toneOf(item: Item): Tone {
   if (item.pending) {
     return "running";
   }
@@ -157,131 +180,149 @@ function toneOf(item: Item): Tone {
     return item.knownBug ? "known" : "failed";
   }
   return item.flaky ? "flaky" : "passed";
-}
+};
 
-export async function prepareReportSection(options: {
-  item: ReportItem;
-  directory: string | null;
-  feature?: string;
-  path?: string | null;
-  humanSpec?: HumanSpec | null;
-}): Promise<ReportSection> {
-  const { item, directory, humanSpec: human } = options;
-  const manifest = directory
-    ? await readEvidenceManifest(directory)
-    : { steps: [], video: null, failedStep: null };
-  const shots = new Map(manifest.steps.map((step) => [step.number, step]));
-  const planned = human ? executionPlan(human) : [];
-  const source = directory
-    ? await fs
-        .readFile(path.join(directory, "spec.ts"), "utf-8")
-        .catch(() => null)
-    : null;
-  const analysis = source ? analyzeSpecSource(source) : null;
-  const executed = analysis?.ok
-    ? analysis.analysis.steps.map((title, index) => ({
-        number: index + 1,
-        title,
-      }))
-    : manifest.steps.length
-      ? manifest.steps.map((step) => ({
-          number: step.number,
-          title: step.label,
-        }))
-      : planned.map((entry, index) => ({
+export const prepareReportSection =
+  async function prepareReportSection(options: {
+    item: ReportItem;
+    directory: string | null;
+    feature?: string;
+    path?: string | null;
+    humanSpec?: HumanSpec | null;
+  }): Promise<ReportSection> {
+    const { item, directory, humanSpec: human } = options;
+    const manifest = directory
+      ? await readEvidenceManifest(directory)
+      : { steps: [], video: null, failedStep: null };
+    const shots = new Map(manifest.steps.map((step) => [step.number, step]));
+    const planned = human ? executionPlan(human) : [];
+    const source = directory
+      ? await fs
+          .readFile(path.join(directory, "spec.ts"), "utf-8")
+          .catch(() => null)
+      : null;
+    const analysis = source ? analyzeSpecSource(source) : null;
+    const executed = analysis?.ok
+      ? analysis.analysis.steps.map((title, index) => ({
           number: index + 1,
-          title: entry.title,
-        }));
-  const failedIndex = manifest.failedStep
-    ? executed.findIndex((entry) =>
-        sameStepTitle(entry.title, manifest.failedStep!)
-      )
-    : -1;
-  const failed = ["failed", "error"].includes(item.status);
-  const steps = await Promise.all(
-    executed.map(async ({ number, title }, index) => {
-      const shot = shots.get(number);
-      const label = shot?.label.trim() || title;
-      const state: StepState = failed
-        ? failedIndex >= 0
-          ? index < failedIndex
-            ? "passed"
-            : index === failedIndex
-              ? "failed"
-              : "skipped"
-          : shot
-            ? "passed"
-            : "skipped"
-        : "passed";
-      const matching =
-        executed.length === planned.length
-          ? planned[index]
-          : planned.find((entry) => sameStepTitle(entry.title, label));
-      return {
-        number,
-        ordinal: matching?.ordinal ?? (matching ? null : number),
-        kind: matching?.kind ?? "step",
-        label,
-        state,
-        image: directory && shot ? await image(directory, shot.file) : null,
-      };
-    })
-  );
-  return {
-    item,
-    tone: toneOf(item),
-    feature: options.feature || "Other Specs",
-    path: options.path ?? null,
-    expectedResult: human?.expectedResult ?? "",
-    steps,
-    video:
-      directory && manifest.video
-        ? await embed(directory, manifest.video, "video/webm", MAX_VIDEO_BYTES)
-        : null,
-    replay: directory && manifest.replay ? await replayData(directory) : null,
-    ...(manifest.replayUnavailable
-      ? { replayUnavailable: manifest.replayUnavailable }
-      : {}),
-  };
-}
-
-const publicAsset = (file: string) =>
-  fs
-    .readFile(new URL(`./assets/${file}`, import.meta.url), "utf-8")
-    .catch(() =>
-      fs
-        .readFile(new URL(`../dist/assets/${file}`, import.meta.url), "utf-8")
-        .catch(() => "")
+          title,
+        }))
+      : (() => {
+          if (manifest.steps.length) {
+            return manifest.steps.map((step) => ({
+              number: step.number,
+              title: step.label,
+            }));
+          }
+          return planned.map((entry, index) => ({
+            number: index + 1,
+            title: entry.title,
+          }));
+        })();
+    const failedIndex = manifest.failedStep
+      ? executed.findIndex((entry) =>
+          sameStepTitle(
+            entry.title,
+            (() => {
+              const presentValue = manifest.failedStep;
+              if (presentValue === null || presentValue === undefined) {
+                throw new Error("Expected an existing value");
+              }
+              return presentValue;
+            })()
+          )
+        )
+      : -1;
+    const failed = ["failed", "error"].includes(item.status);
+    const steps = await Promise.all(
+      executed.map(async ({ number, title }, index) => {
+        const shot = shots.get(number);
+        const label = shot?.label.trim() || title;
+        const state: StepState = failed
+          ? (() => {
+              if (failedIndex >= 0) {
+                return index < failedIndex
+                  ? "passed"
+                  : (() => {
+                      if (index === failedIndex) {
+                        return "failed";
+                      }
+                      return "skipped";
+                    })();
+              }
+              return shot ? "passed" : "skipped";
+            })()
+          : "passed";
+        const matching =
+          executed.length === planned.length
+            ? planned[index]
+            : planned.find((entry) => sameStepTitle(entry.title, label));
+        return {
+          number,
+          ordinal: matching?.ordinal ?? (matching ? null : number),
+          kind: matching?.kind ?? "step",
+          label,
+          state,
+          image: directory && shot ? await image(directory, shot.file) : null,
+        };
+      })
     );
+    return {
+      item,
+      tone: toneOf(item),
+      feature: options.feature || "Other Specs",
+      path: options.path ?? null,
+      expectedResult: human?.expectedResult ?? "",
+      steps,
+      video:
+        directory && manifest.video
+          ? await embed(
+              directory,
+              manifest.video,
+              "video/webm",
+              MAX_VIDEO_BYTES
+            )
+          : null,
+      replay: directory && manifest.replay ? await replayData(directory) : null,
+      ...(manifest.replayUnavailable
+        ? { replayUnavailable: manifest.replayUnavailable }
+        : {}),
+    };
+  };
 
-async function favicon(): Promise<string> {
+const publicAsset = async (file: string): Promise<string> => {
+  try {
+    return await fs.readFile(
+      new URL(`assets/${file}`, import.meta.url),
+      "utf-8"
+    );
+  } catch {
+    return await fs
+      .readFile(new URL(`../dist/assets/${file}`, import.meta.url), "utf-8")
+      .catch(() => "");
+  }
+};
+
+const favicon = async function favicon(): Promise<string> {
   const svg = await publicAsset("specbook-icon.svg");
   return svg
     ? `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}">`
     : "";
-}
+};
 
-async function fonts(): Promise<string> {
-  const face = async (family: string, file: string, weight: string) => {
-    const font = await fs
-      .readFile(new URL(`./assets/${file}`, import.meta.url))
-      .catch(() => null);
-    return font
-      ? `@font-face{font-family:"${family}";font-weight:${weight};font-display:swap;src:url(data:font/woff2;base64,${font.toString("base64")}) format("woff2")}`
-      : "";
-  };
+const fonts = async function fonts(): Promise<string> {
   return (
     (await face("Recursive", "recursive-latin.woff2", "400 700")) +
     (await face("Geist", "geist-bold-latin.woff2", "700"))
   );
-}
+};
 
-async function logo(): Promise<string> {
+const logo = async function logo(): Promise<string> {
   const svg = await publicAsset("specbook-logo.svg");
   return svg
     ? `<img class="logo" alt="" src="data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}">`
     : "";
-}
+};
 
 const CHECK =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
@@ -313,7 +354,7 @@ const RANK: Record<Tone, number> = {
   passed: 5,
 };
 
-function filter(
+const filter = function filter(
   tone: Tone | "all",
   label: string,
   value: number,
@@ -321,9 +362,9 @@ function filter(
 ): string {
   const id = `filter-${tone}`;
   return `<input type="radio" name="filter" id="${id}" class="filter-input"${checked ? " checked" : ""}${value === 0 ? " disabled" : ""}><label for="${id}" class="count is-${tone}${value === 0 ? " zero" : ""}"><span class="icon">${tone === "all" ? ALL : ICONS[tone]}</span><span><b>${value}</b><small>${label}</small></span></label>`;
-}
+};
 
-function stateLabel(item: Item, tone: Tone): string {
+const stateLabel = function stateLabel(item: Item, tone: Tone): string {
   if (tone === "failed") {
     return item.status === "error" ? "Error" : "Failed";
   }
@@ -336,13 +377,31 @@ function stateLabel(item: Item, tone: Tone): string {
       passed: "Passed",
     }[tone] ?? ""
   );
-}
+};
 
-function renderSteps(steps: ReportSection["steps"], replay: boolean): string {
-  return `<ol class="steps">${steps.map((step) => `<li class="${step.state}">${step.ordinal === null ? '<span class="dot"></span>' : `<span class="num">${step.ordinal}</span>`}${replay && step.state !== "skipped" ? `<button type="button" class="label step-seek" data-replay-step="${step.number}" aria-label="Replay: ${escape(step.label)}">${escape(step.label)}</button>` : `<span class="label">${escape(step.label)}</span>`}<span class="mark">${step.state === "passed" ? CHECK : step.state === "failed" ? CROSS : ""}</span></li>`).join("")}</ol>`;
-}
+const renderSteps = function renderSteps(
+  steps: ReportSection["steps"],
+  replay: boolean
+): string {
+  return `<ol class="steps">${steps
+    .map(
+      (step) =>
+        `<li class="${step.state}">${step.ordinal === null ? '<span class="dot"></span>' : `<span class="num">${step.ordinal}</span>`}${replay && step.state !== "skipped" ? `<button type="button" class="label step-seek" data-replay-step="${step.number}" aria-label="Replay: ${escape(step.label)}">${escape(step.label)}</button>` : `<span class="label">${escape(step.label)}</span>`}<span class="mark">${
+          step.state === "passed"
+            ? CHECK
+            : (() => {
+                if (step.state === "failed") {
+                  return CROSS;
+                }
+                return "";
+              })()
+        }</span></li>`
+    )
+    .join("")}</ol>`;
+};
 
-function renderSection(
+// oxlint-disable-next-line complexity -- Assemble the correlated report states and their optional evidence together.
+const renderSection = function renderSection(
   {
     item,
     tone,
@@ -375,7 +434,24 @@ function renderSection(
 <div class="body">
   ${preconditions.length ? `<h3>Preconditions</h3>${renderSteps(preconditions, Boolean(replay))}` : ""}
   ${actions.length ? `<h3>Steps</h3>${renderSteps(actions, Boolean(replay))}` : ""}
-  ${expectedResult ? `<div class="expected ${proof?.state ?? ""}"><h3>Expected result</h3><p>${proof ? `<span class="mark">${proof.state === "passed" ? CHECK : proof.state === "failed" ? CROSS : ""}</span>` : ""}${replay && proof && proof.state !== "skipped" ? `<button type="button" class="step-seek" data-replay-step="${proof.number}" aria-label="Replay expected result">${escape(expectedResult)}</button>` : escape(expectedResult)}</p>${proof?.image && !replay ? `<a class="proof" href="#${escape(shotId(proof))}"><img src="${proof.image}" alt="Expected result: ${escape(expectedResult)}"></a>` : ""}</div>` : ""}
+  ${
+    expectedResult
+      ? `<div class="expected ${proof?.state ?? ""}"><h3>Expected result</h3><p>${
+          proof
+            ? `<span class="mark">${
+                proof.state === "passed"
+                  ? CHECK
+                  : (() => {
+                      if (proof.state === "failed") {
+                        return CROSS;
+                      }
+                      return "";
+                    })()
+              }</span>`
+            : ""
+        }${replay && proof && proof.state !== "skipped" ? `<button type="button" class="step-seek" data-replay-step="${proof.number}" aria-label="Replay expected result">${escape(expectedResult)}</button>` : escape(expectedResult)}</p>${proof?.image && !replay ? `<a class="proof" href="#${escape(shotId(proof))}"><img src="${proof.image}" alt="Expected result: ${escape(expectedResult)}"></a>` : ""}</div>`
+      : ""
+  }
   ${postconditions.length ? `<h3>Postconditions</h3>${renderSteps(postconditions, Boolean(replay))}` : ""}
   ${item.failReason && failing ? `<div class="failure"><h3>What failed</h3>${wait ? `<p class="failure-wait">${escape(wait.summary)}</p>` : ""}<pre>${escape(item.failReason)}</pre></div>` : ""}
   ${replay ? `<div class="visuals"><section class="replay" aria-label="Session replay"${wait ? ` data-wait-ms="${wait.ms}"` : ""}><h3>Replay</h3><p class="replay-status">Loading replay…</p><div class="replay-player"></div><script class="replay-data" type="application/octet-stream">${replay}</script></section><section class="screenshot-section">` : ""}
@@ -390,11 +466,20 @@ function renderSection(
           .join("")}</div>`
       : ""
   }
-  ${replay ? "</section></div>" : replayUnavailable ? `<p class="replay-note">${escape(replayUnavailable)}</p>` : ""}
+  ${
+    replay
+      ? "</section></div>"
+      : (() => {
+          if (replayUnavailable) {
+            return `<p class="replay-note">${escape(replayUnavailable)}</p>`;
+          }
+          return "";
+        })()
+  }
   ${video ? `<h3>Recording</h3><video class="recording" controls preload="metadata" src="${video}"></video>` : ""}
 </div>
 </details>`;
-}
+};
 
 const STYLE = `
 :root{--ink:#2b2b2b;--muted:#6b6b6b;--subtle:#8f8f8f;--line:#ebebeb;--strong:#d6d6d6;--surface:#fff;--soft:#fafafa;--primary:#262626;--success:#1f7a4d;--success-soft:#e9f6ef;--danger:#bd5149;--danger-soft:#fff0ed;--warning:#f2b705;--dot:#c9c9c9}
@@ -504,7 +589,7 @@ figure:target .close,figure.is-zoomed .close{display:block;position:absolute;ins
 footer.wrap{color:var(--subtle);font-size:12px;padding-bottom:40px}
 `;
 
-function renderFeature(
+const renderFeature = function renderFeature(
   name: string,
   entries: ReportSection[],
   single: boolean
@@ -522,7 +607,7 @@ function renderFeature(
   <div class="feature-head"><h2>${escape(name)}</h2><span class="feature-count">${entries.length} Spec${entries.length === 1 ? "" : "s"}</span><span class="tallies">${summary}</span></div>
   <div class="feature-sheet">${entries.map((entry) => renderSection(entry, single, single)).join("\n")}</div>
 </section>`;
-}
+};
 
 export interface HtmlReportData {
   project?: string;
@@ -534,7 +619,8 @@ export interface HtmlReportData {
   sections: ReportSection[];
 }
 
-export async function renderHtmlReport(
+// oxlint-disable-next-line complexity -- Assemble the correlated report states and their optional evidence together.
+export const renderHtmlReport = async function renderHtmlReport(
   data: HtmlReportData,
   options: { single?: boolean } = {}
 ): Promise<string> {
@@ -548,8 +634,7 @@ export async function renderHtmlReport(
     : "";
   const playerStyle = hasReplay ? REPLAY_PLAYER_STYLES : "";
   const reportScript = hasReplay ? await publicAsset("report-replay.js") : "";
-  const inlineScript = (script: string) =>
-    script.replaceAll(/<\/script/gi, "<\\/script");
+
   const results = sections.map((section) => section.item);
   const byFeature = new Map<string, ReportSection[]>();
   for (const entry of sections) {
@@ -561,14 +646,14 @@ export async function renderHtmlReport(
   const groups = [...byFeature]
     .map(([name, entries]) => ({
       name,
-      entries: entries.sort(
+      entries: entries.toSorted(
         (a, b) =>
           RANK[a.tone] - RANK[b.tone] ||
           a.item.title.localeCompare(b.item.title)
       ),
       rank: Math.min(...entries.map((entry) => RANK[entry.tone])),
     }))
-    .sort(
+    .toSorted(
       (a, b) =>
         a.rank - b.rank ||
         Number(a.name === "Other Specs") - Number(b.name === "Other Specs") ||
@@ -592,7 +677,7 @@ export async function renderHtmlReport(
       ? `<span>Environment <b>${escape(batch.environment.name)}</b></span>`
       : "",
     `<span>${escape(new Date(batch.startedAt).toUTCString())}</span>`,
-    elapsed == null
+    elapsed === null || elapsed === undefined
       ? ""
       : `<span class="mono">${escape(duration(elapsed))}</span>`,
     ci?.commitSha
@@ -631,4 +716,4 @@ export async function renderHtmlReport(
 <script>${inlineScript(ZOOM_SCRIPT)}</script>
 ${hasReplay ? `<script id="specbook-replay-library" type="application/octet-stream">${playerScript}</script><script id="specbook-replay-bootstrap">${inlineScript(reportScript)}</script>` : ""}
 </body></html>`;
-}
+};

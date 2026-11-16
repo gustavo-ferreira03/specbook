@@ -40,7 +40,7 @@ export interface ProviderProfile {
   sensitive?: string[];
 }
 
-export async function providerProfile(
+export const providerProfile = async function providerProfile(
   command: string,
   profile: string,
   signal?: AbortSignal
@@ -73,6 +73,7 @@ export async function providerProfile(
       try {
         process.kill(-child.pid, "SIGKILL");
       } catch {
+        /* Cleanup is best effort after the operation has completed or failed. */
         /* The command may have already exited. */
       }
     } else {
@@ -101,6 +102,7 @@ export async function providerProfile(
     }
   });
   try {
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
     const code = await new Promise<number | null>((resolve, reject) => {
       child.once("error", () =>
         reject(
@@ -116,7 +118,15 @@ export async function providerProfile(
     if (timedOut || tooLarge || code !== 0) {
       throw new CodedError(
         "credentials",
-        `Secret provider for profile "${profile}" ${timedOut ? "timed out" : tooLarge ? "returned too much data" : "failed"}; check the provider configuration`
+        `Secret provider for profile "${profile}" ${(() => {
+          if (timedOut) {
+            return "timed out";
+          }
+          if (tooLarge) {
+            return "returned too much data";
+          }
+          return "failed";
+        })()}; check the provider configuration`
       );
     }
     let parsed: unknown;
@@ -144,4 +154,4 @@ export async function providerProfile(
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
-}
+};

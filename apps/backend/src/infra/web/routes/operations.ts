@@ -6,7 +6,7 @@ import { retentionSettingsSchema } from "../../../core/operations/schemas";
 import { settingsRepository } from "../../repositories/settings";
 import { access } from "../access";
 
-export function createOperationsRouter(): Hono {
+export const createOperationsRouter = function createOperationsRouter(): Hono {
   const router = new Hono();
   router.get("/settings/retention", access("admin"), async (c) =>
     c.json(await settingsRepository.getRetention())
@@ -25,4 +25,4 @@ export function createOperationsRouter(): Hono {
     return c.json(await settingsRepository.getRetention());
   });
   return router;
-}
+};

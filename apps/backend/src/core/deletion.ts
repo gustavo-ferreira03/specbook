@@ -45,18 +45,19 @@ import {
   withSpecLocks,
 } from "./specs/lifecycle";
 
-export { ResourceBusyError };
-
-function entityDirectory(root: string, id: string): string {
+const entityDirectory = function entityDirectory(
+  root: string,
+  id: string
+): string {
   const absoluteRoot = path.resolve(root);
   const directory = path.resolve(absoluteRoot, id);
   if (path.dirname(directory) !== absoluteRoot) {
     throw new Error("Invalid storage directory");
   }
   return directory;
-}
+};
 
-async function removeEntityDirectories(
+const removeEntityDirectories = async function removeEntityDirectories(
   root: string,
   ids: string[]
 ): Promise<void> {
@@ -70,9 +71,9 @@ async function removeEntityDirectories(
       console.error(result.reason);
     }
   }
-}
+};
 
-async function removeRunResources(
+const removeRunResources = async function removeRunResources(
   projectId: string,
   runIds: string[]
 ): Promise<void> {
@@ -80,13 +81,16 @@ async function removeRunResources(
     repoGit.deleteRunCommitRefsUnlocked(projectId, runIds)
   );
   await removeRunDirectories(runIds);
-}
+};
 
-async function removeRunDirectories(runIds: string[]): Promise<void> {
+const removeRunDirectories = async function removeRunDirectories(
+  runIds: string[]
+): Promise<void> {
   const batchIds = new Set<string>();
   for (const runId of runIds) {
     try {
       const link = JSON.parse(
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs.readFile(
           path.join(entityDirectory(runsDir, runId), "batch.json"),
           "utf-8"
@@ -95,21 +99,27 @@ async function removeRunDirectories(runIds: string[]): Promise<void> {
       if (typeof link.batchId === "string") {
         batchIds.add(link.batchId);
       }
-    } catch {}
+    } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
+    }
   }
   await removeEntityDirectories(runsDir, runIds);
   for (const batchId of batchIds) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const batch = await getRunBatch(batchId);
     if (batch?.specs.every((item) => runIds.includes(item.runId))) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await fs.rm(getRunBatchDirectory(batchId), {
         recursive: true,
         force: true,
       });
     }
   }
-}
+};
 
-export async function deleteChatData(id: string): Promise<boolean> {
+export const deleteChatData = async function deleteChatData(
+  id: string
+): Promise<boolean> {
   if (!(await chatsRepository.getChatRow(id))) {
     return false;
   }
@@ -139,9 +149,11 @@ export async function deleteChatData(id: string): Promise<boolean> {
   cancelChatBrowserDeletion(id);
   cancelChatDeletion(id);
   return true;
-}
+};
 
-export async function deleteSpecData(id: string): Promise<boolean> {
+export const deleteSpecData = async function deleteSpecData(
+  id: string
+): Promise<boolean> {
   if (
     areSpecsLocked([id]) &&
     ((await runsRepository.hasRunningRuns([id])) ||
@@ -174,9 +186,11 @@ export async function deleteSpecData(id: string): Promise<boolean> {
     await removeRunResources(spec.projectId, result.runIds);
     return true;
   });
-}
+};
 
-export async function deleteFeatureData(id: string): Promise<boolean> {
+export const deleteFeatureData = async function deleteFeatureData(
+  id: string
+): Promise<boolean> {
   const specIds = await featuresRepository.getFeatureDeletionSpecIds(id);
   if (!specIds) {
     return false;
@@ -217,15 +231,22 @@ export async function deleteFeatureData(id: string): Promise<boolean> {
     await removeRunResources(feature.projectId, result.runIds);
     return true;
   });
-}
+};
 
-export async function deleteProjectData(id: string): Promise<boolean> {
+export const deleteProjectData = async function deleteProjectData(
+  id: string
+): Promise<boolean> {
   const project = await projectsRepository.getProject(id);
   if (!project) {
     return false;
   }
 
-  if ((await jobsRepository.list(id)).some((job) => job.status === "running")) {
+  if (
+    await (async () => {
+      const awaitedValue6647 = await jobsRepository.list(id);
+      return awaitedValue6647.some((job) => job.status === "running");
+    })()
+  ) {
     throw new ResourceBusyError(
       "Cancel the active jobs before deleting this project"
     );
@@ -236,7 +257,10 @@ export async function deleteProjectData(id: string): Promise<boolean> {
       "Wait for the active chat to finish before deleting this project"
     );
   }
-  const specIds = (await specsRepository.listSpecs(id)).map((spec) => spec.id);
+  const specIds = await (async () => {
+    const awaitedValue7100 = await specsRepository.listSpecs(id);
+    return awaitedValue7100.map((spec) => spec.id);
+  })();
   if (areSpecsLocked(specIds)) {
     throw new ResourceBusyError(
       "Wait for active Spec operations to finish before deleting this project"
@@ -250,13 +274,15 @@ export async function deleteProjectData(id: string): Promise<boolean> {
   await jobsRepository.cancelProject(id);
 
   for (const chat of chatRows) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await deleteChatData(chat.id);
   }
 
   const runIds = await repoGit.withRepoLock(id, async () => {
-    const projectSpecIds = (await specsRepository.listSpecs(id)).map(
-      (spec) => spec.id
-    );
+    const projectSpecIds = await (async () => {
+      const awaitedValue7705 = await specsRepository.listSpecs(id);
+      return awaitedValue7705.map((spec) => spec.id);
+    })();
     if (await runsRepository.hasRunningRuns(projectSpecIds)) {
       throw new ResourceBusyError(
         "Wait for a running Spec verification to finish before deleting this project"
@@ -312,4 +338,6 @@ export async function deleteProjectData(id: string): Promise<boolean> {
     );
   });
   return true;
-}
+};
+
+export { ResourceBusyError };

@@ -7,6 +7,16 @@ import {
   RUNTIME_LOCATOR_ACTIONS as LOCATOR_ACTIONS,
 } from "./allowlist.ts";
 
+const coordinates = (method: string, ...values: unknown[]) => {
+  if (
+    !values.every(
+      (value) => typeof value === "number" && Number.isFinite(value)
+    )
+  ) {
+    throw new Error(`mouse.${method}() takes literal numbers`);
+  }
+};
+
 export type { ApiRequestEvidence } from "../evidence.ts";
 
 export interface SecretOriginPolicy {
@@ -27,7 +37,7 @@ export const RUNTIME_ENV = "SPECBOOK_RUNTIME";
 export const STEP_ATTACHMENT_PREFIX = "specbook-step-";
 export const API_STEP_ATTACHMENT_PREFIX = "specbook-api-step-";
 export const FAILED_STEP_ANNOTATION = "specbook-failed-step";
-export const SECRET_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
+export const SECRET_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/u;
 export const API_ROUTING_HEADERS: ReadonlySet<string> = new Set([
   "host",
   ":authority",
@@ -39,40 +49,49 @@ const STRICT_SETTLE_MS = 5000;
 
 // Playwright fails at once when a locator matches several elements, even while a page is mid-transition
 // (a single-page app changes the URL before it re-renders). Retry until the match settles or time runs out.
-export async function settleStrict<T>(
+export const settleStrict = async function settleStrict<T>(
   run: () => Promise<T>,
   timeoutMs = STRICT_SETTLE_MS
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       return await run();
     } catch (error) {
       if (
-        !/strict mode violation/.test(
+        !/strict mode violation/u.test(
           error instanceof Error ? error.message : String(error)
         ) ||
         Date.now() >= deadline
       ) {
         throw error;
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // oxlint-disable-next-line no-await-in-loop, promise/avoid-new -- Each operation depends on the preceding attempt or updates ordered browser/evidence state. Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
     }
   }
-}
+};
 
 const SECRET_ORIGIN_ERROR =
   "Refusing to type a secret: the current page origin is not allowed for this credential.";
 
-function envSegment(name: string): string {
+const envSegment = function envSegment(name: string): string {
   return name.toUpperCase().replaceAll("-", "_");
-}
+};
 
-export function secretEnvName(profileName: string, fieldKey: string): string {
+export const secretEnvName = function secretEnvName(
+  profileName: string,
+  fieldKey: string
+): string {
   return `SPECBOOK_SECRET_${envSegment(profileName)}_${envSegment(fieldKey)}`;
-}
+};
 
-export function parseRuntime(raw: string | undefined): SpecbookRuntime {
+export const parseRuntime = function parseRuntime(
+  raw: string | undefined
+): SpecbookRuntime {
   if (!raw) {
     throw new Error(
       `${RUNTIME_ENV} is not set; Specs only run through Specbook`
@@ -80,8 +99,9 @@ export function parseRuntime(raw: string | undefined): SpecbookRuntime {
   }
   const value = JSON.parse(raw) as Partial<SpecbookRuntime>;
   if (typeof value.baseURL !== "string") {
-    throw new Error(`${RUNTIME_ENV} has no baseURL`);
+    throw new TypeError(`${RUNTIME_ENV} has no baseURL`);
   }
+  // oxlint-disable-next-line no-new -- Validate without normalizing the configured base URL or changing the constructor's error.
   new URL(value.baseURL);
   const policy = value.secretOrigins;
   return {
@@ -99,31 +119,42 @@ export function parseRuntime(raw: string | undefined): SpecbookRuntime {
         : [],
     },
   };
-}
+};
 
-export function hardenFunctionConstructors(): void {
-  const blocked = () => {
-    throw new Error("Code generation is not available to Specs");
+export const hardenFunctionConstructors =
+  function hardenFunctionConstructors(): void {
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this helper in the function body that is serialized or hardened as a unit.
+    const blocked = () => {
+      throw new Error("Code generation is not available to Specs");
+    };
+    const prototypes = [
+      Function.prototype,
+      Object.getPrototypeOf(async () => {
+        /* Only inspect this function prototype. */
+      }),
+      Object.getPrototypeOf(function* prototypes() {
+        /* Only inspect this generator prototype. */
+      }),
+      Object.getPrototypeOf(async function* prototypes() {
+        /* Only inspect this generator prototype. */
+      }),
+    ];
+    for (const prototype of prototypes) {
+      Object.defineProperty(prototype, "constructor", {
+        value: blocked,
+        writable: false,
+        configurable: false,
+        enumerable: false,
+      });
+    }
   };
-  const prototypes = [
-    Function.prototype,
-    Object.getPrototypeOf(async () => {}),
-    Object.getPrototypeOf(function* prototypes() {}),
-    Object.getPrototypeOf(async function* prototypes() {}),
-  ];
-  for (const prototype of prototypes) {
-    Object.defineProperty(prototype, "constructor", {
-      value: blocked,
-      writable: false,
-      configurable: false,
-      enumerable: false,
-    });
-  }
-}
 
 const secretRefs = new WeakMap<object, { envName: string; label: string }>();
 
-export function createSecret(profile: unknown, field: unknown): object {
+export const createSecret = function createSecret(
+  profile: unknown,
+  field: unknown
+): object {
   if (
     typeof profile !== "string" ||
     typeof field !== "string" ||
@@ -143,18 +174,18 @@ export function createSecret(profile: unknown, field: unknown): object {
   );
   secretRefs.set(token, { envName: secretEnvName(profile, field), label });
   return token;
-}
+};
 
-export function isSecret(value: unknown): boolean {
+export const isSecret = function isSecret(value: unknown): boolean {
   return typeof value === "object" && value !== null && secretRefs.has(value);
-}
+};
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type AnyFn = (...args: any[]) => any;
 export type RawLocator = Record<string, any>;
 export interface RawPage {
-  url(): string;
-  mainFrame(): unknown;
+  url: () => string;
+  mainFrame: () => unknown;
   keyboard: { press: AnyFn; type: AnyFn };
   mouse: {
     move: AnyFn;
@@ -168,14 +199,17 @@ export interface RawPage {
   [method: string]: any;
 }
 export interface RawApiResponse {
-  status(): number;
-  headers(): Record<string, string>;
-  body(): Promise<Uint8Array>;
-  json(): Promise<unknown>;
-  dispose(): Promise<void>;
+  status: () => number;
+  headers: () => Record<string, string>;
+  body: () => Promise<Uint8Array>;
+  json: () => Promise<unknown>;
+  dispose: () => Promise<void>;
 }
 export interface RawRequest {
-  fetch(url: string, options: Record<string, unknown>): Promise<RawApiResponse>;
+  fetch: (
+    url: string,
+    options: Record<string, unknown>
+  ) => Promise<RawApiResponse>;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -191,20 +225,20 @@ const originals = new WeakMap<
   { kind: WrapperKind; original: object }
 >();
 
-export function unwrap<T = unknown>(
+export const unwrap = function unwrap<T = unknown>(
   value: unknown,
   kinds: WrapperKind[] = ["page", "locator", "keyboard"]
 ): T | undefined {
   if (typeof value !== "object" || value === null) {
-    return undefined;
+    return;
   }
   const entry = originals.get(value);
   return entry && kinds.includes(entry.kind)
     ? (entry.original as T)
     : undefined;
-}
+};
 
-function frozen(
+const frozen = function frozen(
   kind: WrapperKind,
   methods: Record<string, unknown>,
   original: object
@@ -212,22 +246,22 @@ function frozen(
   const wrapper = Object.freeze(Object.assign(Object.create(null), methods));
   originals.set(wrapper, { kind, original });
   return wrapper;
-}
+};
 
 export interface GuardOptions {
   runtime: SpecbookRuntime;
   readSecret: (envName: string) => string | undefined;
 }
 
-function isPlainValue(value: unknown): boolean {
+const isPlainValue = function isPlainValue(value: unknown): boolean {
   return (
     value === null ||
     ["string", "number", "boolean", "undefined"].includes(typeof value) ||
     value instanceof RegExp
   );
-}
+};
 
-function sanitize(value: unknown, depth = 0): unknown {
+const sanitize = function sanitize(value: unknown, depth = 0): unknown {
   if (isPlainValue(value)) {
     return value;
   }
@@ -258,27 +292,27 @@ function sanitize(value: unknown, depth = 0): unknown {
   throw new Error(
     "Only literal values, locators and secret() can be passed to Specbook page methods"
   );
-}
+};
 
-function sanitizeAll(args: unknown[]): unknown[] {
+const sanitizeAll = function sanitizeAll(args: unknown[]): unknown[] {
   return args.map((arg) => sanitize(arg));
-}
+};
 
-function assertSelector(selector: unknown): void {
+const assertSelector = function assertSelector(selector: unknown): void {
   if (typeof selector !== "string") {
-    throw new Error("locator() takes a selector string");
+    throw new TypeError("locator() takes a selector string");
   }
   if (selector.includes("internal:")) {
     throw new Error('Selectors may not use Playwright "internal:" engines');
   }
-}
+};
 
 export const SLOW_PAGE_NOTE =
   "The app answered, but the page was still loading when the time ran out: it is slow, not unreachable.";
 
 // A navigation that fails is an environment problem, unless the app answered and only the wait for
 // the page to finish loading ran out. That one is a slow page, which a longer wait in the Spec fixes.
-async function navigate(
+const navigate = async function navigate(
   page: RawPage,
   run: () => Promise<unknown>
 ): Promise<void> {
@@ -289,35 +323,40 @@ async function navigate(
   page.on?.("response", onResponse);
   try {
     await run();
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause);
-    if (answered && cause instanceof Error && cause.name === "TimeoutError") {
-      cause.message = `${message}\n${SLOW_PAGE_NOTE}`;
-      throw cause;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (answered && error instanceof Error && error.name === "TimeoutError") {
+      error.message = `${message}\n${SLOW_PAGE_NOTE}`;
+      throw error;
     }
-    throw new CodedError("environment", message, { cause });
+    throw new CodedError("environment", message, { cause: error });
   } finally {
     page.off?.("response", onResponse);
   }
-}
+};
 
-export function isSafeRelativePath(value: unknown): value is string {
+export const isSafeRelativePath = function isSafeRelativePath(
+  value: unknown
+): value is string {
   return (
-    typeof value === "string" && /^\/(?!\/)[^\\\u0000-\u001F]*$/.test(value)
+    // oxlint-disable-next-line no-control-regex -- Control characters must be matched explicitly at this input/output boundary.
+    typeof value === "string" && /^\/(?!\/)[^\\\u0000-\u001F]*$/u.test(value)
   );
-}
+};
 
-export function createGuard(options: GuardOptions) {
+export const createGuard = function createGuard(options: GuardOptions) {
   const { runtime } = options;
   const baseOrigin = new URL(runtime.baseURL).origin;
-  const basePath = new URL(runtime.baseURL).pathname.replace(/\/+$/, "");
+  const basePath = new URL(runtime.baseURL).pathname.replace(/\/+$/u, "");
   const apiOrigins = runtime.navigationOrigins ?? [baseOrigin];
 
-  function allowedOriginsFor(envName: string): string[] {
+  const allowedOriginsFor = function allowedOriginsFor(
+    envName: string
+  ): string[] {
     return runtime.secretOrigins.byRef[envName] ?? [];
-  }
+  };
 
-  function secretValue(token: object): {
+  const secretValue = function secretValue(token: object): {
     value: string;
     envName: string;
     sensitive: boolean;
@@ -338,21 +377,24 @@ export function createGuard(options: GuardOptions) {
       envName: ref.envName,
       sensitive: !runtime.secretOrigins.publicRefs?.includes(ref.envName),
     };
-  }
+  };
 
-  function assertPageOrigin(page: RawPage, envName: string): void {
+  const assertPageOrigin = function assertPageOrigin(
+    page: RawPage,
+    envName: string
+  ): void {
     let origin: string;
     try {
-      origin = new URL(page.url()).origin;
+      ({ origin } = new URL(page.url()));
     } catch {
       throw new CodedError("credential_origin", SECRET_ORIGIN_ERROR);
     }
     if (!allowedOriginsFor(envName).includes(origin)) {
       throw new CodedError("credential_origin", SECRET_ORIGIN_ERROR);
     }
-  }
+  };
 
-  async function textArgument(
+  const textArgument = async function textArgument(
     page: RawPage,
     value: unknown,
     target: RawLocator | null
@@ -379,10 +421,13 @@ export function createGuard(options: GuardOptions) {
         }
         await target.evaluate((element: Element) => {
           element.classList.add("__specbookSecret");
+          // oxlint-disable-next-line unicorn/prefer-dom-node-dataset -- A DOM Element can be SVG and need not expose HTMLElement.dataset.
           element.setAttribute("data-specbook-secret", "");
         });
       } finally {
-        await handle?.dispose().catch(() => undefined);
+        await handle?.dispose().catch(() => {
+          /* Intentionally no work for this callback. */
+        });
       }
     } else {
       const intoFrame = await page.evaluate(() => {
@@ -397,6 +442,7 @@ export function createGuard(options: GuardOptions) {
           active.tagName !== "FRAME"
         ) {
           active.classList.add("__specbookSecret");
+          // oxlint-disable-next-line unicorn/prefer-dom-node-dataset -- A DOM Element can be SVG and need not expose HTMLElement.dataset.
           active.setAttribute("data-specbook-secret", "");
         }
         return active?.tagName === "IFRAME" || active?.tagName === "FRAME";
@@ -410,9 +456,12 @@ export function createGuard(options: GuardOptions) {
     }
     assertPageOrigin(page, envName);
     return secret;
-  }
+  };
 
-  function wrapLocator(page: RawPage, locator: RawLocator): object {
+  const wrapLocator = function wrapLocator(
+    page: RawPage,
+    locator: RawLocator
+  ): object {
     const methods: Record<string, unknown> = {};
     for (const name of LOCATOR_FACTORIES) {
       methods[name] = (...args: unknown[]) => {
@@ -463,9 +512,9 @@ export function createGuard(options: GuardOptions) {
       );
     };
     return frozen("locator", methods, locator);
-  }
+  };
 
-  function wrapPage(page: RawPage): object {
+  const wrapPage = function wrapPage(page: RawPage): object {
     const methods: Record<string, unknown> = {};
     for (const name of LOCATOR_FACTORIES) {
       methods[name] = (...args: unknown[]) => {
@@ -494,7 +543,9 @@ export function createGuard(options: GuardOptions) {
     }
     methods.waitForURL = async (url: unknown, waitOptions?: unknown) => {
       if (typeof url !== "string" && !(url instanceof RegExp)) {
-        throw new Error("waitForURL() takes a string or a regular expression");
+        throw new TypeError(
+          "waitForURL() takes a string or a regular expression"
+        );
       }
       await page.waitForURL(url, sanitize(waitOptions));
     };
@@ -512,7 +563,7 @@ export function createGuard(options: GuardOptions) {
       {
         press: async (key: unknown, pressOptions?: unknown) => {
           if (typeof key !== "string") {
-            throw new Error("keyboard.press() takes a key name");
+            throw new TypeError("keyboard.press() takes a key name");
           }
           await page.keyboard.press(key, sanitize(pressOptions));
         },
@@ -524,15 +575,7 @@ export function createGuard(options: GuardOptions) {
       page.keyboard
     );
     methods.keyboard = keyboard;
-    const coordinates = (method: string, ...values: unknown[]) => {
-      if (
-        !values.every(
-          (value) => typeof value === "number" && Number.isFinite(value)
-        )
-      ) {
-        throw new Error(`mouse.${method}() takes literal numbers`);
-      }
-    };
+
     methods.mouse = frozen(
       "mouse",
       {
@@ -562,17 +605,37 @@ export function createGuard(options: GuardOptions) {
       page.mouse
     );
     return frozen("page", methods, page);
-  }
+  };
 
-  function wrapRequest(
+  const checkOrigin = (url: URL, refs: Set<string>) => {
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      !apiOrigins.includes(url.origin)
+    ) {
+      throw new Error("API request origin is not allowed for this run.");
+    }
+    for (const ref of refs) {
+      if (!allowedOriginsFor(ref).includes(url.origin)) {
+        throw new CodedError(
+          "credential_origin",
+          "Refusing to send a secret: the API origin is not allowed for this credential."
+        );
+      }
+    }
+  };
+
+  const wrapRequest = function wrapRequest(
     request: RawRequest,
     capture: (evidence: ApiRequestEvidence) => void
   ): object {
-    const sensitive = /authorization|cookie|token|api[-_]key|password|secret/i;
+    const sensitive = /authorization|cookie|token|api[-_]key|password|secret/iu;
     const configuredSecrets = Object.keys(runtime.secretOrigins.byRef)
       .map(options.readSecret)
       .filter((value): value is string => Boolean(value));
-    const redact = (value: string) => {
+    const redact = (input: string) => {
+      let value = input;
       for (const secret of configuredSecrets) {
         for (const variant of new Set([
           secret,
@@ -601,27 +664,13 @@ export function createGuard(options: GuardOptions) {
     const safeUrl = (url: URL) => {
       const safe = new URL(url);
       for (const key of safe.searchParams.keys()) {
-        if (sensitive.test(key)) safe.searchParams.set(key, "••••");
+        if (sensitive.test(key)) {
+          safe.searchParams.set(key, "••••");
+        }
       }
       return redact(safe.href).slice(0, 2000);
     };
-    const checkOrigin = (url: URL, refs: Set<string>) => {
-      if (
-        !["http:", "https:"].includes(url.protocol) ||
-        url.username ||
-        url.password ||
-        !apiOrigins.includes(url.origin)
-      ) {
-        throw new Error("API request origin is not allowed for this run.");
-      }
-      for (const ref of refs) {
-        if (!allowedOriginsFor(ref).includes(url.origin))
-          throw new CodedError(
-            "credential_origin",
-            "Refusing to send a secret: the API origin is not allowed for this credential."
-          );
-      }
-    };
+
     const resolveValue = (
       value: unknown,
       refs: Set<string>,
@@ -664,11 +713,13 @@ export function createGuard(options: GuardOptions) {
     };
     const methods: Record<string, unknown> = {};
     for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"] as const) {
+      // oxlint-disable-next-line complexity -- Validate, redact, and capture one request together before it reaches the network.
       methods[method.toLowerCase()] = async (
         target: unknown,
         input: unknown = {}
       ) => {
-        if (typeof target !== "string" || /[\\\u0000-\u001F]/.test(target)) {
+        // oxlint-disable-next-line no-control-regex -- Control characters must be matched explicitly at this input/output boundary.
+        if (typeof target !== "string" || /[\\\u0000-\u001F]/u.test(target)) {
           throw new Error("API requests need a literal path or HTTP(S) URL");
         }
         let url = isSafeRelativePath(target)
@@ -687,8 +738,9 @@ export function createGuard(options: GuardOptions) {
           throw new Error("API options must be a literal object");
         }
         for (const key of Object.keys(requestOptions)) {
-          if (!["headers", "data", "timeout"].includes(key))
+          if (!["headers", "data", "timeout"].includes(key)) {
             throw new Error(`API option "${key}" is not allowed`);
+          }
         }
         const headers = requestOptions.headers ?? {};
         if (
@@ -734,6 +786,7 @@ export function createGuard(options: GuardOptions) {
           };
           let response: RawApiResponse;
           try {
+            // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
             response = await request.fetch(url.href, {
               method: currentMethod,
               headers,
@@ -745,6 +798,7 @@ export function createGuard(options: GuardOptions) {
             });
             evidence.status = response.status();
             evidence.responseHeaders = safeHeaders(response.headers());
+            // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
             const body = await response.body();
             evidence.responseBody =
               body.byteLength > 64_000
@@ -763,6 +817,7 @@ export function createGuard(options: GuardOptions) {
             [301, 302, 303, 307, 308].includes(response.status()) &&
             location
           ) {
+            // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
             await response.dispose();
             if (redirects === 5) {
               throw new Error("API request exceeded five redirects");
@@ -770,7 +825,15 @@ export function createGuard(options: GuardOptions) {
             url = new URL(location, url);
             if (
               evidence.status === 303 ||
-              ([301, 302].includes(evidence.status!) &&
+              ([301, 302].includes(
+                (() => {
+                  const presentValue = evidence.status;
+                  if (presentValue === null || presentValue === undefined) {
+                    throw new Error("Expected an existing value");
+                  }
+                  return presentValue;
+                })()
+              ) &&
                 currentMethod === "POST")
             ) {
               currentMethod = "GET";
@@ -792,7 +855,7 @@ export function createGuard(options: GuardOptions) {
       };
     }
     return frozen("request", methods, request);
-  }
+  };
 
   return { wrapPage, wrapLocator, wrapRequest };
-}
+};

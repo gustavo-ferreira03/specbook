@@ -4,6 +4,18 @@ import { restoreReplayEvents } from "./replay-assets.ts";
 import type { ReplayEvent } from "./replay-assets.ts";
 import { REPLAY_MASK_ATTRIBUTE } from "./replay-constants.ts";
 
+const drawsContent = (node: RecordedNode) =>
+  (node.type === 3 && node.textContent?.trim()) ||
+  (node.type === 2 &&
+    /^(?<capture1>img|svg|input|button|canvas|video)$/u.test(
+      node.tagName || ""
+    ));
+
+const clock = (ms: number) => {
+  const seconds = Math.floor(Math.max(0, ms) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
 export interface ReplayStepMarker {
   number: number;
   offset: number;
@@ -20,10 +32,10 @@ export interface ReplayPlayerOptions {
 }
 
 export interface ReplayController {
-  seekToStep(number: number): boolean;
-  pause(): void;
-  resize(): void;
-  destroy(): void;
+  seekToStep: (number: number) => boolean;
+  pause: () => void;
+  resize: () => void;
+  destroy: () => void;
 }
 
 interface RecordedNode {
@@ -58,21 +70,24 @@ const KIND_LABELS: Record<string, string> = {
   postcondition: "Postcondition",
 };
 
-export function stepName(step: { kind: string }, ordinal: number): string {
+export const stepName = function stepName(
+  step: { kind: string },
+  ordinal: number
+): string {
   return step.kind === "step"
     ? `Step ${ordinal}`
     : KIND_LABELS[step.kind] || "Step";
-}
+};
 
-export function assertionWait(
+export const assertionWait = function assertionWait(
   reason: string | null
 ): { ms: number; summary: string } | null {
   if (!reason?.includes("expect(locator).toHaveCount(expected) failed")) {
     return null;
   }
-  const expected = reason.match(/^Expected:\s*(\d+)\s*$/m)?.[1];
-  const received = reason.match(/^Received:\s*(\d+)\s*$/m)?.[1];
-  const timeout = reason.match(/^Timeout:\s*(\d+)ms\s*$/m)?.[1];
+  const expected = reason.match(/^Expected:\s*(?<capture1>\d+)\s*$/mu)?.[1];
+  const received = reason.match(/^Received:\s*(?<capture1>\d+)\s*$/mu)?.[1];
+  const timeout = reason.match(/^Timeout:\s*(?<capture1>\d+)ms\s*$/mu)?.[1];
   if (
     expected === undefined ||
     received === undefined ||
@@ -90,9 +105,10 @@ export function assertionWait(
     ms,
     summary: `Waited ${elapsed} for ${expected} element${expected === "1" ? "" : "s"}; saw ${received}`,
   };
-}
+};
 
-function prepareRecording(recording: unknown): {
+// oxlint-disable-next-line complexity -- Prepare the correlated replay events and marker timeline in one pass.
+const prepareRecording = function prepareRecording(recording: unknown): {
   events: RecordedEvent[];
   markers: Map<number, ReplayStepMarker>;
   opening: number;
@@ -104,7 +120,7 @@ function prepareRecording(recording: unknown): {
   const recorded = restored as RecordedEvent[];
   // Preserve step markers from the blank tab, but open on the first real page.
   const page = recorded.findIndex(
-    (event) => event.type === 4 && /^https?:/.test(event.data?.href || "")
+    (event) => event.type === 4 && /^https?:/u.test(event.data?.href || "")
   );
   const snapshot =
     page === -1
@@ -125,10 +141,7 @@ function prepareRecording(recording: unknown): {
           ...recorded.slice(snapshot + 1),
         ];
   const fullSnapshot = trimmed.findIndex((event) => event.type === 2);
-  const drawsContent = (node: RecordedNode) =>
-    (node.type === 3 && node.textContent?.trim()) ||
-    (node.type === 2 &&
-      /^(img|svg|input|button|canvas|video)$/.test(node.tagName || ""));
+
   const mutations = trimmed.filter(
     (event, index) =>
       index > fullSnapshot &&
@@ -139,13 +152,20 @@ function prepareRecording(recording: unknown): {
   // Frameworks can add invisible nodes before the first drawn frame.
   const drawn =
     mutations.find((event) =>
-      event.data.adds!.some((add) => drawsContent(add.node))
+      (() => {
+        const presentValue = event.data.adds;
+        if (presentValue === null || presentValue === undefined) {
+          throw new Error("Expected an existing value");
+        }
+        return presentValue;
+      })().some((add) => drawsContent(add.node))
     ) || mutations[0];
   let firstFrame = drawn;
   for (
     let index = trimmed.indexOf(drawn) + 1;
+    // oxlint-disable-next-line no-unmodified-loop-condition -- The index advances while the optional initial frame remains fixed.
     drawn && index < trimmed.length;
-    index++
+    index += 1
   ) {
     const event = trimmed[index];
     if (
@@ -172,7 +192,22 @@ function prepareRecording(recording: unknown): {
           event.data?.tag === "specbook-step" &&
           event.data.payload?.phase === "end"
       )
-      .map((event) => [event.data.payload!.number, event.data.payload!.outcome])
+      .map((event) => [
+        (() => {
+          const presentValue = event.data.payload;
+          if (presentValue === null || presentValue === undefined) {
+            throw new Error("Expected an existing value");
+          }
+          return presentValue;
+        })().number,
+        (() => {
+          const presentValue = event.data.payload;
+          if (presentValue === null || presentValue === undefined) {
+            throw new Error("Expected an existing value");
+          }
+          return presentValue;
+        })().outcome,
+      ])
   );
   let ordinal = 0;
   for (const event of events) {
@@ -196,7 +231,7 @@ function prepareRecording(recording: unknown): {
     });
   }
   return { events, markers, opening };
-}
+};
 
 const ICONS = {
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
@@ -210,13 +245,19 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h2v5H5V8h3zm6 0h2v3h3v2h-5zM5 14h5v5H8v-3H5zm9 0h5v2h-3v3h-2z"/></svg>',
 };
 
-export function mountReplay(
+export const mountReplay = function mountReplay(
   container: HTMLElement,
   options: ReplayPlayerOptions
 ): ReplayController {
   const { events, markers, opening } = prepareRecording(options.recording);
   const document = container.ownerDocument;
-  const window = document.defaultView!;
+  const window = (() => {
+    const presentValue = document.defaultView;
+    if (presentValue === null || presentValue === undefined) {
+      throw new Error("Expected an existing value");
+    }
+    return presentValue;
+  })();
   const controller = new AbortController();
   const element = <K extends keyof HTMLElementTagNameMap>(
     tag: K,
@@ -227,6 +268,7 @@ export function mountReplay(
   const listen = <K extends keyof HTMLElementEventMap>(
     node: HTMLElement,
     type: K,
+    // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This callback is required by the Node networking or player event API.
     callback: (event: HTMLElementEventMap[K]) => void
   ) => node.addEventListener(type, callback, { signal: controller.signal });
   container.classList.add("replay");
@@ -265,15 +307,21 @@ export function mountReplay(
       UNSAFE_replayCanvas: false,
     },
   }) as RRWebPlayer & {
-    $set(props: { width: number; height: number }): void;
-    $destroy(): void;
+    $set: (props: { width: number; height: number }) => void;
+    $destroy: () => void;
   };
   const replayer = player.getReplayer();
   const total = player.getMetaData().totalTime;
   const hit = element("button", "replay-hit", { type: "button" });
   const big = element("span", "replay-big");
   hit.append(big);
-  target.querySelector(".rr-player__frame")!.append(hit);
+  (() => {
+    const presentValue = target.querySelector(".rr-player__frame");
+    if (presentValue === null || presentValue === undefined) {
+      throw new Error("Expected an existing value");
+    }
+    return presentValue;
+  })().append(hit);
   const bar = element("div", "replay-bar");
   const seek = element("div", "replay-seek", { tabIndex: 0 });
   seek.setAttribute("role", "slider");
@@ -291,17 +339,46 @@ export function mountReplay(
       event.data?.payload?.phase === "end" &&
       event.data.payload.outcome === "failed"
   );
-  const failedStart = failed && markers.get(failed.data.payload!.number);
+  const failedStart =
+    failed &&
+    markers.get(
+      (() => {
+        const presentValue = failed.data.payload;
+        if (presentValue === null || presentValue === undefined) {
+          throw new Error("Expected an existing value");
+        }
+        return presentValue;
+      })().number
+    );
   if ((options.waitMs || 0) > 0 && failedStart) {
-    const end = Math.min(total, failed!.timestamp - opening);
-    const beginning = Math.max(failedStart.offset, end - options.waitMs!);
+    const end = Math.min(
+      total,
+      (() => {
+        const presentValue = failed;
+        if (presentValue === null || presentValue === undefined) {
+          throw new Error("Expected an existing value");
+        }
+        return presentValue;
+      })().timestamp - opening
+    );
+    const beginning = Math.max(
+      failedStart.offset,
+      end -
+        (() => {
+          const presentValue = options.waitMs;
+          if (presentValue === null || presentValue === undefined) {
+            throw new Error("Expected an existing value");
+          }
+          return presentValue;
+        })()
+    );
     const span = element("span", "replay-wait");
     span.style.left = percent(beginning);
     span.style.width = percent(end - beginning);
     track.append(span);
   }
   track.append(fill);
-  const steps = [...markers.values()].sort((a, b) => a.offset - b.offset);
+  const steps = [...markers.values()].toSorted((a, b) => a.offset - b.offset);
   const markSteps = new WeakMap<Element, ReplayStepMarker>();
   for (const step of steps) {
     const mark = element("span", `replay-mark is-${step.outcome || "pending"}`);
@@ -335,10 +412,7 @@ export function mountReplay(
   );
   bar.append(seek, row);
   target.after(bar);
-  const clock = (ms: number) => {
-    const seconds = Math.floor(Math.max(0, ms) / 1000);
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  };
+
   let destroyed = false;
   let playing = false;
   let shownStep: ReplayStepMarker | null = null;
@@ -356,7 +430,14 @@ export function mountReplay(
     seek.setAttribute("aria-valuenow", String(Math.round(now / 1000)));
     seek.setAttribute("aria-valuetext", `${clock(now)} of ${clock(total)}`);
     time.textContent = `${clock(now)} / ${clock(total)}`;
-    const state = playing ? "pause" : ended ? "replay" : "play";
+    const state = playing
+      ? "pause"
+      : (() => {
+          if (ended) {
+            return "replay";
+          }
+          return "play";
+        })();
     if (toggle.dataset.state !== state) {
       toggle.dataset.state = state;
       toggle.innerHTML = ICONS[state];
@@ -364,19 +445,36 @@ export function mountReplay(
         "aria-label",
         state === "pause"
           ? "Pause replay"
-          : state === "replay"
-            ? "Replay from the start"
-            : "Play replay"
+          : (() => {
+              if (state === "replay") {
+                return "Replay from the start";
+              }
+              return "Play replay";
+            })()
       );
     }
     hit.classList.toggle("is-idle", idle);
     hit.classList.toggle("is-ended", ended);
-    big.innerHTML = ended ? ICONS.replay : idle ? ICONS.play : "";
+    big.innerHTML = ended
+      ? ICONS.replay
+      : (() => {
+          if (idle) {
+            return ICONS.play;
+          }
+          return "";
+        })();
     hit.setAttribute(
       "aria-label",
-      playing ? "Pause replay" : ended ? "Replay from the start" : "Play replay"
+      playing
+        ? "Pause replay"
+        : (() => {
+            if (ended) {
+              return "Replay from the start";
+            }
+            return "Play replay";
+          })()
     );
-    const step = steps.filter((entry) => entry.offset <= now + 1).pop() || null;
+    const step = steps.findLast((entry) => entry.offset <= now + 1) || null;
     if (step !== shownStep) {
       shownStep = step;
       label.replaceChildren();
@@ -457,13 +555,19 @@ export function mountReplay(
     const next =
       event.key === "ArrowRight"
         ? now + 1000
-        : event.key === "ArrowLeft"
-          ? now - 1000
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? total
-              : null;
+        : (() => {
+            if (event.key === "ArrowLeft") {
+              return now - 1000;
+            }
+            return event.key === "Home"
+              ? 0
+              : (() => {
+                  if (event.key === "End") {
+                    return total;
+                  }
+                  return null;
+                })();
+          })();
     if (next === null) {
       return;
     }
@@ -483,7 +587,9 @@ export function mountReplay(
     if (!scrubFrame) {
       scrubFrame = window.requestAnimationFrame(() => {
         scrubFrame = 0;
-        if (destroyed) return;
+        if (destroyed) {
+          return;
+        }
         player.goto(Math.max(1, pending), false);
         render();
       });
@@ -648,4 +754,4 @@ export function mountReplay(
       container.style.removeProperty("--replay-width");
     },
   };
-}
+};

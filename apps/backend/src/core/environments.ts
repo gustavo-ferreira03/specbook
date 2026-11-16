@@ -8,13 +8,7 @@ import { environmentsRepository } from "../infra/repositories/environments";
 import { httpUrlSchema } from "./ci/schemas";
 import { createKeyedLock } from "./operations/keyed-lock";
 
-export const withProjectEnvironmentLock = createKeyedLock().run;
-type EnvironmentDestination = Pick<
-  RunEnvironment,
-  "baseUrl" | "allowedOrigins" | "executor" | "runnerGroup"
->;
-
-export function changesPrivateDestination(
+export const changesPrivateDestination = function changesPrivateDestination(
   previous: EnvironmentDestination | undefined,
   next: EnvironmentDestination
 ): boolean {
@@ -33,10 +27,68 @@ export function changesPrivateDestination(
   }
   return (
     previous?.baseUrl !== next.baseUrl ||
-    JSON.stringify([...new Set(previous?.allowedOrigins ?? [])].sort()) !==
-      JSON.stringify([...new Set(next.allowedOrigins)].sort())
+    JSON.stringify([...new Set(previous?.allowedOrigins)].toSorted()) !==
+      JSON.stringify([...new Set(next.allowedOrigins)].toSorted())
   );
-}
+};
+
+export const validateEnvironmentCredentials =
+  async function validateEnvironmentCredentials(
+    projectId: string,
+    overrides: Record<string, string>
+  ): Promise<void> {
+    const profiles = await credentialsRepository.listProfiles(projectId);
+    for (const [source, target] of Object.entries(overrides)) {
+      if (
+        !profiles.some((profile) => profile.name === source) ||
+        !profiles.some((profile) => profile.id === target)
+      ) {
+        throw new Error("Choose credential profiles saved in this project");
+      }
+    }
+  };
+
+export const resolveRunEnvironment = async function resolveRunEnvironment(
+  projectId: string,
+  name = "Production",
+  baseUrl?: string
+): Promise<RunEnvironment> {
+  const row = await (async () => {
+    const awaitedValue1914 = await environmentsRepository.list(projectId);
+    return awaitedValue1914.find(
+      (environment) => environment.name.toLowerCase() === name.toLowerCase()
+    );
+  })();
+  if (!row) {
+    throw new NetworkTargetError(
+      `Environment "${name}" was not found in this project`
+    );
+  }
+  const origins = [new URL(row.baseUrl).origin, ...row.allowedOrigins];
+  if (baseUrl && !origins.includes(new URL(baseUrl).origin)) {
+    throw new NetworkTargetError(
+      `Add this origin to ${row.name} in Settings → Environments before using it for a preview run`
+    );
+  }
+  return {
+    configuredBaseUrl: row.baseUrl,
+    id: row.id,
+    name: row.name,
+    baseUrl: baseUrl ?? row.baseUrl,
+    allowedOrigins: [...new Set(origins)],
+    credentialOverrides:
+      row.executor === "runner" ? {} : row.credentialOverrides,
+    executor: row.executor,
+    runnerGroup: row.runnerGroup,
+    timeoutScale: row.timeoutScale,
+  };
+};
+
+export const withProjectEnvironmentLock = createKeyedLock().run;
+type EnvironmentDestination = Pick<
+  RunEnvironment,
+  "baseUrl" | "allowedOrigins" | "executor" | "runnerGroup"
+>;
 
 export const environmentSchema = z
   .object({
@@ -96,51 +148,3 @@ export const environmentSchema = z
       });
     }
   });
-
-export async function validateEnvironmentCredentials(
-  projectId: string,
-  overrides: Record<string, string>
-): Promise<void> {
-  const profiles = await credentialsRepository.listProfiles(projectId);
-  for (const [source, target] of Object.entries(overrides)) {
-    if (
-      !profiles.some((profile) => profile.name === source) ||
-      !profiles.some((profile) => profile.id === target)
-    ) {
-      throw new Error("Choose credential profiles saved in this project");
-    }
-  }
-}
-
-export async function resolveRunEnvironment(
-  projectId: string,
-  name = "Production",
-  baseUrl?: string
-): Promise<RunEnvironment> {
-  const row = (await environmentsRepository.list(projectId)).find(
-    (environment) => environment.name.toLowerCase() === name.toLowerCase()
-  );
-  if (!row) {
-    throw new NetworkTargetError(
-      `Environment "${name}" was not found in this project`
-    );
-  }
-  const origins = [new URL(row.baseUrl).origin, ...row.allowedOrigins];
-  if (baseUrl && !origins.includes(new URL(baseUrl).origin)) {
-    throw new NetworkTargetError(
-      `Add this origin to ${row.name} in Settings → Environments before using it for a preview run`
-    );
-  }
-  return {
-    configuredBaseUrl: row.baseUrl,
-    id: row.id,
-    name: row.name,
-    baseUrl: baseUrl ?? row.baseUrl,
-    allowedOrigins: [...new Set(origins)],
-    credentialOverrides:
-      row.executor === "runner" ? {} : row.credentialOverrides,
-    executor: row.executor,
-    runnerGroup: row.runnerGroup,
-    timeoutScale: row.timeoutScale,
-  };
-}

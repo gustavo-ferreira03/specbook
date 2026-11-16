@@ -4,7 +4,7 @@ import type { ProjectAutomation } from "../../infra/repositories/schedules";
 import { projectSecretScrubber } from "../credentials/scrub";
 import type { RunBatch } from "../runner/batch";
 
-export async function recordBatch(
+export const recordBatch = async function recordBatch(
   automation: ProjectAutomation,
   batch: RunBatch
 ): Promise<void> {
@@ -44,11 +44,13 @@ export async function recordBatch(
     batch.status,
     notification
   );
-}
+};
 
-export async function recordScheduledBatch(batch: RunBatch): Promise<void> {
+export const recordScheduledBatch = async function recordScheduledBatch(
+  batch: RunBatch
+): Promise<void> {
   const automation = await schedulesRepository.get(batch.projectId);
   if (automation) {
     await recordBatch(automation, batch);
   }
-}
+};

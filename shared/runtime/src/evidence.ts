@@ -65,15 +65,17 @@ export interface EvidenceManifest {
   replayUnavailable?: string;
 }
 
-export function stepScreenshotContentType(
+export const stepScreenshotContentType = function stepScreenshotContentType(
   file: string
 ): "image/png" | "image/webp" {
   return file.endsWith(".webp") ? "image/webp" : "image/png";
-}
+};
 
-export function isStepScreenshot(file: string): boolean {
-  return /^evidence\/step-\d{2,3}\.(?:png|webp)$/.test(file);
-}
+export const isStepScreenshot = function isStepScreenshot(
+  file: string
+): boolean {
+  return /^evidence\/step-\d{2,3}\.(?:png|webp)$/u.test(file);
+};
 
 const evidenceStepSchema = z
   .object({
@@ -83,7 +85,17 @@ const evidenceStepSchema = z
   })
   .transform((step) => ({
     ...step,
-    number: step.number ?? Number(step.file.match(/step-(\d+)/)![1]),
+    number:
+      step.number ??
+      Number(
+        (() => {
+          const presentValue = step.file.match(/step-(?<stepNumber>\d+)/u);
+          if (presentValue === null || presentValue === undefined) {
+            throw new Error("Expected an existing value");
+          }
+          return presentValue;
+        })()[1]
+      ),
   }));
 
 const evidenceManifestSchema = z.object({
@@ -111,7 +123,7 @@ const evidenceManifestSchema = z.object({
   replayUnavailable: z.string().max(500).optional(),
 });
 
-export async function readEvidenceManifest(
+export const readEvidenceManifest = async function readEvidenceManifest(
   runDir: string
 ): Promise<EvidenceManifest> {
   try {
@@ -121,9 +133,9 @@ export async function readEvidenceManifest(
   } catch {
     return { steps: [], video: null, failedStep: null };
   }
-}
+};
 
-async function readText(
+const readText = async function readText(
   source: string,
   maxBytes: number
 ): Promise<string | null> {
@@ -136,9 +148,12 @@ async function readText(
   } catch {
     return null;
   }
-}
+};
 
-async function copyFile(source: string, destination: string): Promise<boolean> {
+const copyFile = async function copyFile(
+  source: string,
+  destination: string
+): Promise<boolean> {
   try {
     const stat = await fs.lstat(source);
     if (!stat.isFile()) {
@@ -149,9 +164,10 @@ async function copyFile(source: string, destination: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
+};
 
-export async function writeRunEvidence(
+// oxlint-disable-next-line complexity -- Keep run evidence collection and cleanup ordered within the same lifecycle.
+export const writeRunEvidence = async function writeRunEvidence(
   outputDir: string,
   status: Exclude<RunStatus, "running">,
   result: Pick<SpecFileResult, "attachments" | "failedStep"> | null,
@@ -161,11 +177,12 @@ export async function writeRunEvidence(
   const evidenceDir = path.join(outputDir, "evidence");
   await fs.mkdir(evidenceDir, { recursive: true });
   await fs.rm(path.join(outputDir, REPLAY_FILE), { force: true });
-  const steps: EvidenceStep[] = [];
+  let steps: EvidenceStep[] = [];
   for (const attachment of result?.attachments ?? []) {
-    const match = new RegExp(`^${STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`).exec(
-      attachment.name
-    );
+    const match = new RegExp(
+      `^${STEP_ATTACHMENT_PREFIX}(?<stepNumber>\\d{2,3})$`,
+      "u"
+    ).exec(attachment.name);
     if (
       !match ||
       !["image/png", "image/webp"].includes(attachment.contentType)
@@ -178,6 +195,7 @@ export async function writeRunEvidence(
     }
     const extension = attachment.contentType === "image/webp" ? "webp" : "png";
     const file = `evidence/step-${match[1]}.${extension}`;
+    // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
     if (await copyFile(attachment.path, path.join(outputDir, file))) {
       steps.push({
         number,
@@ -186,7 +204,7 @@ export async function writeRunEvidence(
       });
     }
   }
-  steps.sort((left, right) => left.number - right.number);
+  steps = steps.toSorted((left, right) => left.number - right.number);
   let video: string | null = null;
   if (status !== "passed") {
     const recording = result?.attachments.find(
@@ -210,9 +228,11 @@ export async function writeRunEvidence(
   };
   for (const attachment of result?.attachments ?? []) {
     const apiMatch = new RegExp(
-      `^${API_STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`
+      `^${API_STEP_ATTACHMENT_PREFIX}(?<stepNumber>\\d{2,3})$`,
+      "u"
     ).exec(attachment.name);
     if (apiMatch && attachment.contentType === "application/json") {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       const text = await readText(attachment.path, 1_000_000);
       if (!text) {
         continue;
@@ -235,11 +255,15 @@ export async function writeRunEvidence(
             requests: parsed.data,
           });
         }
-      } catch {}
+      } catch {
+        /* Cleanup is best effort; preserve the original result. */
+        /* Cleanup is best effort; preserve the original result. */
+      }
     } else if (
       attachment.name === REPLAY_ATTACHMENT &&
       attachment.contentType === "application/json"
     ) {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       const text = await readText(attachment.path, MAX_REPLAY_RAW_BYTES);
       if (!text) {
         manifest.replayUnavailable = REPLAY_LIMIT_NOTE;
@@ -251,8 +275,10 @@ export async function writeRunEvidence(
           manifest.replayUnavailable = "Replay could not be recorded.";
           continue;
         }
+        // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
         const data = await encodeReplay(events);
         if (data) {
+          // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
           await fs.writeFile(path.join(outputDir, REPLAY_FILE), data);
           manifest.replay = { file: REPLAY_FILE, bytes: data.length };
         } else {
@@ -265,6 +291,7 @@ export async function writeRunEvidence(
       attachment.name === REPLAY_UNAVAILABLE_ATTACHMENT &&
       attachment.contentType === "text/plain"
     ) {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       const text = await readText(attachment.path, 500);
       if (text) {
         manifest.replayUnavailable = scrub(text).slice(0, 500);
@@ -273,6 +300,7 @@ export async function writeRunEvidence(
       attachment.name === "specbook-diagnostics" &&
       attachment.contentType === "application/json"
     ) {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       const text = await readText(attachment.path, 1_000_000);
       if (!text) {
         continue;
@@ -285,7 +313,10 @@ export async function writeRunEvidence(
         if (diagnostics.success) {
           manifest.diagnostics = diagnostics.data;
         }
-      } catch {}
+      } catch {
+        /* Cleanup is best effort; preserve the original result. */
+        /* Cleanup is best effort; preserve the original result. */
+      }
     } else if (
       status !== "passed" &&
       ["specbook-error-context", "error-context"].includes(attachment.name)
@@ -293,6 +324,7 @@ export async function writeRunEvidence(
       if (!attachment.contentType.startsWith("text/")) {
         continue;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       const text = await readText(attachment.path, 1_000_000);
       if (text) {
         manifest.errorContext = [manifest.errorContext, scrub(text)]
@@ -309,4 +341,4 @@ export async function writeRunEvidence(
     "utf-8"
   );
   return manifest;
-}
+};

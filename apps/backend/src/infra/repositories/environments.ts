@@ -8,26 +8,21 @@ import { environments, projects } from "../db/schema";
 import { specEnvironmentsRepository } from "./spec-environments";
 import { specsRepository } from "./specs";
 
-export type Environment = typeof environments.$inferSelect;
-export type EnvironmentInput = Pick<
-  Environment,
-  "name" | "baseUrl" | "allowedOrigins" | "credentialOverrides"
-> &
-  Partial<Pick<Environment, "executor" | "runnerGroup" | "timeoutScale">>;
-
 class EnvironmentsRepository {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async list(projectId: string): Promise<Environment[]> {
     const rows = await db
       .select()
       .from(environments)
       .where(eq(environments.projectId, projectId))
       .orderBy(asc(environments.name));
-    return rows.sort(
+    return rows.toSorted(
       (a, b) =>
         Number(b.name === "Production") - Number(a.name === "Production")
     );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async create(
     projectId: string,
     input: EnvironmentInput
@@ -44,6 +39,7 @@ class EnvironmentsRepository {
     return row;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async update(
     row: Environment,
     input: EnvironmentInput
@@ -70,10 +66,15 @@ class EnvironmentsRepository {
     return { ...row, ...input };
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async delete(id: string): Promise<void> {
-    const row = (
-      await db.select().from(environments).where(eq(environments.id, id))
-    )[0];
+    const row = await (async () => {
+      const awaitedValue1953 = await db
+        .select()
+        .from(environments)
+        .where(eq(environments.id, id));
+      return awaitedValue1953[0];
+    })();
     if (!row) {
       return;
     }
@@ -81,11 +82,19 @@ class EnvironmentsRepository {
       await db.delete(environments).where(eq(environments.id, id));
       for (const spec of await specsRepository.listSpecs(row.projectId)) {
         if (spec.status === "awaiting_deploy") {
+          // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
           await specEnvironmentsRepository.refresh(spec);
         }
       }
     });
   }
 }
+
+export type Environment = typeof environments.$inferSelect;
+export type EnvironmentInput = Pick<
+  Environment,
+  "name" | "baseUrl" | "allowedOrigins" | "credentialOverrides"
+> &
+  Partial<Pick<Environment, "executor" | "runnerGroup" | "timeoutScale">>;
 
 export const environmentsRepository = new EnvironmentsRepository();

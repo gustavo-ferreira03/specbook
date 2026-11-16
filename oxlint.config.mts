@@ -5,6 +5,18 @@ import react from "ultracite/oxlint/react";
 
 export default defineConfig({
   env: core.env,
-  extends: [core, react, next],
+  extends: [core],
   ignorePatterns: core.ignorePatterns,
+  options: { reportUnusedDisableDirectives: "error" },
+  overrides: [
+    {
+      files: ["apps/frontend/**"],
+      plugins: [
+        ...(core.plugins ?? []),
+        ...(react.plugins ?? []),
+        ...(next.plugins ?? []),
+      ],
+      rules: { ...react.rules, ...next.rules },
+    },
+  ],
 });

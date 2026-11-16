@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 
 import { publishChatUpdate } from "../../core/chat/chat-registry";
+import { requireValue } from "../../core/utils/require-value";
 import { db } from "../db/client";
 import { projectSignals, projectStewards, stewardIntents } from "../db/schema";
 
@@ -14,12 +15,13 @@ const now = () => new Date().toISOString();
 export const stewardRepository = {
   async get(projectId: string): Promise<Steward> {
     const select = async () =>
-      (
-        await db
+      await (async () => {
+        const awaitedValue612 = await db
           .select()
           .from(projectStewards)
-          .where(eq(projectStewards.projectId, projectId))
-      )[0];
+          .where(eq(projectStewards.projectId, projectId));
+        return awaitedValue612[0];
+      })();
     const existing = await select();
     if (existing) {
       return existing;
@@ -28,7 +30,7 @@ export const stewardRepository = {
       .insert(projectStewards)
       .values({ projectId, updatedAt: now() })
       .onConflictDoNothing();
-    return (await select())!;
+    return requireValue(await select());
   },
   async update(
     projectId: string,
@@ -57,10 +59,10 @@ export const stewardRepository = {
       .from(projectSignals)
       .where(eq(projectSignals.projectId, projectId))
       .orderBy(desc(projectSignals.createdAt));
-    return limit === null ? query : query.limit(limit);
+    return await (limit === null ? query : query.limit(limit));
   },
   async pendingSignals(projectId: string) {
-    return db
+    return await db
       .select()
       .from(projectSignals)
       .where(
@@ -92,24 +94,27 @@ export const stewardRepository = {
         updatedAt: now(),
       })
       .onConflictDoNothing();
-    const row = (
-      await db
-        .select()
-        .from(stewardIntents)
-        .where(
-          and(
-            eq(stewardIntents.projectId, input.projectId),
-            eq(stewardIntents.key, input.key)
-          )
-        )
-    )[0]!;
+    const row = requireValue(
+      await (async () => {
+        const awaitedValue2755 = await db
+          .select()
+          .from(stewardIntents)
+          .where(
+            and(
+              eq(stewardIntents.projectId, input.projectId),
+              eq(stewardIntents.key, input.key)
+            )
+          );
+        return awaitedValue2755[0];
+      })()
+    );
     if (row.sourceChatId) {
       publishChatUpdate(row.sourceChatId);
     }
     return row;
   },
   async intents(projectId: string) {
-    return db
+    return await db
       .select()
       .from(stewardIntents)
       .where(eq(stewardIntents.projectId, projectId))

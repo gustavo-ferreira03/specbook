@@ -7,127 +7,6 @@ import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { withFileQueue } from "../operations/file-queue";
 import { storageRoot } from "../paths";
 
-export const metricsDir = path.join(storageRoot, "metrics");
-export const chatTurnMetricsPath = path.join(metricsDir, "chat-turns.jsonl");
-
-export type TurnTrigger = "message" | "edit" | "retry";
-export type TurnOutcome = "completed" | "aborted" | "error" | "rejected";
-
-export interface RunSpecOutcome {
-  specId: string;
-  runId: string | null;
-  status: string;
-  durationMs: number | null;
-  chatAttempt: number;
-  specAttempt: number;
-}
-
-export interface ValidatorRejection {
-  tool: "create_spec" | "update_spec";
-  specId: string | null;
-  rule: "named_steps" | "source_validation";
-}
-
-export interface ChatTurnMetrics {
-  schemaVersion: 1;
-  turnId: string;
-  chatId: string;
-  projectId: string | null;
-  mode: "standard" | "discovery" | null;
-  trigger: TurnTrigger;
-  provider: string | null;
-  model: string | null;
-  startedAt: string;
-  endedAt: string | null;
-  durationMs: number | null;
-  outcome: TurnOutcome;
-  errorKind: string | null;
-  browserAvailable: boolean;
-  userMessages: number;
-  autoRetries: number;
-  assistantMessages: number;
-  toolCallCount: number;
-  toolCalls: Record<string, number>;
-  toolErrorCount: number;
-  toolErrors: Record<string, number>;
-  tokens: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-    reasoning: number;
-    total: number;
-  };
-  cost: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-    total: number;
-  };
-  runSpec: RunSpecOutcome[];
-  validatorRejections: ValidatorRejection[];
-}
-
-interface UsageLike {
-  input?: number;
-  output?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-  reasoning?: number;
-  totalTokens?: number;
-  cost?: {
-    input?: number;
-    output?: number;
-    cacheRead?: number;
-    cacheWrite?: number;
-    total?: number;
-  };
-}
-
-function num(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function increment(counter: Record<string, number>, key: string): void {
-  counter[key] = (counter[key] ?? 0) + 1;
-}
-
-function previousRunSpecCalls(sessionManager: SessionManager | null): {
-  total: number;
-  bySpec: Map<string, number>;
-} {
-  const bySpec = new Map<string, number>();
-  let total = 0;
-  if (!sessionManager) {
-    return { total, bySpec };
-  }
-  for (const entry of sessionManager.getEntries()) {
-    if (entry.type !== "message" || entry.message.role !== "assistant") {
-      continue;
-    }
-    const { content } = entry.message as { content?: unknown };
-    if (!Array.isArray(content)) {
-      continue;
-    }
-    for (const part of content) {
-      const call = part as {
-        type?: string;
-        name?: string;
-        arguments?: { specId?: unknown };
-      };
-      if (call?.type !== "toolCall" || call.name !== "run_spec") {
-        continue;
-      }
-      total += 1;
-      const specId =
-        typeof call.arguments?.specId === "string" ? call.arguments.specId : "";
-      bySpec.set(specId, (bySpec.get(specId) ?? 0) + 1);
-    }
-  }
-  return { total, bySpec };
-}
-
 export class TurnMetricsRecorder {
   readonly record: ChatTurnMetrics;
   private readonly started = Date.now();
@@ -177,7 +56,9 @@ export class TurnMetricsRecorder {
       const previous = previousRunSpecCalls(sessionManager);
       this.runSpecTotal = previous.total;
       this.runSpecBySpec = previous.bySpec;
-    } catch {}
+    } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
+    }
   }
 
   fail(
@@ -284,15 +165,145 @@ export class TurnMetricsRecorder {
   }
 }
 
-let writeQueue: Promise<void> = Promise.resolve();
+const num = function num(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+};
 
-function appendMetricsLine(line: string): Promise<void> {
+const increment = function increment(
+  counter: Record<string, number>,
+  key: string
+): void {
+  counter[key] = (counter[key] ?? 0) + 1;
+};
+
+const previousRunSpecCalls = function previousRunSpecCalls(
+  sessionManager: SessionManager | null
+): {
+  total: number;
+  bySpec: Map<string, number>;
+} {
+  const bySpec = new Map<string, number>();
+  let total = 0;
+  if (!sessionManager) {
+    return { total, bySpec };
+  }
+  for (const entry of sessionManager.getEntries()) {
+    if (entry.type !== "message" || entry.message.role !== "assistant") {
+      continue;
+    }
+    const { content } = entry.message as { content?: unknown };
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    for (const part of content) {
+      const call = part as {
+        type?: string;
+        name?: string;
+        arguments?: { specId?: unknown };
+      };
+      if (call?.type !== "toolCall" || call.name !== "run_spec") {
+        continue;
+      }
+      total += 1;
+      const specId =
+        typeof call.arguments?.specId === "string" ? call.arguments.specId : "";
+      bySpec.set(specId, (bySpec.get(specId) ?? 0) + 1);
+    }
+  }
+  return { total, bySpec };
+};
+
+const appendMetricsLine = function appendMetricsLine(
+  line: string
+): Promise<void> {
   const write = writeQueue.then(() =>
     withFileQueue(chatTurnMetricsPath, async () => {
       await fs.mkdir(metricsDir, { recursive: true });
       await fs.appendFile(chatTurnMetricsPath, `${line}\n`, "utf-8");
     })
   );
-  writeQueue = write.catch(() => undefined);
+  writeQueue = write.catch(() => {
+    /* No action is needed until this callback is replaced or invoked by its owner. */
+  });
   return write;
+};
+
+export const metricsDir = path.join(storageRoot, "metrics");
+export const chatTurnMetricsPath = path.join(metricsDir, "chat-turns.jsonl");
+
+export type TurnTrigger = "message" | "edit" | "retry";
+export type TurnOutcome = "completed" | "aborted" | "error" | "rejected";
+
+export interface RunSpecOutcome {
+  specId: string;
+  runId: string | null;
+  status: string;
+  durationMs: number | null;
+  chatAttempt: number;
+  specAttempt: number;
 }
+
+export interface ValidatorRejection {
+  tool: "create_spec" | "update_spec";
+  specId: string | null;
+  rule: "named_steps" | "source_validation";
+}
+
+export interface ChatTurnMetrics {
+  schemaVersion: 1;
+  turnId: string;
+  chatId: string;
+  projectId: string | null;
+  mode: "standard" | "discovery" | null;
+  trigger: TurnTrigger;
+  provider: string | null;
+  model: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  outcome: TurnOutcome;
+  errorKind: string | null;
+  browserAvailable: boolean;
+  userMessages: number;
+  autoRetries: number;
+  assistantMessages: number;
+  toolCallCount: number;
+  toolCalls: Record<string, number>;
+  toolErrorCount: number;
+  toolErrors: Record<string, number>;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoning: number;
+    total: number;
+  };
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  runSpec: RunSpecOutcome[];
+  validatorRejections: ValidatorRejection[];
+}
+
+interface UsageLike {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  reasoning?: number;
+  totalTokens?: number;
+  cost?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    total?: number;
+  };
+}
+
+let writeQueue: Promise<void> = Promise.resolve();

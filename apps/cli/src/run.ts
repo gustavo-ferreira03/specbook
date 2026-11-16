@@ -10,6 +10,7 @@ import { serializeSpecYaml } from "@specbook/runtime/yaml";
 import { ensureChromium } from "./browsers";
 import { resolveRunSecrets } from "./credentials";
 import { generateReport } from "./report";
+import { requiredValue } from "./values";
 import { loadConfig, listSpecs, safeWorkspacePath } from "./workspace";
 
 export interface LocalRunResult extends SuiteSpecResult {
@@ -30,7 +31,7 @@ export interface LocalRun {
   report: string;
 }
 
-export async function runLocal(
+export const runLocal = async function runLocal(
   workspace: string,
   selector?: string,
   options: { signal?: AbortSignal } = {}
@@ -48,16 +49,18 @@ export async function runLocal(
   await ensureChromium();
   options.signal?.throwIfAborted();
   const startedAt = new Date().toISOString();
-  const id = `${startedAt.replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+  const id = `${startedAt.replaceAll(/[:.]/gu, "-")}-${randomUUID().slice(0, 8)}`;
   const directory = await safeWorkspacePath(workspace, `runs/${id}`, true);
   await fs.mkdir(directory, { recursive: true });
   const selected: SuiteSpec[] = [];
   for (const [index, spec] of specs.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     const outputDir = await safeWorkspacePath(
       workspace,
       `runs/${id}/${spec.path}`,
       true
     );
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.mkdir(outputDir, { recursive: true });
     const safeSpec = JSON.parse(
       secrets.scrub(
@@ -68,10 +71,12 @@ export async function runLocal(
         })
       )
     );
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.writeFile(
       path.join(outputDir, "spec.yml"),
       serializeSpecYaml(safeSpec)
     );
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     await fs.writeFile(
       path.join(outputDir, "spec.ts"),
       secrets.scrub(spec.source)
@@ -94,7 +99,7 @@ export async function runLocal(
     ...secrets,
   });
   const results = specs.map((spec, index) => ({
-    ...outcome.results.get(selected[index].key)!,
+    ...requiredValue(outcome.results.get(selected[index].key)),
     path: spec.path,
     title: secrets.scrub(spec.title),
     feature: secrets.scrub(spec.feature),
@@ -104,11 +109,15 @@ export async function runLocal(
       specYaml: createHash("sha256").update(spec.yaml).digest("hex"),
     },
   }));
-  const status = results.every((result) => result.status === "passed")
-    ? "passed"
-    : results.some((result) => result.status === "error")
-      ? "error"
-      : "failed";
+  const status = (() => {
+    if (results.every((result) => result.status === "passed")) {
+      return "passed";
+    }
+    if (results.some((result) => result.status === "error")) {
+      return "error";
+    }
+    return "failed";
+  })();
   const run: LocalRun = {
     id,
     directory,
@@ -125,4 +134,4 @@ export async function runLocal(
   );
   await generateReport(workspace, id);
   return run;
-}
+};

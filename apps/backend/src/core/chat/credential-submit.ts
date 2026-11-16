@@ -7,20 +7,14 @@ import {
   updateProfile,
 } from "../credentials/profiles";
 import { registerTransientSecret } from "../credentials/scrub";
+import { requireValue } from "../utils/require-value";
 import {
   getPendingCredentialRequest,
   resolveCredentialRequest,
 } from "./credential-requests";
 
-export type CredentialSubmission =
-  | { action: "dismiss" }
-  | {
-      action: "submit";
-      values: Record<string, string>;
-      allowedOrigins?: string[];
-    };
-
-export async function submitChatCredentials(
+// oxlint-disable-next-line complexity -- Keep the credential-submit decision tree together so state transitions and error ordering remain explicit.
+export const submitChatCredentials = async function submitChatCredentials(
   chatId: string,
   requestId: string,
   body: CredentialSubmission
@@ -46,14 +40,17 @@ export async function submitChatCredentials(
         !(pending.kind === "login" && field.key === "username"),
     }));
   for (const input of inputs) {
-    if (input.sensitive && input.value)
+    if (input.sensitive && input.value) {
       registerTransientSecret(pending.projectId, input.value);
+    }
   }
   if (inputs.some((input) => input.value === "")) {
     throw new HTTPException(400, { message: "Fill every requested field." });
   }
   if (pending.kind === "code") {
-    resolveCredentialRequest(chatId, requestId, { code: inputs[0].value! });
+    resolveCredentialRequest(chatId, requestId, {
+      code: requireValue(inputs[0].value),
+    });
     return { ok: true };
   }
   const existing = await getProfileByName(
@@ -81,30 +78,34 @@ export async function submitChatCredentials(
     const allowedOrigins = [
       ...new Set([...(existing?.allowedOrigins ?? []), pending.origin]),
     ];
-    if (existing) {
-      await updateProfile(existing, { allowedOrigins, fields: inputs });
-    } else {
-      await createProfile(pending.projectId, {
-        name: pending.profileName,
-        allowedOrigins,
-        fields: inputs,
-      });
-    }
+    await (existing
+      ? updateProfile(existing, { allowedOrigins, fields: inputs })
+      : createProfile(pending.projectId, {
+          name: pending.profileName,
+          allowedOrigins,
+          fields: inputs,
+        }));
     resolveCredentialRequest(chatId, requestId, "saved");
     return { ok: true };
   }
-  if (existing) {
-    await updateProfile(existing, {
-      allowedOrigins: body.allowedOrigins,
-      fields: inputs,
-    });
-  } else {
-    await createProfile(pending.projectId, {
-      name: pending.profileName,
-      allowedOrigins: body.allowedOrigins,
-      fields: inputs,
-    });
-  }
+  await (existing
+    ? updateProfile(existing, {
+        allowedOrigins: body.allowedOrigins,
+        fields: inputs,
+      })
+    : createProfile(pending.projectId, {
+        name: pending.profileName,
+        allowedOrigins: body.allowedOrigins,
+        fields: inputs,
+      }));
   resolveCredentialRequest(chatId, requestId, "saved");
   return { ok: true };
-}
+};
+
+export type CredentialSubmission =
+  | { action: "dismiss" }
+  | {
+      action: "submit";
+      values: Record<string, string>;
+      allowedOrigins?: string[];
+    };

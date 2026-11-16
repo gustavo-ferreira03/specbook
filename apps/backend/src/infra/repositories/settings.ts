@@ -8,11 +8,10 @@ import type {
   RetentionCleanup,
   RetentionSettings,
 } from "../../core/operations/schemas";
+import { requireValue } from "../../core/utils/require-value";
 import { db } from "../db/client";
 import { appSettings } from "../db/schema";
 import type { LlmSettings } from "../db/schema";
-
-const SETTINGS_ID = 1;
 
 class SettingsRepository {
   private defaults: LlmSettings = {
@@ -20,6 +19,7 @@ class SettingsRepository {
     model: "",
   };
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getRetention(): Promise<{
     settings: RetentionSettings;
     lastCleanup: RetentionCleanup | null;
@@ -72,6 +72,7 @@ class SettingsRepository {
       });
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getSecuritySettings(): Promise<SecuritySettings | null> {
     const rows = await db
       .select({ security: appSettings.security })
@@ -92,6 +93,7 @@ class SettingsRepository {
       });
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getAgentPaused(): Promise<boolean> {
     const rows = await db
       .select({ paused: appSettings.agentPaused })
@@ -151,9 +153,10 @@ class SettingsRepository {
         },
       })
       .returning({ deviceId: appSettings.llmDeviceId });
-    return row.deviceId!;
+    return requireValue(row.deviceId);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async updateLlmSettings(llm: LlmSettings): Promise<LlmSettings> {
     const values = {
       id: SETTINGS_ID,
@@ -173,5 +176,7 @@ class SettingsRepository {
     return llm;
   }
 }
+
+const SETTINGS_ID = 1;
 
 export const settingsRepository = new SettingsRepository();

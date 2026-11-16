@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { backendRoot } from "../../../core/paths";
 import { access } from "../access";
 
-export function createCliRouter(
+export const createCliRouter = function createCliRouter(
   packageFile = process.env.SPECBOOK_CLI_PACKAGE_FILE ??
     path.join(backendRoot, "dist", "specbook.tgz")
 ): Hono {
@@ -34,4 +34,4 @@ export function createCliRouter(
     }
   });
   return router;
-}
+};

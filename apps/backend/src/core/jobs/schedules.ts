@@ -1,8 +1,4 @@
 import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
-
-import { recordBatch } from "./schedule-batches";
-
-export { recordScheduledBatch } from "./schedule-batches";
 import {
   isHttpTarget,
   NetworkTargetError,
@@ -23,14 +19,13 @@ import { createKeyedLock } from "../operations/keyed-lock";
 import { getRunBatch, startSpecBatch } from "../runner/batch";
 import { areSpecsLocked } from "../specs/lifecycle";
 import { recordScheduledPrerequisite } from "../steward/engine";
+import { requireValue } from "../utils/require-value";
 import { isAgentPaused } from "./pause";
+import { recordBatch } from "./schedule-batches";
 
-interface CronField {
-  values: Set<number>;
-  wildcard: boolean;
-}
+export { recordScheduledBatch } from "./schedule-batches";
 
-function cronField(
+const cronField = function cronField(
   source: string,
   min: number,
   max: number,
@@ -38,7 +33,9 @@ function cronField(
 ): CronField {
   const values = new Set<number>();
   for (const part of source.split(",")) {
-    const match = /^(\*|\d+(?:-\d+)?)(?:\/(\d+))?$/.exec(part);
+    const match = /^(?<capture1>\*|\d+(?:-\d+)?)(?:\/(?<capture2>\d+))?$/u.exec(
+      part
+    );
     if (!match) {
       throw new Error(
         "Use numbers, *, comma lists, ranges and /steps in cron fields"
@@ -49,8 +46,10 @@ function cronField(
       throw new Error("Invalid cron step");
     }
     const range =
-      match[1] === "*" ? [min, max] : match[1]!.split("-").map(Number);
-    const start = range[0]!;
+      match[1] === "*"
+        ? [min, max]
+        : requireValue(match[1]).split("-").map(Number);
+    const start = requireValue(range[0]);
     const end = range[1] ?? (match[2] ? max : start);
     if (start < min || end > max || start > end) {
       throw new Error(`Cron values must be between ${min} and ${max}`);
@@ -60,24 +59,27 @@ function cronField(
     }
   }
   return { values, wildcard: source.includes("*") };
-}
+};
 
-export function nextCronAt(cron: string, after = new Date()): string {
+export const nextCronAt = function nextCronAt(
+  cron: string,
+  after = new Date()
+): string {
   if (cron.length > 120) {
     throw new Error("Cron expression is too long");
   }
-  const fields = cron.trim().split(/\s+/);
+  const fields = cron.trim().split(/\s+/u);
   if (fields.length !== 5) {
     throw new Error(
       "Cron needs five fields: minute hour day month weekday (UTC)"
     );
   }
   const [minute, hour, day, month, weekday] = [
-    cronField(fields[0]!, 0, 59),
-    cronField(fields[1]!, 0, 23),
-    cronField(fields[2]!, 1, 31),
-    cronField(fields[3]!, 1, 12),
-    cronField(fields[4]!, 0, 7, true),
+    cronField(requireValue(fields[0]), 0, 59),
+    cronField(requireValue(fields[1]), 0, 23),
+    cronField(requireValue(fields[2]), 1, 31),
+    cronField(requireValue(fields[3]), 1, 12),
+    cronField(requireValue(fields[4]), 0, 7, true),
   ] as const;
   const next = new Date(Math.floor(after.getTime() / 60_000) * 60_000 + 60_000);
   const end = next.getUTCFullYear() + 8;
@@ -91,59 +93,22 @@ export function nextCronAt(cron: string, after = new Date()): string {
     if (!month.values.has(next.getUTCMonth() + 1) || !dateMatches) {
       next.setUTCDate(next.getUTCDate() + 1);
       next.setUTCHours(0, 0, 0, 0);
-    } else if (!hour.values.has(next.getUTCHours())) {
-      next.setUTCHours(next.getUTCHours() + 1, 0, 0, 0);
-    } else if (minute.values.has(next.getUTCMinutes())) {
-      return next.toISOString();
-    } else {
-      next.setUTCMinutes(next.getUTCMinutes() + 1, 0, 0);
+      continue;
     }
+    if (!hour.values.has(next.getUTCHours())) {
+      next.setUTCHours(next.getUTCHours() + 1, 0, 0, 0);
+      continue;
+    }
+    if (minute.values.has(next.getUTCMinutes())) {
+      return next.toISOString();
+    }
+    next.setUTCMinutes(next.getUTCMinutes() + 1, 0, 0);
   }
   throw new Error("Cron has no matching date in the next eight years");
-}
+};
 
-const cronSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(120)
-  .superRefine((value, context) => {
-    try {
-      nextCronAt(value);
-    } catch (error) {
-      context.addIssue({
-        code: "custom",
-        message: error instanceof Error ? error.message : "Invalid cron",
-      });
-    }
-  });
-const webhookSchema = z
-  .string()
-  .trim()
-  .max(4000)
-  .url()
-  .refine(
-    isHttpTarget,
-    "Use an HTTP(S) webhook URL without username, password or fragment"
-  );
-
-export const automationSettingsSchema = z
-  .object({
-    cron: cronSchema.nullable().optional(),
-    specIds: z.array(z.string().uuid()).max(1000).optional(),
-    healFailures: z.boolean().optional(),
-    webhookUrl: webhookSchema.nullable().optional(),
-    allowPrivateWebhook: z.boolean().optional(),
-  })
-  .strict();
-
-const withAutomationLock = createKeyedLock().run;
-let processing = false;
-let stopped = false;
-let timer: ReturnType<typeof setInterval> | undefined;
-const deliveries = new Set<AbortController>();
-
-export function publicAutomation(
+// oxlint-disable-next-line complexity -- Keep the schedules decision tree together so state transitions and error ordering remain explicit.
+export const publicAutomation = function publicAutomation(
   projectId: string,
   row: ProjectAutomation | null
 ) {
@@ -161,17 +126,24 @@ export function publicAutomation(
     lastError: row?.lastError ?? null,
     updatedAt: row?.updatedAt ?? null,
   };
-}
+};
 
-export async function updateAutomation(projectId: string, input: unknown) {
+export const updateAutomation = async function updateAutomation(
+  projectId: string,
+  input: unknown
+) {
   const patch = automationSettingsSchema.parse(input);
-  return withAutomationLock(projectId, async () => {
+  // oxlint-disable-next-line complexity -- Keep the schedules decision tree together so state transitions and error ordering remain explicit.
+  return await withAutomationLock(projectId, async () => {
     if (!(await projectsRepository.getProject(projectId))) {
       throw new Error("Project not found");
     }
     if (patch.specIds) {
       const available = new Set(
-        (await specsRepository.listSpecs(projectId)).map((spec) => spec.id)
+        await (async () => {
+          const awaitedValue4765 = await specsRepository.listSpecs(projectId);
+          return awaitedValue4765.map((spec) => spec.id);
+        })()
       );
       if (patch.specIds.some((id) => !available.has(id))) {
         throw new Error("Every selected Spec must belong to this project");
@@ -201,11 +173,15 @@ export async function updateAutomation(projectId: string, input: unknown) {
       healFailures: patch.healFailures ?? previous?.healFailures ?? true,
       webhookUrl,
       allowPrivateWebhook,
-      nextRunAt: cron
-        ? cron !== previous?.cron || !previous?.nextRunAt
-          ? nextCronAt(cron)
-          : previous.nextRunAt
-        : null,
+      nextRunAt: (() => {
+        if (cron) {
+          if (cron !== previous?.cron || !previous?.nextRunAt) {
+            return nextCronAt(cron);
+          }
+          return previous.nextRunAt;
+        }
+        return null;
+      })(),
     });
     if (
       patch.webhookUrl !== undefined &&
@@ -215,9 +191,13 @@ export async function updateAutomation(projectId: string, input: unknown) {
     }
     return publicAutomation(projectId, row);
   });
-}
+};
 
-async function scheduleProject(projectId: string, at: Date): Promise<void> {
+const scheduleProject = async function scheduleProject(
+  projectId: string,
+  at: Date
+): Promise<void> {
+  // oxlint-disable-next-line complexity -- Keep the schedules decision tree together so state transitions and error ordering remain explicit.
   await withAutomationLock(projectId, async () => {
     const automation = await schedulesRepository.get(projectId);
     if (!automation || stopped) {
@@ -317,62 +297,63 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
       );
     }
   });
-}
+};
 
-export async function deliverWebhookNotifications(
+export const deliverWebhookNotifications =
+  async function deliverWebhookNotifications(at = new Date()): Promise<void> {
+    const pending = await schedulesRepository.pendingNotifications(
+      at.toISOString()
+    );
+    await Promise.all(
+      pending.map(async (row) => {
+        if (stopped) {
+          return;
+        }
+        const claimed = await schedulesRepository.claimNotification(
+          row,
+          at.toISOString()
+        );
+        if (!claimed) {
+          return;
+        }
+        const controller = new AbortController();
+        deliveries.add(controller);
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        let error: string | null = null;
+        try {
+          const automation = await schedulesRepository.get(claimed.projectId);
+          const status = await postWebhook(
+            decryptSecret(claimed.webhookUrl),
+            claimed.payload,
+            {
+              allowPrivate: automation?.allowPrivateWebhook ?? false,
+              signal: controller.signal,
+            }
+          );
+          if (status < 200 || status >= 300) {
+            error = `Webhook returned HTTP ${status}`;
+          }
+        } catch (error_) {
+          error =
+            error_ instanceof NetworkTargetError
+              ? error_.message
+              : "Webhook request failed or timed out";
+        } finally {
+          clearTimeout(timeout);
+          deliveries.delete(controller);
+        }
+        await schedulesRepository.finishNotification(
+          claimed,
+          error,
+          at.toISOString()
+        );
+      })
+    );
+  };
+
+export const processSchedules = async function processSchedules(
   at = new Date()
 ): Promise<void> {
-  const pending = await schedulesRepository.pendingNotifications(
-    at.toISOString()
-  );
-  await Promise.all(
-    pending.map(async (row) => {
-      if (stopped) {
-        return;
-      }
-      const claimed = await schedulesRepository.claimNotification(
-        row,
-        at.toISOString()
-      );
-      if (!claimed) {
-        return;
-      }
-      const controller = new AbortController();
-      deliveries.add(controller);
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      let error: string | null = null;
-      try {
-        const automation = await schedulesRepository.get(claimed.projectId);
-        const status = await postWebhook(
-          decryptSecret(claimed.webhookUrl),
-          claimed.payload,
-          {
-            allowPrivate: automation?.allowPrivateWebhook ?? false,
-            signal: controller.signal,
-          }
-        );
-        if (status < 200 || status >= 300) {
-          error = `Webhook returned HTTP ${status}`;
-        }
-      } catch (caught) {
-        error =
-          caught instanceof NetworkTargetError
-            ? caught.message
-            : "Webhook request failed or timed out";
-      } finally {
-        clearTimeout(timeout);
-        deliveries.delete(controller);
-      }
-      await schedulesRepository.finishNotification(
-        claimed,
-        error,
-        at.toISOString()
-      );
-    })
-  );
-}
-
-export async function processSchedules(at = new Date()): Promise<void> {
   if (processing || stopped) {
     return;
   }
@@ -382,6 +363,7 @@ export async function processSchedules(at = new Date()): Promise<void> {
       if (stopped) {
         break;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await scheduleProject(row.projectId, at).catch((error) =>
         logger.error("scheduled run failed", {
           projectId: row.projectId,
@@ -395,28 +377,76 @@ export async function processSchedules(at = new Date()): Promise<void> {
   } finally {
     processing = false;
   }
-}
+};
 
-export function startScheduleMonitor(): void {
+export const startScheduleMonitor = function startScheduleMonitor(): void {
   stopped = false;
   clearInterval(timer);
   timer = setInterval(
     () =>
-      void processSchedules().catch((error) =>
+      // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+      processSchedules().catch((error) =>
         logger.error("schedule monitor failed", { error })
       ),
     5000
   );
   timer.unref();
-  void processSchedules().catch((error) =>
+  // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
+  processSchedules().catch((error) =>
     logger.error("schedule monitor failed", { error })
   );
-}
+};
 
-export function stopScheduleMonitor(): void {
+export const stopScheduleMonitor = function stopScheduleMonitor(): void {
   stopped = true;
   clearInterval(timer);
   for (const controller of deliveries) {
     controller.abort();
   }
+};
+
+interface CronField {
+  values: Set<number>;
+  wildcard: boolean;
 }
+
+const cronSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .superRefine((value, context) => {
+    try {
+      nextCronAt(value);
+    } catch (error) {
+      context.addIssue({
+        code: "custom",
+        message: error instanceof Error ? error.message : "Invalid cron",
+      });
+    }
+  });
+const webhookSchema = z
+  .string()
+  .trim()
+  .max(4000)
+  .url()
+  .refine(
+    isHttpTarget,
+    "Use an HTTP(S) webhook URL without username, password or fragment"
+  );
+
+export const automationSettingsSchema = z
+  .object({
+    cron: cronSchema.nullable().optional(),
+    specIds: z.array(z.string().uuid()).max(1000).optional(),
+    healFailures: z.boolean().optional(),
+    webhookUrl: webhookSchema.nullable().optional(),
+    allowPrivateWebhook: z.boolean().optional(),
+  })
+  .strict();
+
+const withAutomationLock = createKeyedLock().run;
+let processing = false;
+let stopped = false;
+let timer: ReturnType<typeof setInterval> | undefined;
+const deliveries = new Set<AbortController>();

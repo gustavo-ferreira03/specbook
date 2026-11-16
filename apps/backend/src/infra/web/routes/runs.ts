@@ -28,7 +28,7 @@ import { specsRepository } from "../../repositories/specs";
 import { access } from "../access";
 import { htmlReportHeaders } from "../security";
 
-function reportHeaders(
+const reportHeaders = function reportHeaders(
   c: Context,
   name: string,
   html: string
@@ -40,43 +40,19 @@ function reportHeaders(
   const file = `specbook-${
     name
       .toLowerCase()
-      .replaceAll(/[^a-z0-9]+/g, "-")
-      .replaceAll(/^-|-$/g, "")
+      .replaceAll(/[^a-z0-9]+/gu, "-")
+      .replaceAll(/^-|-$/gu, "")
       .slice(0, 60) || "report"
   }.html`;
   return {
     ...headers,
     "Content-Disposition": `attachment; filename="${file}"`,
   };
-}
-
-const CONTENT_TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webm": "video/webm",
-  ".zip": "application/zip",
-  ".gz": "application/gzip",
-  ".ttf": "font/ttf",
-  ".webmanifest": "application/manifest+json",
-  ".md": "text/plain; charset=utf-8",
-  ".txt": "text/plain; charset=utf-8",
-  ".ts": "text/plain; charset=utf-8",
-  ".yml": "text/plain; charset=utf-8",
 };
 
-const runListSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(MAX_RUN_LIST_LIMIT).optional(),
-  before: z.string().uuid().optional(),
-});
-
-function artifactHeaders(type: string): Record<string, string> {
+const artifactHeaders = function artifactHeaders(
+  type: string
+): Record<string, string> {
   return {
     "Content-Type": type,
     "Content-Security-Policy": type.startsWith("text/html")
@@ -84,38 +60,30 @@ function artifactHeaders(type: string): Record<string, string> {
       : "sandbox",
     "X-Content-Type-Options": "nosniff",
   };
-}
+};
 
-const STORAGE_SHIM = Buffer.from(
-  "<script>(function(){function m(){var d={};return{get length(){return Object.keys(d).length},key:function(i){return Object.keys(d)[i]??null},getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}}}}" +
-    '["localStorage","sessionStorage"].forEach(function(n){try{window[n].length}catch(e){Object.defineProperty(window,n,{value:m(),configurable:true})}})})()</script>'
-);
-
-function withStorageShim(data: Buffer, type: string): Buffer {
+const withStorageShim = function withStorageShim(
+  data: Buffer,
+  type: string
+): Buffer {
   if (!type.startsWith("text/html")) {
     return data;
   }
-  const head = /<head[^>]*>/i.exec(data.toString("latin1"));
+  const head = /<head[^>]*>/iu.exec(data.toString("latin1"));
   if (!head) {
     return Buffer.concat([STORAGE_SHIM, data]);
   }
   const at = head.index + head[0].length;
   return Buffer.concat([data.subarray(0, at), STORAGE_SHIM, data.subarray(at)]);
-}
+};
 
-const batchSchema = z.object({
-  environment: z.string().trim().min(1).max(80).optional(),
-  specIds: z.array(z.string().uuid()).min(1),
-  label: z.string().trim().min(1).max(120),
-});
-
-async function requireRun(runId: string): Promise<void> {
+const requireRun = async function requireRun(runId: string): Promise<void> {
   if (!(await runsRepository.getRun(runId))) {
     throw new HTTPException(404, { message: "Run not found" });
   }
-}
+};
 
-export function createRunsRouter(): Hono {
+export const createRunsRouter = function createRunsRouter(): Hono {
   const router = new Hono();
 
   router.post("/specs/:id/run", access("editor"), async (c) => {
@@ -141,7 +109,12 @@ export function createRunsRouter(): Hono {
         const run = await runsRepository.getRun(batch.specs[0].runId);
         return c.json(
           {
-            run: run ? (await visibleRuns([run]))[0] : null,
+            run: run
+              ? await (async () => {
+                  const awaitedValue3365 = await visibleRuns([run]);
+                  return awaitedValue3365[0];
+                })()
+              : null,
             batchId: batch.id,
           },
           202
@@ -273,7 +246,12 @@ export function createRunsRouter(): Hono {
     if (!run) {
       throw new HTTPException(404, { message: "Run not found" });
     }
-    return c.json({ run: (await visibleRuns([run]))[0] });
+    return c.json({
+      run: await (async () => {
+        const awaitedValue7281 = await visibleRuns([run]);
+        return awaitedValue7281[0];
+      })(),
+    });
   });
 
   router.get("/runs/:id/artifacts", access("viewer"), async (c) => {
@@ -350,4 +328,41 @@ export function createRunsRouter(): Hono {
   });
 
   return router;
-}
+};
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webm": "video/webm",
+  ".zip": "application/zip",
+  ".gz": "application/gzip",
+  ".ttf": "font/ttf",
+  ".webmanifest": "application/manifest+json",
+  ".md": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".ts": "text/plain; charset=utf-8",
+  ".yml": "text/plain; charset=utf-8",
+};
+
+const runListSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_RUN_LIST_LIMIT).optional(),
+  before: z.string().uuid().optional(),
+});
+
+const STORAGE_SHIM = Buffer.from(
+  "<script>(function(){function m(){var d={};return{get length(){return Object.keys(d).length},key:function(i){return Object.keys(d)[i]??null},getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}}}}" +
+    '["localStorage","sessionStorage"].forEach(function(n){try{window[n].length}catch(e){Object.defineProperty(window,n,{value:m(),configurable:true})}})})()</script>'
+);
+
+const batchSchema = z.object({
+  environment: z.string().trim().min(1).max(80).optional(),
+  specIds: z.array(z.string().uuid()).min(1),
+  label: z.string().trim().min(1).max(120),
+});

@@ -7,8 +7,9 @@ import { specsRepository } from "./specs";
 import type { Spec } from "./specs";
 
 class SpecEnvironmentsRepository {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async list(spec: Spec) {
-    return db
+    return await db
       .select()
       .from(specEnvironmentStates)
       .where(
@@ -24,11 +25,14 @@ class SpecEnvironmentsRepository {
     if (!environmentId) {
       return false;
     }
-    return (await this.list(spec)).some(
-      (state) =>
-        state.environmentId === environmentId &&
-        state.status === "awaiting_deploy"
-    );
+    return await (async () => {
+      const awaitedValue785 = await this.list(spec);
+      return awaitedValue785.some(
+        (state) =>
+          state.environmentId === environmentId &&
+          state.status === "awaiting_deploy"
+      );
+    })();
   }
 
   async set(
@@ -84,7 +88,7 @@ class SpecEnvironmentsRepository {
       awaiting && fallback !== "failed"
         ? "awaiting_deploy"
         : (fallback ??
-          states.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+          states.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
             ?.status ??
           "unverified");
     await specsRepository.updateSpecStatusForContent(

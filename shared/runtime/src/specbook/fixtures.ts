@@ -35,6 +35,14 @@ import type { RawPage, ApiRequestEvidence } from "./guard.ts";
 import { createReplayImageRecorder } from "./replay-images.ts";
 import { captureStepScreenshot } from "./screenshot.ts";
 
+const hidden = (value: unknown) =>
+  typeof value === "string" ? "*".repeat(value.length) : value;
+
+const marks = (attributes: Record<string, unknown>) =>
+  String(attributes.class ?? "")
+    .split(/\s+/u)
+    .includes("__specbookSecret") || "data-specbook-secret" in attributes;
+
 type StepFn = (title: string, body: () => Promise<void>) => Promise<void>;
 type SecretFn = (profile: string, field: string) => object;
 type CleanupFn = (body: () => Promise<void>) => Promise<void>;
@@ -59,7 +67,15 @@ const secretValues = [
           !runtime.secretOrigins.publicRefs?.includes(name) &&
           value
       )
-      .map(([, value]) => value!)
+      .map(([, value]) =>
+        (() => {
+          const presentValue = value;
+          if (presentValue === null || presentValue === undefined) {
+            throw new Error("Expected an existing value");
+          }
+          return presentValue;
+        })()
+      )
   ),
 ];
 
@@ -80,7 +96,7 @@ const secretVariants = [
       ];
     })
   ),
-].sort((left, right) => right.length - left.length);
+].toSorted((left, right) => right.length - left.length);
 
 const hasSecret = (value: unknown): boolean =>
   typeof value === "string" &&
@@ -117,12 +133,7 @@ class ReplayCapture {
       | (ReplayMutation & { node?: ReplayNode })
       | undefined;
     const marked: number[] = [];
-    const hidden = (value: unknown) =>
-      typeof value === "string" ? "*".repeat(value.length) : value;
-    const marks = (attributes: Record<string, unknown>) =>
-      String(attributes.class ?? "")
-        .split(/\s+/)
-        .includes("__specbookSecret") || "data-specbook-secret" in attributes;
+
     const visit = (node: ReplayNode): void => {
       const { attributes } = node;
       if (
@@ -140,7 +151,9 @@ class ReplayCapture {
           attributes[MASK_ATTRIBUTE] = "";
         }
       }
-      node.childNodes?.forEach(visit);
+      for (const child of node.childNodes ?? []) {
+        visit(child);
+      }
     };
     if (!data) {
       return marked;
@@ -211,12 +224,15 @@ class ReplayCapture {
     }
     try {
       const value = JSON.stringify(
-        scrubJson(event, (text) =>
-          secretVariants.reduce(
-            (safe, secret) => (secret ? safe.split(secret).join("••••") : safe),
-            text
-          )
-        )
+        scrubJson(event, (text) => {
+          let safe = text;
+          for (const secret of secretVariants) {
+            if (secret) {
+              safe = safe.split(secret).join("••••");
+            }
+          }
+          return safe;
+        })
       );
       const size = Buffer.byteLength(value) + 1;
       if (
@@ -261,13 +277,17 @@ class ReplayCapture {
   }
 }
 
-async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
+const startReplay = async function startReplay(
+  page: Page,
+  replay: ReplayCapture
+): Promise<void> {
   const binding = "__specbookReplayEvent";
   await page.exposeBinding(binding, ({ frame }, event: ReplayEvent) => {
     if (frame === page.mainFrame()) {
       replay.receive(event);
     }
   });
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this helper in the function body that is serialized or hardened as a unit.
   const content = `${await readRecorderSource()}\n;(${function content(
     createImages: typeof createReplayImageRecorder
   ) {
@@ -288,9 +308,9 @@ async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
     const pending = new Set<Promise<void>>();
     const deliveries = {
       send(event: unknown): void {
-        const delivered = target
-          .__specbookReplayEvent(event)
-          .catch(() => undefined);
+        const delivered = target.__specbookReplayEvent(event).catch(() => {
+          /* Intentionally no work for this callback. */
+        });
         pending.add(delivered);
         void delivered.finally(() => pending.delete(delivered));
       },
@@ -315,9 +335,12 @@ async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
   }.toString()})(${createReplayImageRecorder.toString()});`;
   await page.addInitScript({ content });
   await page.evaluate(content);
-}
+};
 
-async function stopReplay(page: Page, replay: ReplayCapture): Promise<void> {
+const stopReplay = async function stopReplay(
+  page: Page,
+  replay: ReplayCapture
+): Promise<void> {
   await withEvidenceTimeout(
     () =>
       page.evaluate(() =>
@@ -328,21 +351,25 @@ async function stopReplay(page: Page, replay: ReplayCapture): Promise<void> {
         ).__specbookStopReplay?.()
       ),
     1000
-  ).catch(() => undefined);
+  ).catch(() => {
+    /* Intentionally no work for this callback. */
+  });
   replay.stop();
-}
+};
 
-function diagnosticUrl(value: string): string | undefined {
+const diagnosticUrl = function diagnosticUrl(
+  value: string
+): string | undefined {
   try {
     const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return undefined;
+      return;
     }
     return `${url.origin}${url.pathname}`.slice(0, 2000);
   } catch {
-    return undefined;
+    // A malformed URL has no public evidence URL.
   }
-}
+};
 
 export const test = base.extend<{
   step: StepFn;
@@ -350,6 +377,7 @@ export const test = base.extend<{
   cleanup: CleanupFn;
   _specbookEvidence: EvidenceState;
 }>({
+  // oxlint-disable-next-line no-empty-pattern -- Playwright requires fixture dependencies to use object destructuring.
   _specbookEvidence: async ({}, use) => {
     await use({ apiRequests: [] });
   },
@@ -364,7 +392,8 @@ export const test = base.extend<{
   },
   page: async ({ page, _specbookEvidence }, use, testInfo) => {
     _specbookEvidence.page = page;
-    const replay = (_specbookEvidence.replay = new ReplayCapture());
+    const replay = new ReplayCapture();
+    _specbookEvidence.replay = replay;
     try {
       await startReplay(page, replay);
     } catch {
@@ -375,15 +404,21 @@ export const test = base.extend<{
       : null;
     if (navigation) {
       navigation.on("Fetch.requestPaused", (event) => {
-        const allowed = runtime.navigationOrigins!.includes(
-          new URL(event.request.url).origin
-        );
+        const allowed = (() => {
+          const presentValue = runtime.navigationOrigins;
+          if (presentValue === null || presentValue === undefined) {
+            throw new Error("Expected an existing value");
+          }
+          return presentValue;
+        })().includes(new URL(event.request.url).origin);
         void navigation
           .send(allowed ? "Fetch.continueRequest" : "Fetch.failRequest", {
             requestId: event.requestId,
             ...(allowed ? {} : { errorReason: "BlockedByClient" }),
           })
-          .catch(() => undefined);
+          .catch(() => {
+            /* Intentionally no work for this callback. */
+          });
       });
       await navigation.send("Fetch.enable", {
         patterns: [{ resourceType: "Document", requestStage: "Request" }],
@@ -448,9 +483,9 @@ export const test = base.extend<{
         });
       }
       if (navigation) {
-        await withEvidenceTimeout(() => navigation.detach(), 1000).catch(
-          () => undefined
-        );
+        await withEvidenceTimeout(() => navigation.detach(), 1000).catch(() => {
+          /* Intentionally no work for this callback. */
+        });
       }
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
@@ -474,7 +509,7 @@ export const test = base.extend<{
         throw new Error("step() needs a title");
       }
       if (typeof body !== "function") {
-        throw new Error("step() needs an async function");
+        throw new TypeError("step() needs an async function");
       }
       if (active) {
         throw new Error("Steps cannot be nested");
@@ -519,7 +554,10 @@ export const test = base.extend<{
             path: file,
             contentType: "text/plain",
           });
-        } catch {}
+        } catch {
+          /* Cleanup is best effort; preserve the original result. */
+          /* Cleanup is best effort; preserve the original result. */
+        }
         throw error;
       } finally {
         active = false;
@@ -537,6 +575,7 @@ export const test = base.extend<{
         const file = testInfo.outputPath(`${STEP_ATTACHMENT_PREFIX}${number}`);
         try {
           if (!real) {
+            // oxlint-disable-next-line no-unsafe-finally -- The evidence-only throw is caught inside this finally block.
             throw new Error("This step has no browser page");
           }
           const image = await captureStepScreenshot(real, file, secretValues);
@@ -544,7 +583,10 @@ export const test = base.extend<{
             path: image.file,
             contentType: image.contentType,
           });
-        } catch {}
+        } catch {
+          /* Cleanup is best effort; preserve the original result. */
+          /* Cleanup is best effort; preserve the original result. */
+        }
         if (real && replay && !replay.unavailable) {
           // A loaded image can arrive after its first DOM snapshot.
           await withEvidenceTimeout(
@@ -557,12 +599,15 @@ export const test = base.extend<{
                 ).rrweb?.record.takeFullSnapshot()
               ),
             1000
-          ).catch(() => undefined);
+          ).catch(() => {
+            /* Intentionally no work for this callback. */
+          });
         }
         replay?.marker(count, title, kind, "end", outcome);
       }
     });
   },
+  // oxlint-disable-next-line no-empty-pattern -- Playwright requires fixture dependencies to use object destructuring.
   secret: async ({}, use) => {
     await use((profile, field) => createSecret(profile, field));
   },
@@ -574,9 +619,10 @@ export const test = base.extend<{
     testInfo
   ) => {
     let registered: (() => Promise<void>) | undefined;
+    // oxlint-disable-next-line require-await -- Cleanup registration must reject invalid input through its promise contract.
     await use(async (body) => {
       if (typeof body !== "function") {
-        throw new Error("cleanup() needs an async function");
+        throw new TypeError("cleanup() needs an async function");
       }
       registered = body;
     });
@@ -592,7 +638,10 @@ export const test = base.extend<{
       await Promise.race([
         Promise.resolve()
           .then(registered)
-          .catch(() => undefined),
+          .catch(() => {
+            /* Intentionally no work for this callback. */
+          }),
+        // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, CLEANUP_BUDGET_MS);
         }),
@@ -603,7 +652,9 @@ export const test = base.extend<{
   },
 });
 
-function settlingMatchers<T extends object>(matchers: T): T {
+const settlingMatchers = function settlingMatchers<T extends object>(
+  matchers: T
+): T {
   return new Proxy(matchers, {
     get(target, key, receiver) {
       const value = Reflect.get(target, key, receiver);
@@ -621,9 +672,9 @@ function settlingMatchers<T extends object>(matchers: T): T {
         );
     },
   });
-}
+};
 
-export function expect(target: unknown, ...rest: unknown[]) {
+export const expect = function expect(target: unknown, ...rest: unknown[]) {
   if (rest.length > 0) {
     throw new Error("expect() takes one page, locator or API response value");
   }
@@ -648,4 +699,4 @@ export function expect(target: unknown, ...rest: unknown[]) {
   throw new Error(
     "expect() takes the page, a locator or an API response value"
   );
-}
+};

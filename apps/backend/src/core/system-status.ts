@@ -8,17 +8,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../infra/db/client";
 import { storageRoot } from "./paths";
 
-const require = createRequire(import.meta.url);
-
-interface SystemCheck {
-  id: string;
-  label: string;
-  ok: boolean;
-  message: string;
-  nextStep?: string;
-}
-
-async function check(
+const check = async function check(
   id: string,
   label: string,
   verify: () => Promise<void>,
@@ -30,13 +20,14 @@ async function check(
   } catch {
     return { id, label, ok: false, message: "Unavailable", nextStep };
   }
-}
+};
 
-async function executable(name: string): Promise<void> {
+const executable = async function executable(name: string): Promise<void> {
   for (const dir of (process.env.PATH ?? "")
     .split(path.delimiter)
     .filter(Boolean)) {
     if (
+      // oxlint-disable-next-line no-await-in-loop, promise/prefer-catch -- Apply dependent state changes in order and keep resource use bounded. Only handle rejection of the original operation; errors in the success handler must still propagate.
       await fs.access(path.join(dir, name), constants.X_OK).then(
         () => true,
         () => false
@@ -46,9 +37,9 @@ async function executable(name: string): Promise<void> {
     }
   }
   throw new Error(`${name} is unavailable`);
-}
+};
 
-async function chromium(mcp: boolean): Promise<void> {
+const chromium = async function chromium(mcp: boolean): Promise<void> {
   const loader = mcp
     ? createRequire(require.resolve("@playwright/mcp/package.json"))
     : require;
@@ -56,9 +47,9 @@ async function chromium(mcp: boolean): Promise<void> {
     mcp ? "playwright" : "playwright-core"
   ) as { chromium: { executablePath: () => string } };
   await fs.access(browser.executablePath(), constants.X_OK);
-}
+};
 
-export async function systemStatus() {
+export const systemStatus = async function systemStatus() {
   const checks = await Promise.all([
     check(
       "database",
@@ -115,4 +106,14 @@ export async function systemStatus() {
     checkedAt: new Date().toISOString(),
     checks,
   };
+};
+
+const require = createRequire(import.meta.url);
+
+interface SystemCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  message: string;
+  nextStep?: string;
 }

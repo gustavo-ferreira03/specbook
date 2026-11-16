@@ -17,7 +17,10 @@ import { access } from "../access";
 import { loadProject } from "../load-project";
 import { gitCloneUrl } from "./git-http";
 
-async function remoteAccessOf(c: Context, project: Project) {
+const remoteAccessOf = async function remoteAccessOf(
+  c: Context,
+  project: Project
+) {
   return {
     cloneUrl: gitCloneUrl(c, project.id),
     branch: "main",
@@ -25,9 +28,9 @@ async function remoteAccessOf(c: Context, project: Project) {
     token: accessTokenInfoOf(project),
     externalSyncError: project.gitExternalSyncError,
   };
-}
+};
 
-export function createGitRouter(): Hono {
+export const createGitRouter = function createGitRouter(): Hono {
   const router = new Hono();
 
   router.get("/projects/:id/git/remote", access("viewer"), async (c) => {
@@ -46,7 +49,10 @@ export function createGitRouter(): Hono {
       if (checkoutMoved) {
         await reindexProjectUnlocked(project.id);
       }
-      return (await issueGitAccessToken(project.id)).token;
+      return await (async () => {
+        const awaitedValue1869 = await issueGitAccessToken(project.id);
+        return awaitedValue1869.token;
+      })();
     });
     return c.json({
       token,
@@ -83,4 +89,4 @@ export function createGitRouter(): Hono {
   });
 
   return router;
-}
+};

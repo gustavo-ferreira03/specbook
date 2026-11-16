@@ -3,9 +3,9 @@
 import { Folder, LoaderCircle, Play } from "lucide-react";
 import Link from "next/link";
 
-import { useAuth } from "@/components/AuthProvider";
-import { RelativeTime } from "@/components/RelativeTime";
-import { StatusPill } from "@/components/StatusPill";
+import { useAuth } from "@/components/auth-provider";
+import { RelativeTime } from "@/components/relative-time";
+import { StatusPill } from "@/components/status-pill";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -19,20 +19,21 @@ import {
   formatDuration,
   formatNumber,
 } from "@/lib/format";
-import { useDisplayStatus } from "@/lib/projectOverview";
+import { useDisplayStatus } from "@/lib/project-overview";
+import { requiredValue } from "@/lib/required-value";
 import { SPEC_STATUS_ORDER, countStatuses, statusMeta } from "@/lib/status";
 import type { Feature, Run, SpecSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export type LastRuns = Record<string, Run | null | undefined>;
 
-export function lastRunsOf(specs: SpecSummary[]): LastRuns {
+export const lastRunsOf = function lastRunsOf(specs: SpecSummary[]): LastRuns {
   return Object.fromEntries(
     specs.map((spec) => [spec.id, spec.lastRun ?? null])
   );
-}
+};
 
-export function orderFeatures(
+export const orderFeatures = function orderFeatures(
   features: Feature[],
   rootId: string | null = null
 ): { feature: Feature; label: string; depth: number }[] {
@@ -44,16 +45,20 @@ export function orderFeatures(
     byParent.set(parent, [...(byParent.get(parent) ?? []), feature]);
   }
   const result: { feature: Feature; label: string; depth: number }[] = [];
-  function visit(parentId: string | null, trail: string[], depth: number) {
+  const visit = function visit(
+    parentId: string | null,
+    trail: string[],
+    depth: number
+  ) {
     for (const feature of byParent.get(parentId) ?? []) {
       const path = [...trail, feature.title];
       result.push({ feature, label: path.join(" / "), depth });
       visit(feature.id, path, depth + 1);
     }
-  }
+  };
   visit(rootId, [], 0);
   return result;
-}
+};
 
 export interface SpecGroup {
   id: string;
@@ -62,11 +67,15 @@ export interface SpecGroup {
   emptyText?: string;
 }
 
-function canRun(spec: SpecSummary) {
+const canRun = function canRun(spec: SpecSummary) {
   return spec.status !== "invalid";
-}
+};
 
-function GroupSummary({ specs }: { specs: SpecSummary[] }) {
+const GroupSummary = function GroupSummary({
+  specs,
+}: {
+  specs: SpecSummary[];
+}) {
   const counts = countStatuses(specs);
   const problems = SPEC_STATUS_ORDER.filter(
     (status) => status !== "passed" && (counts[status] ?? 0) > 0
@@ -98,9 +107,13 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
       })}
     </span>
   );
-}
+};
 
-function LastRunText({ run }: { run: Run | null | undefined }) {
+const LastRunText = function LastRunText({
+  run,
+}: {
+  run: Run | null | undefined;
+}) {
   if (run === undefined) {
     return <Skeleton className="ml-auto h-3 w-20" />;
   }
@@ -119,14 +132,14 @@ function LastRunText({ run }: { run: Run | null | undefined }) {
           className="text-meta text-ink-subtle"
           title={run.baseUrl ?? undefined}
         >
-          {run.environment!.name}
+          {requiredValue(run.environment).name}
         </span>
       )}
     </span>
   );
-}
+};
 
-function SpecRow({
+const SpecRow = function SpecRow({
   projectId,
   spec,
   run,
@@ -141,7 +154,9 @@ function SpecRow({
 }) {
   const { canEdit } = useAuth();
   const duration =
-    run?.durationMs == null ? null : formatDuration(run.durationMs);
+    run?.durationMs === null || run?.durationMs === undefined
+      ? null
+      : formatDuration(run.durationMs);
   const status = useDisplayStatus(spec);
   return (
     <li className="group/row border-line hover:bg-surface-soft relative flex items-center gap-3 border-b px-4 py-2.5 transition-colors duration-150 sm:gap-4">
@@ -200,9 +215,9 @@ function SpecRow({
       </span>
     </li>
   );
-}
+};
 
-function GroupHeader({
+const GroupHeader = function GroupHeader({
   group,
   chapter,
   running,
@@ -257,9 +272,9 @@ function GroupHeader({
       )}
     </li>
   );
-}
+};
 
-export function SpecTable({
+export const SpecTable = function SpecTable({
   projectId,
   groups,
   lastRuns,
@@ -331,9 +346,9 @@ export function SpecTable({
       </ul>
     </div>
   );
-}
+};
 
-export function SpecTableSkeleton({
+export const SpecTableSkeleton = function SpecTableSkeleton({
   groups = 3,
   rows = 3,
 }: {
@@ -351,7 +366,7 @@ export function SpecTableSkeleton({
           <div className="border-line bg-surface-soft flex h-11 items-center gap-2.5 border-b px-4">
             <Skeleton className="h-3.5 w-32" />
           </div>
-          {Array.from({ length: rows }).map((_, row) => (
+          {Array.from({ length: rows }).map((_Value, row) => (
             <div
               key={row}
               className="border-line flex h-12 items-center gap-4 border-b px-4 last:border-0"
@@ -365,9 +380,9 @@ export function SpecTableSkeleton({
       ))}
     </div>
   );
-}
+};
 
-export function RunningIcon({
+export const RunningIcon = function RunningIcon({
   running,
   size = 13,
 }: {
@@ -382,4 +397,4 @@ export function RunningIcon({
   ) : (
     <Play size={size} />
   );
-}
+};

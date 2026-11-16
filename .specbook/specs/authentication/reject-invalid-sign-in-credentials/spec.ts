@@ -13,7 +13,7 @@ test("Reject invalid sign-in credentials", async ({ page, step }) => {
       .getByRole("textbox", { name: "Password" })
       .fill("invalid-password");
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(/\/login\?next=%2F$/);
+    await expect(page).toHaveURL(/\/login\?next=%2F$/u);
   });
   await step(
     "The sign-in page shows \u201CEmail or password is incorrect.\u201D",

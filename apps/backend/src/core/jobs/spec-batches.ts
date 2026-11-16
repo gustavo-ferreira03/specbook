@@ -30,6 +30,7 @@ import {
   reviewRunEvidence,
 } from "../runner/evidence-review";
 import { executeSpec } from "../runner/run";
+import { requireValue } from "../utils/require-value";
 import { isAgentPaused } from "./pause";
 import { enqueueJob } from "./queue";
 import {
@@ -42,16 +43,14 @@ import {
 import type { SpecBatch, SpecBatchCandidate as Candidate } from "./schemas";
 import { finishedAt } from "./shared";
 
-const batchLocks = createKeyedLock();
-
-async function withBatchLock<T>(
+const withBatchLock = async function withBatchLock<T>(
   id: string,
   work: () => Promise<T>
 ): Promise<T> {
-  return batchLocks.run(id, work);
-}
+  return await batchLocks.run(id, work);
+};
 
-function batchOf(item: InboxItem): SpecBatch {
+const batchOf = function batchOf(item: InboxItem): SpecBatch {
   if (item.kind !== "spec_batch") {
     throw new Error("This suggestion is not a list of Specs.");
   }
@@ -62,9 +61,9 @@ function batchOf(item: InboxItem): SpecBatch {
     );
   }
   return batch;
-}
+};
 
-function stableId(value: string): string {
+const stableId = function stableId(value: string): string {
   const hex = crypto
     .createHash("sha256")
     .update(value)
@@ -75,9 +74,9 @@ function stableId(value: string): string {
   hex[16] = "8";
   const result = hex.join("");
   return `${result.slice(0, 8)}-${result.slice(8, 12)}-${result.slice(12, 16)}-${result.slice(16, 20)}-${result.slice(20)}`;
-}
+};
 
-export async function proposeSpecBatch(
+export const proposeSpecBatch = async function proposeSpecBatch(
   projectId: string,
   chatId: string,
   input: unknown,
@@ -112,6 +111,7 @@ export async function proposeSpecBatch(
     if (
       candidate.featureId &&
       !byId &&
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       (await featuresRepository.getFeature(candidate.featureId))
     ) {
       throw new Error("A suggested feature belongs to another project.");
@@ -134,15 +134,20 @@ export async function proposeSpecBatch(
   const existingJob = await jobsRepository.forChat(chatId);
   const sourceChatId = existingJob?.sourceChatId ?? chatId;
   return withBatchLock(`chat:${chatId}`, async () => {
-    const existing = (
-      await jobsRepository.itemsByKind(projectId, "spec_batch", ["pending"])
-    ).find(
-      (item) =>
-        item.kind === "spec_batch" &&
-        item.status === "pending" &&
-        payloadOf(item).sourceChatId === sourceChatId &&
-        JSON.stringify(item.payload.proposed) === JSON.stringify(clean)
-    );
+    const existing = await (async () => {
+      const awaitedValue4390 = await jobsRepository.itemsByKind(
+        projectId,
+        "spec_batch",
+        ["pending"]
+      );
+      return awaitedValue4390.find(
+        (item) =>
+          item.kind === "spec_batch" &&
+          item.status === "pending" &&
+          payloadOf(item).sourceChatId === sourceChatId &&
+          JSON.stringify(item.payload.proposed) === JSON.stringify(clean)
+      );
+    })();
     if (existing) {
       return existing;
     }
@@ -189,12 +194,15 @@ export async function proposeSpecBatch(
     await jobsRepository.log(job.id, "spec_batch:proposed", item.id);
     return item;
   });
-}
+};
 
-async function enqueueSelected(item: InboxItem): Promise<void> {
+const enqueueSelected = async function enqueueSelected(
+  item: InboxItem
+): Promise<void> {
   for (const candidate of batchOf(item).candidates.filter(
-    (candidate) => candidate.selected
+    (candidateValue) => candidateValue.selected
   )) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await enqueueJob(
       item.projectId,
       {
@@ -209,13 +217,13 @@ async function enqueueSelected(item: InboxItem): Promise<void> {
       }
     );
   }
-}
+};
 
-export async function selectSpecBatch(
+export const selectSpecBatch = async function selectSpecBatch(
   item: InboxItem,
   candidateIds: string[]
 ): Promise<InboxItem> {
-  return withBatchLock(item.id, async () => {
+  return await withBatchLock(item.id, async () => {
     const current = await jobsRepository.item(item.id);
     if (!current) {
       throw new Error("This suggestion no longer exists.");
@@ -284,33 +292,36 @@ export async function selectSpecBatch(
       "spec_batch:selected",
       JSON.stringify({ itemId: current.id, candidateIds })
     );
-    const approved = (await jobsRepository.item(current.id))!;
+    const approved = requireValue(await jobsRepository.item(current.id));
     await enqueueSelected(approved);
     return approved;
   });
-}
+};
 
-export async function recoverSpecBatches(): Promise<void> {
-  for (const project of await projectsRepository.listProjects()) {
-    for (const item of await jobsRepository.itemsByKind(
-      project.id,
-      "spec_batch",
-      ["approved"]
-    )) {
-      if (item.kind !== "spec_batch" || item.status !== "approved") {
-        continue;
+export const recoverSpecBatches =
+  async function recoverSpecBatches(): Promise<void> {
+    for (const project of await projectsRepository.listProjects()) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      for (const item of await jobsRepository.itemsByKind(
+        project.id,
+        "spec_batch",
+        ["approved"]
+      )) {
+        if (item.kind !== "spec_batch" || item.status !== "approved") {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        await enqueueSelected(item).catch((error) =>
+          logger.error("could not recover a selected Spec batch", {
+            itemId: item.id,
+            error,
+          })
+        );
       }
-      await enqueueSelected(item).catch((error) =>
-        logger.error("could not recover a selected Spec batch", {
-          itemId: item.id,
-          error,
-        })
-      );
     }
-  }
-}
+  };
 
-async function selectedCandidate(job: Job) {
+const selectedCandidate = async function selectedCandidate(job: Job) {
   const item = await jobsRepository.specBatchForJob(
     job.projectId,
     job.id,
@@ -318,16 +329,17 @@ async function selectedCandidate(job: Job) {
   );
   const candidate = item
     ? batchOf(item).candidates.find(
-        (candidate) => candidate.selected && candidate.jobId === job.id
+        (candidateValue) =>
+          candidateValue.selected && candidateValue.jobId === job.id
       )
     : null;
   if (item && candidate) {
     return { item, candidate };
   }
   throw new Error("The human has not selected a Spec for this request.");
-}
+};
 
-async function updateCandidate(
+const updateCandidate = async function updateCandidate(
   itemId: string,
   candidateId: string,
   patch: Partial<Candidate>
@@ -352,18 +364,20 @@ async function updateCandidate(
       },
     });
   });
-}
+};
 
-export async function selectedSpecInstructions(job: Job): Promise<string> {
+export const selectedSpecInstructions = async function selectedSpecInstructions(
+  job: Job
+): Promise<string> {
   const { item, candidate } = await selectedCandidate(job);
   const features = await featuresRepository.listFeatures(job.projectId);
   let feature = features.find(
-    (feature) =>
-      feature.id === (candidate.resolvedFeatureId ?? candidate.featureId)
+    (featureValue) =>
+      featureValue.id === (candidate.resolvedFeatureId ?? candidate.featureId)
   );
   feature ??= features.find(
-    (feature) =>
-      feature.title.trim().toLowerCase() ===
+    (featureValue) =>
+      featureValue.title.trim().toLowerCase() ===
       candidate.feature.trim().toLowerCase()
   );
   if (!feature) {
@@ -376,10 +390,14 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
         commitMessage: `spec-batch:${item.id}:${candidate.id} organize selected Spec`,
         checkPolicy: async () => {
           if (
-            (await jobsRepository.get(job.id))?.status !== "running" ||
+            (await (async () => {
+              const resolvedValue12463 = await jobsRepository.get(job.id);
+              return resolvedValue12463?.status;
+            })()) !== "running" ||
             (await isAgentPaused(job.projectId))
-          )
+          ) {
             throw new Error("The user paused this request.");
+          }
         },
       }
     );
@@ -388,15 +406,22 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
     resolvedFeatureId: feature.id,
   });
   return `${job.pendingMessage}\nSelected Spec reference: ${item.id}/${candidate.id}. Call create_spec with featureId ${feature.id} and title ${JSON.stringify(candidate.title)}. The selection authorizes only this new Spec; existing contracts stay unchanged. create_spec validates, saves and runs the Spec once: read its result and evidenceReview instead of running again. If the run failed or evidenceReview says the test checks the wrong thing, fix the Spec and call create_spec again, at most 3 runs in total. If the Spec already exists, read its latest result with run_spec. Ask for prerequisites with inbox_report.`;
-}
+};
 
-export async function selectedSpecResult(job: Job) {
+export const selectedSpecResult = async function selectedSpecResult(job: Job) {
   const { candidate } = await selectedCandidate(job);
   const spec = candidate.specId
     ? await specsRepository.getSpec(candidate.specId)
     : null;
   const run =
-    (spec ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0] : null) ??
+    (spec
+      ? await (async () => {
+          const awaitedValue12937 = await runsRepository.listRuns(spec.id, {
+            limit: 1,
+          });
+          return awaitedValue12937[0];
+        })()
+      : null) ??
     (candidate.runId ? await runsRepository.getRun(candidate.runId) : null);
   const evidenceReview =
     run && run.status !== "running"
@@ -417,17 +442,20 @@ export async function selectedSpecResult(job: Job) {
         ? `${reviewNextStep(evidenceReview) ?? "Inspect the failure on the live page."} Then call create_spec again with the corrected Spec.`
         : undefined,
   };
-}
+};
 
-const MAX_DRAFT_RUNS = 3;
+const draftFailures = async function draftFailures(
+  specId: string
+): Promise<number> {
+  return await (async () => {
+    const awaitedValue13869 = await runsRepository.listRuns(specId, {
+      limit: 20,
+    });
+    return awaitedValue13869.filter((run) => run.status === "failed").length;
+  })();
+};
 
-async function draftFailures(specId: string): Promise<number> {
-  return (await runsRepository.listRuns(specId, { limit: 20 })).filter(
-    (run) => run.status === "failed"
-  ).length;
-}
-
-export async function createSelectedSpec(
+export const createSelectedSpec = async function createSelectedSpec(
   job: Job,
   input: unknown,
   options: {
@@ -452,7 +480,7 @@ export async function createSelectedSpec(
     throw new Error(validation.error);
   }
   await options.checkPolicy?.();
-  let spec = await specsRepository.getSpec(candidate.specId!);
+  let spec = await specsRepository.getSpec(requireValue(candidate.specId));
   let revised = false;
   if (!spec) {
     ({ spec } = await createSpecInRepo(
@@ -502,7 +530,12 @@ export async function createSelectedSpec(
   }
   await jobsRepository.update(job.id, { specId: spec.id });
   await options.checkPolicy?.();
-  const existing = (await runsRepository.listRuns(spec.id, { limit: 1 }))[0];
+  const existing = await (async () => {
+    const awaitedValue16535 = await runsRepository.listRuns(spec.id, {
+      limit: 1,
+    });
+    return awaitedValue16535[0];
+  })();
   if (existing && existing.status !== "running" && !revised) {
     await updateCandidate(item.id, candidate.id, { runId: existing.id });
     return selectedSpecResult(job);
@@ -533,9 +566,11 @@ export async function createSelectedSpec(
     await updateCandidate(item.id, candidate.id, { error: message });
     throw error;
   }
-}
+};
 
-export async function presentSpecBatch(item: InboxItem) {
+export const presentSpecBatch = async function presentSpecBatch(
+  item: InboxItem
+) {
   const batch = batchOf(item);
   const scrub = createProjectScrubber(item.projectId);
   const inbox = await jobsRepository.itemsForJobs(
@@ -556,7 +591,12 @@ export async function presentSpecBatch(item: InboxItem) {
           : null;
       const run =
         (spec
-          ? (await runsRepository.listRuns(spec.id, { limit: 1 }))[0]
+          ? await (async () => {
+              const awaitedValue18335 = await runsRepository.listRuns(spec.id, {
+                limit: 1,
+              });
+              return awaitedValue18335[0];
+            })()
           : null) ??
         (candidate.runId ? await runsRepository.getRun(candidate.runId) : null);
       const question = job
@@ -567,20 +607,30 @@ export async function presentSpecBatch(item: InboxItem) {
               other.status === "pending"
           )
         : null;
-      const state = candidate.selected
-        ? run && run.status !== "running"
-          ? run.status === "passed"
-            ? "passed"
-            : "failed"
-          : job?.status === "blocked"
-            ? "needs_answer"
-            : job?.status === "running" || run?.status === "running"
-              ? "generating"
-              : ["completed", "cancelled"].includes(job?.status ?? "") ||
-                  (job?.status === "stalled" && !job.retryAt)
-                ? "stopped"
-                : "queued"
-        : "proposed";
+      const state = (() => {
+        if (candidate.selected) {
+          if (run && run.status !== "running") {
+            if (run.status === "passed") {
+              return "passed";
+            }
+            return "failed";
+          }
+          if (job?.status === "blocked") {
+            return "needs_answer";
+          }
+          if (job?.status === "running" || run?.status === "running") {
+            return "generating";
+          }
+          if (
+            ["completed", "cancelled"].includes(job?.status ?? "") ||
+            (job?.status === "stalled" && !job.retryAt)
+          ) {
+            return "stopped";
+          }
+          return "queued";
+        }
+        return "proposed";
+      })();
       const error = run?.failReason ?? candidate.error ?? job?.stopReason;
       return {
         ...candidate,
@@ -607,4 +657,8 @@ export async function presentSpecBatch(item: InboxItem) {
       batch.contextRevisionId && context?.status !== "confirmed"
     ),
   };
-}
+};
+
+const batchLocks = createKeyedLock();
+
+const MAX_DRAFT_RUNS = 3;

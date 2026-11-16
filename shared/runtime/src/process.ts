@@ -45,7 +45,7 @@ export interface ProcessResult {
 
 const activeProcesses = new Set<ChildProcess>();
 
-export function minimalChildEnv(
+export const minimalChildEnv = function minimalChildEnv(
   extra: Record<string, string | undefined> = {}
 ): Record<string, string> {
   const env: Record<string, string> = {};
@@ -67,33 +67,42 @@ export function minimalChildEnv(
   }
   for (const [key, value] of Object.entries(extra)) {
     if (value === undefined) {
+      // oxlint-disable-next-line typescript/no-dynamic-delete -- An unset environment variable must be absent from the child process environment.
       delete env[key];
     } else {
       env[key] = value;
     }
   }
   return env;
-}
+};
 
-export function terminateProcessTree(proc: ChildProcess): void {
+export const terminateProcessTree = function terminateProcessTree(
+  proc: ChildProcess
+): void {
   if (process.platform === "linux" && proc.pid) {
     try {
       process.kill(-proc.pid, "SIGKILL");
       return;
-    } catch {}
+    } catch {
+      /* Cleanup is best effort; preserve the original result. */
+      /* Cleanup is best effort; preserve the original result. */
+    }
   }
   try {
     proc.kill("SIGKILL");
-  } catch {}
-}
+  } catch {
+    /* Cleanup is best effort; preserve the original result. */
+    /* Cleanup is best effort; preserve the original result. */
+  }
+};
 
-export function stopActiveProcesses(): void {
+export const stopActiveProcesses = function stopActiveProcesses(): void {
   for (const proc of activeProcesses) {
     terminateProcessTree(proc);
   }
-}
+};
 
-export function runNodeCli(
+export const runNodeCli = function runNodeCli(
   script: string,
   args: string[],
   options: {
@@ -103,6 +112,7 @@ export function runNodeCli(
     signal?: AbortSignal;
   }
 ): Promise<ProcessResult> {
+  // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
   return new Promise((resolve, reject) => {
     options.signal?.throwIfAborted();
     const proc = spawn(process.execPath, [script, ...args], {
@@ -156,14 +166,14 @@ export function runNodeCli(
       finish({ code, output: collected(), timedOut: false });
     });
   });
-}
+};
 
-function maxConcurrentRuns(): number {
+const maxConcurrentRuns = function maxConcurrentRuns(): number {
   const value = Number(process.env.SPECBOOK_MAX_CONCURRENT_RUNS);
   return Number.isInteger(value) && value > 0
     ? value
     : DEFAULT_MAX_CONCURRENT_RUNS;
-}
+};
 
 let runningSlots = 0;
 const slotQueue: {
@@ -172,12 +182,13 @@ const slotQueue: {
   abort: () => void;
 }[] = [];
 
-export async function withRunSlot<T>(
+export const withRunSlot = async function withRunSlot<T>(
   work: () => Promise<T>,
   signal?: AbortSignal
 ): Promise<T> {
   signal?.throwIfAborted();
   if (runningSlots >= maxConcurrentRuns()) {
+    // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
     await new Promise<void>((resolve, reject) => {
       const waiter = {
         resume: resolve,
@@ -212,4 +223,4 @@ export async function withRunSlot<T>(
       runningSlots -= 1;
     }
   }
-}
+};

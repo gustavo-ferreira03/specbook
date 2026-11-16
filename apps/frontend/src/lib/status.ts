@@ -176,7 +176,7 @@ const STATUS: Record<
 export const NO_SPECS_DESCRIPTION =
   "Describe a behavior in a chat and the agent saves it here as a Spec.";
 
-export function statusMeta(status: string): StatusMeta {
+export const statusMeta = function statusMeta(status: string): StatusMeta {
   const base = STATUS[status as AnyStatus] ?? {
     label: status,
     runLabel: status,
@@ -185,7 +185,7 @@ export function statusMeta(status: string): StatusMeta {
     icon: CircleDashed,
   };
   return { ...base, ...TONES[base.tone] };
-}
+};
 
 export const SPEC_STATUS_ORDER: SpecStatus[] = [
   "failed",
@@ -197,10 +197,12 @@ export const SPEC_STATUS_ORDER: SpecStatus[] = [
 
 export type StatusCounts = Partial<Record<SpecStatus, number>>;
 
-export function countStatuses(items: { status: SpecStatus }[]): StatusCounts {
+export const countStatuses = function countStatuses(
+  items: { status: SpecStatus }[]
+): StatusCounts {
   const counts: StatusCounts = {};
   for (const item of items) {
     counts[item.status] = (counts[item.status] ?? 0) + 1;
   }
   return counts;
-}
+};

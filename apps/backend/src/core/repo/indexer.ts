@@ -37,49 +37,26 @@ import {
   specTestFile,
   specYamlFile,
   validateSpec,
+  // oxlint-disable-next-line import/no-cycle -- These service modules call each other after initialization; keep the existing orchestration boundary.
 } from "./writer";
 
-export interface ReindexResult {
-  specsSeen: number;
-  specsRemoved: number;
-  featuresRemoved: number;
-  invalidSpecs: string[];
-}
-
-interface FoundSpec {
-  path: string;
-  dirPath: string;
-  yaml: string | null;
-  testSource: string | null;
-  unsafeReason: string | null;
-}
-
-interface PlannedSpec {
-  item: FoundSpec;
-  feature: Feature;
-  existing: Spec | undefined;
-  title: string;
-  description: string;
-  humanSpec: HumanSpec | null;
-  sourceHash: string;
-  markdownHash: string;
-  status: Spec["status"];
-  invalidReason: string | null;
-  needsValidation: boolean;
-}
-
-async function isDirectory(target: string): Promise<boolean> {
+const isDirectory = async function isDirectory(
+  target: string
+): Promise<boolean> {
   try {
-    return (await fs.stat(target)).isDirectory();
+    return await (async () => {
+      const awaitedValue1428 = await fs.stat(target);
+      return awaitedValue1428.isDirectory();
+    })();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return false;
     }
     throw error;
   }
-}
+};
 
-async function readRepoEntry(
+const readRepoEntry = async function readRepoEntry(
   root: string,
   relative: string
 ): Promise<{ content: string | null; unsafe: string | null }> {
@@ -101,9 +78,9 @@ async function readRepoEntry(
     }
     throw error;
   }
-}
+};
 
-async function walk(
+const walk = async function walk(
   root: string,
   relative: string,
   dirs: string[],
@@ -117,11 +94,13 @@ async function walk(
       continue;
     }
     const entryRelative = `${relative}/${entry.name}`;
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const specYaml = await readRepoEntry(root, specYamlFile(entryRelative));
     if (specYaml.content !== null || specYaml.unsafe !== null) {
       const test = specYaml.unsafe
         ? { content: null, unsafe: null }
-        : await readRepoEntry(root, specTestFile(entryRelative));
+        : // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+          await readRepoEntry(root, specTestFile(entryRelative));
       found.push({
         path: entryRelative,
         dirPath: relative,
@@ -131,12 +110,13 @@ async function walk(
       });
     } else {
       dirs.push(entryRelative);
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await walk(root, entryRelative, dirs, found);
     }
   }
-}
+};
 
-async function planFeatures(
+const planFeatures = async function planFeatures(
   projectId: string,
   root: string,
   dirs: string[],
@@ -153,8 +133,9 @@ async function planFeatures(
   const seenIds = new Set<string>();
   const queries: DbQuery[] = [];
 
-  for (const dir of [...dirs].sort()) {
+  for (const dir of [...dirs].toSorted()) {
     let doc: ReturnType<typeof parseFeatureYaml> | null = null;
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const yaml = await readRepoEntry(root, featureYamlFile(dir));
     if (yaml.unsafe) {
       console.warn(
@@ -164,7 +145,9 @@ async function planFeatures(
     if (yaml.content !== null) {
       try {
         doc = parseFeatureYaml(yaml.content);
-      } catch {}
+      } catch {
+        /* Cleanup is best effort after the operation has completed or failed. */
+      }
     }
     const parentPath = path.posix.dirname(dir);
     const parentId =
@@ -209,9 +192,10 @@ async function planFeatures(
     unseen: existing.filter((feature) => !seenIds.has(feature.id)),
     queries,
   };
-}
+};
 
-function planSpecs(
+// oxlint-disable-next-line complexity -- Keep the indexer decision tree together so state transitions and error ordering remain explicit.
+const planSpecs = function planSpecs(
   found: FoundSpec[],
   featuresByPath: Map<string, Feature>,
   existingSpecs: Spec[]
@@ -304,9 +288,9 @@ function planSpecs(
     }
   }
   return planned;
-}
+};
 
-function validatePlanned(planned: PlannedSpec[]): void {
+const validatePlanned = function validatePlanned(planned: PlannedSpec[]): void {
   for (const entry of planned) {
     if (!entry.needsValidation) {
       continue;
@@ -325,9 +309,9 @@ function validatePlanned(planned: PlannedSpec[]): void {
       entry.invalidReason = validation.error;
     }
   }
-}
+};
 
-function specQuery(
+const specQuery = function specQuery(
   projectId: string,
   entry: PlannedSpec
 ): { id: string; query: DbQuery | null } {
@@ -368,9 +352,9 @@ function specQuery(
       ? specsRepository.updateSpecQuery(existing.id, patch)
       : null,
   };
-}
+};
 
-async function planContext(
+const planContext = async function planContext(
   projectId: string,
   root: string
 ): Promise<{ queries: DbQuery[]; syncError: string | null | undefined }> {
@@ -411,9 +395,9 @@ async function planContext(
     ],
     syncError: null,
   };
-}
+};
 
-async function removeRunDirs(
+const removeRunDirs = async function removeRunDirs(
   projectId: string,
   runIds: string[]
 ): Promise<void> {
@@ -426,9 +410,12 @@ async function removeRunDirs(
       fs.rm(path.join(runsDir, runId), { recursive: true, force: true })
     )
   );
-}
+};
 
-function withAncestors(ids: Set<string>, features: Feature[]): Set<string> {
+const withAncestors = function withAncestors(
+  ids: Set<string>,
+  features: Feature[]
+): Set<string> {
   const byId = new Map(features.map((feature) => [feature.id, feature]));
   const result = new Set<string>();
   for (const id of ids) {
@@ -441,18 +428,18 @@ function withAncestors(ids: Set<string>, features: Feature[]): Set<string> {
     }
   }
   return result;
-}
+};
 
-export async function reindexProject(
+export const reindexProject = async function reindexProject(
   projectId: string,
   options: { allowDirty?: boolean } = {}
 ): Promise<ReindexResult> {
-  return repoGit.withRepoLock(projectId, () =>
+  return await repoGit.withRepoLock(projectId, () =>
     reindexProjectUnlocked(projectId, options)
   );
-}
+};
 
-export async function reindexProjectUnlocked(
+export const reindexProjectUnlocked = async function reindexProjectUnlocked(
   projectId: string,
   options: { allowDirty?: boolean } = {}
 ): Promise<ReindexResult> {
@@ -570,9 +557,10 @@ export async function reindexProjectUnlocked(
   }
   await removeRunDirs(projectId, removedRunIds);
 
-  const workingTreeChanged = !(
-    await repoGit.getProjectGit(projectId).status()
-  ).isClean();
+  const workingTreeChanged = !(await (async () => {
+    const awaitedValue15613 = await repoGit.getProjectGit(projectId).status();
+    return awaitedValue15613.isClean();
+  })());
   if (workingTreeChanged) {
     await repoGit.commitAll(projectId, "specbook: import working tree changes");
   }
@@ -589,19 +577,55 @@ export async function reindexProjectUnlocked(
     featuresRemoved: removedFeatureIds.length,
     invalidSpecs,
   };
+};
+
+export const reindexAllProjects =
+  async function reindexAllProjects(): Promise<void> {
+    for (const project of await projectsRepository.listProjects()) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        await repoGit.ensureProjectRepo(project.id);
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        await repoBare.ensureBareRepo(
+          project.id,
+          repoGit.getRepoDir(project.id)
+        );
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        await reindexProject(project.id, { allowDirty: false });
+      } catch (error) {
+        console.error(
+          `[specbook] reindex failed for project ${project.id}:`,
+          error
+        );
+      }
+    }
+  };
+
+export interface ReindexResult {
+  specsSeen: number;
+  specsRemoved: number;
+  featuresRemoved: number;
+  invalidSpecs: string[];
 }
 
-export async function reindexAllProjects(): Promise<void> {
-  for (const project of await projectsRepository.listProjects()) {
-    try {
-      await repoGit.ensureProjectRepo(project.id);
-      await repoBare.ensureBareRepo(project.id, repoGit.getRepoDir(project.id));
-      await reindexProject(project.id, { allowDirty: false });
-    } catch (error) {
-      console.error(
-        `[specbook] reindex failed for project ${project.id}:`,
-        error
-      );
-    }
-  }
+interface FoundSpec {
+  path: string;
+  dirPath: string;
+  yaml: string | null;
+  testSource: string | null;
+  unsafeReason: string | null;
+}
+
+interface PlannedSpec {
+  item: FoundSpec;
+  feature: Feature;
+  existing: Spec | undefined;
+  title: string;
+  description: string;
+  humanSpec: HumanSpec | null;
+  sourceHash: string;
+  markdownHash: string;
+  status: Spec["status"];
+  invalidReason: string | null;
+  needsValidation: boolean;
 }

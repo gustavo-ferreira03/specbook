@@ -22,48 +22,22 @@ import { createSelectedSpec, selectedSpecResult } from "./spec-batches";
 import { createTriageTools } from "./triage";
 import { verifyProposal } from "./verification";
 
-const JOB_SYSTEM_PROMPT = loadPrompt("job-system-prompt.txt");
-
-export const AGENT_RULES_VERSION = 4;
-
-export interface TurnPolicy {
-  prompt: string;
-  browserScope: "spec" | "explore";
-  baseUrl?: string;
-  environment?: RunEnvironment;
-  infrastructureFailure?(error: string, code?: ErrorCode): Promise<void>;
-  browserReady?(): Promise<void>;
-  tools(tools: ToolDefinition[]): ToolDefinition[];
-  tokens(count: number): void;
-  flush(): Promise<void>;
-}
-
-function result(value: unknown, terminate = false) {
+const result = function result(value: unknown, terminate = false) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(value) }],
     details: undefined,
     terminate,
   };
-}
+};
 
-interface ToolCall {
-  job: Job;
-  tool: ToolDefinition;
-  args: Parameters<ToolDefinition["execute"]>;
-  abort: () => void;
-  check: () => Promise<void>;
-  baseUrl?: string;
-  environment?: RunEnvironment;
-}
-type ToolHandler = (
-  call: ToolCall
-) => Promise<Awaited<ReturnType<ToolDefinition["execute"]>>>;
+const executeOriginal = async function executeOriginal({
+  tool,
+  args,
+}: ToolCall) {
+  return await tool.execute(...args);
+};
 
-async function executeOriginal({ tool, args }: ToolCall) {
-  return tool.execute(...args);
-}
-
-async function createSelected({
+const createSelected = async function createSelected({
   job,
   args,
   check,
@@ -78,25 +52,35 @@ async function createSelected({
       environment,
     })
   );
-}
+};
 
-async function rejectSelectedMutation(): Promise<never> {
-  throw new Error(
-    "Create only the selected Spec using its assigned feature. Do not change existing Specs. To revise the selected Spec after a failed run, call create_spec again with the corrected Spec."
-  );
-}
+const rejectSelectedMutation =
+  async function rejectSelectedMutation(): Promise<never> {
+    return await Promise.reject(
+      new Error(
+        "Create only the selected Spec using its assigned feature. Do not change existing Specs. To revise the selected Spec after a failed run, call create_spec again with the corrected Spec."
+      )
+    );
+  };
 
-async function readSelected({ job }: ToolCall) {
+const readSelected = async function readSelected({ job }: ToolCall) {
   return result(await selectedSpecResult(job));
-}
+};
 
-async function rejectCoverageMutation(): Promise<never> {
-  throw new Error(
-    "Use propose_spec_batch to suggest Specs for uncovered areas. The human chooses which Specs to create."
-  );
-}
+const rejectCoverageMutation =
+  async function rejectCoverageMutation(): Promise<never> {
+    return await Promise.reject(
+      new Error(
+        "Use propose_spec_batch to suggest Specs for uncovered areas. The human chooses which Specs to create."
+      )
+    );
+  };
 
-async function proposeAndVerify({ job, tool, args }: ToolCall) {
+const proposeAndVerify = async function proposeAndVerify({
+  job,
+  tool,
+  args,
+}: ToolCall) {
   const item = await proposeMutation(job, tool.name, args[1]);
   const verification = ["failure_triage", "regenerate"].includes(job.kind)
     ? await verifyProposal(job, item, args[2])
@@ -104,40 +88,57 @@ async function proposeAndVerify({ job, tool, args }: ToolCall) {
   if (verification?.status === "passed") {
     await applyVerifiedRepairs(job.projectId);
   }
-  const saved = (await jobsRepository.item(item.id))?.status === "approved";
+  const saved =
+    (await (async () => {
+      const resolvedValue2930 = await jobsRepository.item(item.id);
+      return resolvedValue2930?.status;
+    })()) === "approved";
   const unproven =
     verification?.status === "passed"
       ? reviewNextStep(verification.review)
       : undefined;
   return result({
     inboxId: item.id,
-    status:
-      verification && (verification.status !== "passed" || unproven)
-        ? "unfinished"
-        : saved
-          ? "saved"
-          : "proposed",
+    status: (() => {
+      if (verification && (verification.status !== "passed" || unproven)) {
+        return "unfinished";
+      }
+      if (saved) {
+        return "saved";
+      }
+      return "proposed";
+    })(),
     verification,
-    message: unproven
-      ? `This candidate passed but does not prove the expected result. ${unproven} Then call update_spec again.`
-      : verification && verification.status !== "passed"
-        ? "This candidate did not pass and is not visible for approval. Inspect the failure and keep working on a minimal repair. Do not ask the human to approve unfinished work."
-        : saved
-          ? "The verified repair was saved to the project. Report the result in one short sentence and finish."
-          : "Await human approval; no repository files changed.",
+    message: (() => {
+      if (unproven) {
+        return `This candidate passed but does not prove the expected result. ${unproven} Then call update_spec again.`;
+      }
+      if (verification && verification.status !== "passed") {
+        return "This candidate did not pass and is not visible for approval. Inspect the failure and keep working on a minimal repair. Do not ask the human to approve unfinished work.";
+      }
+      if (saved) {
+        return "The verified repair was saved to the project. Report the result in one short sentence and finish.";
+      }
+      return "Await human approval; no repository files changed.";
+    })(),
   });
-}
+};
 
-async function runInvestigated({ job, tool, args }: ToolCall) {
+const runInvestigated = async function runInvestigated({
+  job,
+  tool,
+  args,
+}: ToolCall) {
   if (z.object({ specId: z.string() }).parse(args[1]).specId !== job.specId) {
     throw new Error("Run the Spec being investigated");
   }
-  const item = (
-    await jobsRepository.itemsForJob(job.id, {
+  const item = await (async () => {
+    const awaitedValue4206 = await jobsRepository.itemsForJob(job.id, {
       kind: "spec_fix",
       statuses: ["pending"],
-    })
-  )[0];
+    });
+    return awaitedValue4206[0];
+  })();
   if (item) {
     return result(await verifyProposal(job, item, args[2]));
   }
@@ -158,16 +159,29 @@ async function runInvestigated({ job, tool, args }: ToolCall) {
     await jobsRepository.update(job.id, { runId: rerun.data.runId });
   }
   return output;
-}
+};
 
-async function requestCredentials({ job, tool, args, abort }: ToolCall) {
+const requestCredentials = async function requestCredentials({
+  job,
+  tool,
+  args,
+  abort,
+}: ToolCall) {
   if (
-    (await credentialsRepository.listProfiles(job.projectId)).length > 0 &&
-    !(await jobsRepository.actions(job.id)).some(
-      (action) =>
-        action.action === "fill_secret" ||
-        action.action === "browser_vault_fill"
-    )
+    (await (async () => {
+      const awaitedValue5039 = await credentialsRepository.listProfiles(
+        job.projectId
+      );
+      return awaitedValue5039.length;
+    })()) > 0 &&
+    !(await (async () => {
+      const awaitedValue5116 = await jobsRepository.actions(job.id);
+      return awaitedValue5116.some(
+        (action) =>
+          action.action === "fill_secret" ||
+          action.action === "browser_vault_fill"
+      );
+    })())
   ) {
     throw new Error(
       "Do not ask for access yet: this project has saved credential profiles. Call browser_vault_list, sign in with browser_vault_fill on the login form, and continue. Ask for a login only if signing in with them fails."
@@ -182,7 +196,7 @@ async function requestCredentials({ job, tool, args, abort }: ToolCall) {
               .parse(args[1])
               .label?.trim()
               .toLowerCase()
-              .replaceAll(/[^a-z0-9_-]+/g, "-") || "login",
+              .replaceAll(/[^a-z0-9_-]+/gu, "-") || "login",
           fields: [
             { key: "username", label: "Email or username" },
             { key: "password", label: "Password" },
@@ -208,41 +222,9 @@ async function requestCredentials({ job, tool, args, abort }: ToolCall) {
   });
   abort();
   return result({ inboxId: item.id, status: "blocked" }, true);
-}
+};
 
-const commonHandlers = new Map<string, ToolHandler>([
-  ["create_spec", proposeAndVerify],
-  ["update_spec", proposeAndVerify],
-  ["create_feature", proposeAndVerify],
-  ["request_credential", requestCredentials],
-  ["browser_vault_save_login", requestCredentials],
-]);
-const jobHandlers = new Map<string, Map<string, ToolHandler>>([
-  [
-    "generate_spec",
-    new Map<string, ToolHandler>([
-      ["create_spec", createSelected],
-      ["create_feature", rejectSelectedMutation],
-      ["update_spec", rejectSelectedMutation],
-      ["propose_spec_batch", rejectSelectedMutation],
-      ["start_background_task", rejectSelectedMutation],
-      ["run_spec", readSelected],
-    ]),
-  ],
-  [
-    "coverage",
-    new Map<string, ToolHandler>([
-      ["create_spec", rejectCoverageMutation],
-      ["create_feature", rejectCoverageMutation],
-    ]),
-  ],
-  [
-    "failure_triage",
-    new Map<string, ToolHandler>([["run_spec", runInvestigated]]),
-  ],
-]);
-
-export function createJobPolicy(
+export const createJobPolicy = function createJobPolicy(
   job: Job,
   abort: () => void,
   baseUrl?: string,
@@ -330,7 +312,10 @@ export function createJobPolicy(
           if (
             report.kind === "question" &&
             job.kind === "failure_triage" &&
-            (await jobsRepository.get(job.id))?.classification === "test_drift"
+            (await (async () => {
+              const resolvedValue10020 = await jobsRepository.get(job.id);
+              return resolvedValue10020?.classification;
+            })()) === "test_drift"
           ) {
             throw new Error(
               "Do not ask permission to repair test drift. Call update_spec with the fix; Specbook runs it in isolation and saves or holds it for review on its own."
@@ -381,16 +366,22 @@ export function createJobPolicy(
         executionMode: "sequential" as const,
         async execute(id, params, signal, onUpdate, ctx) {
           await check();
-          actions++;
+          actions += 1;
           await jobsRepository.update(job.id, { actionsUsed: actions });
           await jobsRepository.log(
             job.id,
             tool.name,
-            (await scrub(JSON.stringify(params))).slice(0, 6000)
+            await (async () => {
+              const awaitedValue11655 = await scrub(JSON.stringify(params));
+              return awaitedValue11655.slice(0, 6000);
+            })()
           );
           try {
             if (
-              (await jobsRepository.get(job.id))?.status !== "running" ||
+              (await (async () => {
+                const resolvedValue12266 = await jobsRepository.get(job.id);
+                return resolvedValue12266?.status;
+              })()) !== "running" ||
               (await isAgentPaused(job.projectId))
             ) {
               abort();
@@ -443,6 +434,7 @@ export function createJobPolicy(
     tokens(count) {
       pending = pending
         .then(() => jobsRepository.recordUsage(job.id, count))
+        // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires an event or callback handler.
         .catch((error) =>
           logger.error("job usage could not be recorded", {
             jobId: job.id,
@@ -452,4 +444,65 @@ export function createJobPolicy(
     },
     flush: () => pending,
   };
+};
+
+const JOB_SYSTEM_PROMPT = loadPrompt("job-system-prompt.txt");
+
+export const AGENT_RULES_VERSION = 4;
+
+export interface TurnPolicy {
+  prompt: string;
+  browserScope: "spec" | "explore";
+  baseUrl?: string;
+  environment?: RunEnvironment;
+  infrastructureFailure?: (error: string, code?: ErrorCode) => Promise<void>;
+  browserReady?: () => Promise<void>;
+  tools: (tools: ToolDefinition[]) => ToolDefinition[];
+  tokens: (count: number) => void;
+  flush: () => Promise<void>;
 }
+
+interface ToolCall {
+  job: Job;
+  tool: ToolDefinition;
+  args: Parameters<ToolDefinition["execute"]>;
+  abort: () => void;
+  check: () => Promise<void>;
+  baseUrl?: string;
+  environment?: RunEnvironment;
+}
+type ToolHandler = (
+  call: ToolCall
+) => Promise<Awaited<ReturnType<ToolDefinition["execute"]>>>;
+
+const commonHandlers = new Map<string, ToolHandler>([
+  ["create_spec", proposeAndVerify],
+  ["update_spec", proposeAndVerify],
+  ["create_feature", proposeAndVerify],
+  ["request_credential", requestCredentials],
+  ["browser_vault_save_login", requestCredentials],
+]);
+const jobHandlers = new Map<string, Map<string, ToolHandler>>([
+  [
+    "generate_spec",
+    new Map<string, ToolHandler>([
+      ["create_spec", createSelected],
+      ["create_feature", rejectSelectedMutation],
+      ["update_spec", rejectSelectedMutation],
+      ["propose_spec_batch", rejectSelectedMutation],
+      ["start_background_task", rejectSelectedMutation],
+      ["run_spec", readSelected],
+    ]),
+  ],
+  [
+    "coverage",
+    new Map<string, ToolHandler>([
+      ["create_spec", rejectCoverageMutation],
+      ["create_feature", rejectCoverageMutation],
+    ]),
+  ],
+  [
+    "failure_triage",
+    new Map<string, ToolHandler>([["run_spec", runInvestigated]]),
+  ],
+]);

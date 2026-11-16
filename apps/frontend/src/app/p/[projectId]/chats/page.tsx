@@ -10,17 +10,17 @@ import {
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
-import { useAuth } from "@/components/AuthProvider";
-import { EmptyState } from "@/components/EmptyState";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { RelativeTime } from "@/components/RelativeTime";
+import { useAuth } from "@/components/auth-provider";
+import { EmptyState } from "@/components/empty-state";
+import { PageContainer, PageHeader } from "@/components/page-header";
+import { RelativeTime } from "@/components/relative-time";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, isAbortError, listProjectChats } from "@/lib/api";
 import { matchesInvalidation, onInvalidate } from "@/lib/invalidation";
 import type { Chat } from "@/lib/types";
 
-export default function ChatsHome({
+const ChatsHome = function ChatsHome({
   params,
 }: {
   params: Promise<{ projectId: string }>;
@@ -35,16 +35,21 @@ export default function ChatsHome({
   useEffect(() => {
     const controller = new AbortController();
     const load = () => {
-      listProjectChats(projectId, controller.signal)
-        .then(({ chats: result }) => {
+      (async () => {
+        try {
+          const resolvedValue = await listProjectChats(
+            projectId,
+            controller.signal
+          );
+          const { chats: result } = resolvedValue;
           setChats(result);
           setError("");
-        })
-        .catch((loadError) => {
+        } catch (loadError) {
           if (!isAbortError(loadError)) {
             setError(errorMessage(loadError));
           }
-        });
+        }
+      })();
     };
     load();
     const stop = onInvalidate((event) => {
@@ -56,6 +61,7 @@ export default function ChatsHome({
       controller.abort();
       stop();
     };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
   }, [projectId, refreshKey]);
 
   const newChatButton = canEdit && (
@@ -69,102 +75,111 @@ export default function ChatsHome({
   return (
     <div className="bg-surface flex min-h-full flex-col">
       <PageHeader title="Chats" width="chat" />
-      {error && !chats ? (
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState
-            role="alert"
-            tone="danger"
-            icon={AlertCircle}
-            title="Chats could not load"
-            description={error}
-            action={
-              <Button
-                type="button"
-                onClick={() => setRefreshKey((key) => key + 1)}
-              >
-                <RefreshCw size={14} /> Try again
-              </Button>
-            }
-          />
-        </div>
-      ) : chats ? (
-        chats.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center">
-            <EmptyState
-              icon={MessageSquareText}
-              title="No chats yet"
-              description="Describe a behavior while the agent operates a live browser, and save the result as a Spec."
-              action={
-                canEdit && (
-                  <Button asChild>
-                    <Link href={newChatHref}>
-                      <MessageSquareText size={14} /> New chat
-                    </Link>
-                  </Button>
-                )
-              }
-            />
-          </div>
-        ) : (
-          <PageContainer width="chat">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="tabular text-meta text-ink-muted">
-                {chats.length}{" "}
-                {chats.length === 1 ? "conversation" : "conversations"}
-              </p>
-              {newChatButton}
-            </div>
-            <ul
-              className="sheet divide-line bg-surface divide-y overflow-hidden rounded-xl"
-              aria-label="Chats"
-            >
-              {chats.map((chat) => (
-                <li key={chat.id}>
-                  <Link
-                    href={`/p/${projectId}/chats/${chat.id}`}
-                    className="group hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:ring-ring flex items-center gap-3 px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+      {(() => {
+        if (error && !chats) {
+          return (
+            <div className="flex flex-1 items-center justify-center">
+              <EmptyState
+                role="alert"
+                tone="danger"
+                icon={AlertCircle}
+                title="Chats could not load"
+                description={error}
+                action={
+                  <Button
+                    type="button"
+                    onClick={() => setRefreshKey((key) => key + 1)}
                   >
-                    <span
-                      className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-full border"
-                      aria-hidden="true"
+                    <RefreshCw size={14} /> Try again
+                  </Button>
+                }
+              />
+            </div>
+          );
+        }
+        if (chats) {
+          if (chats.length === 0) {
+            return (
+              <div className="flex flex-1 items-center justify-center">
+                <EmptyState
+                  icon={MessageSquareText}
+                  title="No chats yet"
+                  description="Describe a behavior while the agent operates a live browser, and save the result as a Spec."
+                  action={
+                    canEdit && (
+                      <Button asChild>
+                        <Link href={newChatHref}>
+                          <MessageSquareText size={14} /> New chat
+                        </Link>
+                      </Button>
+                    )
+                  }
+                />
+              </div>
+            );
+          }
+          return (
+            <PageContainer width="chat">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="tabular text-meta text-ink-muted">
+                  {chats.length}{" "}
+                  {chats.length === 1 ? "conversation" : "conversations"}
+                </p>
+                {newChatButton}
+              </div>
+              <ul
+                className="sheet divide-line bg-surface divide-y overflow-hidden rounded-xl"
+                aria-label="Chats"
+              >
+                {chats.map((chat) => (
+                  <li key={chat.id}>
+                    <Link
+                      href={`/p/${projectId}/chats/${chat.id}`}
+                      className="group hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:ring-ring flex items-center gap-3 px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
                     >
-                      <MessageSquareText size={14} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="text-body text-ink block truncate font-medium">
-                        {chat.title}
+                      <span
+                        className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-full border"
+                        aria-hidden="true"
+                      >
+                        <MessageSquareText size={14} />
                       </span>
-                      <RelativeTime
-                        value={chat.createdAt}
-                        prefix="Started"
-                        className="text-meta text-ink-subtle block"
+                      <span className="min-w-0 flex-1">
+                        <span className="text-body text-ink block truncate font-medium">
+                          {chat.title}
+                        </span>
+                        <RelativeTime
+                          value={chat.createdAt}
+                          prefix="Started"
+                          className="text-meta text-ink-subtle block"
+                        />
+                      </span>
+                      <ChevronRight
+                        size={15}
+                        className="text-ink-disabled group-hover:text-ink-muted shrink-0 transition-colors"
+                        aria-hidden="true"
                       />
-                    </span>
-                    <ChevronRight
-                      size={15}
-                      className="text-ink-disabled group-hover:text-ink-muted shrink-0 transition-colors"
-                      aria-hidden="true"
-                    />
-                  </Link>
-                </li>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </PageContainer>
+          );
+        }
+        return (
+          <PageContainer width="chat">
+            <output
+              className="block space-y-2"
+              aria-busy="true"
+              aria-label="Loading chats"
+            >
+              {[0, 1, 2].map((row) => (
+                <Skeleton key={row} className="h-[60px] w-full rounded-lg" />
               ))}
-            </ul>
+            </output>
           </PageContainer>
-        )
-      ) : (
-        <PageContainer width="chat">
-          <div
-            className="space-y-2"
-            aria-busy="true"
-            aria-label="Loading chats"
-            role="status"
-          >
-            {[0, 1, 2].map((row) => (
-              <Skeleton key={row} className="h-[60px] w-full rounded-lg" />
-            ))}
-          </div>
-        </PageContainer>
-      )}
+        );
+      })()}
     </div>
   );
-}
+};
+export default ChatsHome;

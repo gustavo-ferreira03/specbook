@@ -52,6 +52,7 @@ import {
   TunnelWaitInterrupted,
   waitForTunnel,
 } from "../tunnel/registry";
+import { requireValue } from "../utils/require-value";
 import {
   analyzeForRun,
   MAX_FAIL_REASON_CHARS,
@@ -63,86 +64,20 @@ import type { ExecutedRun, RunOptions } from "./execution";
 import { resolveSecretOriginPolicy } from "./secrets";
 import type { SecretOriginPolicy } from "./secrets";
 
-type FinalRunStatus = Exclude<RunStatus, "running">;
-export type RunBatchTrigger =
-  | "deploy"
-  | "ci"
-  | "schedule"
-  | "manual"
-  | "spec_change";
+const refsOf = (analysis: SpecAnalysis) =>
+  analysis.secretRefs.map((ref) => ref.envName);
 
-export interface RunBatchItem {
-  runId: string;
-  specId: string;
-  commitSha: string;
-  sourceHash: string;
-  markdownHash: string;
-  title: string;
-  status: RunStatus;
-  durationMs: number | null;
-  failReason: string | null;
-  awaitingDeploy?: boolean;
-}
-
-export interface CiBatchMetadata {
-  commitSha?: string;
-  ref?: string;
-  buildUrl?: string;
-  qualityGate: { failOnFlaky: boolean; failOnKnownBugs: boolean };
-  knownBugSpecIds: string[];
-}
-
-export interface RunBatch {
-  id: string;
-  projectId: string;
-  label: string;
-  trigger?: RunBatchTrigger;
-  baseUrl?: string;
-  environment?: RunEnvironment;
-  ci?: CiBatchMetadata;
-  status: RunStatus;
-  startedAt: string;
-  durationMs: number | null;
-  failReason: string | null;
-  specs: RunBatchItem[];
-  runnerOptions?: Pick<RunOptions, "persistFailures" | "updateSpecStatus">;
-  tunnelOptions?: Pick<RunOptions, "persistFailures" | "updateSpecStatus">;
-  waitingForTunnelAt?: string;
-}
-
-interface PreparedSpec {
-  run: Run;
-  projectId: string;
-  markdown: string;
-  testSource: string;
-  analysis: SpecAnalysis;
-  item: RunBatchItem;
-  finished?: ExecutedRun;
-}
-
-interface BatchSecrets {
-  env: Record<string, string>;
-  origins: SecretOriginPolicy;
-  scrub: (text: string) => string;
-}
-
-const MAX_BATCH_TIMEOUT_MS = 30 * 60 * 1000;
-
-function batchTimeout(specs: number, environment?: RunEnvironment): number {
+const batchTimeout = function batchTimeout(
+  specs: number,
+  environment?: RunEnvironment
+): number {
   return Math.min(
     MAX_BATCH_TIMEOUT_MS,
     Math.max(1, specs) * RUN_TIMEOUT_MS * (environment?.timeoutScale ?? 1)
   );
-}
-const activeBatches = new Map<string, Promise<void>>();
-const MAX_CACHED_BATCHES = 300;
-const batchIndex = new Map<
-  string,
-  Map<string, { startedAt: string; ci: boolean }>
->();
-const indexedBatchIds = new Map<string, string>();
+};
 
-function indexBatch(batch: RunBatch): void {
+const indexBatch = function indexBatch(batch: RunBatch): void {
   const previousProject = indexedBatchIds.get(batch.id);
   if (previousProject && previousProject !== batch.projectId) {
     const previous = batchIndex.get(previousProject);
@@ -160,17 +95,19 @@ function indexBatch(batch: RunBatch): void {
   indexedBatchIds.delete(batch.id);
   indexedBatchIds.set(batch.id, batch.projectId);
   while (indexedBatchIds.size > MAX_CACHED_BATCHES) {
-    const [id, projectId] = indexedBatchIds.entries().next().value!;
+    const [id, projectId] = requireValue(
+      indexedBatchIds.entries().next().value
+    );
     indexedBatchIds.delete(id);
-    const entries = batchIndex.get(projectId)!;
+    const entries = requireValue(batchIndex.get(projectId));
     entries.delete(id);
     if (!entries.size) {
       batchIndex.delete(projectId);
     }
   }
-}
+};
 
-async function ensureBatchIndex(
+const ensureBatchIndex = async function ensureBatchIndex(
   projectId: string
 ): Promise<Map<string, { startedAt: string; ci: boolean }>> {
   const entries = await fs
@@ -192,8 +129,9 @@ async function ensureBatchIndex(
       : undefined;
     if (metadata) {
       indexedBatchIds.delete(entry.name);
-      indexedBatchIds.set(entry.name, indexedProject!);
+      indexedBatchIds.set(entry.name, requireValue(indexedProject));
     } else {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const batch = await getRunBatch(entry.name);
       if (!batch) {
         continue;
@@ -206,18 +144,18 @@ async function ensureBatchIndex(
     }
   }
   return project;
-}
+};
 
-function batchDirectory(id: string): string {
+const batchDirectory = function batchDirectory(id: string): string {
   const root = path.resolve(runBatchesDir);
   const directory = path.resolve(root, id);
   if (path.dirname(directory) !== root) {
     throw new Error("Invalid run batch id");
   }
   return directory;
-}
+};
 
-async function writeBatch(batch: RunBatch): Promise<void> {
+const writeBatch = async function writeBatch(batch: RunBatch): Promise<void> {
   const directory = batchDirectory(batch.id);
   await fs.mkdir(directory, { recursive: true });
   const target = path.join(directory, "batch.json");
@@ -225,9 +163,11 @@ async function writeBatch(batch: RunBatch): Promise<void> {
   await fs.writeFile(temporary, JSON.stringify(batch), "utf-8");
   await fs.rename(temporary, target);
   indexBatch(batch);
-}
+};
 
-export async function getRunBatch(id: string): Promise<RunBatch | null> {
+export const getRunBatch = async function getRunBatch(
+  id: string
+): Promise<RunBatch | null> {
   try {
     const batch = JSON.parse(
       await fs.readFile(path.join(batchDirectory(id), "batch.json"), "utf-8")
@@ -240,13 +180,16 @@ export async function getRunBatch(id: string): Promise<RunBatch | null> {
     }
     throw error;
   }
-}
+};
 
-export function getRunBatchDirectory(id: string): string {
+export const getRunBatchDirectory = function getRunBatchDirectory(
+  id: string
+): string {
   return batchDirectory(id);
-}
+};
 
-async function finishPreparedSpec(
+// oxlint-disable-next-line complexity -- Keep the batch decision tree together so state transitions and error ordering remain explicit.
+const finishPreparedSpec = async function finishPreparedSpec(
   batchId: string,
   prepared: PreparedSpec,
   outcome: {
@@ -333,53 +276,53 @@ async function finishPreparedSpec(
   if (
     options?.updateSpecStatus !== false &&
     (options?.persistFailures !== false || result.status === "passed") &&
-    (result.status === "passed" || result.status === "failed")
+    (result.status === "passed" || result.status === "failed") &&
+    current &&
+    current.sourceHash === prepared.item.sourceHash &&
+    current.markdownHash === prepared.item.markdownHash &&
+    (!awaitingDeploy ||
+      (result.status === "passed" &&
+        prepared.run.baseUrl ===
+          prepared.run.environment?.configuredBaseUrl)) &&
+    (!prepared.run.awaitingDeploy ||
+      (result.status === "passed" &&
+        prepared.run.baseUrl === prepared.run.environment?.configuredBaseUrl))
   ) {
-    if (
-      current &&
-      current.sourceHash === prepared.item.sourceHash &&
-      current.markdownHash === prepared.item.markdownHash &&
-      (!awaitingDeploy ||
-        (result.status === "passed" &&
-          prepared.run.baseUrl ===
-            prepared.run.environment?.configuredBaseUrl)) &&
-      (!prepared.run.awaitingDeploy ||
-        (result.status === "passed" &&
-          prepared.run.baseUrl === prepared.run.environment?.configuredBaseUrl))
-    ) {
-      if (prepared.run.environment) {
-        await specEnvironmentsRepository.set(
+    await (prepared.run.environment
+      ? specEnvironmentsRepository.set(
           current,
           prepared.run.environment.id,
           result.status
-        );
-      } else {
-        await specsRepository.updateSpecStatusForContent(
+        )
+      : specsRepository.updateSpecStatusForContent(
           current.id,
           current.sourceHash,
           current.markdownHash,
           result.status
-        );
-      }
-    }
+        ));
   }
   prepared.item.status = result.status;
   prepared.item.durationMs = result.durationMs;
   prepared.item.failReason = result.failReason;
-}
+};
 
-async function snapshotPreparedSpecs(prepared: PreparedSpec[]): Promise<void> {
+const snapshotPreparedSpecs = async function snapshotPreparedSpecs(
+  prepared: PreparedSpec[]
+): Promise<void> {
   for (const entry of prepared) {
     const directory = path.join(runsDir, entry.run.id);
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await fs.mkdir(directory, { recursive: true });
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await Promise.all([
       fs.writeFile(path.join(directory, "spec.ts"), entry.testSource, "utf-8"),
       fs.writeFile(path.join(directory, "spec.yml"), entry.markdown, "utf-8"),
     ]);
   }
-}
+};
 
-async function executeBatch(
+// oxlint-disable-next-line complexity -- Keep the batch decision tree together so state transitions and error ordering remain explicit.
+const executeBatch = async function executeBatch(
   batch: RunBatch,
   prepared: PreparedSpec[],
   baseUrl: string,
@@ -457,7 +400,7 @@ async function executeBatch(
         signal: options?.signal,
       });
     }, options?.signal);
-    processFailure = outcome.processFailure;
+    ({ processFailure } = outcome);
     for (const entry of prepared) {
       const result = outcome.results.get(entry.run.id);
       if (result && (options ? !processFailure : result.status !== "error")) {
@@ -492,7 +435,8 @@ async function executeBatch(
   }
   try {
     for (const entry of prepared) {
-      const result = results.get(entry.run.id)!;
+      const result = requireValue(results.get(entry.run.id));
+      // oxlint-disable-next-line no-loop-func -- This awaited or explicitly chained callback observes the current operation state; iterations retain their sequencing.
       const finish = () =>
         finishPreparedSpec(
           batch.id,
@@ -507,20 +451,25 @@ async function executeBatch(
           options,
           result.failedStep
         );
-      if (batch.environment?.executor === "tunnel") {
-        await withSpecLock(entry.item.specId, finish);
-      } else {
-        await finish();
-      }
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      await (batch.environment?.executor === "tunnel"
+        ? withSpecLock(entry.item.specId, finish)
+        : finish());
     }
-    batch.status = processFailure
-      ? "error"
-      : prepared.some(
-            (entry) =>
-              entry.item.status === "failed" || entry.item.status === "error"
-          )
-        ? "failed"
-        : "passed";
+    batch.status = (() => {
+      if (processFailure) {
+        return "error";
+      }
+      if (
+        prepared.some(
+          (entry) =>
+            entry.item.status === "failed" || entry.item.status === "error"
+        )
+      ) {
+        return "failed";
+      }
+      return "passed";
+    })();
     batch.failReason = processFailure;
   } catch (error) {
     if (options) {
@@ -538,6 +487,7 @@ async function executeBatch(
           { status: "error", durationMs: null, failReason: message },
           secrets.scrub
         );
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await (
         batch.environment?.executor === "tunnel"
           ? withSpecLock(entry.item.specId, finish)
@@ -560,29 +510,34 @@ async function executeBatch(
       }
     }
   }
-}
+};
 
-async function prepareSpecBatch(
+// oxlint-disable-next-line complexity -- Keep the batch decision tree together so state transitions and error ordering remain explicit.
+const prepareSpecBatch = async function prepareSpecBatch(
   projectId: string,
   ids: string[],
   label: string,
-  baseUrl: string,
+  baseUrlInput: string,
   healOnFailure: boolean,
   ci?: CiBatchMetadata,
   trigger: RunBatchTrigger = "manual",
-  environment?: RunEnvironment,
+  environmentInput?: RunEnvironment,
   options?: RunOptions
 ): Promise<{
   batch: RunBatch;
   prepared: PreparedSpec[];
   secrets: BatchSecrets;
 }> {
+  let environment = environmentInput;
+
+  let baseUrl = baseUrlInput;
+
   const { commitSha, definitions } = await repoGit.withRepoLock(
     projectId,
     async () => {
       await prepareRunRepositoryUnlocked(projectId);
-      const commitSha = await repoGit.getHeadSha(projectId);
-      const definitions: {
+      const commitShaValue = await repoGit.getHeadSha(projectId);
+      const definitionsValue: {
         spec: Spec;
         markdown: string;
         testSource: string;
@@ -591,6 +546,7 @@ async function prepareSpecBatch(
         analysis: SpecAnalysis;
       }[] = [];
       for (const id of ids) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         const spec = await specsRepository.getSpec(id);
         if (!spec || spec.projectId !== projectId) {
           throw new Error(
@@ -607,6 +563,7 @@ async function prepareSpecBatch(
               : `Spec "${spec.title}" is invalid: ${spec.invalidReason ?? "unknown reason"}`
           );
         }
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         const [markdown, testSource] = await Promise.all([
           fs.readFile(
             path.join(repoGit.getRepoDir(projectId), specYamlFile(spec.path)),
@@ -638,7 +595,7 @@ async function prepareSpecBatch(
             "Spec changed after the failed run; retry skipped"
           );
         }
-        definitions.push({
+        definitionsValue.push({
           spec,
           markdown,
           testSource,
@@ -647,7 +604,7 @@ async function prepareSpecBatch(
           analysis: analyzeForRun(spec.title, testSource, markdown),
         });
       }
-      return { commitSha, definitions };
+      return { commitSha: commitShaValue, definitions: definitionsValue };
     }
   );
 
@@ -660,10 +617,9 @@ async function prepareSpecBatch(
             options.environment,
             options.baseUrl
           );
-    baseUrl = environment.baseUrl;
+    ({ baseUrl } = environment);
   }
-  const refsOf = (analysis: SpecAnalysis) =>
-    analysis.secretRefs.map((ref) => ref.envName);
+
   const refs = [
     ...new Set(
       definitions.flatMap((definition) => refsOf(definition.analysis))
@@ -696,7 +652,9 @@ async function prepareSpecBatch(
   const rollback = async () => {
     await Promise.all(
       createdRuns.map((run) =>
-        runsRepository.deleteRun(run.id).catch(() => undefined)
+        runsRepository.deleteRun(run.id).catch(() => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+        })
       )
     );
     await repoGit
@@ -706,19 +664,31 @@ async function prepareSpecBatch(
           createdRuns.map((run) => run.id)
         )
       )
-      .catch(() => undefined);
+      .catch(() => {
+        /* No action is needed until this callback is replaced or invoked by its owner. */
+      });
   };
   try {
     for (const definition of definitions) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const awaitingDeploy = await specEnvironmentsRepository.awaiting(
         definition.spec,
         environment?.id
       );
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const run = await runsRepository.createRun({
         specId: definition.spec.id,
         commitSha,
         sourceHash: definition.sourceHash,
-        automate: awaitingDeploy ? false : options ? options.automate : true,
+        automate: (() => {
+          if (awaitingDeploy) {
+            return false;
+          }
+          if (options) {
+            return options.automate;
+          }
+          return true;
+        })(),
         awaitingDeploy,
         retryOf: options?.retryOf,
         healOnFailure,
@@ -726,6 +696,7 @@ async function prepareSpecBatch(
         environment,
       });
       createdRuns.push(run);
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await repoGit.withRepoLock(projectId, () =>
         repoGit.pinRunCommitUnlocked(projectId, run.id, commitSha)
       );
@@ -793,9 +764,9 @@ async function prepareSpecBatch(
     item: batch.specs[index],
   }));
   return { batch, prepared, secrets };
-}
+};
 
-async function dispatchRunnerBatch(
+const dispatchRunnerBatch = async function dispatchRunnerBatch(
   batch: RunBatch,
   prepared: PreparedSpec[],
   timeoutMs?: number
@@ -803,7 +774,9 @@ async function dispatchRunnerBatch(
   try {
     for (const entry of prepared) {
       const directory = path.join(runsDir, entry.run.id);
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await fs.mkdir(directory, { recursive: true });
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await Promise.all([
         fs.writeFile(
           path.join(directory, "spec.ts"),
@@ -825,10 +798,10 @@ async function dispatchRunnerBatch(
       {
         batchId: batch.id,
         projectId: batch.projectId,
-        baseUrl: batch.baseUrl!,
+        baseUrl: requireValue(batch.baseUrl),
         networkPolicy: await runNetworkPolicy(
           batch.projectId,
-          batch.baseUrl!,
+          requireValue(batch.baseUrl),
           batch.environment
         ),
         timeoutMs:
@@ -847,6 +820,7 @@ async function dispatchRunnerBatch(
     );
   } catch (error) {
     for (const entry of prepared) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await finishPreparedSpec(
         batch.id,
         entry,
@@ -857,6 +831,7 @@ async function dispatchRunnerBatch(
         },
         (text) => text
       );
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await runsRepository.acknowledgeAutomation(entry.run.id);
     }
     batch.status = "error";
@@ -865,9 +840,9 @@ async function dispatchRunnerBatch(
     await writeBatch(batch);
     throw error;
   }
-}
+};
 
-export async function finishRunnerBatch(
+export const finishRunnerBatch = async function finishRunnerBatch(
   batchId: string,
   completion: RunnerCompletion
 ): Promise<void> {
@@ -879,6 +854,7 @@ export async function finishRunnerBatch(
     return;
   }
   for (const item of batch.specs) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const run = await runsRepository.getRun(item.runId);
     const result = completion.results.find(
       (entry) => entry.runId === item.runId
@@ -887,6 +863,7 @@ export async function finishRunnerBatch(
       throw new Error("Runner result is missing a Spec");
     }
     const directory = path.join(runsDir, run.id);
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const [markdown, testSource] = await Promise.all([
       fs.readFile(path.join(directory, "spec.yml"), "utf-8"),
       fs.readFile(path.join(directory, "spec.ts"), "utf-8"),
@@ -899,6 +876,7 @@ export async function finishRunnerBatch(
       analysis: analyzeForRun(item.title, testSource, markdown),
       item,
     };
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     await withSpecLock(item.specId, () =>
       finishPreparedSpec(
         batch.id,
@@ -910,19 +888,25 @@ export async function finishRunnerBatch(
       )
     );
   }
-  batch.status = completion.processFailure
-    ? "error"
-    : batch.specs.some(
-          (entry) => entry.status === "failed" || entry.status === "error"
-        )
-      ? "failed"
-      : "passed";
+  batch.status = (() => {
+    if (completion.processFailure) {
+      return "error";
+    }
+    if (
+      batch.specs.some(
+        (entry) => entry.status === "failed" || entry.status === "error"
+      )
+    ) {
+      return "failed";
+    }
+    return "passed";
+  })();
   batch.durationMs = completion.durationMs;
   batch.failReason = completion.processFailure;
   await writeBatch(batch);
-}
+};
 
-export async function failBrokenRunnerBatch(
+export const failBrokenRunnerBatch = async function failBrokenRunnerBatch(
   job: RunnerJob,
   reason: string
 ): Promise<void> {
@@ -930,9 +914,11 @@ export async function failBrokenRunnerBatch(
   const items: RunBatchItem[] = [];
   let environment = previous?.environment;
   for (const spec of job.payload.specs) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const run = await runsRepository.getRun(spec.runId);
     environment ??= run?.environment ?? undefined;
     if (run) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await withSpecLock(spec.specId, async () => {
         const current = await specsRepository.getSpec(spec.specId);
         if (
@@ -989,25 +975,29 @@ export async function failBrokenRunnerBatch(
     durationMs: Math.max(0, Date.now() - Date.parse(job.createdAt)),
     failReason: reason,
   });
-}
+};
 
-async function waitRunnerBatch(
+const waitRunnerBatch = async function waitRunnerBatch(
   batch: RunBatch,
   signal?: AbortSignal
 ): Promise<RunBatch> {
   try {
     while (true) {
       signal?.throwIfAborted();
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await maintainRunnerQueue();
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const completed = await getRunBatch(batch.id).catch(() => null);
       if (completed && completed.status !== "running") {
         return completed;
       }
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       const job = await runnersRepository.jobByBatch(batch.id);
       if (job?.status === "completed") {
         const failReason =
           job.lastFailure ??
           "Runner work could not be finalized. Check the server logs for details.";
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         const specs = await Promise.all(
           batch.specs.map(async (item): Promise<RunBatchItem> => {
             const run = await runsRepository.getRun(item.runId);
@@ -1028,7 +1018,10 @@ async function waitRunnerBatch(
           specs,
         };
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      // oxlint-disable-next-line promise/avoid-new, no-await-in-loop -- Bridge an event or callback API to the asynchronous operation. Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 500);
+      });
     }
   } catch (error) {
     if (signal?.aborted && (await cancelRunnerBatch(batch.id))) {
@@ -1047,103 +1040,109 @@ async function waitRunnerBatch(
         })),
       });
       for (const item of batch.specs) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await runsRepository.acknowledgeAutomation(item.runId);
       }
     }
     throw error;
   }
-}
+};
 
-export async function verifyRunnerCandidate(input: {
-  specId: string;
-  testSource: string;
-  markdown: string;
-  environment: RunEnvironment;
-  directory: string;
-  timeoutMs?: number;
-  signal?: AbortSignal;
-}): Promise<ExecutedRun & { status: FinalRunStatus }> {
-  const spec = await specsRepository.getSpec(input.specId);
-  if (!spec) {
-    throw new Error("Spec no longer exists");
-  }
-  input.signal?.throwIfAborted();
-  const analysis = analyzeForRun(spec.title, input.testSource, input.markdown);
-  const commitSha = await repoGit.getHeadSha(spec.projectId);
-  const run = await runsRepository.createRun({
-    specId: spec.id,
-    commitSha,
-    sourceHash: sourceHashOf(input.testSource),
-    environment: input.environment,
-    baseUrl: input.environment.baseUrl,
-    automate: false,
-  });
-  const item: RunBatchItem = {
-    runId: run.id,
-    specId: spec.id,
-    commitSha,
-    sourceHash: run.sourceHash,
-    markdownHash: markdownHashOf(input.markdown),
-    title: spec.title,
-    status: "running",
-    durationMs: null,
-    failReason: null,
-  };
-  const batch: RunBatch = {
-    id: crypto.randomUUID(),
-    projectId: spec.projectId,
-    label: "Verify proposed repair",
-    environment: input.environment,
-    baseUrl: input.environment.baseUrl,
-    status: "running",
-    startedAt: run.startedAt,
-    durationMs: null,
-    failReason: null,
-    specs: [item],
-    runnerOptions: { updateSpecStatus: false },
-  };
-  const prepared: PreparedSpec = {
-    run,
-    projectId: spec.projectId,
-    markdown: input.markdown,
-    testSource: input.testSource,
-    analysis,
-    item,
-  };
-  const directory = path.join(runsDir, run.id);
-  try {
-    await repoGit.withRepoLock(spec.projectId, () =>
-      repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha)
+export const verifyRunnerCandidate =
+  async function verifyRunnerCandidate(input: {
+    specId: string;
+    testSource: string;
+    markdown: string;
+    environment: RunEnvironment;
+    directory: string;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<ExecutedRun & { status: FinalRunStatus }> {
+    const spec = await specsRepository.getSpec(input.specId);
+    if (!spec) {
+      throw new Error("Spec no longer exists");
+    }
+    input.signal?.throwIfAborted();
+    const analysis = analyzeForRun(
+      spec.title,
+      input.testSource,
+      input.markdown
     );
-    await writeBatch(batch);
-    await dispatchRunnerBatch(batch, [prepared], input.timeoutMs);
-    await waitRunnerBatch(batch, input.signal);
-    const result = await runsRepository.getRun(run.id);
-    if (!result) {
-      throw new Error("Runner verification result disappeared");
-    }
-    if (result.status === "running") {
-      throw new Error("Runner verification is incomplete");
-    }
-    const manifest = await readEvidenceManifest(directory);
-    await fs.cp(directory, input.directory, { recursive: true });
-    return {
-      ...result,
-      status: result.status,
-      failedStep: manifest.failedStep,
+    const commitSha = await repoGit.getHeadSha(spec.projectId);
+    const run = await runsRepository.createRun({
+      specId: spec.id,
+      commitSha,
+      sourceHash: sourceHashOf(input.testSource),
+      environment: input.environment,
+      baseUrl: input.environment.baseUrl,
+      automate: false,
+    });
+    const item: RunBatchItem = {
+      runId: run.id,
+      specId: spec.id,
+      commitSha,
+      sourceHash: run.sourceHash,
+      markdownHash: markdownHashOf(input.markdown),
+      title: spec.title,
+      status: "running",
+      durationMs: null,
+      failReason: null,
     };
-  } finally {
-    await cancelRunnerBatch(batch.id);
-    await runsRepository.deleteRun(run.id);
-    await repoGit.withRepoLock(spec.projectId, () =>
-      repoGit.deleteRunCommitRefsUnlocked(spec.projectId, [run.id])
-    );
-    await fs.rm(directory, { recursive: true, force: true });
-    await fs.rm(batchDirectory(batch.id), { recursive: true, force: true });
-  }
-}
+    const batch: RunBatch = {
+      id: crypto.randomUUID(),
+      projectId: spec.projectId,
+      label: "Verify proposed repair",
+      environment: input.environment,
+      baseUrl: input.environment.baseUrl,
+      status: "running",
+      startedAt: run.startedAt,
+      durationMs: null,
+      failReason: null,
+      specs: [item],
+      runnerOptions: { updateSpecStatus: false },
+    };
+    const prepared: PreparedSpec = {
+      run,
+      projectId: spec.projectId,
+      markdown: input.markdown,
+      testSource: input.testSource,
+      analysis,
+      item,
+    };
+    const directory = path.join(runsDir, run.id);
+    try {
+      await repoGit.withRepoLock(spec.projectId, () =>
+        repoGit.pinRunCommitUnlocked(spec.projectId, run.id, commitSha)
+      );
+      await writeBatch(batch);
+      await dispatchRunnerBatch(batch, [prepared], input.timeoutMs);
+      await waitRunnerBatch(batch, input.signal);
+      const result = await runsRepository.getRun(run.id);
+      if (!result) {
+        throw new Error("Runner verification result disappeared");
+      }
+      if (result.status === "running") {
+        throw new Error("Runner verification is incomplete");
+      }
+      const manifest = await readEvidenceManifest(directory);
+      await fs.cp(directory, input.directory, { recursive: true });
+      return {
+        ...result,
+        status: result.status,
+        failedStep: manifest.failedStep,
+      };
+    } finally {
+      await cancelRunnerBatch(batch.id);
+      await runsRepository.deleteRun(run.id);
+      await repoGit.withRepoLock(spec.projectId, () =>
+        repoGit.deleteRunCommitRefsUnlocked(spec.projectId, [run.id])
+      );
+      await fs.rm(directory, { recursive: true, force: true });
+      await fs.rm(batchDirectory(batch.id), { recursive: true, force: true });
+    }
+  };
 
-export async function executeSingleSpecBatch(
+export const executeSingleSpecBatch = async function executeSingleSpecBatch(
   specId: string,
   options: RunOptions
 ): Promise<ExecutedRun> {
@@ -1192,7 +1191,7 @@ export async function executeSingleSpecBatch(
       released = true;
       const completed = await waitRunnerBatch(batch, options.signal);
       const stored = await runsRepository.getRun(prepared[0].run.id);
-      const item = completed.specs[0];
+      const [item] = completed.specs;
       const run = stored ?? {
         ...prepared[0].run,
         status: item.status,
@@ -1207,21 +1206,27 @@ export async function executeSingleSpecBatch(
       await release();
       released = true;
     }
-    await executeBatch(batch, prepared, batch.baseUrl!, secrets, options);
+    await executeBatch(
+      batch,
+      prepared,
+      requireValue(batch.baseUrl),
+      secrets,
+      options
+    );
     if (!prepared[0].finished) {
       throw new TunnelWaitInterrupted(
         "Backend stopped while waiting for a tunnel"
       );
     }
-    return prepared[0].finished!;
+    return requireValue(prepared[0].finished);
   } finally {
     if (!released) {
       await release();
     }
   }
-}
+};
 
-export async function startSpecBatch(
+export const startSpecBatch = async function startSpecBatch(
   projectId: string,
   specIds: string[],
   label: string,
@@ -1288,6 +1293,7 @@ export async function startSpecBatch(
       await options.onPrepared?.(batch);
     } catch (error) {
       for (const entry of prepared) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await finishPreparedSpec(
           batch.id,
           entry,
@@ -1298,6 +1304,7 @@ export async function startSpecBatch(
           },
           secrets.scrub
         );
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await runsRepository.acknowledgeAutomation(entry.run.id);
       }
       batch.status = "error";
@@ -1331,42 +1338,50 @@ export async function startSpecBatch(
     environment.baseUrl,
     secrets
   ).finally(
-    environment.executor === "tunnel" ? () => undefined : releaseSpecLocks
+    environment.executor === "tunnel"
+      ? () => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+        }
+      : releaseSpecLocks
   );
   activeBatches.set(batch.id, task);
-  void task.catch(console.error).finally(() => activeBatches.delete(batch.id));
+  // oxlint-disable-next-line promise/catch-or-return -- The continuation is tracked by the run lifecycle and handles both its fulfillment and rejection.
+  task.catch(console.error).finally(() => activeBatches.delete(batch.id));
   return batch;
-}
+};
 
-export async function pendingTunnelBatchRunIds(): Promise<string[]> {
-  const entries = await fs
-    .readdir(runBatchesDir, { withFileTypes: true, encoding: "utf-8" })
-    .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    });
-  const batches = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => getRunBatch(entry.name).catch(() => null))
-  );
-  return batches
-    .filter(
-      (batch) =>
-        batch?.status === "running" &&
-        batch.environment?.executor === "tunnel" &&
-        batch.waitingForTunnelAt
-    )
-    .flatMap((batch) =>
-      batch!.specs
-        .filter((item) => item.status === "running")
-        .map((item) => item.runId)
+export const pendingTunnelBatchRunIds =
+  async function pendingTunnelBatchRunIds(): Promise<string[]> {
+    const entries = await fs
+      .readdir(runBatchesDir, { withFileTypes: true, encoding: "utf-8" })
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      });
+    const batches = await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => getRunBatch(entry.name).catch(() => null))
     );
-}
+    return batches
+      .filter(
+        (batch) =>
+          batch?.status === "running" &&
+          batch.environment?.executor === "tunnel" &&
+          batch.waitingForTunnelAt
+      )
+      .flatMap((batch) =>
+        requireValue(batch)
+          .specs.filter((item) => item.status === "running")
+          .map((item) => item.runId)
+      );
+  };
 
-async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
+const resumeTunnelBatch = async function resumeTunnelBatch(
+  batch: RunBatch
+): Promise<void> {
   const release = await acquireSpecLocks(
     batch.specs.map((item) => item.specId)
   );
@@ -1405,9 +1420,14 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
         )
       ),
     ];
-    const current = (await environmentsRepository.list(batch.projectId)).find(
-      (entry) => entry.id === batch.environment!.id
-    );
+    const current = await (async () => {
+      const awaitedValue41715 = await environmentsRepository.list(
+        batch.projectId
+      );
+      return awaitedValue41715.find(
+        (entry) => entry.id === requireValue(batch.environment).id
+      );
+    })();
     if (!current) {
       throw new Error("The queued run's tunnel environment was removed");
     }
@@ -1418,7 +1438,7 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
     );
     if (
       environment.executor !== "tunnel" ||
-      environment.id !== batch.environment!.id
+      environment.id !== requireValue(batch.environment).id
     ) {
       throw new Error("The queued run's tunnel environment changed");
     }
@@ -1447,14 +1467,13 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
     const task = executeBatch(
       batch,
       prepared,
-      batch.baseUrl!,
+      requireValue(batch.baseUrl),
       secrets,
       batch.tunnelOptions
     );
     activeBatches.set(batch.id, task);
-    void task
-      .catch(console.error)
-      .finally(() => activeBatches.delete(batch.id));
+    // oxlint-disable-next-line promise/catch-or-return -- The continuation is tracked by the run lifecycle and handles both its fulfillment and rejection.
+    task.catch(console.error).finally(() => activeBatches.delete(batch.id));
   } catch (error) {
     await release();
     const reason =
@@ -1462,6 +1481,7 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
         ? error.message
         : "Queued tunnel run could not resume";
     for (const item of batch.specs) {
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
       await runsRepository.finishRun(
         item.runId,
         "error",
@@ -1477,57 +1497,64 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
     delete batch.waitingForTunnelAt;
     await writeBatch(batch);
   }
-}
+};
 
-export async function markInterruptedBatches(): Promise<void> {
-  const pendingRunners = new Set(await pendingRunnerBatchIds());
-  let entries: Dirent[];
-  try {
-    entries = await fs.readdir(runBatchesDir, {
-      withFileTypes: true,
-      encoding: "utf-8",
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-    if (pendingRunners.has(entry.name)) {
-      continue;
-    }
-    const batch = await getRunBatch(entry.name).catch((error: unknown) => {
-      logger.error("could not recover interrupted batch", {
-        batchId: entry.name,
-        error,
+export const markInterruptedBatches =
+  async function markInterruptedBatches(): Promise<void> {
+    const pendingRunners = new Set(await pendingRunnerBatchIds());
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(runBatchesDir, {
+        withFileTypes: true,
+        encoding: "utf-8",
       });
-      return null;
-    });
-    if (!batch || batch.status !== "running") {
-      continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+      throw error;
     }
-    if (batch.environment?.executor === "tunnel" && batch.waitingForTunnelAt) {
-      await resumeTunnelBatch(batch);
-      continue;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      if (pendingRunners.has(entry.name)) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      const batch = await getRunBatch(entry.name).catch((error: unknown) => {
+        logger.error("could not recover interrupted batch", {
+          batchId: entry.name,
+          error,
+        });
+        return null;
+      });
+      if (!batch || batch.status !== "running") {
+        continue;
+      }
+      if (
+        batch.environment?.executor === "tunnel" &&
+        batch.waitingForTunnelAt
+      ) {
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+        await resumeTunnelBatch(batch);
+        continue;
+      }
+      batch.status = "error";
+      batch.failReason = "Backend stopped before the batch completed";
+      batch.specs = batch.specs.map((spec) =>
+        spec.status === "running"
+          ? { ...spec, status: "error", failReason: batch.failReason }
+          : spec
+      );
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      await writeBatch(batch);
     }
-    batch.status = "error";
-    batch.failReason = "Backend stopped before the batch completed";
-    batch.specs = batch.specs.map((spec) =>
-      spec.status === "running"
-        ? { ...spec, status: "error", failReason: batch.failReason }
-        : spec
-    );
-    await writeBatch(batch);
-  }
-}
+  };
 
-const finishedBatches = new Map<string, { stamp: string; batch: RunBatch }>();
-
-async function readListedBatch(id: string): Promise<RunBatch | null> {
+const readListedBatch = async function readListedBatch(
+  id: string
+): Promise<RunBatch | null> {
   const stamp = await fs
     .stat(path.join(batchDirectory(id), "batch.json"))
     .then((stat) => `${stat.ino}:${stat.mtimeMs}:${stat.size}`)
@@ -1551,13 +1578,13 @@ async function readListedBatch(id: string): Promise<RunBatch | null> {
   if (batch && batch.status !== "running") {
     finishedBatches.set(id, { stamp, batch });
     while (finishedBatches.size > MAX_CACHED_BATCHES) {
-      finishedBatches.delete(finishedBatches.keys().next().value!);
+      finishedBatches.delete(requireValue(finishedBatches.keys().next().value));
     }
   }
   return batch;
-}
+};
 
-export async function listRunBatches(
+export const listRunBatches = async function listRunBatches(
   projectId: string,
   limit = 100,
   ciOnly = false
@@ -1565,27 +1592,103 @@ export async function listRunBatches(
   const project = await ensureBatchIndex(projectId);
   const candidates = [...project]
     .filter(([, entry]) => !ciOnly || entry.ci)
-    .sort(([, a], [, b]) => b.startedAt.localeCompare(a.startedAt));
+    .toSorted(([, a], [, b]) => b.startedAt.localeCompare(a.startedAt));
   const batches: RunBatch[] = [];
   let next = 0;
   while (batches.length < limit && next < candidates.length) {
     const window = candidates.slice(next, (next += limit - batches.length));
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
     const loaded = await Promise.all(window.map(([id]) => readListedBatch(id)));
-    window.forEach(([id], index) => {
+    for (const [index, [id]] of window.entries()) {
       const batch = loaded[index];
       if (!batch) {
         project.delete(id);
       } else if (batch.projectId === projectId && (!ciOnly || batch.ci)) {
         batches.push(batch);
       }
-    });
+    }
   }
   return batches;
-}
+};
 
-export async function listCiBatches(
+export const listCiBatches = async function listCiBatches(
   projectId: string,
   limit = 20
 ): Promise<RunBatch[]> {
-  return listRunBatches(projectId, limit, true);
+  return await listRunBatches(projectId, limit, true);
+};
+
+type FinalRunStatus = Exclude<RunStatus, "running">;
+export type RunBatchTrigger =
+  | "deploy"
+  | "ci"
+  | "schedule"
+  | "manual"
+  | "spec_change";
+
+export interface RunBatchItem {
+  runId: string;
+  specId: string;
+  commitSha: string;
+  sourceHash: string;
+  markdownHash: string;
+  title: string;
+  status: RunStatus;
+  durationMs: number | null;
+  failReason: string | null;
+  awaitingDeploy?: boolean;
 }
+
+export interface CiBatchMetadata {
+  commitSha?: string;
+  ref?: string;
+  buildUrl?: string;
+  qualityGate: { failOnFlaky: boolean; failOnKnownBugs: boolean };
+  knownBugSpecIds: string[];
+}
+
+export interface RunBatch {
+  id: string;
+  projectId: string;
+  label: string;
+  trigger?: RunBatchTrigger;
+  baseUrl?: string;
+  environment?: RunEnvironment;
+  ci?: CiBatchMetadata;
+  status: RunStatus;
+  startedAt: string;
+  durationMs: number | null;
+  failReason: string | null;
+  specs: RunBatchItem[];
+  runnerOptions?: Pick<RunOptions, "persistFailures" | "updateSpecStatus">;
+  tunnelOptions?: Pick<RunOptions, "persistFailures" | "updateSpecStatus">;
+  waitingForTunnelAt?: string;
+}
+
+interface PreparedSpec {
+  run: Run;
+  projectId: string;
+  markdown: string;
+  testSource: string;
+  analysis: SpecAnalysis;
+  item: RunBatchItem;
+  finished?: ExecutedRun;
+}
+
+interface BatchSecrets {
+  env: Record<string, string>;
+  origins: SecretOriginPolicy;
+  scrub: (text: string) => string;
+}
+
+const MAX_BATCH_TIMEOUT_MS = 30 * 60 * 1000;
+
+const activeBatches = new Map<string, Promise<void>>();
+const MAX_CACHED_BATCHES = 300;
+const batchIndex = new Map<
+  string,
+  Map<string, { startedAt: string; ci: boolean }>
+>();
+const indexedBatchIds = new Map<string, string>();
+
+const finishedBatches = new Map<string, { stamp: string; batch: RunBatch }>();

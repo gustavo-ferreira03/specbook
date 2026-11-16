@@ -11,20 +11,9 @@ import { sessionsDir } from "../paths";
 import { isChatDeleting, publishChatUpdate } from "./chat-registry";
 import type { ChatMessageRecord, ChatToolStepRecord } from "./types";
 
-export const cwd = process.cwd();
-export const ERROR_TYPE = "specbook-error";
-export const WARNING_TYPE = "specbook-warning";
-export const TOOL_STEP_TYPE = "specbook-tool-step";
-const DEFAULT_TITLE = "New chat";
-
-export interface AgentMessage {
-  role?: string;
-  content?: unknown;
-  stopReason?: string;
-  errorMessage?: string;
-}
-
-export function extractText(message: AgentMessage | undefined): string {
+export const extractText = function extractText(
+  message: AgentMessage | undefined
+): string {
   const content = message?.content;
   if (typeof content === "string") {
     return content;
@@ -42,43 +31,47 @@ export function extractText(message: AgentMessage | undefined): string {
     )
     .map((part) => part.text)
     .join("");
-}
+};
 
-export function flushSessionFile(sessionManager: SessionManager): void {
+export const flushSessionFile = function flushSessionFile(
+  sessionManager: SessionManager
+): void {
   const writable = sessionManager as unknown as {
-    _rewriteFile(): void;
+    _rewriteFile: () => void;
     flushed: boolean;
   };
   writable._rewriteFile();
   writable.flushed = true;
-}
+};
 
-const sessionPaths = new Map<string, string>();
-const titles = new Map<
-  string,
-  { mtimeMs: number; size: number; title: string }
->();
-
-async function fileExists(filePath: string): Promise<boolean> {
+const fileExists = async function fileExists(
+  filePath: string
+): Promise<boolean> {
   try {
-    return (await fs.stat(filePath)).isFile();
+    return await (async () => {
+      const awaitedValue1479 = await fs.stat(filePath);
+      return awaitedValue1479.isFile();
+    })();
   } catch {
     return false;
   }
-}
+};
 
-async function refreshSessionPaths(): Promise<void> {
-  await fs.mkdir(sessionsDir, { recursive: true });
-  const names = await fs.readdir(sessionsDir);
-  for (const name of names) {
-    const match = /_([^_]+)\.jsonl$/.exec(name);
-    if (match) {
-      sessionPaths.set(match[1], path.join(sessionsDir, name));
+const refreshSessionPaths =
+  async function refreshSessionPaths(): Promise<void> {
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const names = await fs.readdir(sessionsDir);
+    for (const name of names) {
+      const match = /_(?<capture1>[^_]+)\.jsonl$/u.exec(name);
+      if (match) {
+        sessionPaths.set(match[1], path.join(sessionsDir, name));
+      }
     }
-  }
-}
+  };
 
-async function resolveSessionPath(id: string): Promise<string | null> {
+const resolveSessionPath = async function resolveSessionPath(
+  id: string
+): Promise<string | null> {
   const cached = sessionPaths.get(id);
   if (cached && (await fileExists(cached))) {
     return cached;
@@ -90,29 +83,34 @@ async function resolveSessionPath(id: string): Promise<string | null> {
     return found;
   }
   sessionPaths.delete(id);
-  const info = (await SessionManager.list(cwd, sessionsDir)).find(
-    (session) => session.id === id
-  );
+  const info = await (async () => {
+    const awaitedValue2344 = await SessionManager.list(cwd, sessionsDir);
+    return awaitedValue2344.find((session) => session.id === id);
+  })();
   if (!info) {
     return null;
   }
   sessionPaths.set(id, info.path);
   return info.path;
-}
+};
 
-function forgetSession(id: string): void {
+const forgetSession = function forgetSession(id: string): void {
   sessionPaths.delete(id);
   titles.delete(id);
-}
+};
 
-export async function openSession(id: string): Promise<SessionManager | null> {
+export const openSession = async function openSession(
+  id: string
+): Promise<SessionManager | null> {
   const sessionPath = await resolveSessionPath(id);
   return sessionPath
     ? SessionManager.open(sessionPath, sessionsDir, cwd)
     : null;
-}
+};
 
-function sessionTitle(sessionManager: SessionManager): string {
+const sessionTitle = function sessionTitle(
+  sessionManager: SessionManager
+): string {
   const name = sessionManager.getSessionName()?.trim();
   if (name && name !== DEFAULT_TITLE) {
     return name;
@@ -127,18 +125,18 @@ function sessionTitle(sessionManager: SessionManager): string {
     }
   }
   return DEFAULT_TITLE;
-}
+};
 
-export function chatTitle(text: string): string {
-  let title = text.replaceAll(/\s+/g, " ").trim();
+export const chatTitle = function chatTitle(text: string): string {
+  let title = text.replaceAll(/\s+/gu, " ").trim();
   if (title.length > 60) {
     const space = title.lastIndexOf(" ", 60);
     title = `${title.slice(0, space > 0 ? space : 60)}…`;
   }
   return title.charAt(0).toUpperCase() + title.slice(1);
-}
+};
 
-async function cachedTitle(id: string): Promise<string> {
+const cachedTitle = async function cachedTitle(id: string): Promise<string> {
   const sessionPath = await resolveSessionPath(id);
   if (!sessionPath) {
     return DEFAULT_TITLE;
@@ -160,17 +158,19 @@ async function cachedTitle(id: string): Promise<string> {
   );
   titles.set(id, { mtimeMs: stats.mtimeMs, size: stats.size, title });
   return title;
-}
+};
 
-export function userMessageCount(sessionManager: SessionManager): number {
+export const userMessageCount = function userMessageCount(
+  sessionManager: SessionManager
+): number {
   return sessionManager
     .getEntries()
     .filter(
       (entry) => entry.type === "message" && entry.message.role === "user"
     ).length;
-}
+};
 
-export function ensureUserMessage(
+export const ensureUserMessage = function ensureUserMessage(
   sessionManager: SessionManager,
   userText: string,
   previousCount: number
@@ -183,25 +183,25 @@ export function ensureUserMessage(
     content: userText,
     timestamp: Date.now(),
   });
-}
+};
 
-export function appendError(
+export const appendError = function appendError(
   sessionManager: SessionManager,
   message: string
 ): void {
   sessionManager.appendCustomMessageEntry(ERROR_TYPE, message, true);
   flushSessionFile(sessionManager);
-}
+};
 
-export function appendWarning(
+export const appendWarning = function appendWarning(
   sessionManager: SessionManager,
   message: string
 ): void {
   sessionManager.appendCustomMessageEntry(WARNING_TYPE, message, true);
   flushSessionFile(sessionManager);
-}
+};
 
-export async function branchSessionForTurn(
+export const branchSessionForTurn = async function branchSessionForTurn(
   id: string,
   messageId: string,
   options: { editedText?: string; userOnly?: boolean } = {}
@@ -217,7 +217,7 @@ export async function branchSessionForTurn(
 
   const branch = sessionManager.getBranch();
   const targetIndex = branch.findIndex((entry) => entry.id === messageId);
-  const target = targetIndex !== -1 ? branch[targetIndex] : undefined;
+  const target = targetIndex === -1 ? undefined : branch[targetIndex];
   if (
     !target ||
     target.type !== "message" ||
@@ -255,9 +255,11 @@ export async function branchSessionForTurn(
   flushSessionFile(sessionManager);
   publishChatUpdate(id);
   return { text: text.trim(), sessionManager };
-}
+};
 
-export async function removeChatSession(id: string): Promise<void> {
+export const removeChatSession = async function removeChatSession(
+  id: string
+): Promise<void> {
   const sessionPath = await resolveSessionPath(id);
   forgetSession(id);
   if (!sessionPath) {
@@ -274,9 +276,9 @@ export async function removeChatSession(id: string): Promise<void> {
     throw new Error("Invalid chat session path");
   }
   await fs.rm(resolved, { force: true });
-}
+};
 
-export async function createChat(
+export const createChat = async function createChat(
   projectId: string,
   metadata: ChatMetadata = {},
   title?: string
@@ -296,19 +298,23 @@ export async function createChat(
   }
   await chatsRepository.insertChat(sessionId, projectId, metadata);
   return { id: sessionId };
-}
+};
 
-export async function listChats(
+export const listChats = async function listChats(
   projectId: string
 ): Promise<
   { id: string; title: string; createdAt: string; updatedAt: string }[]
 > {
   const jobChatIds = new Set(
-    (await jobsRepository.list(projectId)).map((job) => job.chatId)
+    await (async () => {
+      const awaitedValue8642 = await jobsRepository.list(projectId);
+      return awaitedValue8642.map((job) => job.chatId);
+    })()
   );
-  const rows = (await chatsRepository.listChatRows(projectId)).filter(
-    (row) => !jobChatIds.has(row.id)
-  );
+  const rows = await (async () => {
+    const awaitedValue8726 = await chatsRepository.listChatRows(projectId);
+    return awaitedValue8726.filter((row) => !jobChatIds.has(row.id));
+  })();
   const chats = await Promise.all(
     rows.map(async (row) => {
       const title = await cachedTitle(row.id).catch(() => DEFAULT_TITLE);
@@ -323,9 +329,9 @@ export async function listChats(
     })
   );
   return chats.filter((chat) => chat.title !== DEFAULT_TITLE);
-}
+};
 
-export function messagesOf(
+export const messagesOf = function messagesOf(
   id: string,
   sessionManager: SessionManager
 ): ChatMessageRecord[] {
@@ -369,9 +375,10 @@ export function messagesOf(
     });
   }
   return messages;
-}
+};
 
-export function toolStepsOf(
+// oxlint-disable-next-line complexity -- Keep the session-store decision tree together so state transitions and error ordering remain explicit.
+export const toolStepsOf = function toolStepsOf(
   sessionManager: SessionManager
 ): ChatToolStepRecord[] {
   const branch = sessionManager.getBranch();
@@ -439,16 +446,16 @@ export function toolStepsOf(
     }
   }
   return steps;
-}
+};
 
-export async function getChatMessages(
+export const getChatMessages = async function getChatMessages(
   id: string
 ): Promise<ChatMessageRecord[] | null> {
   const sessionManager = await openSession(id);
   return sessionManager ? messagesOf(id, sessionManager) : null;
-}
+};
 
-export async function getChatView(id: string): Promise<{
+export const getChatView = async function getChatView(id: string): Promise<{
   title: string;
   messages: ChatMessageRecord[];
   toolSteps: ChatToolStepRecord[];
@@ -462,4 +469,23 @@ export async function getChatView(id: string): Promise<{
     messages: messagesOf(id, sessionManager),
     toolSteps: toolStepsOf(sessionManager),
   };
+};
+
+export const cwd = process.cwd();
+export const ERROR_TYPE = "specbook-error";
+export const WARNING_TYPE = "specbook-warning";
+export const TOOL_STEP_TYPE = "specbook-tool-step";
+const DEFAULT_TITLE = "New chat";
+
+export interface AgentMessage {
+  role?: string;
+  content?: unknown;
+  stopReason?: string;
+  errorMessage?: string;
 }
+
+const sessionPaths = new Map<string, string>();
+const titles = new Map<
+  string,
+  { mtimeMs: number; size: number; title: string }
+>();

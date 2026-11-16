@@ -7,7 +7,9 @@ import { chromium } from "playwright-core";
 const require = createRequire(import.meta.url);
 let installing: Promise<void> | undefined;
 
-export async function ensureChromium(signal?: AbortSignal): Promise<void> {
+export const ensureChromium = async function ensureChromium(
+  signal?: AbortSignal
+): Promise<void> {
   signal?.throwIfAborted();
   if (existsSync(chromium.executablePath())) {
     return;
@@ -35,6 +37,7 @@ export async function ensureChromium(signal?: AbortSignal): Promise<void> {
   try {
     await Promise.race([
       installing,
+      // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
       new Promise<never>((_resolve, reject) => {
         cancel = () => reject(signal.reason);
         signal.addEventListener("abort", cancel, { once: true });
@@ -48,4 +51,4 @@ export async function ensureChromium(signal?: AbortSignal): Promise<void> {
       signal.removeEventListener("abort", cancel);
     }
   }
-}
+};

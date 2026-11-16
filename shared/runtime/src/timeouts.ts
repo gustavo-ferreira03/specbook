@@ -8,11 +8,11 @@ export const timeoutScaleSchema = z
   .min(1)
   .max(MAX_TIMEOUT_SCALE);
 
-export function specTimeouts(scale = 1) {
+export const specTimeouts = function specTimeouts(scale = 1) {
   return {
     test: 100_000 * scale,
     navigation: 30_000 * scale,
     action: 15_000 * scale,
     expect: 5000 * scale,
   };
-}
+};

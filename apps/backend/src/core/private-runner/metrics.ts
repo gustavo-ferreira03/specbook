@@ -1,29 +1,13 @@
 import type { RunnerQueueEntry } from "@specbook/runtime/runner-protocol";
 import { z } from "zod";
 
-export const runnerMetricsQuerySchema = z
-  .object({
-    format: z.enum(["json", "prometheus"]).default("json"),
-    group: z.string().max(80).optional(),
-  })
-  .strict();
+const label = (value: string | null) =>
+  (value ?? "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll("\n", "\\n")
+    .replaceAll('"', '\\"');
 
-export const runnerMetricsSchema = z
-  .object({
-    groups: z.array(
-      z
-        .object({
-          group: z.string().nullable(),
-          queued: z.number().int().nonnegative(),
-          oldestWaitSeconds: z.number().nonnegative(),
-        })
-        .strict()
-    ),
-  })
-  .strict();
-export const runnerMetricsJsonSchema = z.toJSONSchema(runnerMetricsSchema);
-
-export function queueMetrics(queues: RunnerQueueEntry[]) {
+export const queueMetrics = function queueMetrics(queues: RunnerQueueEntry[]) {
   const groups = new Map<
     string | null,
     { group: string | null; queued: number; oldestWaitSeconds: number }
@@ -45,20 +29,15 @@ export function queueMetrics(queues: RunnerQueueEntry[]) {
     groups.set(queue.group, value);
   }
   return runnerMetricsSchema.parse({
-    groups: [...groups.values()].sort((a, b) =>
+    groups: [...groups.values()].toSorted((a, b) =>
       (a.group ?? "").localeCompare(b.group ?? "")
     ),
   });
-}
+};
 
-export function prometheusQueueMetrics(
+export const prometheusQueueMetrics = function prometheusQueueMetrics(
   metrics: z.infer<typeof runnerMetricsSchema>
 ): string {
-  const label = (value: string | null) =>
-    (value ?? "")
-      .replaceAll("\\", "\\\\")
-      .replaceAll("\n", "\\n")
-      .replaceAll('"', '\\"');
   return [
     "# HELP specbook_runner_queue_depth Number of Specs waiting for a runner.",
     "# TYPE specbook_runner_queue_depth gauge",
@@ -74,4 +53,26 @@ export function prometheusQueueMetrics(
     ),
     "",
   ].join("\n");
-}
+};
+
+export const runnerMetricsQuerySchema = z
+  .object({
+    format: z.enum(["json", "prometheus"]).default("json"),
+    group: z.string().max(80).optional(),
+  })
+  .strict();
+
+export const runnerMetricsSchema = z
+  .object({
+    groups: z.array(
+      z
+        .object({
+          group: z.string().nullable(),
+          queued: z.number().int().nonnegative(),
+          oldestWaitSeconds: z.number().nonnegative(),
+        })
+        .strict()
+    ),
+  })
+  .strict();
+export const runnerMetricsJsonSchema = z.toJSONSchema(runnerMetricsSchema);

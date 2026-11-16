@@ -6,19 +6,7 @@ import type { defineTool } from "@earendil-works/pi-coding-agent";
 import { accountsRepository } from "../../infra/repositories/accounts";
 import { createProjectScrubber } from "../credentials/scrub";
 
-export interface Actor {
-  id: string | null;
-  name: string;
-  email?: string;
-  kind: "user" | "agent" | "ci" | "git" | "system";
-}
-
-const actors = new AsyncLocalStorage<Actor>();
-export const currentActor = () => actors.getStore();
-export const withActor = <T>(actor: Actor, work: () => T): T =>
-  actors.run(actor, work);
-
-export async function recordAudit(
+export const recordAudit = async function recordAudit(
   action: string,
   details: Record<string, unknown> = {},
   projectId?: string,
@@ -47,9 +35,9 @@ export async function recordAudit(
           },
     createdAt: new Date().toISOString(),
   });
-}
+};
 
-export function auditTools(
+export const auditTools = function auditTools(
   projectId: string,
   chatId: string,
   tools: ReturnType<typeof defineTool>[]
@@ -81,4 +69,16 @@ export function auditTools(
       }
     },
   }));
+};
+
+export interface Actor {
+  id: string | null;
+  name: string;
+  email?: string;
+  kind: "user" | "agent" | "ci" | "git" | "system";
 }
+
+const actors = new AsyncLocalStorage<Actor>();
+export const currentActor = () => actors.getStore();
+export const withActor = <T>(actor: Actor, work: () => T): T =>
+  actors.run(actor, work);

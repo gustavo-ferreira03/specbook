@@ -7,7 +7,8 @@ import net from "node:net";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { fileURLToPath } from "node:url";
+import type { ReadableStream } from "node:stream/web";
+import { setTimeout as wait } from "node:timers/promises";
 
 import { configHome, scrub } from "./credentials";
 import { normalizeServerUrl, redactTokens } from "./remote";
@@ -18,9 +19,7 @@ const MAX_UI_DOWNLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_UI_EXTRACTED_BYTES = 1024 * 1024 * 1024;
 declare const SPECBOOK_UI_RELEASE_SHA256: string;
 const expectedUiSha256 =
-  typeof SPECBOOK_UI_RELEASE_SHA256 === "undefined"
-    ? ""
-    : SPECBOOK_UI_RELEASE_SHA256;
+  SPECBOOK_UI_RELEASE_SHA256 === undefined ? "" : SPECBOOK_UI_RELEASE_SHA256;
 
 export interface ServeOptions {
   port?: string;
@@ -43,26 +42,31 @@ export type ServeEvent =
     }
   | { event: "stopped"; url: string };
 
-async function version(): Promise<string> {
+const version = async function version(): Promise<string> {
   const manifest = JSON.parse(
     await fs.readFile(path.join(packageDirectory, "package.json"), "utf-8")
   ) as { version?: unknown };
   if (
     typeof manifest.version !== "string" ||
-    !/^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(manifest.version)
+    !/^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/u.test(manifest.version)
   ) {
     throw new Error("The CLI package has an invalid version");
   }
   return manifest.version;
-}
+};
 
-async function uiEntry(directory: string): Promise<string | null> {
+const uiEntry = async function uiEntry(
+  directory: string
+): Promise<string | null> {
   const entry = path.join(directory, "server.js");
   const stat = await fs.lstat(entry).catch(() => null);
   return stat?.isFile() && !stat.isSymbolicLink() ? entry : null;
-}
+};
 
-async function response(url: string, signal?: AbortSignal): Promise<Response> {
+const response = async function response(
+  url: string,
+  signal?: AbortSignal
+): Promise<Response> {
   let fetched: Response;
   try {
     const requestSignal = signal
@@ -84,15 +88,15 @@ async function response(url: string, signal?: AbortSignal): Promise<Response> {
     );
   }
   return fetched;
-}
+};
 
-async function downloadUi(
+const downloadUi = async function downloadUi(
   currentVersion: string,
   target: string,
   url: string,
   signal?: AbortSignal
 ): Promise<void> {
-  if (!/^[a-f0-9]{64}$/.test(expectedUiSha256)) {
+  if (!/^[a-f0-9]{64}$/u.test(expectedUiSha256)) {
     throw new Error(
       "This CLI build has no trusted UI release checksum; use a release CLI or provide an extracted UI with --ui"
     );
@@ -111,19 +115,22 @@ async function downloadUi(
     const hash = createHash("sha256");
     let bytes = 0;
     const measured = new Transform({
+      // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires a callback or event handler and cannot consume a returned promise.
       transform(chunk: Buffer, _encoding, callback) {
         bytes += chunk.length;
         if (bytes > MAX_UI_DOWNLOAD_BYTES) {
+          // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires a callback or event handler and cannot consume a returned promise.
           callback(new Error("The UI release archive exceeds 200 MB"));
           return;
         }
         hash.update(chunk);
+        // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This API requires a callback or event handler and cannot consume a returned promise.
         callback(null, chunk);
       },
     });
     await pipeline(
       Readable.fromWeb(
-        downloaded.body as unknown as import("node:stream/web").ReadableStream<Uint8Array>
+        downloaded.body as unknown as ReadableStream<Uint8Array>
       ),
       measured,
       createWriteStream(archive, { flags: "wx", mode: 0o600 }),
@@ -144,13 +151,13 @@ async function downloadUi(
       preservePaths: false,
       filter(name, entry) {
         expanded += entry.size;
-        const relative = name.replace(/^\.\//, "");
+        const relative = name.replace(/^\.\//u, "");
         if (
           expanded > MAX_UI_EXTRACTED_BYTES ||
           !("type" in entry) ||
           !["File", "Directory"].includes(entry.type) ||
           path.isAbsolute(relative) ||
-          relative.split(/[\\/]/).includes("..")
+          relative.split(/[\\/]/u).includes("..")
         ) {
           invalid = true;
         }
@@ -182,9 +189,9 @@ async function downloadUi(
   } finally {
     await fs.rm(temporary, { recursive: true, force: true });
   }
-}
+};
 
-export async function resolveUi(
+export const resolveUi = async function resolveUi(
   options: Pick<ServeOptions, "ui" | "signal">,
   emit: (event: ServeEvent) => Promise<void>
 ): Promise<{
@@ -204,6 +211,7 @@ export async function resolveUi(
     path.join(moduleDirectory, "ui"),
     path.join(packageDirectory, "ui"),
   ]) {
+    // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
     if (await uiEntry(directory)) {
       return { directory, source: "bundled" };
     }
@@ -237,9 +245,9 @@ export async function resolveUi(
       { cause: error }
     );
   }
-}
+};
 
-function portNumber(
+const portNumber = function portNumber(
   value: string | undefined,
   fallback: number,
   label: string
@@ -251,15 +259,26 @@ function portNumber(
     );
   }
   return number;
-}
+};
 
-function hostUrl(host: string, port: number): string {
-  const reachable =
-    host === "0.0.0.0" ? "127.0.0.1" : host === "::" ? "::1" : host;
+const hostUrl = function hostUrl(host: string, port: number): string {
+  const reachable = (() => {
+    if (host === "0.0.0.0") {
+      return "127.0.0.1";
+    }
+    if (host === "::") {
+      return "::1";
+    }
+    return host;
+  })();
   return `http://${reachable.includes(":") ? `[${reachable}]` : reachable}:${port}`;
-}
+};
 
-async function availablePort(host: string, port: number): Promise<void> {
+const availablePort = async function availablePort(
+  host: string,
+  port: number
+): Promise<void> {
+  // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
   await new Promise<void>((resolve, reject) => {
     const listener = net.createServer();
     listener.once("error", () =>
@@ -273,14 +292,15 @@ async function availablePort(host: string, port: number): Promise<void> {
       listener.close((error) => (error ? reject(error) : resolve()))
     );
   });
-}
+};
 
-async function cliPackage(data: string): Promise<string> {
+const cliPackage = async function cliPackage(data: string): Promise<string> {
   if (process.env.SPECBOOK_CLI_PACKAGE_FILE) {
     return path.resolve(process.env.SPECBOOK_CLI_PACKAGE_FILE);
   }
   const bundled = path.join(packageDirectory, "dist", "specbook.tgz");
-  if ((await fs.stat(bundled).catch(() => null))?.isFile()) {
+  const catchValue1 = await fs.stat(bundled).catch(() => null);
+  if (catchValue1?.isFile()) {
     return bundled;
   }
   const directory = path.join(data, "cli");
@@ -311,7 +331,7 @@ async function cliPackage(data: string): Promise<string> {
   } finally {
     await fs.rm(temporary, { force: true });
   }
-}
+};
 
 interface ServerProcess {
   child: ChildProcess;
@@ -320,7 +340,7 @@ interface ServerProcess {
   done: Promise<void>;
 }
 
-export async function runServe(
+export const runServe = async function runServe(
   options: ServeOptions,
   emit: (event: ServeEvent) => Promise<void>,
   log: (line: string) => void
@@ -341,7 +361,7 @@ export async function runServe(
     );
   }
   const host = options.host ?? process.env.HOST ?? "127.0.0.1";
-  if (!host || /[\s/\\?#@]/.test(host)) {
+  if (!host || /[\s/\\?#@]/u.test(host)) {
     throw new Error("Use a hostname or IP address for --host");
   }
   const data = path.resolve(
@@ -350,7 +370,8 @@ export async function runServe(
       path.join(configHome(), "server")
   );
   const serverEntry = path.join(packageDirectory, "dist", "server", "index.js");
-  if (!(await fs.stat(serverEntry).catch(() => null))?.isFile()) {
+  const catchValue2 = await fs.stat(serverEntry).catch(() => null);
+  if (!catchValue2?.isFile()) {
     throw new Error(
       "The server runtime is not built. Install a packed Specbook CLI or run pnpm --filter @specbook/runtime --filter specbook build in this checkout."
     );
@@ -395,6 +416,7 @@ export async function runServe(
       let pending = "";
       let writes = Promise.resolve();
       const write = (line: string) => {
+        // oxlint-disable-next-line promise/always-return -- This continuation performs a side effect; its fulfilled value is intentionally unused.
         writes = writes.then(async () => {
           let safe: string;
           try {
@@ -423,6 +445,7 @@ export async function runServe(
         }
       });
     }
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
     state.done = new Promise((resolve) => {
       child.once("error", () => {
         state.exited = true;
@@ -449,10 +472,12 @@ export async function runServe(
     while (Date.now() < deadline) {
       signal.throwIfAborted();
       try {
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         const fetched = await fetch(target, {
           signal: AbortSignal.any([signal, AbortSignal.timeout(1000)]),
           redirect: "error",
         });
+        // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
         await fetched.body?.cancel();
         if (fetched.ok) {
           return;
@@ -460,7 +485,8 @@ export async function runServe(
       } catch {
         signal.throwIfAborted();
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      // oxlint-disable-next-line no-await-in-loop -- Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+      await wait(200);
     }
     throw new Error(
       "Specbook did not become ready within 90 seconds; check the server output"
@@ -484,6 +510,7 @@ export async function runServe(
       ui: resolvedUi.directory,
       uiSource: resolvedUi.source,
     });
+    // oxlint-disable-next-line promise/avoid-new -- Adapt the existing event or callback lifecycle to a promise, including its cancellation and cleanup.
     await new Promise<void>((resolve) => {
       signal.addEventListener("abort", () => resolve(), { once: true });
       if (signal.aborted) {
@@ -496,15 +523,19 @@ export async function runServe(
   } finally {
     startup.abort();
     for (const state of children) {
-      if (!state.exited) state.child.kill("SIGTERM");
+      if (!state.exited) {
+        state.child.kill("SIGTERM");
+      }
     }
     const force = setTimeout(() => {
       for (const state of children) {
-        if (!state.exited) state.child.kill("SIGKILL");
+        if (!state.exited) {
+          state.child.kill("SIGKILL");
+        }
       }
     }, 12_000);
     await Promise.all(children.map((state) => state.done));
     clearTimeout(force);
   }
   await emit({ event: "stopped", url });
-}
+};

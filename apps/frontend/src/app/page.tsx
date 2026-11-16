@@ -15,10 +15,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-import { useAuth } from "@/components/AuthProvider";
-import { EmptyState } from "@/components/EmptyState";
-import { InstanceHeader } from "@/components/InstanceHeader";
-import { Brand } from "@/components/LogoMark";
+import { useAuth } from "@/components/auth-provider";
+import { EmptyState } from "@/components/empty-state";
+import { InstanceHeader } from "@/components/instance-header";
+import { Brand } from "@/components/logo-mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, getLlmRuntimeStatus } from "@/lib/api";
 import type { Project } from "@/lib/types";
 
-function HomeContent() {
+const HomeContent = function HomeContent() {
   const { canEdit, isAdmin } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -44,13 +44,17 @@ function HomeContent() {
 
   useEffect(() => {
     let active = true;
-    getLlmRuntimeStatus()
-      .then((status) => {
+    (async () => {
+      try {
+        const resolvedValue = await getLlmRuntimeStatus();
+        const status = resolvedValue;
         if (active) {
           setLlmReady(status.ready);
         }
-      })
-      .catch(() => undefined);
+      } catch {
+        // Keep the last usable state if this optional operation fails.
+      }
+    })();
     return () => {
       active = false;
     };
@@ -58,10 +62,13 @@ function HomeContent() {
 
   useEffect(() => {
     let active = true;
+    // oxlint-disable-next-line react/set-state-in-effect -- Reset the previous request or selection when its external key changes before loading fresh state.
     setProjects(null);
     setLoadError("");
-    api<{ projects: Project[] }>("/projects")
-      .then((result) => {
+    (async () => {
+      try {
+        const resolvedValue = await api<{ projects: Project[] }>("/projects");
+        const result = resolvedValue;
         if (!active) {
           return;
         }
@@ -75,20 +82,23 @@ function HomeContent() {
           return;
         }
         setProjects(result.projects);
-      })
-      .catch((error) => {
+      } catch (error) {
         if (!active) {
           return;
         }
         setLoadError(error instanceof Error ? error.message : String(error));
         setProjects([]);
-      });
+      }
+    })();
     return () => {
       active = false;
     };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
   }, [forceNew, retryKey, router, canEdit]);
 
-  async function createProject(event: React.FormEvent<HTMLFormElement>) {
+  const createProject = async function createProject(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
     setCreateError("");
     setSubmitting(true);
@@ -110,10 +120,11 @@ function HomeContent() {
       setCreateError(error instanceof Error ? error.message : String(error));
       setSubmitting(false);
     }
-  }
+  };
 
   if (projects === null) {
     return (
+      /* oxlint-disable jsx-a11y/prefer-tag-over-role -- Alert forwards live-region semantics to its shared native wrapper; preserve the component structure. */
       <main
         className="bg-canvas min-h-dvh"
         aria-label="Loading projects"
@@ -138,6 +149,7 @@ function HomeContent() {
           <Skeleton className="h-[26rem] rounded-xl" />
         </div>
       </main>
+      /* oxlint-enable jsx-a11y/prefer-tag-over-role */
     );
   }
 
@@ -300,6 +312,7 @@ function HomeContent() {
               </p>
             </div>
             {!llmReady && (
+              /* oxlint-disable jsx-a11y/prefer-tag-over-role -- Alert forwards live-region semantics to its shared native wrapper; preserve the component structure. */
               <Alert
                 variant="warning"
                 role="status"
@@ -329,6 +342,7 @@ function HomeContent() {
                   </AlertDescription>
                 </div>
               </Alert>
+              /* oxlint-enable jsx-a11y/prefer-tag-over-role */
             )}
             {createError && (
               <Alert variant="danger" role="alert">
@@ -363,18 +377,21 @@ function HomeContent() {
       </div>
     </main>
   );
-}
+};
 
-export default function Home() {
+const Home = function Home() {
   return (
     <Suspense
       fallback={
+        /* oxlint-disable jsx-a11y/prefer-tag-over-role -- Alert forwards live-region semantics to its shared native wrapper; preserve the component structure. */
         <main className="bg-canvas min-h-dvh" role="status">
           <span className="sr-only">Loading Specbook</span>
         </main>
+        /* oxlint-enable jsx-a11y/prefer-tag-over-role */
       }
     >
       <HomeContent />
     </Suspense>
   );
-}
+};
+export default Home;

@@ -2,9 +2,7 @@ import { scrubJsonText } from "@specbook/runtime/scrub";
 
 import { listCredentialValues } from "./profiles";
 
-const LABEL = "••••";
-
-function xmlEscaped(value: string, quotes: boolean): string {
+const xmlEscaped = function xmlEscaped(value: string, quotes: boolean): string {
   const escaped = value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -12,9 +10,9 @@ function xmlEscaped(value: string, quotes: boolean): string {
   return quotes
     ? escaped.replaceAll('"', "&quot;").replaceAll("'", "&#x27;")
     : escaped;
-}
+};
 
-export function createSecretScrubber(
+export const createSecretScrubber = function createSecretScrubber(
   values: string[]
 ): (text: string) => string {
   const needles = new Set<string>();
@@ -28,37 +26,43 @@ export function createSecretScrubber(
     needles.add(xmlEscaped(value, true));
     needles.add(JSON.stringify(value).slice(1, -1));
   }
-  const sorted = [...needles].sort((a, b) => b.length - a.length);
-  const replace = (text: string) =>
-    sorted.reduce((acc, needle) => acc.split(needle).join(LABEL), text);
+  const sorted = [...needles].toSorted((a, b) => b.length - a.length);
+  const replace = (text: string) => {
+    let masked = text;
+    for (const needle of sorted) {
+      masked = masked.split(needle).join(LABEL);
+    }
+    return masked;
+  };
   return (text) => scrubJsonText(text, replace);
-}
+};
 
-const TRANSIENT_TTL_MS = 30 * 60_000;
-const transientSecrets = new Map<string, Map<string, number>>();
-
-export function registerTransientSecret(
+export const registerTransientSecret = function registerTransientSecret(
   projectId: string,
   value: string
 ): void {
   const values = transientSecrets.get(projectId) ?? new Map<string, number>();
   values.set(value, Date.now() + TRANSIENT_TTL_MS);
   transientSecrets.set(projectId, values);
-}
+};
 
-function liveTransientSecrets(projectId: string): string[] {
+const liveTransientSecrets = function liveTransientSecrets(
+  projectId: string
+): string[] {
   const values = transientSecrets.get(projectId);
   if (!values) {
     return [];
   }
   const now = Date.now();
   for (const [value, expiresAt] of values) {
-    if (expiresAt < now) values.delete(value);
+    if (expiresAt < now) {
+      values.delete(value);
+    }
   }
   return [...values.keys()];
-}
+};
 
-export async function projectSecretScrubber(
+export const projectSecretScrubber = async function projectSecretScrubber(
   projectId: string
 ): Promise<(text: string) => string> {
   const fields = await listCredentialValues(projectId);
@@ -72,9 +76,11 @@ export async function projectSecretScrubber(
     (value) => !visible.has(value) || sensitive.has(value)
   );
   return createSecretScrubber([...sensitive, ...transient]);
-}
+};
 
-export function createProjectScrubber(projectId: string) {
+export const createProjectScrubber = function createProjectScrubber(
+  projectId: string
+) {
   return Object.assign(
     async (text: string) => (await projectSecretScrubber(projectId))(text),
     {
@@ -84,4 +90,9 @@ export function createProjectScrubber(projectId: string) {
       },
     }
   );
-}
+};
+
+const LABEL = "••••";
+
+const TRANSIENT_TTL_MS = 30 * 60_000;
+const transientSecrets = new Map<string, Map<string, number>>();

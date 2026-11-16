@@ -6,8 +6,8 @@ export interface HostAllowlist {
   anyPort: Set<string>;
 }
 
-function parseHost(value: string): URL | null {
-  if (!value || /[\s/@\\?#,]/.test(value)) {
+const parseHost = function parseHost(value: string): URL | null {
+  if (!value || /[\s/@\\?#,]/u.test(value)) {
     return null;
   }
   try {
@@ -16,9 +16,9 @@ function parseHost(value: string): URL | null {
   } catch {
     return null;
   }
-}
+};
 
-export function buildHostAllowlist(
+export const buildHostAllowlist = function buildHostAllowlist(
   _port: number,
   env: NodeJS.ProcessEnv = process.env
 ): HostAllowlist {
@@ -36,7 +36,10 @@ export function buildHostAllowlist(
       if (value) {
         allowlist.exact.add(new URL(value).host.toLowerCase());
       }
-    } catch {}
+    } catch {
+      /* Cleanup is best effort; preserve the original result. */
+      /* Cleanup is best effort; preserve the original result. */
+    }
   }
   for (const raw of (env.SPECBOOK_ALLOWED_HOSTS ?? "").split(",")) {
     const entry = raw.trim().toLowerCase();
@@ -55,9 +58,9 @@ export function buildHostAllowlist(
     }
   }
   return allowlist;
-}
+};
 
-export function isAllowedHost(
+export const isAllowedHost = function isAllowedHost(
   allowlist: HostAllowlist,
   host: string | undefined
 ): boolean {
@@ -67,13 +70,16 @@ export function isAllowedHost(
   }
   return (
     allowlist.any ||
-    isIP(url.hostname.replaceAll(/^\[|\]$/g, "")) !== 0 ||
+    isIP(url.hostname.replaceAll(/^\[|\]$/gu, "")) !== 0 ||
     allowlist.exact.has(url.host) ||
     allowlist.anyPort.has(url.hostname)
   );
-}
+};
 
-export function matchesOriginHost(origin: string, host: string): boolean {
+export const matchesOriginHost = function matchesOriginHost(
+  origin: string,
+  host: string
+): boolean {
   try {
     const url = new URL(origin);
     const target = new URL(`${url.protocol}//${host}`);
@@ -85,9 +91,9 @@ export function matchesOriginHost(origin: string, host: string): boolean {
   } catch {
     return false;
   }
-}
+};
 
-export function frontendProxyOrigin(
+export const frontendProxyOrigin = function frontendProxyOrigin(
   headers: Headers,
   allowlist: HostAllowlist
 ): string | null {
@@ -103,4 +109,4 @@ export function frontendProxyOrigin(
     return null;
   }
   return `${protocol}://${host}`;
-}
+};

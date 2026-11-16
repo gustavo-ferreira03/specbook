@@ -14,11 +14,15 @@ const manifest = JSON.parse(
 const output = path.resolve(process.argv[2] ?? path.join(root, "dist/release"));
 const build = path.join(frontend, process.env.NEXT_DIST_DIR ?? ".next");
 const standalone = path.join(build, "standalone");
-await fs.access(path.join(standalone, "apps/frontend/server.js")).catch(() => {
-  throw new Error(
-    "Standalone UI is not built. Run pnpm --filter frontend build first."
-  );
-});
+await (async () => {
+  try {
+    return await fs.access(path.join(standalone, "apps/frontend/server.js"));
+  } catch {
+    throw new Error(
+      "Standalone UI is not built. Run pnpm --filter frontend build first."
+    );
+  }
+})();
 
 await fs.mkdir(output, { recursive: true });
 const staging = await fs.mkdtemp(path.join(os.tmpdir(), "specbook-ui-"));
@@ -30,11 +34,20 @@ try {
   const store = path.join(standalone, "node_modules/.pnpm");
   for (const entry of await fs.readdir(store)) {
     const dependencies = path.join(store, entry, "node_modules");
-    for (const name of await fs.readdir(dependencies).catch(() => [])) {
-      const names = name.startsWith("@")
-        ? (await fs.readdir(path.join(dependencies, name))).map(
-            (child) => `${name}/${child}`
-          )
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Requests, polling retries, and filesystem operations here must finish in order.
+    for (const name of await (async () => {
+      try {
+        return await fs.readdir(dependencies);
+      } catch {
+        return [];
+      }
+    })()) {
+      const scopedNames = name.startsWith("@")
+        ? // oxlint-disable-next-line eslint/no-await-in-loop -- Requests, polling retries, and filesystem operations here must finish in order.
+          await fs.readdir(path.join(dependencies, name))
+        : null;
+      const names = scopedNames
+        ? scopedNames.map((child) => `${name}/${child}`)
         : [name];
       for (const packageName of names) {
         if (packageName.startsWith(".")) {
@@ -42,6 +55,7 @@ try {
         }
         const source = path.join(dependencies, packageName);
         const dependency = JSON.parse(
+          // oxlint-disable-next-line eslint/no-await-in-loop -- Requests, polling retries, and filesystem operations here must finish in order.
           await fs.readFile(path.join(source, "package.json"), "utf-8")
         );
         const previous = packages.get(packageName);
@@ -52,6 +66,7 @@ try {
         }
         if (!previous) {
           packages.set(packageName, dependency.version);
+          // oxlint-disable-next-line eslint/no-await-in-loop -- Requests, polling retries, and filesystem operations here must finish in order.
           await fs.cp(source, path.join(staging, "node_modules", packageName), {
             recursive: true,
             dereference: true,
@@ -85,6 +100,7 @@ try {
     path.join(staging, "package.json"),
     `${JSON.stringify({ name: "specbook-ui", version: manifest.version, private: true, type: "commonjs" }, null, 2)}\n`
   );
+  // oxlint-disable-next-line promise/avoid-new -- Bridge the abortable timer or child-process callback into a promise.
   await new Promise((resolve, reject) => {
     const child = spawn("tar", ["-czf", artifact, "-C", staging, "."], {
       stdio: "inherit",

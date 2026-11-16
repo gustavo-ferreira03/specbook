@@ -3,9 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { chatSessions } from "../db/schema";
 
-export type ChatSessionRow = typeof chatSessions.$inferSelect;
-
 class ChatSessionsRepository {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async upsert(row: ChatSessionRow): Promise<void> {
     await db
       .insert(chatSessions)
@@ -16,6 +15,7 @@ class ChatSessionsRepository {
       });
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getByProfile(
     projectId: string,
     profileId: string
@@ -32,9 +32,12 @@ class ChatSessionsRepository {
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async deleteByProfileId(profileId: string): Promise<void> {
     await db.delete(chatSessions).where(eq(chatSessions.profileId, profileId));
   }
 }
+
+export type ChatSessionRow = typeof chatSessions.$inferSelect;
 
 export const chatSessionsRepository = new ChatSessionsRepository();

@@ -3,7 +3,6 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { runNodeCli, withRunSlot } from "@specbook/runtime/process";
 import {
@@ -20,29 +19,10 @@ import type {
   RawRequest,
 } from "@specbook/runtime/specbook/guard";
 
+import { requireValue } from "../../src/core/utils/require-value";
 import { tempDir } from "../helpers/storage";
 
-const BASE = "https://app.example.com/shop/";
-const runtime = {
-  baseURL: BASE,
-  secretOrigins: {
-    defaultOrigins: ["https://app.example.com"],
-    byRef: {
-      SPECBOOK_SECRET_ADMIN_PASSWORD: [
-        "https://app.example.com",
-        "https://login.example.com",
-      ],
-    },
-  },
-};
-
-interface Call {
-  target: string;
-  method: string;
-  args: unknown[];
-}
-
-function fakePage(
+const fakePage = function fakePage(
   options: {
     url?: string;
     frameOfElement?: "main" | "child";
@@ -93,15 +73,43 @@ function fakePage(
       {
         get(_target, property: string) {
           if (property === "evaluate") {
-            return async (callback: (node: unknown) => unknown) =>
-              callback(element(description));
+            // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This handler models the callback interface exercised by the test.
+            return (callback: (node: unknown) => unknown) => {
+              try {
+                // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This handler models the callback interface exercised by the test.
+                return Promise.resolve(callback(element(description)));
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            };
           }
           if (property === "elementHandle") {
-            return async () => ({
-              ownerFrame: async () =>
-                options.frameOfElement === "child" ? childFrame : mainFrame,
-              dispose: async () => undefined,
-            });
+            return () => {
+              try {
+                return Promise.resolve({
+                  ownerFrame: () => {
+                    try {
+                      return Promise.resolve(
+                        options.frameOfElement === "child"
+                          ? childFrame
+                          : mainFrame
+                      );
+                    } catch (error) {
+                      return Promise.reject(error);
+                    }
+                  },
+                  dispose: () => {
+                    try {
+                      return Promise.resolve(undefined);
+                    } catch (error) {
+                      return Promise.reject(error);
+                    }
+                  },
+                });
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            };
           }
           return record(property);
         },
@@ -112,45 +120,86 @@ function fakePage(
     url: () => currentUrl,
     mainFrame: () => mainFrame,
     keyboard: {
-      press: async (...args: unknown[]) =>
-        calls.push({ target: "keyboard", method: "press", args }),
-      type: async (...args: unknown[]) =>
-        calls.push({ target: "keyboard", method: "type", args }),
+      press: (...args: unknown[]) => {
+        try {
+          return Promise.resolve(
+            calls.push({ target: "keyboard", method: "press", args })
+          );
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      },
+      type: (...args: unknown[]) => {
+        try {
+          return Promise.resolve(
+            calls.push({ target: "keyboard", method: "type", args })
+          );
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      },
     },
     mouse: Object.fromEntries(
       ["move", "down", "up", "click", "dblclick", "wheel"].map((method) => [
         method,
-        async (...args: unknown[]) =>
-          calls.push({ target: "mouse", method, args }),
+        (...args: unknown[]) => {
+          try {
+            return Promise.resolve(
+              calls.push({ target: "mouse", method, args })
+            );
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
       ])
     ) as RawPage["mouse"],
-    evaluate: async (callback: () => unknown) => {
-      const document = Object.getOwnPropertyDescriptor(globalThis, "document");
-      Object.defineProperty(globalThis, "document", {
-        configurable: true,
-        value: {
-          activeElement: options.activeIframe
-            ? { tagName: "IFRAME" }
-            : element("keyboard"),
-        },
-      });
+    // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This handler models the callback interface exercised by the test.
+    evaluate: (callback: () => unknown) => {
       try {
-        return callback();
-      } finally {
-        if (document) {
-          Object.defineProperty(globalThis, "document", document);
-        } else {
-          Reflect.deleteProperty(globalThis, "document");
+        const document = Object.getOwnPropertyDescriptor(
+          globalThis,
+          "document"
+        );
+        Object.defineProperty(globalThis, "document", {
+          configurable: true,
+          value: {
+            activeElement: options.activeIframe
+              ? { tagName: "IFRAME" }
+              : element("keyboard"),
+          },
+        });
+        try {
+          // oxlint-disable-next-line promise/prefer-await-to-callbacks -- This handler models the callback interface exercised by the test.
+          return Promise.resolve(callback());
+        } finally {
+          if (document) {
+            Object.defineProperty(globalThis, "document", document);
+          } else {
+            Reflect.deleteProperty(globalThis, "document");
+          }
         }
+      } catch (error) {
+        return Promise.reject(error);
       }
     },
-    goto: async (...args: unknown[]) => {
-      calls.push({ target: "page", method: "goto", args });
-      currentUrl = String(args[0]);
-      return { request: () => "raw-response" };
+    goto: (...args: unknown[]) => {
+      try {
+        calls.push({ target: "page", method: "goto", args });
+        currentUrl = String(args[0]);
+        return Promise.resolve({ request: () => "raw-response" });
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
-    reload: async (...args: unknown[]) =>
-      calls.push({ target: "page", method: "reload", args }),
+    reload: (...args: unknown[]) => {
+      try {
+        return Promise.resolve(
+          calls.push({ target: "page", method: "reload", args })
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
     getByRole: (...args: unknown[]) => {
       calls.push({ target: "page", method: "getByRole", args });
       return locator("role");
@@ -166,19 +215,40 @@ function fakePage(
     context: () => "raw-context",
   };
   return { page, calls, marks, setUrl: (url: string) => (currentUrl = url) };
-}
+};
 
-function guarded(
+const guarded = function guarded(
   options: Parameters<typeof fakePage>[0] = {},
-  secrets: Record<string, string> = {
-    SPECBOOK_SECRET_ADMIN_PASSWORD: "hunter22",
-  }
+  secretOverrides?: Record<string, string>
 ) {
   const fake = fakePage(options);
+  const secrets = secretOverrides ?? {
+    SPECBOOK_SECRET_ADMIN_PASSWORD: "hunter22",
+  };
   const guard = createGuard({ runtime, readSecret: (name) => secrets[name] });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = guard.wrapPage(fake.page) as any;
   return { ...fake, wrapped: page };
+};
+
+const BASE = "https://app.example.com/shop/";
+const runtime = {
+  baseURL: BASE,
+  secretOrigins: {
+    defaultOrigins: ["https://app.example.com"],
+    byRef: {
+      SPECBOOK_SECRET_ADMIN_PASSWORD: [
+        "https://app.example.com",
+        "https://login.example.com",
+      ],
+    },
+  },
+};
+
+interface Call {
+  target: string;
+  method: string;
+  args: unknown[];
 }
 
 describe("specbook page proxy", () => {
@@ -220,6 +290,7 @@ describe("specbook page proxy", () => {
         { waitUntil: "load" },
       ],
     });
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const target of [
       "https://evil.example/",
       "//evil.example/",
@@ -231,10 +302,11 @@ describe("specbook page proxy", () => {
     ]) {
       await assert.rejects(
         wrapped.goto(target),
-        /takes a path starting with/,
+        /takes a path starting with/u,
         String(target)
       );
     }
+    /* oxlint-enable no-await-in-loop */
   });
 
   test("locators are wrapped too and actions return nothing", async () => {
@@ -251,33 +323,37 @@ describe("specbook page proxy", () => {
     });
     const filtered = wrapped
       .locator("li")
-      .filter({ has: wrapped.getByLabel("x"), hasText: /a/ });
+      .filter({ has: wrapped.getByLabel("x"), hasText: /a/u });
     assert.ok(filtered);
     const filterCall = calls.find((call) => call.method === "filter");
     assert.equal(
-      typeof (filterCall?.args[0] as { has: unknown }).has,
+      typeof (requireValue(filterCall).args[0] as { has: unknown }).has,
       "object"
     );
-    assert.notEqual((filterCall?.args[0] as { has: unknown }).has, undefined);
+    assert.notEqual(
+      (requireValue(filterCall).args[0] as { has: unknown }).has,
+      undefined
+    );
     assert.throws(
       () => wrapped.locator("internal:control=enter-frame"),
-      /internal:/
+      /internal:/u
     );
     assert.throws(
       () => wrapped.getByRole("button").and("css"),
-      /takes a locator/
+      /takes a locator/u
     );
     assert.throws(
       () => wrapped.getByRole("button", { name: () => 1 }),
-      /Only literal values/
+      /Only literal values/u
     );
     assert.throws(
+      // oxlint-disable-next-line typescript/no-extraneous-class -- Use a class instance to verify rejection of non-plain locator options.
       () => wrapped.getByRole("button", new (class Options {})()),
-      /plain object literals/
+      /plain object literals/u
     );
     assert.throws(
       () => wrapped.getByRole("button").filter({ has: wrapped }),
-      /Only literal values|plain object/
+      /Only literal values|plain object/u
     );
   });
 
@@ -306,7 +382,7 @@ describe("specbook page proxy", () => {
       evil.wrapped
         .getByLabel("Password")
         .fill(createSecret("admin", "password")),
-      /origin is not allowed/
+      /origin is not allowed/u
     );
     assert.ok(!evil.calls.some((call) => call.method === "fill"));
 
@@ -315,7 +391,7 @@ describe("specbook page proxy", () => {
       framed.wrapped
         .getByLabel("Password")
         .fill(createSecret("admin", "password")),
-      /outside the page's main frame/
+      /outside the page's main frame/u
     );
     assert.ok(!framed.calls.some((call) => call.method === "fill"));
 
@@ -324,14 +400,14 @@ describe("specbook page proxy", () => {
       unknown.wrapped
         .getByLabel("Password")
         .fill(createSecret("other", "password")),
-      /origin is not allowed/
+      /origin is not allowed/u
     );
     const missing = guarded({}, {});
     await assert.rejects(
       missing.wrapped
         .getByLabel("Password")
         .fill(createSecret("admin", "password")),
-      /not configured/
+      /not configured/u
     );
   });
 
@@ -350,11 +426,11 @@ describe("specbook page proxy", () => {
     const framed = guarded({ activeIframe: true });
     await assert.rejects(
       framed.wrapped.keyboard.type(createSecret("admin", "password")),
-      /main frame/
+      /main frame/u
     );
     await assert.rejects(
       plain.wrapped.keyboard.type({ toString: () => "x" }),
-      /string literal or secret/
+      /string literal or secret/u
     );
     assert.equal(Object.getPrototypeOf(plain.wrapped.keyboard), null);
     assert.equal(plain.wrapped.keyboard.down, undefined);
@@ -385,28 +461,28 @@ describe("specbook page proxy", () => {
         { target: "mouse", method: "wheel", args: [0, 120] },
       ]
     );
-    await assert.rejects(mouse.move("1", 2), /literal numbers/);
-    await assert.rejects(mouse.click(1, Number.NaN), /literal numbers/);
-    await assert.rejects(mouse.wheel(0), /literal numbers/);
+    await assert.rejects(mouse.move("1", 2), /literal numbers/u);
+    await assert.rejects(mouse.click(1, Number.NaN), /literal numbers/u);
+    await assert.rejects(mouse.wheel(0), /literal numbers/u);
     await assert.rejects(
       mouse.down({ button: () => 1 }),
-      /Only literal values/
+      /Only literal values/u
     );
     assert.equal(mouse.drag, undefined);
 
     const target = wrapped.getByLabel("Done");
     await wrapped.locator("#card").dragTo(target, { steps: 5 });
-    const drag = calls.at(-1)!;
+    const drag = requireValue(calls.at(-1));
     assert.equal(drag.method, "dragTo");
     assert.equal(drag.args[0], unwrap(target));
     assert.deepEqual(drag.args[1], { steps: 5 });
     await assert.rejects(
       wrapped.locator("#card").dragTo("#done"),
-      /takes a locator/
+      /takes a locator/u
     );
     await assert.rejects(
       wrapped.locator("#card").dragTo(wrapped),
-      /takes a locator/
+      /takes a locator/u
     );
   });
 
@@ -419,8 +495,8 @@ describe("specbook page proxy", () => {
       '{"token":"[secret admin.password]"}'
     );
     assert.ok(!Object.values(token).includes("hunter22"));
-    assert.throws(() => createSecret("Admin", "password"), /profile name/);
-    assert.throws(() => createSecret("admin", 1), /profile name/);
+    assert.throws(() => createSecret("Admin", "password"), /profile name/u);
+    assert.throws(() => createSecret("admin", 1), /profile name/u);
   });
 
   test("paths and runtime configuration", () => {
@@ -430,7 +506,7 @@ describe("specbook page proxy", () => {
     assert.ok(!isSafeRelativePath("/\\x"));
     assert.ok(!isSafeRelativePath("/a\\b"));
     assert.ok(!isSafeRelativePath("http://x/"));
-    assert.throws(() => parseRuntime(undefined), /only run through Specbook/);
+    assert.throws(() => parseRuntime(undefined), /only run through Specbook/u);
     assert.equal(parseRuntime(JSON.stringify(runtime)).baseURL, BASE);
   });
 });
@@ -440,25 +516,51 @@ describe("specbook API proxy", () => {
     const calls: { url: string; options: Record<string, unknown> }[] = [];
     const evidence: ApiRequestEvidence[] = [];
     const raw: RawRequest = {
-      async fetch(url, options) {
-        calls.push({ url, options });
-        const redirect = url.endsWith("/redirect");
-        return {
-          status: () => (redirect ? 307 : 200),
-          headers: (): Record<string, string> =>
-            redirect
-              ? { location: "https://api.example.com/echo" }
-              : {
-                  "content-type": "application/json",
-                  "set-cookie": "session=hunter22",
-                },
-          body: async () =>
-            new TextEncoder().encode(
-              JSON.stringify({ token: "hunter22", value: "x".repeat(10_000) })
-            ),
-          json: async () => ({ ok: true }),
-          dispose: async () => {},
-        };
+      fetch(url, options) {
+        try {
+          calls.push({ url, options });
+          const redirect = url.endsWith("/redirect");
+          return Promise.resolve({
+            status: () => (redirect ? 307 : 200),
+            headers: (): Record<string, string> =>
+              redirect
+                ? { location: "https://api.example.com/echo" }
+                : {
+                    "content-type": "application/json",
+                    "set-cookie": "session=hunter22",
+                  },
+            body: () => {
+              try {
+                return Promise.resolve(
+                  new TextEncoder().encode(
+                    JSON.stringify({
+                      token: "hunter22",
+                      value: "x".repeat(10_000),
+                    })
+                  )
+                );
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            },
+            json: () => {
+              try {
+                return Promise.resolve({ ok: true });
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            },
+            dispose: () => {
+              try {
+                return Promise.resolve();
+              } catch (error) {
+                return Promise.reject(error);
+              }
+            },
+          });
+        } catch (error) {
+          return Promise.reject(error);
+        }
       },
     };
     const guard = createGuard({
@@ -471,9 +573,10 @@ describe("specbook API proxy", () => {
       },
       readSecret: () => "hunter22",
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const request = guard.wrapRequest(raw, (item) =>
-      evidence.push(item)
+    const request = guard.wrapRequest(
+      raw,
+      (item) => evidence.push(item)
+      // oxlint-disable-next-line typescript/no-explicit-any -- Probe the runtime guard surface, including deliberately unsupported methods.
     ) as any;
     assert.equal(Object.getPrototypeOf(request), null);
     assert.equal(request.fetch, undefined);
@@ -502,13 +605,14 @@ describe("specbook API proxy", () => {
       request.get("/redirect", {
         headers: { Authorization: createSecret("admin", "password") },
       }),
-      /API origin is not allowed for this credential/
+      /API origin is not allowed for this credential/u
     );
     assert.equal(
       calls.length,
       2,
       "credential-bearing redirect is rejected before a second fetch"
     );
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const header of [
       "Host",
       "hOsT",
@@ -518,9 +622,10 @@ describe("specbook API proxy", () => {
     ]) {
       await assert.rejects(
         request.get("/echo", { headers: { [header]: "other.example.com" } }),
-        /routing headers/
+        /routing headers/u
       );
     }
+    /* oxlint-enable no-await-in-loop */
     assert.equal(
       calls.length,
       2,
@@ -528,15 +633,15 @@ describe("specbook API proxy", () => {
     );
     await assert.rejects(
       request.get("https://evil.example.com/"),
-      /origin is not allowed/
+      /origin is not allowed/u
     );
     await assert.rejects(
       request.get("/echo", { ignoreHTTPSErrors: true }),
-      /not allowed/
+      /not allowed/u
     );
     await assert.rejects(
       request.get("/echo", { timeout: 0 }),
-      /between 1 and 30000/
+      /between 1 and 30000/u
     );
     await request.get("/redirect");
     assert.equal(
@@ -570,10 +675,13 @@ describe("function constructor hardening", () => {
     );
     assert.equal(result.status, 0, result.stderr);
     const lines = result.stdout.trim().split("\n");
-    const outcomes = JSON.parse(lines.at(-1)!) as string[];
+    const outcomes = JSON.parse(requireValue(lines.at(-1))) as string[];
     assert.deepEqual(
       outcomes,
-      Array(4).fill("Code generation is not available to Specs")
+      Array.from(
+        { length: 4 },
+        () => "Code generation is not available to Specs"
+      )
     );
   });
 });
@@ -588,6 +696,7 @@ describe("run cancellation", () => {
       let release!: () => void;
       const held = withRunSlot(
         () =>
+          // oxlint-disable-next-line promise/avoid-new -- Adapt the event-driven fixture API while keeping its cancellation and completion behavior.
           new Promise<void>((resolve) => {
             release = resolve;
           })
@@ -595,16 +704,28 @@ describe("run cancellation", () => {
       try {
         const controller = new AbortController();
         let executed = false;
-        const cancelled = withRunSlot(async () => {
-          executed = true;
+        const cancelled = withRunSlot(() => {
+          try {
+            executed = true;
+
+            return Promise.resolve();
+          } catch (error) {
+            return Promise.reject(error);
+          }
         }, controller.signal);
-        const rejected = assert.rejects(cancelled, /cancelled/);
+        const rejected = assert.rejects(cancelled, /cancelled/u);
         controller.abort(new Error("cancelled"));
         await rejected;
         assert.equal(executed, false);
         let nextStarted = false;
-        const next = withRunSlot(async () => {
-          nextStarted = true;
+        const next = withRunSlot(() => {
+          try {
+            nextStarted = true;
+
+            return Promise.resolve();
+          } catch (error) {
+            return Promise.reject(error);
+          }
         });
         await Promise.resolve();
         assert.equal(nextStarted, false);
@@ -612,7 +733,16 @@ describe("run cancellation", () => {
         await held;
         await next;
         assert.equal(nextStarted, true);
-        assert.equal(await withRunSlot(async () => "released"), "released");
+        assert.equal(
+          await withRunSlot(() => {
+            try {
+              return Promise.resolve("released");
+            } catch (error) {
+              return Promise.reject(error);
+            }
+          }),
+          "released"
+        );
       } finally {
         release();
         await held;
@@ -649,7 +779,7 @@ describe("run cancellation", () => {
             timeoutMs: 30_000,
             signal: controller.signal,
           }),
-        /aborted/
+        /aborted/u
       );
     }
   );

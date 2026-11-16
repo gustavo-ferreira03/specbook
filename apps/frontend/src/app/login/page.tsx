@@ -4,15 +4,15 @@ import { ArrowRight, KeyRound } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-import { useAuth } from "@/components/AuthProvider";
-import { AuthField, AuthShell } from "@/components/AuthShell";
-import { InlineFeedback } from "@/components/SettingsLayout";
+import { useAuth } from "@/components/auth-provider";
+import { AuthField, AuthShell } from "@/components/auth-shell";
+import { InlineFeedback } from "@/components/settings-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, errorMessage, safeReturnPath } from "@/lib/api";
 
-function LoginContent() {
+const LoginContent = function LoginContent() {
   const router = useRouter();
   const search = useSearchParams();
   const { refresh } = useAuth();
@@ -30,12 +30,14 @@ function LoginContent() {
   );
   useEffect(() => {
     let active = true;
-    void api<{
-      needsAdmin: boolean;
-      passwordLoginEnabled: boolean;
-      oidcEnabled: boolean;
-    }>("/auth/options")
-      .then((result) => {
+    (async () => {
+      try {
+        const resolvedValue = await api<{
+          needsAdmin: boolean;
+          passwordLoginEnabled: boolean;
+          oidcEnabled: boolean;
+        }>("/auth/options");
+        const result = resolvedValue;
         if (!active) {
           return;
         }
@@ -44,17 +46,17 @@ function LoginContent() {
           return;
         }
         setOptions(result);
-      })
-      .catch((reason) => {
+      } catch (error_) {
         if (active) {
-          setError(errorMessage(reason));
+          setError(errorMessage(error_));
         }
-      });
+      }
+    })();
     return () => {
       active = false;
     };
   }, [router]);
-  async function login(event: React.FormEvent) {
+  const login = async function login(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
@@ -66,12 +68,12 @@ function LoginContent() {
       setPassword("");
       await refresh();
       router.replace(safeReturnPath(search.get("next")));
-    } catch (reason) {
-      setError(errorMessage(reason));
+    } catch (error_) {
+      setError(errorMessage(error_));
       setBusy(false);
     }
-  }
-  async function singleSignOn() {
+  };
+  const singleSignOn = async function singleSignOn() {
     setBusy(true);
     setError("");
     try {
@@ -80,11 +82,11 @@ function LoginContent() {
         body: JSON.stringify({}),
       });
       window.location.assign(result.url);
-    } catch (reason) {
-      setError(errorMessage(reason));
+    } catch (error_) {
+      setError(errorMessage(error_));
       setBusy(false);
     }
-  }
+  };
   return (
     <AuthShell
       title="Sign in"
@@ -98,7 +100,7 @@ function LoginContent() {
             <Button
               variant="outline"
               className="h-10 w-full"
-              onClick={() => void singleSignOn()}
+              onClick={() => singleSignOn()}
               disabled={busy}
             >
               <KeyRound size={14} /> Continue with single sign-on
@@ -163,18 +165,13 @@ function LoginContent() {
       )}
     </AuthShell>
   );
-}
+};
 
-export default function LoginPage() {
+const LoginPage = function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <span className="sr-only" role="status">
-          Loading sign in
-        </span>
-      }
-    >
+    <Suspense fallback={<output className="sr-only">Loading sign in</output>}>
       <LoginContent />
     </Suspense>
   );
-}
+};
+export default LoginPage;

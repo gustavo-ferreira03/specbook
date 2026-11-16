@@ -37,17 +37,12 @@ import {
   runnerTokenSchema,
 } from "../../../core/private-runner/tokens";
 import { runnerQueueSnapshot } from "../../../core/private-runner/visibility";
+import { requireValue } from "../../../core/utils/require-value";
 import { runnersRepository } from "../../repositories/runners";
 import type { RunnerToken } from "../../repositories/runners";
 import { access } from "../access";
 
-declare module "hono" {
-  interface ContextVariableMap {
-    runner: RunnerToken;
-  }
-}
-
-async function verifyRunner(c: Context): Promise<true> {
+const verifyRunner = async function verifyRunner(c: Context): Promise<true> {
   const runner = await authenticateRunnerToken(c.req.header("authorization"));
   if (!runner) {
     throw new HTTPException(401, {
@@ -63,9 +58,9 @@ async function verifyRunner(c: Context): Promise<true> {
   }
   c.set("runner", runner);
   return true;
-}
+};
 
-async function verifyMetrics(c: Context): Promise<true> {
+const verifyMetrics = async function verifyMetrics(c: Context): Promise<true> {
   const runner = await authenticateRunnerToken(
     c.req.header("authorization"),
     false
@@ -84,25 +79,23 @@ async function verifyMetrics(c: Context): Promise<true> {
   c.set("user", user);
   c.set("authentication", "token");
   return true;
-}
+};
 
-function requireSession(c: Context): void {
+const requireSession = function requireSession(c: Context): void {
   if (c.get("authentication") !== "session") {
     throw new HTTPException(403, {
       message: "Sign in to the web app to manage runner tokens.",
     });
   }
-}
+};
 
-const upgradeMessage = `Runner protocol is incompatible with this server (requires ${RUNNER_PROTOCOL_VERSION}). Upgrade the CLI from this server's /cli/specbook.tgz and restart the runner.`;
-
-function requireProtocol(version: number): void {
+const requireProtocol = function requireProtocol(version: number): void {
   if (version !== RUNNER_PROTOCOL_VERSION) {
     throw new HTTPException(426, { message: upgradeMessage });
   }
-}
+};
 
-export function createRunnersRouter(): Hono {
+export const createRunnersRouter = function createRunnersRouter(): Hono {
   const router = new Hono();
   router.get(
     "/runner/metrics",
@@ -111,14 +104,17 @@ export function createRunnersRouter(): Hono {
     async (c) => {
       const { group, format } = c.req.valid("query");
       const runner = c.get("runner");
-      const queues = (await runnerQueueSnapshot()).queues.filter(
-        (entry) =>
-          (!runner ||
-            (entry.group === runner.group &&
-              (!runner.projectIds ||
-                runner.projectIds.includes(entry.projectId)))) &&
-          (group === undefined || (entry.group ?? "") === group)
-      );
+      const queues = await (async () => {
+        const awaitedValue3185 = await runnerQueueSnapshot();
+        return awaitedValue3185.queues.filter(
+          (entry) =>
+            (!runner ||
+              (entry.group === runner.group &&
+                (!runner.projectIds ||
+                  runner.projectIds.includes(entry.projectId)))) &&
+            (group === undefined || (entry.group ?? "") === group)
+        );
+      })();
       const metrics = queueMetrics(queues);
       c.header("Cache-Control", "no-store");
       if (format === "prometheus") {
@@ -131,7 +127,12 @@ export function createRunnersRouter(): Hono {
   );
   router.get("/runners/queue", access("admin"), async (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ queues: (await runnerQueueSnapshot()).queues });
+    return c.json({
+      queues: await (async () => {
+        const awaitedValue3946 = await runnerQueueSnapshot();
+        return awaitedValue3946.queues;
+      })(),
+    });
   });
   router.get("/runners", access("admin"), async (c) => {
     const [tokens, instances] = await Promise.all([
@@ -225,8 +226,8 @@ export function createRunnersRouter(): Hono {
         lease: job
           ? {
               jobId: job.id,
-              leaseId: job.leaseId!,
-              leaseExpiresAt: job.leaseExpiresAt!,
+              leaseId: requireValue(job.leaseId),
+              leaseExpiresAt: requireValue(job.leaseExpiresAt),
               heartbeatMs: Math.min(
                 60_000,
                 Math.max(1000, Math.floor(runnerLeaseMs() / 4))
@@ -301,4 +302,12 @@ export function createRunnersRouter(): Hono {
     }
   );
   return router;
+};
+
+declare module "hono" {
+  interface ContextVariableMap {
+    runner: RunnerToken;
+  }
 }
+
+const upgradeMessage = `Runner protocol is incompatible with this server (requires ${RUNNER_PROTOCOL_VERSION}). Upgrade the CLI from this server's /cli/specbook.tgz and restart the runner.`;

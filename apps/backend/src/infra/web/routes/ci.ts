@@ -27,6 +27,7 @@ import {
 } from "../../../core/ci/tokens";
 import { getRunBatch, listCiBatches } from "../../../core/runner/batch";
 import { fingerprint } from "../../../core/steward/signals";
+import { requireValue } from "../../../core/utils/require-value";
 import { ciRepository } from "../../repositories/ci";
 import { environmentsRepository } from "../../repositories/environments";
 import { stewardRepository } from "../../repositories/steward";
@@ -35,47 +36,19 @@ import type { BearerVerifier } from "../access";
 import { loadProject } from "../load-project";
 import { publicFrontendOrigin, htmlReportHeaders } from "../security";
 
-async function authenticate(c: Context, projectId: string) {
+const authenticate = async function authenticate(
+  c: Context,
+  projectId: string
+) {
   if (!(await authenticateCiToken(projectId, c.req.header("authorization")))) {
     throw new HTTPException(401, {
       message: "A valid project CI bearer token is required",
     });
   }
   c.header("Cache-Control", "no-store");
-}
-
-const rejectCi = () =>
-  Response.json(
-    { error: "A valid project CI bearer token is required" },
-    { status: 401 }
-  );
-
-const verifyCiToken: BearerVerifier = async (c) => {
-  const authorization = c.req.header("authorization");
-  const projectId = c.req.path.match(
-    /^\/ci\/projects\/([0-9a-f-]{36})\//i
-  )?.[1];
-  if (projectId) {
-    return (await authenticateCiToken(projectId, authorization))
-      ? true
-      : rejectCi();
-  }
-  const batchId = c.req.path.match(/^\/ci\/runs\/([0-9a-f-]{36})$/i)?.[1];
-  const batch = batchId ? await getRunBatch(batchId) : null;
-  if (!batch?.ci) {
-    return Response.json({ error: "CI batch not found" }, { status: 404 });
-  }
-  return (await authenticateCiToken(batch.projectId, authorization))
-    ? true
-    : rejectCi();
 };
 
-const projectAuth: MiddlewareHandler = async (c, next) => {
-  await authenticate(c, c.req.param("id")!);
-  await next();
-};
-
-function ciError(c: Context, error: unknown): never {
+const ciError = function ciError(c: Context, error: unknown): never {
   if (error instanceof CiRequestError) {
     if (error.retryAfter) {
       c.header("Retry-After", String(error.retryAfter));
@@ -83,23 +56,23 @@ function ciError(c: Context, error: unknown): never {
     throw new HTTPException(error.status, { message: error.message });
   }
   throw error;
-}
+};
 
-async function acceptTrigger(
+const acceptTrigger = async function acceptTrigger(
   c: Context,
   projectId: string,
   target?: string,
   name?: string
 ) {
-  return acceptCiTrigger(
+  return await acceptCiTrigger(
     projectId,
-    c.req.header("authorization")!,
+    requireValue(c.req.header("authorization")),
     target,
     name
   ).catch((error) => ciError(c, error));
-}
+};
 
-export function createCiSettingsRouter(): Hono {
+export const createCiSettingsRouter = function createCiSettingsRouter(): Hono {
   const router = new Hono();
   router.get(
     "/projects/:id/ci",
@@ -107,15 +80,18 @@ export function createCiSettingsRouter(): Hono {
     browserSession,
     async (c) => {
       const id = c.req.param("id");
-      const project = await loadProject(id);
+      const _project = await loadProject(id);
       c.header("Cache-Control", "no-store");
       return c.json({
         environments: await environmentsRepository.list(id),
         token: await ciTokenInfo(id),
         batches: await Promise.all(
-          (await listCiBatches(id)).map((batch) =>
-            ciResult(batch, publicFrontendOrigin(c))
-          )
+          await (async () => {
+            const awaitedValue2586 = await listCiBatches(id);
+            return awaitedValue2586.map((batch) =>
+              ciResult(batch, publicFrontendOrigin(c))
+            );
+          })()
         ),
       });
     }
@@ -142,9 +118,9 @@ export function createCiSettingsRouter(): Hono {
     }
   );
   return router;
-}
+};
 
-export function createCiRouter(): Hono {
+export const createCiRouter = function createCiRouter(): Hono {
   const router = new Hono();
   router.post(
     "/ci/projects/:id/runs",
@@ -156,7 +132,7 @@ export function createCiRouter(): Hono {
       const input = c.req.valid("json");
       const batch = await startCiRun(
         projectId,
-        c.req.header("authorization")!,
+        requireValue(c.req.header("authorization")),
         input
       ).catch((error) => ciError(c, error));
       c.header("Location", `/ci/runs/${batch.id}`);
@@ -189,17 +165,24 @@ export function createCiRouter(): Hono {
       let result = await ciResult(batch, publicFrontendOrigin(c));
       const deadline = Date.now() + 25_000;
       while (
+        // oxlint-disable-next-line no-unmodified-loop-condition -- The request option stays fixed; completion, cancellation, and the deadline bound this polling loop.
         wait === "true" &&
         !result.complete &&
         Date.now() < deadline &&
         !c.req.raw.signal.aborted
       ) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // oxlint-disable-next-line promise/avoid-new, no-await-in-loop -- Bridge an event or callback API to the asynchronous operation. Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
+        await new Promise((resolve) => {
+          setTimeout(resolve, 500);
+        });
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await authenticate(c, batch.projectId);
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         batch = await getRunBatch(id);
         if (!batch) {
           throw new HTTPException(404, { message: "CI batch not found" });
         }
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         result = await ciResult(batch, publicFrontendOrigin(c));
       }
       if (format === "junit") {
@@ -268,4 +251,37 @@ export function createCiRouter(): Hono {
     }
   );
   return router;
-}
+};
+
+const rejectCi = () =>
+  Response.json(
+    { error: "A valid project CI bearer token is required" },
+    { status: 401 }
+  );
+
+const verifyCiToken: BearerVerifier = async (c) => {
+  const authorization = c.req.header("authorization");
+  const projectId = c.req.path.match(
+    /^\/ci\/projects\/(?<capture1>[0-9a-f-]{36})\//iu
+  )?.[1];
+  if (projectId) {
+    return (await authenticateCiToken(projectId, authorization))
+      ? true
+      : rejectCi();
+  }
+  const batchId = c.req.path.match(
+    /^\/ci\/runs\/(?<capture1>[0-9a-f-]{36})$/iu
+  )?.[1];
+  const batch = batchId ? await getRunBatch(batchId) : null;
+  if (!batch?.ci) {
+    return Response.json({ error: "CI batch not found" }, { status: 404 });
+  }
+  return (await authenticateCiToken(batch.projectId, authorization))
+    ? true
+    : rejectCi();
+};
+
+const projectAuth: MiddlewareHandler = async (c, next) => {
+  await authenticate(c, requireValue(c.req.param("id")));
+  return await next();
+};

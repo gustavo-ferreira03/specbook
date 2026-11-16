@@ -1,16 +1,11 @@
 import type { RunEnvironment } from "../../infra/db/schema";
 import { credentialsRepository } from "../../infra/repositories/credentials";
 import type { CredentialProfileRow } from "../../infra/repositories/credentials";
+import { requireValue } from "../utils/require-value";
 import { loginFieldKeys } from "./login-classifier";
 import { getProfileByName } from "./profiles";
 
-export interface ResolvedCredential {
-  profile: CredentialProfileRow;
-  appOrigins: Set<string>;
-  fillOrigins: Set<string>;
-}
-
-export async function resolveCredentialProfile(
+export const resolveCredentialProfile = async function resolveCredentialProfile(
   projectId: string,
   name: string,
   productionBaseUrl: string,
@@ -27,7 +22,7 @@ export async function resolveCredentialProfile(
     return "the overridden profile does not belong to this project.";
   }
   const base = new URL(
-    overrideId ? environment!.configuredBaseUrl : productionBaseUrl
+    overrideId ? requireValue(environment).configuredBaseUrl : productionBaseUrl
   ).origin;
   const appOrigins = new Set([base, ...profile.allowedOrigins]);
   const keys = loginFieldKeys(profile.fields.map((field) => field.key));
@@ -40,4 +35,10 @@ export async function resolveCredentialProfile(
     appOrigins,
     fillOrigins: exactLogin ? new Set(profile.allowedOrigins) : appOrigins,
   };
+};
+
+export interface ResolvedCredential {
+  profile: CredentialProfileRow;
+  appOrigins: Set<string>;
+  fillOrigins: Set<string>;
 }

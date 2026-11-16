@@ -8,8 +8,8 @@ import type { TunnelFrame } from "../tunnel-protocol.ts";
 interface MessageSocket extends EventEmitter {
   readyState: number;
   bufferedAmount: number;
-  send(data: string, callback: (error?: Error) => void): void;
-  close(code?: number, reason?: string): void;
+  send: (data: string, callback: (error?: Error) => void) => void;
+  close: (code?: number, reason?: string) => void;
 }
 interface Pending {
   resolve: (stream: Duplex) => void;
@@ -24,10 +24,16 @@ export class TunnelMultiplexer {
   private blockedWrites = new Map<string, (error?: Error) => void>();
   private stopped = false;
 
+  private accept?: (origin: string) => Promise<Duplex>;
+  private socket: MessageSocket;
   constructor(
-    private socket: MessageSocket,
-    private accept?: (origin: string) => Promise<Duplex>
+    socket: MessageSocket,
+    accept?: (origin: string) => Promise<Duplex>
   ) {
+    this.accept = accept;
+
+    this.socket = socket;
+
     socket.on("message", (data: Buffer, binary: boolean) => {
       if (binary || data.length > 65_536) {
         socket.close(1008, "Invalid tunnel frame");
@@ -56,7 +62,9 @@ export class TunnelMultiplexer {
 
   private send(
     frame: TunnelFrame,
-    done: (error?: Error) => void = () => undefined
+    done: (error?: Error) => void = () => {
+      /* Intentionally no work for this callback. */
+    }
   ): void {
     if (
       this.stopped ||
@@ -116,7 +124,9 @@ export class TunnelMultiplexer {
         done(error);
       },
     });
-    stream.on("error", () => undefined);
+    stream.on("error", () => {
+      /* Intentionally no work for this callback. */
+    });
     stream.on("tunnel-data", (chunk: Buffer) => {
       if (!stream.push(chunk) && !paused) {
         paused = true;
@@ -133,7 +143,8 @@ export class TunnelMultiplexer {
     }
     const id = randomUUID();
     this.stream(id);
-    return new Promise<Duplex>((resolve, reject) => {
+    // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
+    return await new Promise<Duplex>((resolve, reject) => {
       const timer = setTimeout(
         () =>
           this.streams
@@ -151,6 +162,7 @@ export class TunnelMultiplexer {
     });
   }
 
+  // oxlint-disable-next-line complexity -- Handle each tunnel frame in the same stream state machine.
   private async receive(frame: TunnelFrame): Promise<void> {
     if (this.stopped) {
       return;
@@ -239,6 +251,9 @@ export class TunnelMultiplexer {
         const write = this.blockedWrites.get(frame.id);
         this.blockedWrites.delete(frame.id);
         write?.();
+        break;
+      }
+      default: {
         break;
       }
     }

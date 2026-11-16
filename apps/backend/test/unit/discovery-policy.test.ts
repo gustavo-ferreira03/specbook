@@ -9,52 +9,81 @@ import {
   DISCOVERY_BROWSER_TOOLS,
   snapshotClickTarget,
 } from "../../src/core/chat/discovery-policy";
+import { requireValue } from "../../src/core/utils/require-value";
 import type { ProjectContextRevisionRow } from "../../src/infra/repositories/project-contexts";
 
-const START_URL = "https://app.example.com/start";
-
-function fakeMcp(urls: string[], snapshot = '- button "Products" [ref=e1]') {
+const fakeMcp = function fakeMcp(
+  urls: string[],
+  snapshot = '- button "Products" [ref=e1]'
+) {
   const calls: { name: string; arguments: unknown }[] = [];
   const navigations: string[] = [];
   let current = 0;
   const mcp = {
     client: {
-      callTool: async (request: { name: string; arguments: unknown }) => {
-        calls.push(request);
-        if (request.name === "browser_navigate_back") {
-          current = Math.min(current + 1, urls.length - 1);
+      callTool: (request: { name: string; arguments: unknown }) => {
+        try {
+          calls.push(request);
+          if (request.name === "browser_navigate_back") {
+            current = Math.min(current + 1, urls.length - 1);
+          }
+          const url = urls[current];
+          return Promise.resolve({
+            content: [
+              {
+                type: "text",
+                text:
+                  request.name === "browser_snapshot"
+                    ? snapshot
+                    : `- Page URL: ${url}`,
+              },
+            ],
+          });
+        } catch (error) {
+          return Promise.reject(error);
         }
-        const url = urls[current];
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                request.name === "browser_snapshot"
-                  ? snapshot
-                  : `- Page URL: ${url}`,
-            },
-          ],
-        };
       },
     },
     tools: [],
-    ensureBrowser: async () => {},
-    navigate: async (url: string) => {
-      navigations.push(url);
+    ensureBrowser: () => {
+      try {
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
-    close: async () => {},
+    navigate: (url: string) => {
+      try {
+        navigations.push(url);
+
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    close: () => {
+      try {
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
   } as unknown as BrowserMcp;
   return { mcp, calls, navigations };
-}
+};
 
-function policyFor(urls: string[] = [START_URL], snapshot?: string) {
+const policyFor = function policyFor(
+  urls: string[] = [START_URL],
+  snapshot?: string
+) {
   const revision = {
     brief: { goal: "", startUrl: START_URL, safetyNotes: [] },
   } as unknown as ProjectContextRevisionRow;
   const fake = fakeMcp(urls, snapshot);
   return { policy: createDiscoveryBrowserPolicy(revision, fake.mcp), ...fake };
-}
+};
+
+const START_URL = "https://app.example.com/start";
 
 describe("chat navigation origins", () => {
   const profiles = [
@@ -98,47 +127,51 @@ describe("discovery browser policy", () => {
 
   test("navigation must stay on the discovery origin over HTTP(S)", async () => {
     const { policy } = policyFor();
-    await policy.beforeCall!("browser_navigate", {
+    await requireValue(policy.beforeCall)("browser_navigate", {
       url: "https://app.example.com/other?x=1",
     });
     await assert.rejects(
-      policy.beforeCall!("browser_navigate", {
+      requireValue(policy.beforeCall)("browser_navigate", {
         url: "https://evil.example.com/",
       }),
-      /outside the discovery origin/
+      /outside the discovery origin/u
     );
     await assert.rejects(
-      policy.beforeCall!("browser_navigate", {
+      requireValue(policy.beforeCall)("browser_navigate", {
         url: "http://app.example.com/",
       }),
-      /outside the discovery origin/
+      /outside the discovery origin/u
     );
     await assert.rejects(
-      policy.beforeCall!("browser_navigate", {
+      requireValue(policy.beforeCall)("browser_navigate", {
         url: "https://app.example.com@evil.com/",
       }),
-      /without embedded credentials/
+      /without embedded credentials/u
     );
     await assert.rejects(
-      policy.beforeCall!("browser_navigate", { url: "javascript:alert(1)" }),
-      /only HTTP and HTTPS/
+      requireValue(policy.beforeCall)("browser_navigate", {
+        // oxlint-disable-next-line no-script-url -- Exercise rejection of a JavaScript URL without executing it.
+        url: "javascript:alert(1)",
+      }),
+      /only HTTP and HTTPS/u
     );
     await assert.rejects(
-      policy.beforeCall!("browser_navigate", { url: "not a url" }),
-      /not a valid URL/
+      requireValue(policy.beforeCall)("browser_navigate", { url: "not a url" }),
+      /not a valid URL/u
     );
   });
 
   test("new tabs are refused", async () => {
     const { policy } = policyFor();
     await assert.rejects(
-      policy.beforeCall!("browser_tabs", { action: "new" }),
-      /new tabs/
+      requireValue(policy.beforeCall)("browser_tabs", { action: "new" }),
+      /new tabs/u
     );
-    await policy.beforeCall!("browser_tabs", { action: "list" });
+    await requireValue(policy.beforeCall)("browser_tabs", { action: "list" });
   });
 
   test("clicks use the actual snapshot target even when the model gives an innocent description", async () => {
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const name of [
       "Delete account",
       "Salvar alterações",
@@ -149,14 +182,16 @@ describe("discovery browser policy", () => {
     ]) {
       const { policy } = policyFor([START_URL], `- button "${name}" [ref=e1]`);
       await assert.rejects(
-        policy.beforeCall!("browser_click", {
+        requireValue(policy.beforeCall)("browser_click", {
           target: "aria-ref=e1",
           element: "Products menu",
         }),
-        /actual button/,
+        /actual button/u,
         name
       );
     }
+    /* oxlint-enable no-await-in-loop */
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const name of [
       "Products",
       "Ver detalhes do pedido",
@@ -164,30 +199,31 @@ describe("discovery browser policy", () => {
       "Dashboard",
     ]) {
       const { policy } = policyFor([START_URL], `- link "${name}" [ref=e1]`);
-      await policy.beforeCall!("browser_click", {
+      await requireValue(policy.beforeCall)("browser_click", {
         ref: "e1",
         element: "Delete something",
       });
     }
+    /* oxlint-enable no-await-in-loop */
     const { policy } = policyFor();
     await assert.rejects(
-      policy.beforeCall!("browser_click", {
+      requireValue(policy.beforeCall)("browser_click", {
         target: "button",
         element: "Products",
       }),
-      /reference/
+      /reference/u
     );
     await assert.rejects(
-      policy.beforeCall!("browser_click", { ref: "e999" }),
-      /missing or ambiguous/
+      requireValue(policy.beforeCall)("browser_click", { ref: "e999" }),
+      /missing or ambiguous/u
     );
     await assert.rejects(
-      policy.beforeCall!("browser_type", {
+      requireValue(policy.beforeCall)("browser_type", {
         submit: true,
         target: "aria-ref=e1",
         text: "value",
       }),
-      /Submitting/
+      /Submitting/u
     );
   });
 
@@ -197,7 +233,7 @@ describe("discovery browser policy", () => {
         '- button "Delete account" [ref=e1]\n  - img "Icon" [ref=e2]',
         "e2"
       ),
-      /Delete account/
+      /Delete account/u
     );
     assert.equal(
       snapshotClickTarget('- button "\\u0044elete" [ref=e1]', "e1"),
@@ -205,7 +241,7 @@ describe("discovery browser policy", () => {
     );
     assert.throws(
       () => snapshotClickTarget("- button [ref=e1]", "e1"),
-      /no accessible name/
+      /no accessible name/u
     );
     assert.throws(
       () =>
@@ -213,7 +249,7 @@ describe("discovery browser policy", () => {
           '- button "First" [ref=e1]\n- button "Second" [ref=e1]',
           "e1"
         ),
-      /ambiguous/
+      /ambiguous/u
     );
   });
 
@@ -223,18 +259,18 @@ describe("discovery browser policy", () => {
       "https://login.example.com",
     ]);
     assert.equal(policy.allowedTools, undefined);
-    await policy.beforeCall!("browser_navigate", {
+    await requireValue(policy.beforeCall)("browser_navigate", {
       url: "https://login.example.com/signin",
     });
     await assert.rejects(
-      policy.beforeCall!("browser_snapshot", {}),
-      /before inspecting/
+      requireValue(policy.beforeCall)("browser_snapshot", {}),
+      /before inspecting/u
     );
     await assert.rejects(
-      policy.beforeCall!("browser_navigate", {
+      requireValue(policy.beforeCall)("browser_navigate", {
         url: "https://elsewhere.example/",
       }),
-      /outside the project origin/
+      /outside the project origin/u
     );
   });
 
@@ -244,8 +280,8 @@ describe("discovery browser policy", () => {
       START_URL,
     ]);
     await assert.rejects(
-      policy.afterCall!("browser_click", {}, ""),
-      /left the discovery origin/
+      requireValue(policy.afterCall)("browser_click", {}, ""),
+      /left the discovery origin/u
     );
     assert.ok(calls.some((call) => call.name === "browser_navigate_back"));
   });
@@ -256,14 +292,14 @@ describe("discovery browser policy", () => {
       "https://evil.example.com/b",
     ]);
     await assert.rejects(
-      policy.afterCall!("browser_click", {}, ""),
-      /left the discovery origin/
+      requireValue(policy.afterCall)("browser_click", {}, ""),
+      /left the discovery origin/u
     );
     assert.deepEqual(navigations, [START_URL]);
   });
 
   test("staying on the origin passes", async () => {
     const { policy } = policyFor(["https://app.example.com/deep/page"]);
-    await policy.afterCall!("browser_click", {}, "");
+    await requireValue(policy.afterCall)("browser_click", {}, "");
   });
 });

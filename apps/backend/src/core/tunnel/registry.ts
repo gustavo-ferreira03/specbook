@@ -19,40 +19,26 @@ import { runnersRepository } from "../../infra/repositories/runners";
 import type { RunnerToken } from "../../infra/repositories/runners";
 import { isAllowedHost } from "../../infra/web/security";
 import { authenticateRunnerToken } from "../private-runner/tokens";
+import { requireValue } from "../utils/require-value";
 
-interface Connection {
-  websocket: WebSocket;
-  multiplexer: TunnelMultiplexer;
-  runnerId: string;
-  tokenHash: string;
-  config: TunnelConfig;
+export class TunnelWaitInterruptedError extends Error {
+  name = "TunnelWaitInterruptedError";
 }
-interface Waiting {
-  environment: RunEnvironment;
-  projectId: string;
-  runIds: string[];
-  queuedAt: string;
-}
-const connections = new Map<string, Connection>();
-const connecting = new Set<string>();
-const waiting = new Map<string, Waiting>();
-let shutdown = new AbortController();
-export class TunnelWaitInterrupted extends Error {}
 
-export function tunnelQueueTimeoutMs(): number {
+export const tunnelQueueTimeoutMs = function tunnelQueueTimeoutMs(): number {
   const seconds = Number(
     process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS ?? 1800
   );
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 30 * 60_000;
-}
+};
 
-export function stopTunnelWaits(): void {
+export const stopTunnelWaits = function stopTunnelWaits(): void {
   shutdown.abort(
-    new TunnelWaitInterrupted("Backend stopped while waiting for a tunnel")
+    new TunnelWaitInterruptedError("Backend stopped while waiting for a tunnel")
   );
-}
+};
 
-export function tunnelStartCommand(
+export const tunnelStartCommand = function tunnelStartCommand(
   environment: Pick<RunEnvironment, "id" | "baseUrl" | "allowedOrigins">,
   projectId: string
 ): string {
@@ -63,13 +49,13 @@ export function tunnelStartCommand(
     ]),
   ];
   return `specbook tunnel --project ${projectId} --environment ${environment.id}${origins.map((origin) => ` --allow-origin '${origin.replaceAll("'", "'\\''")}'`).join("")}`;
-}
+};
 
-export function hasTunnel(environmentId: string): boolean {
+export const hasTunnel = function hasTunnel(environmentId: string): boolean {
   return connections.get(environmentId)?.websocket.readyState === 1;
-}
+};
 
-export function publicTunnels() {
+export const publicTunnels = function publicTunnels() {
   return [...connections.values()]
     .filter((connection) => connection.websocket.readyState === 1)
     .map(({ runnerId, config }) => ({
@@ -80,25 +66,28 @@ export function publicTunnels() {
       group: config.environment.group,
       online: true,
     }));
-}
+};
 
-function retireConnection(
+const retireConnection = function retireConnection(
   connection: Connection,
   code: number,
   reason: string
 ): void {
   connection.multiplexer.close();
   connection.websocket.close(code, reason);
-}
+};
 
-export function closeRunnerTunnels(runnerId: string): void {
+export const closeRunnerTunnels = function closeRunnerTunnels(
+  runnerId: string
+): void {
   for (const connection of connections.values()) {
-    if (connection.runnerId === runnerId)
+    if (connection.runnerId === runnerId) {
       retireConnection(connection, 1008, "Runner token changed");
+    }
   }
-}
+};
 
-export async function configuredTunnel(
+export const configuredTunnel = async function configuredTunnel(
   runner: RunnerToken,
   projectId: string,
   selector: string
@@ -116,10 +105,13 @@ export async function configuredTunnel(
       "This runner token is not allowed to access this project"
     );
   }
-  const environment = (await environmentsRepository.list(projectId)).find(
-    (row) =>
-      row.id === selector || row.name.toLowerCase() === selector.toLowerCase()
-  );
+  const environment = await (async () => {
+    const awaitedValue3740 = await environmentsRepository.list(projectId);
+    return awaitedValue3740.find(
+      (row) =>
+        row.id === selector || row.name.toLowerCase() === selector.toLowerCase()
+    );
+  })();
   if (!environment || String(environment.executor) !== "tunnel") {
     throw new CodedError(
       "environment",
@@ -147,9 +139,11 @@ export async function configuredTunnel(
     ],
     websocketPath: "/runner/tunnel",
   });
-}
+};
 
-async function currentConnection(connection: Connection): Promise<boolean> {
+const currentConnection = async function currentConnection(
+  connection: Connection
+): Promise<boolean> {
   const runner = await runnersRepository.get(connection.runnerId);
   if (!runner || runner.tokenHash !== connection.tokenHash) {
     return false;
@@ -165,8 +159,8 @@ async function currentConnection(connection: Connection): Promise<boolean> {
       current.environment.id === previous.environment.id &&
       current.environment.projectId === previous.environment.projectId &&
       current.environment.group === previous.environment.group &&
-      JSON.stringify([...current.origins].sort()) ===
-        JSON.stringify([...previous.origins].sort());
+      JSON.stringify([...current.origins].toSorted()) ===
+        JSON.stringify([...previous.origins].toSorted());
     if (matching) {
       connection.config = current;
     }
@@ -174,51 +168,52 @@ async function currentConnection(connection: Connection): Promise<boolean> {
   } catch {
     return false;
   }
-}
+};
 
-export async function createEnvironmentTunnelProxy(
-  environment: RunEnvironment
-) {
-  if (!hasTunnel(environment.id)) {
-    throw new CodedError(
-      "environment",
-      `No tunnel connected in group ${environment.runnerGroup ?? "(unset)"}. Start specbook tunnel inside the private network.`
-    );
-  }
-  return createRunProxy(
-    environment.allowedOrigins,
-    undefined,
-    async (target) => {
-      const connection = connections.get(environment.id);
-      if (
-        !connection ||
-        !environment.allowedOrigins.includes(target.origin) ||
-        !connection.config.origins.includes(target.origin)
-      ) {
-        throw new CodedError(
-          "environment",
-          "Tunnel connection unavailable or target blocked"
-        );
-      }
-      if (!(await currentConnection(connection))) {
-        retireConnection(connection, 1008, "Tunnel configuration changed");
-        throw new CodedError(
-          "environment",
-          "Tunnel connection unavailable or target blocked"
-        );
-      }
-      return connection.multiplexer.connect(target.origin);
+export const createEnvironmentTunnelProxy =
+  async function createEnvironmentTunnelProxy(environment: RunEnvironment) {
+    if (!hasTunnel(environment.id)) {
+      throw new CodedError(
+        "environment",
+        `No tunnel connected in group ${environment.runnerGroup ?? "(unset)"}. Start specbook tunnel inside the private network.`
+      );
     }
-  );
-}
+    return await createRunProxy(
+      environment.allowedOrigins,
+      undefined,
+      async (target) => {
+        const connection = connections.get(environment.id);
+        if (
+          !connection ||
+          !environment.allowedOrigins.includes(target.origin) ||
+          !connection.config.origins.includes(target.origin)
+        ) {
+          throw new CodedError(
+            "environment",
+            "Tunnel connection unavailable or target blocked"
+          );
+        }
+        if (!(await currentConnection(connection))) {
+          retireConnection(connection, 1008, "Tunnel configuration changed");
+          throw new CodedError(
+            "environment",
+            "Tunnel connection unavailable or target blocked"
+          );
+        }
+        return connection.multiplexer.connect(target.origin);
+      }
+    );
+  };
 
-export async function waitForTunnel(
+export const waitForTunnel = async function waitForTunnel(
   environment: RunEnvironment,
   projectId: string,
   runIds: string[] = [],
-  signal?: AbortSignal,
+  signalInput?: AbortSignal,
   queuedAt = new Date().toISOString()
 ): Promise<void> {
+  let signal = signalInput;
+
   signal = signal
     ? AbortSignal.any([signal, shutdown.signal])
     : shutdown.signal;
@@ -242,6 +237,7 @@ export async function waitForTunnel(
     while (!hasTunnel(environment.id)) {
       signal?.throwIfAborted();
       checkDeadline();
+      // oxlint-disable-next-line promise/avoid-new, no-await-in-loop -- Bridge an event or callback API to the asynchronous operation. Keep dependent retries, browser actions, and state changes in their original order and bound concurrent resource use.
       await new Promise<void>((resolve) => {
         const done = () => {
           clearTimeout(timer);
@@ -263,33 +259,42 @@ export async function waitForTunnel(
   } finally {
     waiting.delete(id);
   }
-}
+};
 
-export function pendingTunnelRunIds(): string[] {
+export const pendingTunnelRunIds = function pendingTunnelRunIds(): string[] {
   return [...waiting.values()].flatMap((entry) => entry.runIds);
-}
+};
 
-export async function tunnelQueueEntries(): Promise<RunnerQueueEntry[]> {
+export const tunnelQueueEntries = async function tunnelQueueEntries(): Promise<
+  RunnerQueueEntry[]
+> {
   const groups = new Map<string, Waiting[]>();
   for (const entry of waiting.values()) {
-    if (entry.runIds.length)
+    if (entry.runIds.length) {
       groups.set(entry.environment.id, [
         ...(groups.get(entry.environment.id) ?? []),
         entry,
       ]);
+    }
   }
-  return Promise.all(
+  return await Promise.all(
     [...groups.values()].map(async (entries) => {
-      const first = entries[0]!;
-      const oldest = entries.reduce(
-        (value, entry) => (entry.queuedAt < value ? entry.queuedAt : value),
-        first.queuedAt
-      );
+      const first = requireValue(entries[0]);
+      let oldest = first.queuedAt;
+      for (const entry of entries) {
+        if (entry.queuedAt < oldest) {
+          oldest = entry.queuedAt;
+        }
+      }
       return {
         projectId: first.projectId,
         projectName:
-          (await projectsRepository.getProject(first.projectId))?.name ??
-          "Project",
+          (await (async () => {
+            const resolvedValue9698 = await projectsRepository.getProject(
+              first.projectId
+            );
+            return resolvedValue9698?.name;
+          })()) ?? "Project",
         environmentId: first.environment.id,
         environmentName: first.environment.name,
         group: first.environment.runnerGroup ?? null,
@@ -303,9 +308,9 @@ export async function tunnelQueueEntries(): Promise<RunnerQueueEntry[]> {
       };
     })
   );
-}
+};
 
-export function attachTunnelWebSockets(
+export const attachTunnelWebSockets = function attachTunnelWebSockets(
   server: Server,
   hostAllowlist: HostAllowlist
 ): () => void {
@@ -328,25 +333,31 @@ export function attachTunnelWebSockets(
         connecting.delete(reservedEnvironment);
       }
       if (pendingInstance) {
-        void runnersRepository
+        runnersRepository
           .disconnect(pendingInstance.runnerId, pendingInstance.id)
-          .catch(() => undefined);
+          .catch(() => {
+            /* No action is needed until this callback is replaced or invoked by its owner. */
+          });
       }
     });
     const reject = (status: number, message: string) => {
-      const title =
-        status === 401
-          ? "Unauthorized"
-          : status === 409
-            ? "Conflict"
-            : status === 426
-              ? "Upgrade Required"
-              : "Forbidden";
+      const title = (() => {
+        if (status === 401) {
+          return "Unauthorized";
+        }
+        if (status === 409) {
+          return "Conflict";
+        }
+        if (status === 426) {
+          return "Upgrade Required";
+        }
+        return "Forbidden";
+      })();
       socket.end(
         `HTTP/1.1 ${status} ${title}\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n${message}`
       );
     };
-    void (async () => {
+    (async () => {
       if (
         !isAllowedHost(hostAllowlist, request.headers.host) ||
         request.headers.origin
@@ -416,8 +427,10 @@ export function attachTunnelWebSockets(
         "tunnel"
       );
       if (
-        (await runnersRepository.get(runner.id))?.tokenHash !==
-          runner.tokenHash ||
+        (await (async () => {
+          const resolvedValue14080 = await runnersRepository.get(runner.id);
+          return resolvedValue14080?.tokenHash;
+        })()) !== runner.tokenHash ||
         socket.destroyed ||
         socket.readableEnded
       ) {
@@ -452,7 +465,8 @@ export function attachTunnelWebSockets(
           }
           alive = false;
           websocket.ping();
-          void currentConnection(connection)
+          currentConnection(connection)
+            // oxlint-disable-next-line promise/always-return -- This continuation performs a side effect; its fulfilled value is intentionally unused.
             .then(async (current) => {
               if (!current) {
                 retireConnection(
@@ -481,15 +495,17 @@ export function attachTunnelWebSockets(
             );
         }, 5000);
         monitor.unref();
-        websocket.on("error", () => undefined);
+        websocket.on("error", () => {
+          /* No action is needed until this callback is replaced or invoked by its owner. */
+        });
         websocket.once("close", () => {
           clearInterval(monitor);
           if (connections.get(environmentId) === connection) {
             connections.delete(environmentId);
           }
-          void runnersRepository
-            .disconnect(runner.id, instanceId)
-            .catch(() => undefined);
+          runnersRepository.disconnect(runner.id, instanceId).catch(() => {
+            /* No action is needed until this callback is replaced or invoked by its owner. */
+          });
         });
       });
     })().catch(() => {
@@ -508,4 +524,24 @@ export function attachTunnelWebSockets(
     }
     wss.close();
   };
+};
+
+interface Connection {
+  websocket: WebSocket;
+  multiplexer: TunnelMultiplexer;
+  runnerId: string;
+  tokenHash: string;
+  config: TunnelConfig;
 }
+interface Waiting {
+  environment: RunEnvironment;
+  projectId: string;
+  runIds: string[];
+  queuedAt: string;
+}
+const connections = new Map<string, Connection>();
+const connecting = new Set<string>();
+const waiting = new Map<string, Waiting>();
+let shutdown = new AbortController();
+
+export { TunnelWaitInterruptedError as TunnelWaitInterrupted };

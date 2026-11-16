@@ -15,16 +15,18 @@ import type { RunBatch } from "../runner/batch";
 import { ciResult } from "./results";
 import type { CiResult } from "./results";
 
-export async function htmlReport(
+export const htmlReport = async function htmlReport(
   result: CiResult,
   options: { single?: boolean } = {}
 ): Promise<string> {
   const { batch } = result;
   const features = new Map(
-    (await featuresRepository.listFeatures(batch.projectId)).map((feature) => [
-      feature.id,
-      feature.title,
-    ])
+    await (async () => {
+      const awaitedValue804 = await featuresRepository.listFeatures(
+        batch.projectId
+      );
+      return awaitedValue804.map((feature) => [feature.id, feature.title]);
+    })()
   );
   const sections = await Promise.all(
     result.results.map(async (item) => {
@@ -49,7 +51,12 @@ export async function htmlReport(
   return renderHtmlReport(
     {
       project:
-        (await projectsRepository.getProject(batch.projectId))?.name ?? "",
+        (await (async () => {
+          const resolvedValue1767 = await projectsRepository.getProject(
+            batch.projectId
+          );
+          return resolvedValue1767?.name;
+        })()) ?? "",
       startedAt: batch.startedAt,
       durationMs: batch.durationMs,
       environment: batch.environment,
@@ -59,9 +66,9 @@ export async function htmlReport(
     },
     options
   );
-}
+};
 
-export async function runReport(
+export const runReport = async function runReport(
   run: {
     id: string;
     specId: string;
@@ -95,8 +102,10 @@ export async function runReport(
     ],
   } as unknown as RunBatch;
   return htmlReport(await ciResult(batch), { single: true });
-}
+};
 
-export async function batchReport(batch: RunBatch): Promise<string> {
+export const batchReport = async function batchReport(
+  batch: RunBatch
+): Promise<string> {
   return htmlReport(await ciResult(batch));
-}
+};

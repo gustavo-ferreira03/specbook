@@ -1,16 +1,16 @@
-export function slugify(value: string): string {
+export const slugify = function slugify(value: string): string {
   const slug = value
     .normalize("NFKD")
-    .replaceAll(/[̀-ͯ]/g, "")
+    .replaceAll(/[̀-ͯ]/gu, "")
     .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-+|-+$/g, "")
+    .replaceAll(/[^a-z0-9]+/gu, "-")
+    .replaceAll(/^-+|-+$/gu, "")
     .slice(0, 60)
-    .replaceAll(/-+$/g, "");
+    .replaceAll(/-+$/gu, "");
   return slug || "untitled";
-}
+};
 
-export function uniqueSlug(
+export const uniqueSlug = function uniqueSlug(
   title: string,
   taken: Set<string>,
   id: string
@@ -20,9 +20,9 @@ export function uniqueSlug(
     return base;
   }
   return `${base}-${id.slice(0, 6)}`;
-}
+};
 
-export function humanizeSlug(slug: string): string {
-  const words = slug.replaceAll(/-+/g, " ").trim();
+export const humanizeSlug = function humanizeSlug(slug: string): string {
+  const words = slug.replaceAll(/-+/gu, " ").trim();
   return words ? words[0].toUpperCase() + words.slice(1) : "Untitled";
-}
+};

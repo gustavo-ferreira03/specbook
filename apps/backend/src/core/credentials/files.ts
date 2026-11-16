@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export async function writeProtectedFile(
+export const writeProtectedFile = async function writeProtectedFile(
   file: string,
   contents: string | Buffer
 ): Promise<void> {
@@ -14,4 +14,4 @@ export async function writeProtectedFile(
   } finally {
     await fs.rm(temporary, { force: true });
   }
-}
+};

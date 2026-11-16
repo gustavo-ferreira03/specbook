@@ -6,13 +6,8 @@ import { db, runBatch } from "../db/client";
 import type { DbQuery } from "../db/client";
 import { features, runs, specs } from "../db/schema";
 
-export type Feature = typeof features.$inferSelect;
-export type DeleteFeatureResult =
-  | { status: "not_found" }
-  | { status: "busy" }
-  | { status: "deleted"; specIds: string[]; runIds: string[] };
-
 class FeaturesRepository {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   private collectFeatureIds(rootId: string, rows: Feature[]): string[] {
     const ids = new Set([rootId]);
     let changed = true;
@@ -32,6 +27,7 @@ class FeaturesRepository {
     return [...ids];
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async createFeature(
     projectId: string,
     parentId: string | null,
@@ -53,6 +49,7 @@ class FeaturesRepository {
     return row;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getFeatureByPath(
     projectId: string,
     path: string
@@ -64,6 +61,7 @@ class FeaturesRepository {
     return rows[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async updateFeatureRecord(
     id: string,
     patch: Partial<Pick<Feature, "title" | "description" | "path" | "parentId">>
@@ -71,14 +69,16 @@ class FeaturesRepository {
     await db.update(features).set(patch).where(eq(features.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async listFeatures(projectId: string): Promise<Feature[]> {
-    return db
+    return await db
       .select()
       .from(features)
       .where(eq(features.projectId, projectId))
       .orderBy(asc(features.createdAt), asc(features.id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async getFeature(id: string): Promise<Feature | null> {
     const rows = await db.select().from(features).where(eq(features.id, id));
     return rows[0] ?? null;
@@ -100,10 +100,12 @@ class FeaturesRepository {
     return specRows.map((spec) => spec.id);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   insertFeatureQuery(row: Feature): DbQuery {
     return db.insert(features).values(row);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   updateFeatureQuery(
     id: string,
     patch: Partial<Pick<Feature, "title" | "description" | "path" | "parentId">>
@@ -111,6 +113,7 @@ class FeaturesRepository {
     return db.update(features).set(patch).where(eq(features.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   deleteFeaturesQuery(ids: string[]): DbQuery[] {
     return ids.length
       ? [db.delete(features).where(inArray(features.id, ids))]
@@ -152,5 +155,11 @@ class FeaturesRepository {
     return { status: "deleted", specIds, runIds: runRows.map((run) => run.id) };
   }
 }
+
+export type Feature = typeof features.$inferSelect;
+export type DeleteFeatureResult =
+  | { status: "not_found" }
+  | { status: "busy" }
+  | { status: "deleted"; specIds: string[]; runIds: string[] };
 
 export const featuresRepository = new FeaturesRepository();

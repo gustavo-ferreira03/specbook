@@ -32,7 +32,7 @@ export const REPLAY_LIMIT_NOTE =
 const compress = promisify(gzip);
 const decompress = promisify(gunzip);
 
-export async function decodeReplay(
+export const decodeReplay = async function decodeReplay(
   data: Buffer
 ): Promise<ReplayEvent[] | null> {
   if (data.length > MAX_REPLAY_BYTES) {
@@ -46,9 +46,9 @@ export async function decodeReplay(
   } catch {
     return null;
   }
-}
+};
 
-export async function encodeReplay(
+export const encodeReplay = async function encodeReplay(
   events: ReplayEvent[]
 ): Promise<Buffer | null> {
   try {
@@ -57,7 +57,7 @@ export async function encodeReplay(
       return null;
     }
     const sorted = JSON.stringify(
-      source.sort((left, right) => left.timestamp - right.timestamp)
+      source.toSorted((left, right) => left.timestamp - right.timestamp)
     );
     if (Buffer.byteLength(sorted) > MAX_REPLAY_RAW_BYTES) {
       return null;
@@ -78,9 +78,9 @@ export async function encodeReplay(
   } catch {
     return null;
   }
-}
+};
 
-export async function readReplay(
+export const readReplay = async function readReplay(
   directory: string
 ): Promise<ReplayEvent[] | null> {
   try {
@@ -99,23 +99,24 @@ export async function readReplay(
   } catch {
     return null;
   }
-}
+};
 
 let recorderSource: Promise<string> | undefined;
 
-export function readRecorderSource(): Promise<string> {
-  return (recorderSource ??= (async () => {
-    const candidates = [
-      new URL("assets/rrweb-recorder.js", import.meta.url),
-      new URL("../dist/assets/rrweb-recorder.js", import.meta.url),
-    ];
-    const bundled = candidates.find((file) => existsSync(file));
-    const file =
-      bundled ??
-      path.join(
-        path.dirname(createRequire(import.meta.url).resolve("rrweb")),
-        "rrweb.umd.min.cjs"
-      );
-    return fs.readFile(file, "utf-8");
-  })());
-}
+export const readRecorderSource =
+  function readRecorderSource(): Promise<string> {
+    return (recorderSource ??= (async () => {
+      const candidates = [
+        new URL("assets/rrweb-recorder.js", import.meta.url),
+        new URL("../dist/assets/rrweb-recorder.js", import.meta.url),
+      ];
+      const bundled = candidates.find((file) => existsSync(file));
+      const file =
+        bundled ??
+        path.join(
+          path.dirname(createRequire(import.meta.url).resolve("rrweb")),
+          "rrweb.umd.min.cjs"
+        );
+      return await fs.readFile(file, "utf-8");
+    })());
+  };

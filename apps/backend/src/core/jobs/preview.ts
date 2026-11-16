@@ -13,13 +13,9 @@ import {
   newSpecProposalSchema,
 } from "./schemas";
 
-interface ProposalFile {
-  path: string;
-  before: string | null;
-  after: string;
-}
-
-export async function proposalFiles(item: InboxItem): Promise<ProposalFile[]> {
+export const proposalFiles = async function proposalFiles(
+  item: InboxItem
+): Promise<ProposalFile[]> {
   if (item.kind === "feature") {
     return [
       {
@@ -56,7 +52,12 @@ export async function proposalFiles(item: InboxItem): Promise<ProposalFile[]> {
           title:
             patch.title ??
             original.title ??
-            (await specsRepository.getSpec(patch.specId))?.title ??
+            (await (async () => {
+              const resolvedValue1519 = await specsRepository.getSpec(
+                patch.specId
+              );
+              return resolvedValue1519?.title;
+            })()) ??
             "",
           description: patch.description ?? original.description,
           humanSpec: patch.humanSpec ?? original.humanSpec,
@@ -69,4 +70,10 @@ export async function proposalFiles(item: InboxItem): Promise<ProposalFile[]> {
       after: patch.testSource ?? before.testSource ?? "",
     },
   ];
+};
+
+interface ProposalFile {
+  path: string;
+  before: string | null;
+  after: string;
 }

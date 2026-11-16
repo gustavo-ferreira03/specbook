@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-export const chatIdSchema = z.string().regex(/^c-[a-f0-9]{8}$/);
+export const chatIdSchema = z.string().regex(/^c-[a-f0-9]{8}$/u);
 const message = z.string().trim().min(1).max(20_000);
-const name = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/);
+const name = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/u);
 export const proposalInputSchema = z.strictObject({
   title: message,
   why: message,

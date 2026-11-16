@@ -2,6 +2,25 @@ import { errorCodeSchema } from "@specbook/runtime/errors";
 import { agentHumanSpecSchema as humanSpecSchema } from "@specbook/runtime/human-spec";
 import { z } from "zod";
 
+export const payloadOf = function payloadOf(item: {
+  payload: unknown;
+}): InboxPayload {
+  const parsed = inboxPayloadSchema.safeParse(item.payload);
+  return parsed.success ? parsed.data : {};
+};
+
+export const specBatchOf = function specBatchOf(item: {
+  payload: unknown;
+}): SpecBatch | undefined {
+  return payloadOf(item).specBatch;
+};
+
+export const verificationOf = function verificationOf(item: {
+  payload: unknown;
+}) {
+  return payloadOf(item).verification;
+};
+
 export const jobLimitsSchema = z
   .object({
     wallTimeMs: z.number().int().min(1000).max(86_400_000).default(3_600_000),
@@ -256,16 +275,3 @@ export const inboxPayloadSchema = z
   })
   .passthrough();
 export type InboxPayload = z.infer<typeof inboxPayloadSchema>;
-
-export function payloadOf(item: { payload: unknown }): InboxPayload {
-  const parsed = inboxPayloadSchema.safeParse(item.payload);
-  return parsed.success ? parsed.data : {};
-}
-
-export function specBatchOf(item: { payload: unknown }): SpecBatch | undefined {
-  return payloadOf(item).specBatch;
-}
-
-export function verificationOf(item: { payload: unknown }) {
-  return payloadOf(item).verification;
-}

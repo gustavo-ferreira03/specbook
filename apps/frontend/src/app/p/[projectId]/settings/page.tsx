@@ -8,18 +8,17 @@ import {
 } from "next/navigation";
 import { Suspense, useState } from "react";
 
-import { AppContext } from "@/components/AppContext";
-import { useAuth } from "@/components/AuthProvider";
-import { AutomationSettingsCard } from "@/components/AutomationSettingsCard";
-import { CiSettingsCard } from "@/components/CiSettingsCard";
-import { CredentialProfilesCard } from "@/components/CredentialProfilesCard";
-import { EmptyState } from "@/components/EmptyState";
-import { EnvironmentsSettingsCard } from "@/components/EnvironmentsSettingsCard";
-import { GitRemoteAccess } from "@/components/GitRemoteAccess";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { ProjectSettingsCard } from "@/components/ProjectSettingsCard";
-import { RepositoryRecovery } from "@/components/RepositoryRecovery";
-import { Button } from "@/components/ui/button";
+import { AppContext } from "@/components/app-context";
+import { useAuth } from "@/components/auth-provider";
+import { AutomationSettingsCard } from "@/components/automation-settings-card";
+import { CiSettingsCard } from "@/components/ci-settings-card";
+import { CredentialProfilesCard } from "@/components/credential-profiles-card";
+import { EmptyState } from "@/components/empty-state";
+import { EnvironmentsSettingsCard } from "@/components/environments-settings-card";
+import { GitRemoteAccess } from "@/components/git-remote-access";
+import { PageContainer, PageHeader } from "@/components/page-header";
+import { ProjectSettingsCard } from "@/components/project-settings-card";
+import { RepositoryRecovery } from "@/components/repository-recovery";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const SETTINGS_TABS = ["general", "context", "automation", "git"] as const;
@@ -31,7 +30,7 @@ const TAB_LABELS: [SettingsTab, string][] = [
   ["git", "Git"],
 ];
 
-function SettingsContent() {
+const SettingsContent = function SettingsContent() {
   const { canEdit } = useAuth();
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
@@ -47,7 +46,7 @@ function SettingsContent() {
     token: string | null;
   } | null>(null);
 
-  function selectTab(value: string) {
+  const selectTab = function selectTab(value: string) {
     const params = new URLSearchParams(searchParams.toString());
     if (value === "general") {
       params.delete("tab");
@@ -57,7 +56,7 @@ function SettingsContent() {
     router.replace(params.size ? `${pathname}?${params}` : pathname, {
       scroll: false,
     });
-  }
+  };
 
   if (!canEdit) {
     return (
@@ -129,18 +128,13 @@ function SettingsContent() {
       </Tabs>
     </div>
   );
-}
+};
 
-export default function SettingsPage() {
+const SettingsPage = function SettingsPage() {
   return (
-    <Suspense
-      fallback={
-        <span className="sr-only" role="status">
-          Loading settings
-        </span>
-      }
-    >
+    <Suspense fallback={<output className="sr-only">Loading settings</output>}>
       <SettingsContent />
     </Suspense>
   );
-}
+};
+export default SettingsPage;

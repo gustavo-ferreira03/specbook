@@ -30,10 +30,7 @@ import { projectContextsRepository } from "../../repositories/project-contexts";
 import { projectsRepository } from "../../repositories/projects";
 import { access } from "../access";
 
-const messageSchema = z.object({ text: z.string().trim().min(1) });
-const SSE_HEARTBEAT_MS = 20_000;
-
-export function createChatsRouter(): Hono {
+export const createChatsRouter = function createChatsRouter(): Hono {
   const router = new Hono();
 
   router.post(
@@ -111,17 +108,25 @@ export function createChatsRouter(): Hono {
       throw new HTTPException(404, { message: "Chat not found" });
     }
     c.res = streamSSE(c, async (stream) => {
-      let releaseSession = () => {};
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- This mutable callback slot belongs to one resource acquisition and is replaced independently for each operation.
+      let releaseSession = () => {
+        /* No action is needed until this callback is replaced or invoked by its owner. */
+      };
       const notify = (event: ChatUpdateEvent) =>
-        void stream
+        stream
           .writeSSE({
             event: event.type,
             data: event.type === "updated" ? "" : JSON.stringify(event),
           })
-          .catch(() => undefined);
+          .catch(() => {
+            /* No action is needed until this callback is replaced or invoked by its owner. */
+          });
       const unsubscribe = subscribeToChatUpdates(id, notify);
       const heartbeat = setInterval(
-        () => void stream.write(":ping\n\n").catch(() => undefined),
+        () =>
+          stream.write(":ping\n\n").catch(() => {
+            /* No action is needed until this callback is replaced or invoked by its owner. */
+          }),
         SSE_HEARTBEAT_MS
       );
       stream.onAbort(() => {
@@ -139,9 +144,14 @@ export function createChatsRouter(): Hono {
         return;
       }
       await stream.writeSSE({ event: "connected", data: "" });
-      await new Promise<void>((resolve) =>
-        stream.aborted ? resolve() : stream.onAbort(resolve)
-      );
+      // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
+      await new Promise<void>((resolve) => {
+        if (stream.aborted) {
+          resolve();
+        } else {
+          stream.onAbort(resolve);
+        }
+      });
     });
     c.header("Cache-Control", "no-cache, no-transform");
     c.header("X-Accel-Buffering", "no");
@@ -269,9 +279,9 @@ export function createChatsRouter(): Hono {
   );
 
   return router;
-}
+};
 
-async function assertChatWritable(
+const assertChatWritable = async function assertChatWritable(
   id: string,
   options: { allowBusy?: boolean } = {}
 ): Promise<void> {
@@ -290,4 +300,7 @@ async function assertChatWritable(
   if (!options.allowBusy && isChatBusy(id)) {
     throw new HTTPException(409, { message: "The agent is still replying" });
   }
-}
+};
+
+const messageSchema = z.object({ text: z.string().trim().min(1) });
+const SSE_HEARTBEAT_MS = 20_000;

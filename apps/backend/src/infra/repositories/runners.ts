@@ -21,46 +21,22 @@ import { HTTPException } from "hono/http-exception";
 import { db } from "../db/client";
 import { runnerInstances, runnerJobs, runnerTokens } from "../db/schema";
 
-export type RunnerToken = typeof runnerTokens.$inferSelect;
-export type RunnerJob = typeof runnerJobs.$inferSelect;
-export type RunnerInstance = typeof runnerInstances.$inferSelect;
-export const MAX_RUNNER_ATTEMPTS = 3;
-export const RUNNER_EXECUTION_GRACE_MS = 60_000;
-export const RUNNER_COMPLETION_TIMEOUT_MS = 5 * 60_000;
-
-export function runnerQueueTimeoutMs(): number {
-  const seconds = Number(
-    process.env.SPECBOOK_RUNNER_QUEUE_TIMEOUT_SECONDS ?? 1800
-  );
-  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 30 * 60_000;
-}
-
-export function runnerJobDeadline(job: RunnerJob): number {
-  return job.status === "queued"
-    ? Date.parse(
-        job.queueExpiresAt ??
-          new Date(
-            Date.parse(job.createdAt) + runnerQueueTimeoutMs()
-          ).toISOString()
-      )
-    : Date.parse(job.claimedAt ?? job.updatedAt) +
-        job.payload.timeoutMs +
-        RUNNER_EXECUTION_GRACE_MS;
-}
-
 class RunnersRepository {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async instance(id: string): Promise<RunnerInstance | null> {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue1504 = await db
           .select()
           .from(runnerInstances)
-          .where(eq(runnerInstances.id, id))
-      )[0] ?? null
+          .where(eq(runnerInstances.id, id));
+        return awaitedValue1504[0];
+      })()) ?? null
     );
   }
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async instances(): Promise<RunnerInstance[]> {
-    return db
+    return await db
       .select()
       .from(runnerInstances)
       .where(
@@ -123,6 +99,7 @@ class RunnersRepository {
     }
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async disconnect(runnerId: string, instanceId: string): Promise<void> {
     const now = new Date().toISOString();
     await db
@@ -160,29 +137,41 @@ class RunnersRepository {
         )
       );
   }
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async list(): Promise<RunnerToken[]> {
-    return db.select().from(runnerTokens).orderBy(asc(runnerTokens.createdAt));
+    return await db
+      .select()
+      .from(runnerTokens)
+      .orderBy(asc(runnerTokens.createdAt));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async token(hash: string): Promise<RunnerToken | null> {
     return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue4637 = await db
           .select()
           .from(runnerTokens)
-          .where(eq(runnerTokens.tokenHash, hash))
-      )[0] ?? null
+          .where(eq(runnerTokens.tokenHash, hash));
+        return awaitedValue4637[0];
+      })()) ?? null
     );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async get(id: string): Promise<RunnerToken | null> {
     return (
-      (
-        await db.select().from(runnerTokens).where(eq(runnerTokens.id, id))
-      )[0] ?? null
+      (await (async () => {
+        const awaitedValue4862 = await db
+          .select()
+          .from(runnerTokens)
+          .where(eq(runnerTokens.id, id));
+        return awaitedValue4862[0];
+      })()) ?? null
     );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async create(
     name: string,
     group: string | null,
@@ -207,6 +196,7 @@ class RunnersRepository {
     return row;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async touch(
     id: string,
     versions?: { version: string; protocolVersion: number; concurrency: number }
@@ -226,6 +216,7 @@ class RunnersRepository {
       .where(eq(runnerTokens.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async rotate(id: string, hash: string): Promise<RunnerToken | null> {
     const [tokens] = await db.batch([
       db
@@ -260,6 +251,7 @@ class RunnersRepository {
     return tokens[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async revoke(id: string): Promise<boolean> {
     const removed = await db
       .delete(runnerTokens)
@@ -280,6 +272,7 @@ class RunnersRepository {
     return removed.length > 0;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async enqueue(
     batchId: string,
     projectId: string,
@@ -312,31 +305,41 @@ class RunnersRepository {
     return row;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async pending(): Promise<RunnerJob[]> {
-    return db
+    return await db
       .select()
       .from(runnerJobs)
       .where(ne(runnerJobs.status, "completed"));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async job(id: string): Promise<RunnerJob | null> {
     return (
-      (await db.select().from(runnerJobs).where(eq(runnerJobs.id, id)))[0] ??
-      null
-    );
-  }
-
-  async jobByBatch(batchId: string): Promise<RunnerJob | null> {
-    return (
-      (
-        await db
+      (await (async () => {
+        const awaitedValue8506 = await db
           .select()
           .from(runnerJobs)
-          .where(eq(runnerJobs.batchId, batchId))
-      )[0] ?? null
+          .where(eq(runnerJobs.id, id));
+        return awaitedValue8506[0];
+      })()) ?? null
     );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
+  async jobByBatch(batchId: string): Promise<RunnerJob | null> {
+    return (
+      (await (async () => {
+        const awaitedValue8685 = await db
+          .select()
+          .from(runnerJobs)
+          .where(eq(runnerJobs.batchId, batchId));
+        return awaitedValue8685[0];
+      })()) ?? null
+    );
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async reclaim(
     now = new Date().toISOString(),
     activeCompletionIds: string[] = [],
@@ -419,8 +422,8 @@ class RunnersRepository {
         ? undefined
         : sql`${runnerJobs.projectId} in (select value from json_each(${JSON.stringify(runner.projectIds)}))`;
     const beforeDeadline = sql`coalesce(julianday(${runnerJobs.queueExpiresAt}), julianday(${runnerJobs.createdAt}) + ${runnerQueueTimeoutMs()} / 86400000.0) > julianday(${new Date().toISOString()})`;
-    const candidate = (
-      await db
+    const candidate = await (async () => {
+      const awaitedValue11475 = await db
         .select()
         .from(runnerJobs)
         .where(
@@ -433,8 +436,9 @@ class RunnersRepository {
           )
         )
         .orderBy(asc(runnerJobs.createdAt))
-        .limit(1)
-    )[0];
+        .limit(1);
+      return awaitedValue11475[0];
+    })();
     if (!candidate) {
       return null;
     }
@@ -457,6 +461,7 @@ class RunnersRepository {
     return updated[0] ?? null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async heartbeat(
     id: string,
     leaseId: string,
@@ -481,6 +486,7 @@ class RunnersRepository {
     return rows.length ? expires : null;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async release(
     id: string,
     leaseId: string,
@@ -510,6 +516,7 @@ class RunnersRepository {
     return rows.length > 0;
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async reserveCompletion(id: string): Promise<void> {
     await db
       .update(runnerJobs)
@@ -521,6 +528,7 @@ class RunnersRepository {
       .where(eq(runnerJobs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async restoreLease(id: string, leaseId: string): Promise<void> {
     await db
       .update(runnerJobs)
@@ -538,6 +546,7 @@ class RunnersRepository {
       );
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async recordFailure(
     id: string,
     reason: string,
@@ -552,6 +561,7 @@ class RunnersRepository {
       .where(eq(runnerJobs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async complete(id: string, failed = false): Promise<void> {
     await db
       .update(runnerJobs)
@@ -567,6 +577,7 @@ class RunnersRepository {
       .where(eq(runnerJobs.id, id));
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async cancelBatch(batchId: string): Promise<boolean> {
     const rows = await db
       .update(runnerJobs)
@@ -586,5 +597,34 @@ class RunnersRepository {
     return rows.length > 0;
   }
 }
+
+export const runnerQueueTimeoutMs = function runnerQueueTimeoutMs(): number {
+  const seconds = Number(
+    process.env.SPECBOOK_RUNNER_QUEUE_TIMEOUT_SECONDS ?? 1800
+  );
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 30 * 60_000;
+};
+
+export const runnerJobDeadline = function runnerJobDeadline(
+  job: RunnerJob
+): number {
+  return job.status === "queued"
+    ? Date.parse(
+        job.queueExpiresAt ??
+          new Date(
+            Date.parse(job.createdAt) + runnerQueueTimeoutMs()
+          ).toISOString()
+      )
+    : Date.parse(job.claimedAt ?? job.updatedAt) +
+        job.payload.timeoutMs +
+        RUNNER_EXECUTION_GRACE_MS;
+};
+
+export type RunnerToken = typeof runnerTokens.$inferSelect;
+export type RunnerJob = typeof runnerJobs.$inferSelect;
+export type RunnerInstance = typeof runnerInstances.$inferSelect;
+export const MAX_RUNNER_ATTEMPTS = 3;
+export const RUNNER_EXECUTION_GRACE_MS = 60_000;
+export const RUNNER_COMPLETION_TIMEOUT_MS = 5 * 60_000;
 
 export const runnersRepository = new RunnersRepository();

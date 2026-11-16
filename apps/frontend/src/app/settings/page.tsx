@@ -3,22 +3,22 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
-import { AccessTokensSettings } from "@/components/AccessTokensSettings";
-import { AgentPauseSettings } from "@/components/AgentPauseSettings";
-import { AuditSettings } from "@/components/AuditSettings";
-import { useAuth } from "@/components/AuthProvider";
-import { InstanceHeader } from "@/components/InstanceHeader";
-import { MembersSettings } from "@/components/MembersSettings";
-import { ModelSettings } from "@/components/ModelSettings";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { RetentionSettings } from "@/components/RetentionSettings";
-import { RunnersSettings } from "@/components/RunnersSettings";
-import { SecuritySettings } from "@/components/SecuritySettings";
-import { SsoSettings } from "@/components/SsoSettings";
-import { SystemStatus } from "@/components/SystemStatus";
+import { AccessTokensSettings } from "@/components/access-tokens-settings";
+import { AgentPauseSettings } from "@/components/agent-pause-settings";
+import { AuditSettings } from "@/components/audit-settings";
+import { useAuth } from "@/components/auth-provider";
+import { InstanceHeader } from "@/components/instance-header";
+import { MembersSettings } from "@/components/members-settings";
+import { ModelSettings } from "@/components/model-settings";
+import { PageContainer, PageHeader } from "@/components/page-header";
+import { RetentionSettings } from "@/components/retention-settings";
+import { RunnersSettings } from "@/components/runners-settings";
+import { SecuritySettings } from "@/components/security-settings";
+import { SsoSettings } from "@/components/sso-settings";
+import { SystemStatus } from "@/components/system-status";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-function SettingsContent() {
+const SettingsContent = function SettingsContent() {
   const { isAdmin } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -35,11 +35,15 @@ function SettingsContent() {
     ["access-tokens", "Access tokens"],
   ];
   const requested = searchParams.get("tab") ?? "";
-  const tab = sections.some(([id]) => id === requested)
-    ? requested
-    : isAdmin
-      ? "model"
-      : "access-tokens";
+  const tab = (() => {
+    if (sections.some(([id]) => id === requested)) {
+      return requested;
+    }
+    if (isAdmin) {
+      return "model";
+    }
+    return "access-tokens";
+  })();
   return (
     <main className="bg-surface min-h-dvh">
       <InstanceHeader />
@@ -114,18 +118,13 @@ function SettingsContent() {
       </Tabs>
     </main>
   );
-}
+};
 
-export default function SettingsPage() {
+const SettingsPage = function SettingsPage() {
   return (
-    <Suspense
-      fallback={
-        <span className="sr-only" role="status">
-          Loading settings
-        </span>
-      }
-    >
+    <Suspense fallback={<output className="sr-only">Loading settings</output>}>
       <SettingsContent />
     </Suspense>
   );
-}
+};
+export default SettingsPage;

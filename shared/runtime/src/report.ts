@@ -20,28 +20,32 @@ export interface PlaywrightReport {
 
 type Json = Record<string, unknown>;
 
-const ANSI = /\u001B\[[0-9;]*[A-Za-z]/g;
+// oxlint-disable-next-line no-control-regex -- Control characters must be matched explicitly at this input/output boundary.
+const ANSI = /\u001B\[[0-9;]*[A-Za-z]/gu;
 
-export function stripAnsi(text: string): string {
+export const stripAnsi = function stripAnsi(text: string): string {
   return text.replaceAll(ANSI, "");
-}
+};
 
-function records(value: unknown): Json[] {
+const records = function records(value: unknown): Json[] {
   return Array.isArray(value)
     ? value.filter((item): item is Json => !!item && typeof item === "object")
     : [];
-}
+};
 
-function text(value: unknown): string | null {
+const text = function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
-}
+};
 
-function errorMessage(error: Json): string | null {
+const errorMessage = function errorMessage(error: Json): string | null {
   const message = text(error.message) ?? text(error.value);
   return message ? stripAnsi(message).trim() : null;
-}
+};
 
-function failedStepOf(test: Json, result: Json): string | null {
+const failedStepOf = function failedStepOf(
+  test: Json,
+  result: Json
+): string | null {
   for (const annotation of [
     ...records(result.annotations),
     ...records(test.annotations),
@@ -55,13 +59,13 @@ function failedStepOf(test: Json, result: Json): string | null {
   }
   const failed = records(result.steps).find((step) => step.error);
   return failed ? text(failed.title) : null;
-}
+};
 
-function fileKey(file: string): string {
-  return path.basename(file).replace(/\.spec\.ts$/, "");
-}
+const fileKey = function fileKey(file: string): string {
+  return path.basename(file).replace(/\.spec\.ts$/u, "");
+};
 
-function testResult(test: Json): SpecFileResult {
+const testResult = function testResult(test: Json): SpecFileResult {
   const results = records(test.results);
   const result = results.at(-1);
   if (!result) {
@@ -133,9 +137,9 @@ function testResult(test: Json): SpecFileResult {
         .map((annotation) => errorCodeSchema.safeParse(annotation.description))
         .find((parsed) => parsed.success)?.data ?? "infrastructure",
   };
-}
+};
 
-function collect(
+const collect = function collect(
   suites: Json[],
   files: Map<string, SpecFileResult>,
   file: string | null
@@ -158,9 +162,11 @@ function collect(
     }
     collect(records(suite.suites), files, suiteFile);
   }
-}
+};
 
-export function parsePlaywrightReport(json: string): PlaywrightReport {
+export const parsePlaywrightReport = function parsePlaywrightReport(
+  json: string
+): PlaywrightReport {
   const data = JSON.parse(json) as Json;
   if (!data || typeof data !== "object" || !Array.isArray(data.suites)) {
     throw new Error("Playwright report has no suites");
@@ -171,4 +177,4 @@ export function parsePlaywrightReport(json: string): PlaywrightReport {
     .map(errorMessage)
     .filter((message): message is string => !!message);
   return { files, errors };
-}
+};

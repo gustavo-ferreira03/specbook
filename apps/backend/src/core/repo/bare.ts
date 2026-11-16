@@ -6,63 +6,12 @@ import type { SimpleGit } from "simple-git";
 
 import { projectsRepository } from "../../infra/repositories/projects";
 import { bareReposDir } from "../paths";
+import { BareStateError } from "./bare-state-error";
 
-const MAIN_REF = "refs/heads/main";
-const BARE_TRACKING_REF = "refs/remotes/specbook/main";
-const DEFAULT_MAX_PUSH_BYTES = 200 * 1024 * 1024;
-
-const PRE_RECEIVE_HOOK = `#!/bin/sh
-status=0
-while read -r old new ref; do
-    if [ "$ref" != "${MAIN_REF}" ]; then
-        echo "Specbook accepts pushes to ${MAIN_REF} only (rejected $ref)" >&2
-        status=1
-        continue
-    fi
-    case "$new" in
-        *[!0]*) ;;
-        *) continue ;;
-    esac
-    for commit in $(git rev-list "$new" --not --all); do
-        bad=$(git ls-tree -r "$commit" | awk '$1 == "120000" || $1 == "160000" { sub(/^[^\\t]*\\t/, ""); print; exit }')
-        if [ -n "$bad" ]; then
-            echo "Specbook does not accept symbolic links or submodules (commit $commit, path $bad)" >&2
-            status=1
-            break
-        fi
-    done
-done
-exit $status
-`;
-
-export class BareStateError extends Error {}
-
-export type BareRelation =
-  | "no-bare-head"
-  | "equal"
-  | "checkout-ahead"
-  | "bare-ahead"
-  | "diverged";
-
-function maxPushBytes(): number {
-  const configured = Number.parseInt(
-    process.env.SPECBOOK_GIT_MAX_PUSH_BYTES ?? "",
-    10
-  );
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_MAX_PUSH_BYTES;
-}
-
-function checkoutGit(checkoutDir: string): SimpleGit {
-  return simpleGit({
-    baseDir: checkoutDir,
-    timeout: { block: 30_000 },
-    allowEnvironment: ["GIT_TERMINAL_PROMPT"],
-  }).env("GIT_TERMINAL_PROMPT", "0");
-}
+export { BareStateError } from "./bare-state-error";
 
 class RepoBare {
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   getBareRepoDir(projectId: string): string {
     const absoluteRoot = path.resolve(bareReposDir);
     const dir = path.resolve(absoluteRoot, `${projectId}.git`);
@@ -81,7 +30,7 @@ class RepoBare {
   }
 
   async bareExists(projectId: string): Promise<boolean> {
-    return fs
+    return await fs
       .stat(path.join(this.getBareRepoDir(projectId), "HEAD"))
       .then((stat) => stat.isFile())
       .catch(() => false);
@@ -112,24 +61,27 @@ class RepoBare {
     }
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   private async checkoutHead(checkoutDir: string): Promise<string | null> {
-    return checkoutGit(checkoutDir)
+    return await checkoutGit(checkoutDir)
       .raw(["rev-parse", "--verify", "--quiet", MAIN_REF])
       .then((value) => value.trim() || null)
       .catch(() => null);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   private async isAncestor(
     git: SimpleGit,
     ancestor: string,
     descendant: string
   ): Promise<boolean> {
-    return git
+    return await git
       .raw(["merge-base", ancestor, descendant])
       .then((value) => value.trim() === ancestor)
       .catch(() => false);
   }
 
+  // oxlint-disable-next-line class-methods-use-this -- Keep this operation on the service instance used by callers.
   async recordStateError(
     projectId: string,
     message: string | null
@@ -194,7 +146,13 @@ class RepoBare {
   ): Promise<boolean> {
     const { relation } = await this.compare(projectId, checkoutDir);
     if (relation === "bare-ahead") {
-      return (await this.fastForwardCheckout(projectId, checkoutDir)).moved;
+      return await (async () => {
+        const awaitedValue5870 = await this.fastForwardCheckout(
+          projectId,
+          checkoutDir
+        );
+        return awaitedValue5870.moved;
+      })();
     }
     await this.publish(projectId, checkoutDir);
     return false;
@@ -209,7 +167,9 @@ class RepoBare {
     await git.addConfig("receive.denyCurrentBranch", "ignore");
     await git.addConfig("receive.fsckObjects", "true");
     await git.addConfig("receive.maxInputSize", String(maxPushBytes()));
-    await git.raw(["config", "--unset-all", "gc.auto"]).catch(() => undefined);
+    await git.raw(["config", "--unset-all", "gc.auto"]).catch(() => {
+      /* No action is needed until this callback is replaced or invoked by its owner. */
+    });
     await git.addConfig("receive.autogc", "true");
     await this.writeHook(projectId, "pre-receive", PRE_RECEIVE_HOOK);
   }
@@ -224,6 +184,7 @@ class RepoBare {
     const current = await fs.readFile(hookPath, "utf-8").catch(() => null);
     const mode = await fs
       .stat(hookPath)
+      // oxlint-disable-next-line no-bitwise -- Implement the byte layout required by the encoded protocol.
       .then((stat) => stat.mode & 0o777)
       .catch(() => 0);
     if (current === content && mode === 0o755) {
@@ -274,7 +235,7 @@ class RepoBare {
   }
 
   async getBareHeadSha(projectId: string): Promise<string | null> {
-    return this.bareGit(projectId)
+    return await this.bareGit(projectId)
       .raw(["rev-parse", "--verify", "--quiet", MAIN_REF])
       .then((value) => value.trim() || null)
       .catch(() => null);
@@ -299,7 +260,12 @@ class RepoBare {
       );
     }
     const git = checkoutGit(checkoutDir);
-    if (!(await git.status()).isClean()) {
+    if (
+      !(await (async () => {
+        const awaitedValue9531 = await git.status();
+        return awaitedValue9531.isClean();
+      })())
+    ) {
       await this.fail(
         projectId,
         "The project checkout has uncommitted changes; Specbook cannot follow the pushed commits"
@@ -320,12 +286,14 @@ class RepoBare {
     ]) {
       const target = path.join(dir, lock);
       if (
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs
           .stat(target)
           .then(() => true)
           .catch(() => false)
       ) {
         console.warn(`[specbook] removing stale lock ${target}`);
+        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
         await fs.rm(target, { force: true });
       }
     }
@@ -338,5 +306,59 @@ class RepoBare {
     });
   }
 }
+
+const maxPushBytes = function maxPushBytes(): number {
+  // oxlint-disable-next-line unicorn/prefer-number-coercion -- Retain parseInt numeric-prefix handling and its existing fallback for command and HTTP inputs.
+  const configured = Number.parseInt(
+    process.env.SPECBOOK_GIT_MAX_PUSH_BYTES ?? "",
+    10
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_PUSH_BYTES;
+};
+
+const checkoutGit = function checkoutGit(checkoutDir: string): SimpleGit {
+  return simpleGit({
+    baseDir: checkoutDir,
+    timeout: { block: 30_000 },
+    allowEnvironment: ["GIT_TERMINAL_PROMPT"],
+  }).env("GIT_TERMINAL_PROMPT", "0");
+};
+
+const MAIN_REF = "refs/heads/main";
+const BARE_TRACKING_REF = "refs/remotes/specbook/main";
+const DEFAULT_MAX_PUSH_BYTES = 200 * 1024 * 1024;
+
+const PRE_RECEIVE_HOOK = `#!/bin/sh
+status=0
+while read -r old new ref; do
+    if [ "$ref" != "${MAIN_REF}" ]; then
+        echo "Specbook accepts pushes to ${MAIN_REF} only (rejected $ref)" >&2
+        status=1
+        continue
+    fi
+    case "$new" in
+        *[!0]*) ;;
+        *) continue ;;
+    esac
+    for commit in $(git rev-list "$new" --not --all); do
+        bad=$(git ls-tree -r "$commit" | awk '$1 == "120000" || $1 == "160000" { sub(/^[^\\t]*\\t/, ""); print; exit }')
+        if [ -n "$bad" ]; then
+            echo "Specbook does not accept symbolic links or submodules (commit $commit, path $bad)" >&2
+            status=1
+            break
+        fi
+    done
+done
+exit $status
+`;
+
+export type BareRelation =
+  | "no-bare-head"
+  | "equal"
+  | "checkout-ahead"
+  | "bare-ahead"
+  | "diverged";
 
 export const repoBare = new RepoBare();

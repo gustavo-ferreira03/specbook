@@ -23,42 +23,44 @@ const numberFormatter = new Intl.NumberFormat(LOCALE);
 
 type DateInput = string | number | Date;
 
-function toDate(value: DateInput): Date {
+const toDate = function toDate(value: DateInput): Date {
   return value instanceof Date ? value : new Date(value);
-}
+};
 
-export function formatDate(value: DateInput): string {
+export const formatDate = function formatDate(value: DateInput): string {
   return dateFormatter.format(toDate(value));
-}
+};
 
-export function formatShortDate(value: DateInput): string {
+export const formatShortDate = function formatShortDate(
+  value: DateInput
+): string {
   return shortDateFormatter.format(toDate(value));
-}
+};
 
-export function formatDateTime(
+export const formatDateTime = function formatDateTime(
   value: DateInput,
   options: { seconds?: boolean } = {}
 ): string {
   return (
     options.seconds ? preciseDateTimeFormatter : dateTimeFormatter
   ).format(toDate(value));
-}
+};
 
-export function formatTime(value: DateInput): string {
+export const formatTime = function formatTime(value: DateInput): string {
   return timeFormatter.format(toDate(value));
-}
+};
 
-export function formatNumber(value: number): string {
+export const formatNumber = function formatNumber(value: number): string {
   return numberFormatter.format(value);
-}
+};
 
-export function countLabel(
+export const countLabel = function countLabel(
   count: number,
   noun: string,
   plural = `${noun}s`
 ): string {
   return `${count} ${count === 1 ? noun : plural}`;
-}
+};
 
 const relativeFormatter = new Intl.RelativeTimeFormat(LOCALE, {
   numeric: "auto",
@@ -73,7 +75,7 @@ const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", Number.POSITIVE_INFINITY],
 ];
 
-export function formatRelative(
+export const formatRelative = function formatRelative(
   value: DateInput,
   now: number = Date.now()
 ): string {
@@ -95,9 +97,11 @@ export function formatRelative(
     }
   }
   return formatDate(date);
-}
+};
 
-export function formatWaitDuration(durationMs: number): string {
+export const formatWaitDuration = function formatWaitDuration(
+  durationMs: number
+): string {
   if (durationMs < 60_000) {
     return "under a minute";
   }
@@ -107,9 +111,11 @@ export function formatWaitDuration(durationMs: number): string {
   }
   const hours = Math.floor(minutes / 60);
   return `${hours} hr`;
-}
+};
 
-export function formatDuration(durationMs: number): string {
+export const formatDuration = function formatDuration(
+  durationMs: number
+): string {
   if (durationMs < 1000) {
     return `${Math.round(durationMs)}ms`;
   }
@@ -119,19 +125,19 @@ export function formatDuration(durationMs: number): string {
   const minutes = Math.floor(durationMs / 60_000);
   const seconds = Math.round((durationMs % 60_000) / 1000);
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-}
+};
 
-export function environmentLabel(
+export const environmentLabel = function environmentLabel(
   name: string | null | undefined
 ): string | undefined {
   return name && name !== "Production" ? name : undefined;
-}
+};
 
 // Only the Spec's steps are numbered; preconditions, the expected result and postconditions are named.
-export function evidenceStepLabel(step: {
+export const evidenceStepLabel = function evidenceStepLabel(step: {
   kind?: "precondition" | "step" | "expected" | "postcondition";
   ordinal?: number | null;
   number: number;
 }): string {
   return stepName({ kind: step.kind ?? "step" }, step.ordinal ?? step.number);
-}
+};

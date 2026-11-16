@@ -12,7 +12,14 @@ import {
 } from "../tunnel/registry";
 import { maintainRunnerQueue } from "./queue";
 
-export async function runnerQueueSnapshot() {
+const keyOf = (
+  projectId: string,
+  environmentId: string,
+  group: string | null
+) => JSON.stringify([projectId, environmentId, group]);
+
+// oxlint-disable-next-line complexity -- Keep the visibility decision tree together so state transitions and error ordering remain explicit.
+export const runnerQueueSnapshot = async function runnerQueueSnapshot() {
   await maintainRunnerQueue();
   const [configured, jobs, runners, instances] = await Promise.all([
     db
@@ -36,11 +43,7 @@ export async function runnerQueueSnapshot() {
     : [];
   const byRun = new Map(pendingRuns.map((run) => [run.id, run.environment]));
   const entries = new Map<string, RunnerQueueEntry>();
-  const keyOf = (
-    projectId: string,
-    environmentId: string,
-    group: string | null
-  ) => JSON.stringify([projectId, environmentId, group]);
+
   for (const { environment, projectName } of configured) {
     if (environment.executor === "server") {
       continue;
@@ -135,11 +138,15 @@ export async function runnerQueueSnapshot() {
       ? Math.max(0, Date.now() - Date.parse(entry.oldestQueuedAt))
       : 0;
     if (entry.queued) {
-      entry.reason = online.length
-        ? entry.busyRunners === online.length
-          ? "All runners busy."
-          : "Waiting for a runner to claim work."
-        : `No runner online${entry.group ? ` in group ${entry.group}` : ""}.`;
+      entry.reason = (() => {
+        if (online.length) {
+          if (entry.busyRunners === online.length) {
+            return "All runners busy.";
+          }
+          return "Waiting for a runner to claim work.";
+        }
+        return `No runner online${entry.group ? ` in group ${entry.group}` : ""}.`;
+      })();
       const retry = jobs.find(
         (job) =>
           job.status === "queued" &&
@@ -159,26 +166,28 @@ export async function runnerQueueSnapshot() {
       queue
     );
     for (const id of tunnelRunIds) {
-      if (byRun.get(id)?.id === queue.environmentId) runQueues.set(id, queue);
+      if (byRun.get(id)?.id === queue.environmentId) {
+        runQueues.set(id, queue);
+      }
     }
   }
   return { queues: [...entries.values()], batchQueues, runQueues };
-}
+};
 
-export async function visibleRuns<T extends Run>(
-  runs: T[]
+export const visibleRuns = async function visibleRuns<T extends Run>(
+  runsValue: T[]
 ): Promise<(T & { queue: RunnerQueueEntry | null })[]> {
   if (
-    !runs.some(
+    !runsValue.some(
       (run) =>
         run.status === "running" && run.environment?.executor !== "server"
     )
   ) {
-    return runs.map((run) => ({ ...run, queue: null }));
+    return runsValue.map((run) => ({ ...run, queue: null }));
   }
   const { runQueues } = await runnerQueueSnapshot();
-  return runs.map((run) => ({
+  return runsValue.map((run) => ({
     ...run,
     queue: run.status === "running" ? (runQueues.get(run.id) ?? null) : null,
   }));
-}
+};

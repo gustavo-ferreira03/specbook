@@ -1,4 +1,7 @@
-export function inspectElement(element: Element): string {
+export const inspectElement = function inspectElement(
+  element: Element
+): string {
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep this helper in the function body that is serialized or hardened as a unit.
   const clean = (node: Element) => {
     const copy = node.cloneNode(true) as Element;
     for (const field of [copy, ...copy.querySelectorAll("*")]) {
@@ -11,7 +14,7 @@ export function inspectElement(element: Element): string {
   };
   const openingTag = (node: Element) =>
     clean(node.cloneNode(false) as Element)
-      .outerHTML.replace(/<\/[^>]+>$/, "")
+      .outerHTML.replace(/<\/[^>]+>$/u, "")
       .slice(0, 600);
   const ancestors: string[] = [];
   for (
@@ -32,28 +35,28 @@ export function inspectElement(element: Element): string {
       stroke: style.stroke,
     },
   });
-}
+};
 
 export const INSPECT_ELEMENT = inspectElement.toString();
 
-export function redactUrls(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(redactUrls);
+export const redactUrls = function redactUrls(input: unknown): unknown {
+  if (Array.isArray(input)) {
+    return input.map(redactUrls);
   }
-  if (value && typeof value === "object") {
+  if (input && typeof input === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, redactUrls(item)])
+      Object.entries(input).map(([key, item]) => [key, redactUrls(item)])
     );
   }
-  if (typeof value !== "string") {
-    return value;
+  if (typeof input !== "string") {
+    return input;
   }
-  return value.replaceAll(/https?:\/\/[^\s"'<>]+/g, (value) => {
+  return input.replaceAll(/https?:\/\/[^\s"'<>]+/gu, (urlText) => {
     try {
-      const url = new URL(value);
+      const url = new URL(urlText);
       url.username = "";
       url.password = "";
-      for (const key of [...url.searchParams.keys()]) {
+      for (const key of url.searchParams.keys()) {
         url.searchParams.set(key, "[redacted]");
       }
       url.hash = "";
@@ -62,4 +65,4 @@ export function redactUrls(value: unknown): unknown {
       return "[invalid URL]";
     }
   });
-}
+};

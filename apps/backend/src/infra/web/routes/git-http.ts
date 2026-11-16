@@ -14,26 +14,14 @@ import {
 import { BareStateError, repoBare } from "../../../core/repo/bare";
 import { repoGit } from "../../../core/repo/git";
 import { reindexProjectUnlocked } from "../../../core/repo/indexer";
+import { requireValue } from "../../../core/utils/require-value";
 import { projectsRepository } from "../../repositories/projects";
 import type { Project } from "../../repositories/projects";
 import { access } from "../access";
 import type { BearerVerifier } from "../access";
 import { buildHostAllowlist, frontendProxyOrigin } from "../security";
 
-const GIT_PATH =
-  /^\/git\/([0-9a-fA-F-]{36})\.git\/(info\/refs|git-upload-pack|git-receive-pack)$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SERVICES = new Set(["git-upload-pack", "git-receive-pack"]);
-const REALM = 'Basic realm="Specbook project repository", charset="UTF-8"';
-const BACKEND_TIMEOUT_MS = 300_000;
-const MAX_CGI_HEAD_BYTES = 64 * 1024;
-
-interface CgiHead {
-  status: number;
-  headers: Record<string, string>;
-}
-
-function unauthorized(): Response {
+const unauthorized = function unauthorized(): Response {
   return new Response("Specbook requires a project access token\n", {
     status: 401,
     headers: {
@@ -41,31 +29,17 @@ function unauthorized(): Response {
       "content-type": "text/plain; charset=utf-8",
     },
   });
-}
-
-const verifyGitToken: BearerVerifier = async (c) => {
-  const projectId = GIT_PATH.exec(c.req.path)?.[1];
-  if (!projectId || !UUID.test(projectId)) {
-    return true;
-  }
-  const credentials = parseBasicAuth(c.req.header("authorization"));
-  const project = credentials
-    ? await projectsRepository.getProject(projectId)
-    : null;
-  return project && verifyGitAccessToken(project, credentials!.password)
-    ? true
-    : unauthorized();
 };
 
-function trustProxy(): boolean {
+const trustProxy = function trustProxy(): boolean {
   const value = (process.env.TRUST_PROXY ?? "").trim().toLowerCase();
   return value === "1" || value === "true";
-}
+};
 
-export function publicGitOrigin(c: Context): string {
+export const publicGitOrigin = function publicGitOrigin(c: Context): string {
   const configured = process.env.SPECBOOK_PUBLIC_API_URL;
   if (configured) {
-    return configured.replace(/\/$/, "");
+    return configured.replace(/\/$/u, "");
   }
   const proxied = frontendProxyOrigin(
     c.req.raw.headers,
@@ -85,13 +59,16 @@ export function publicGitOrigin(c: Context): string {
   const host = forwardedHost || c.req.header("host") || requestUrl.host;
   const protocol = forwardedProto || requestUrl.protocol.replace(":", "");
   return `${protocol}://${host}`;
-}
+};
 
-export function gitCloneUrl(c: Context, projectId: string): string {
+export const gitCloneUrl = function gitCloneUrl(
+  c: Context,
+  projectId: string
+): string {
   return `${publicGitOrigin(c)}/git/${projectId}.git`;
-}
+};
 
-function parseBasicAuth(
+const parseBasicAuth = function parseBasicAuth(
   header: string | undefined
 ): { username: string; password: string } | null {
   if (!header) {
@@ -110,9 +87,11 @@ function parseBasicAuth(
     username: decoded.slice(0, separator),
     password: decoded.slice(separator + 1),
   };
-}
+};
 
-function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
+const splitCgiHead = function splitCgiHead(
+  buffer: Buffer
+): { head: CgiHead; rest: Buffer } | null {
   const crlf = buffer.indexOf("\r\n\r\n");
   const lf = buffer.indexOf("\n\n");
   let index = -1;
@@ -133,7 +112,7 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
   for (const line of buffer
     .subarray(0, index)
     .toString("utf-8")
-    .split(/\r?\n/)) {
+    .split(/\r?\n/u)) {
     const colon = line.indexOf(":");
     if (colon === -1) {
       continue;
@@ -141,6 +120,7 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
     const name = line.slice(0, colon).trim();
     const value = line.slice(colon + 1).trim();
     if (name.toLowerCase() === "status") {
+      // oxlint-disable-next-line unicorn/prefer-number-coercion -- Retain parseInt numeric-prefix handling and its existing fallback for command and HTTP inputs.
       status = Number.parseInt(value, 10) || 200;
     } else {
       headers[name.toLowerCase()] = value;
@@ -150,9 +130,10 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
     head: { status, headers },
     rest: buffer.subarray(index + separator),
   };
-}
+};
 
-function readCgiHead(stdout: Readable): Promise<CgiHead> {
+const readCgiHead = function readCgiHead(stdout: Readable): Promise<CgiHead> {
+  // oxlint-disable-next-line promise/avoid-new -- Bridge an event or callback API to the asynchronous operation.
   return new Promise((resolve, reject) => {
     let buffer = Buffer.alloc(0);
     const cleanup = () => {
@@ -190,22 +171,9 @@ function readCgiHead(stdout: Readable): Promise<CgiHead> {
     stdout.once("end", onEnd);
     stdout.once("error", reject);
   });
-}
+};
 
-interface BackendRequest {
-  projectId: string;
-  endpoint: string;
-  method: string;
-  query: string;
-  contentType?: string;
-  contentEncoding?: string;
-  gitProtocol?: string;
-  contentLength?: string;
-  chunked: boolean;
-  body: ReadableStream<Uint8Array> | null;
-}
-
-function buildEnv(request: BackendRequest): NodeJS.ProcessEnv {
+const buildEnv = function buildEnv(request: BackendRequest): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
     GIT_PROJECT_ROOT: path.resolve(bareReposDir),
@@ -232,9 +200,9 @@ function buildEnv(request: BackendRequest): NodeJS.ProcessEnv {
     env.CONTENT_LENGTH = request.contentLength;
   }
   return env;
-}
+};
 
-function spawnBackend(request: BackendRequest) {
+const spawnBackend = function spawnBackend(request: BackendRequest) {
   const child = spawn("git", ["http-backend"], {
     env: buildEnv(request),
     stdio: ["pipe", "pipe", "pipe"],
@@ -255,7 +223,9 @@ function spawnBackend(request: BackendRequest) {
       error
     );
   });
-  child.stdin.on("error", () => undefined);
+  child.stdin.on("error", () => {
+    /* No action is needed until this callback is replaced or invoked by its owner. */
+  });
   if (request.body) {
     pipeline(
       Readable.fromWeb(request.body as Parameters<typeof Readable.fromWeb>[0]),
@@ -268,9 +238,11 @@ function spawnBackend(request: BackendRequest) {
   }
 
   return { child, readStderr: () => stderr };
-}
+};
 
-async function streamBackend(request: BackendRequest): Promise<Response> {
+const streamBackend = async function streamBackend(
+  request: BackendRequest
+): Promise<Response> {
   const { child, readStderr } = spawnBackend(request);
   try {
     const head = await readCgiHead(child.stdout);
@@ -288,9 +260,9 @@ async function streamBackend(request: BackendRequest): Promise<Response> {
       headers: { "content-type": "text/plain" },
     });
   }
-}
+};
 
-async function runBackendBuffered(
+const runBackendBuffered = async function runBackendBuffered(
   request: BackendRequest
 ): Promise<{ head: CgiHead; body: Buffer }> {
   const { child, readStderr } = spawnBackend(request);
@@ -305,27 +277,35 @@ async function runBackendBuffered(
     chunks.push(chunk as Buffer);
   }
   return { head, body: Buffer.concat(chunks) };
-}
+};
 
-async function alignBareWithCheckoutUnlocked(projectId: string): Promise<void> {
-  const status = await repoGit.getProjectGit(projectId).status();
-  if (status.conflicted.length > 0) {
-    throw new Error("conflict");
-  }
-  const { moved } = await repoBare.fastForwardCheckout(
-    projectId,
-    repoGit.getRepoDir(projectId)
-  );
-  if (moved) {
-    await reindexProjectUnlocked(projectId);
-  }
-  if (!status.isClean()) {
-    await repoGit.commitAll(projectId, "specbook: import working tree changes");
-  }
-  await repoGit.publishToBareUnlocked(projectId);
-}
+const alignBareWithCheckoutUnlocked =
+  async function alignBareWithCheckoutUnlocked(
+    projectId: string
+  ): Promise<void> {
+    const status = await repoGit.getProjectGit(projectId).status();
+    if (status.conflicted.length > 0) {
+      throw new Error("conflict");
+    }
+    const { moved } = await repoBare.fastForwardCheckout(
+      projectId,
+      repoGit.getRepoDir(projectId)
+    );
+    if (moved) {
+      await reindexProjectUnlocked(projectId);
+    }
+    if (!status.isClean()) {
+      await repoGit.commitAll(
+        projectId,
+        "specbook: import working tree changes"
+      );
+    }
+    await repoGit.publishToBareUnlocked(projectId);
+  };
 
-function stateErrorResponse(error: unknown): Response | null {
+const stateErrorResponse = function stateErrorResponse(
+  error: unknown
+): Response | null {
   if (error instanceof Error && error.message === "conflict") {
     return new Response("The project has an unresolved git conflict\n", {
       status: 409,
@@ -339,9 +319,11 @@ function stateErrorResponse(error: unknown): Response | null {
     });
   }
   return null;
-}
+};
 
-async function followExternalPush(projectId: string): Promise<void> {
+const followExternalPush = async function followExternalPush(
+  projectId: string
+): Promise<void> {
   try {
     const { moved } = await repoBare.fastForwardCheckout(
       projectId,
@@ -361,9 +343,9 @@ async function followExternalPush(projectId: string): Promise<void> {
       .setGitExternalSyncError(projectId, message)
       .catch((dbError: unknown) => console.error(dbError));
   }
-}
+};
 
-export function createGitHttpRouter(): Hono {
+export const createGitHttpRouter = function createGitHttpRouter(): Hono {
   const router = new Hono();
 
   router.all("/git/*", access("git-token", verifyGitToken), async (c) => {
@@ -377,7 +359,7 @@ export function createGitHttpRouter(): Hono {
       return c.text("Not found\n", 404);
     }
 
-    const query = url.search.replace(/^\?/, "");
+    const query = url.search.replace(/^\?/u, "");
     const service = url.searchParams.get("service");
     if (endpoint === "info/refs") {
       if (c.req.method !== "GET") {
@@ -506,4 +488,45 @@ export function createGitHttpRouter(): Hono {
   });
 
   return router;
+};
+
+const GIT_PATH =
+  /^\/git\/(?<capture1>[0-9a-fA-F-]{36})\.git\/(?<capture2>info\/refs|git-upload-pack|git-receive-pack)$/u;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const SERVICES = new Set(["git-upload-pack", "git-receive-pack"]);
+const REALM = 'Basic realm="Specbook project repository", charset="UTF-8"';
+const BACKEND_TIMEOUT_MS = 300_000;
+const MAX_CGI_HEAD_BYTES = 64 * 1024;
+
+interface CgiHead {
+  status: number;
+  headers: Record<string, string>;
+}
+
+const verifyGitToken: BearerVerifier = async (c) => {
+  const projectId = GIT_PATH.exec(c.req.path)?.[1];
+  if (!projectId || !UUID.test(projectId)) {
+    return true;
+  }
+  const credentials = parseBasicAuth(c.req.header("authorization"));
+  const project = credentials
+    ? await projectsRepository.getProject(projectId)
+    : null;
+  return project &&
+    verifyGitAccessToken(project, requireValue(credentials).password)
+    ? true
+    : unauthorized();
+};
+
+interface BackendRequest {
+  projectId: string;
+  endpoint: string;
+  method: string;
+  query: string;
+  contentType?: string;
+  contentEncoding?: string;
+  gitProtocol?: string;
+  contentLength?: string;
+  chunked: boolean;
+  body: ReadableStream<Uint8Array> | null;
 }

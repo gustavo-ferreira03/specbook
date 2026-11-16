@@ -13,7 +13,7 @@ const SheetTrigger = SheetPrimitive.Trigger;
 const SheetClose = SheetPrimitive.Close;
 const SheetPortal = SheetPrimitive.Portal;
 
-function SheetOverlay({
+const SheetOverlay = function SheetOverlay({
   className,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Overlay>) {
@@ -27,7 +27,7 @@ function SheetOverlay({
       {...props}
     />
   );
-}
+};
 
 const sheetVariants = cva(
   "bg-sidebar shadow-dialog data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col transition duration-200 ease-out outline-none motion-reduce:transition-none",
@@ -46,7 +46,7 @@ const sheetVariants = cva(
   }
 );
 
-function SheetContent({
+const SheetContent = function SheetContent({
   side = "right",
   className,
   children,
@@ -72,9 +72,12 @@ function SheetContent({
       </SheetPrimitive.Content>
     </SheetPortal>
   );
-}
+};
 
-function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
+const SheetHeader = function SheetHeader({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
@@ -82,9 +85,12 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
       {...props}
     />
   );
-}
+};
 
-function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
+const SheetFooter = function SheetFooter({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-footer"
@@ -92,9 +98,9 @@ function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
       {...props}
     />
   );
-}
+};
 
-function SheetTitle({
+const SheetTitle = function SheetTitle({
   className,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Title>) {
@@ -105,9 +111,9 @@ function SheetTitle({
       {...props}
     />
   );
-}
+};
 
-function SheetDescription({
+const SheetDescription = function SheetDescription({
   className,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Description>) {
@@ -118,7 +124,7 @@ function SheetDescription({
       {...props}
     />
   );
-}
+};
 
 export {
   Sheet,
