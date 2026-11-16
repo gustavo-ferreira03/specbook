@@ -24,7 +24,7 @@ export async function copyText(text: string): Promise<boolean> {
   textarea.style.left = "0";
   textarea.style.opacity = "0";
   textarea.style.pointerEvents = "none";
-  document.body.appendChild(textarea);
+  document.body.append(textarea);
   try {
     textarea.select();
     textarea.setSelectionRange(0, text.length);

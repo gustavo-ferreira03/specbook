@@ -397,7 +397,7 @@ describe(
             const root = document.createElement("div");
             root.style.position = "fixed";
             root.style.left = "-10000px";
-            document.body.appendChild(root);
+            document.body.append(root);
             const player = new target.rrweb.Replayer(initialEvents, {
               root,
               showWarning: false,
