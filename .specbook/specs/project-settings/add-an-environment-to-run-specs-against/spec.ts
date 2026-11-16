@@ -12,6 +12,7 @@ test("Add an environment to run Specs against", async ({
       .getByRole("button", { name: "Delete Self-test staging" })
       .click();
     await page.getByRole("button", { name: "Delete environment" }).click();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
   });
   await step("Signed in as the Specbook administrator", async () => {
     await page.goto("/login?next=%2F");

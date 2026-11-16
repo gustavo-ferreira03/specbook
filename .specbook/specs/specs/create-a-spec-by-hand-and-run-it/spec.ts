@@ -15,6 +15,7 @@ test("Create a Spec by hand and run it", async ({
     await page
       .getByRole("button", { name: "Delete feature", exact: true })
       .click();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
   });
   await step("Signed in as the Specbook administrator", async () => {
     await page.goto("/login?next=%2F");

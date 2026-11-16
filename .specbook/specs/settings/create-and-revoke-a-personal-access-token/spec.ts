@@ -14,6 +14,7 @@ test("Create and revoke a personal access token", async ({
     await page
       .getByRole("button", { name: "Revoke token", exact: true })
       .click();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
   });
   await step("Signed in as the Specbook administrator", async () => {
     await page.goto("/login?next=%2F");

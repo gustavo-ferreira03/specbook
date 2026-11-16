@@ -12,6 +12,7 @@ test("Store a credential profile with hidden values", async ({
       .getByRole("button", { name: "Delete self-test-shopper" })
       .click();
     await page.getByRole("button", { name: "Delete profile" }).click();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
   });
   await step("Signed in as the Specbook administrator", async () => {
     await page.goto("/login?next=%2F");
