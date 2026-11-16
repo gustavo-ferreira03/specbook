@@ -33,8 +33,7 @@ import { stewardRepository } from "../../repositories/steward";
 import { access, browserSession } from "../access";
 import type { BearerVerifier } from "../access";
 import { loadProject } from "../load-project";
-import { publicFrontendOrigin } from "../security";
-import { htmlReportHeaders } from "../security";
+import { publicFrontendOrigin, htmlReportHeaders } from "../security";
 
 async function authenticate(c: Context, projectId: string) {
   if (!(await authenticateCiToken(projectId, c.req.header("authorization")))) {

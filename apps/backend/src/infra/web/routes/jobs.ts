@@ -19,8 +19,9 @@ import {
 } from "../../../core/chat/session";
 import { projectOverview } from "../../../core/jobs/overview";
 import { applyProposal } from "../../../core/jobs/proposals";
-import { payloadOf, verificationOf } from "../../../core/jobs/schemas";
 import {
+  payloadOf,
+  verificationOf,
   createJobSchema,
   reviewSchema,
   selectSpecBatchSchema,

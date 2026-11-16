@@ -30,8 +30,7 @@ import {
 } from "../tunnel/registry";
 import { jobBaseUrl, jobEnvironment } from "./environment";
 import { isAgentPaused } from "./pause";
-import { payloadOf } from "./schemas";
-import { fixProposalSchema } from "./schemas";
+import { payloadOf, fixProposalSchema } from "./schemas";
 
 export interface ProposalVerification {
   id: string;

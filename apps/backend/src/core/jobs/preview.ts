@@ -6,8 +6,8 @@ import {
 
 import type { InboxItem } from "../../infra/repositories/jobs";
 import { specsRepository } from "../../infra/repositories/specs";
-import { payloadOf } from "./schemas";
 import {
+  payloadOf,
   featureProposalSchema,
   fixProposalSchema,
   newSpecProposalSchema,

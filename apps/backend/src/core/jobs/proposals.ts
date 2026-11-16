@@ -17,8 +17,9 @@ import {
 } from "../repo/writer";
 import { withSpecLock } from "../specs/lifecycle";
 import { jobBaseUrl } from "./environment";
-import { payloadOf, verificationOf } from "./schemas";
 import {
+  payloadOf,
+  verificationOf,
   featureProposalSchema,
   fixProposalSchema,
   newSpecProposalSchema,

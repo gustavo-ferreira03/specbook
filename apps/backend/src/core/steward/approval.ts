@@ -12,8 +12,7 @@ import { stewardRepository } from "../../infra/repositories/steward";
 import { recordAgentMetric } from "../jobs/metrics";
 import { isAgentPaused } from "../jobs/pause";
 import { applyProposal, isImplementationOnly } from "../jobs/proposals";
-import { payloadOf, verificationOf } from "../jobs/schemas";
-import { fixProposalSchema } from "../jobs/schemas";
+import { payloadOf, verificationOf, fixProposalSchema } from "../jobs/schemas";
 import { provesExpectedResult } from "../runner/evidence-review";
 
 export function isLocatorOnlyFix(item: InboxItem): boolean {
