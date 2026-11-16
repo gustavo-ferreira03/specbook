@@ -34,19 +34,21 @@ export interface LocalRun {
 export const runLocal = async function runLocal(
   workspace: string,
   selector?: string,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; baseUrl?: string } = {}
 ): Promise<LocalRun> {
+  options.signal?.throwIfAborted();
   const config = await loadConfig(workspace);
+  const baseUrl = options.baseUrl ?? config.baseUrl;
   const specs = await listSpecs(workspace, selector);
   if (!specs.length) {
     throw new Error("No Specs found; use specbook spec new or specbook chat");
   }
-  const policy = await localNetworkPolicy(config.baseUrl);
+  const policy = await localNetworkPolicy(baseUrl);
   const secrets = await resolveRunSecrets(
     specs.flatMap((spec) => spec.analysis.secretRefs),
-    config.baseUrl
+    baseUrl
   );
-  await ensureChromium();
+  await ensureChromium(options.signal);
   options.signal?.throwIfAborted();
   const startedAt = new Date().toISOString();
   const id = `${startedAt.replaceAll(/[:.]/gu, "-")}-${randomUUID().slice(0, 8)}`;
@@ -91,7 +93,7 @@ export const runLocal = async function runLocal(
   }
   const outcome = await runPlaywrightSuite({
     directory,
-    baseUrl: config.baseUrl,
+    baseUrl,
     specs: selected,
     timeoutMs: specs.length * 100_000 + 30_000,
     networkPolicy: policy,
@@ -122,7 +124,7 @@ export const runLocal = async function runLocal(
     id,
     directory,
     startedAt,
-    baseUrl: config.baseUrl,
+    baseUrl,
     status,
     durationMs: Date.now() - Date.parse(startedAt),
     results,

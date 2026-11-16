@@ -159,7 +159,7 @@ const promptCredentials = async function promptCredentials(
 ) {
   if (!interactive) {
     throw new Error(
-      "Use --stdin-json to provide credentials non-interactively"
+      "The hidden prompt needs a terminal: run this command in your own terminal, or pass values with --stdin-json in automation"
     );
   }
   clack.intro(pc.inverse(" specbook credentials "), { output: stderr });
@@ -569,8 +569,17 @@ program
 program
   .command("ci")
   .helpGroup("Verify:")
-  .description("run remote Specs with a project CI token and save reports")
-  .option("--url <url>", "Specbook server URL; defaults to SPECBOOK_URL")
+  .description(
+    "run Specs in a pipeline and save HTML, JUnit and Markdown reports"
+  )
+  .argument(
+    "[selector]",
+    "a Spec or feature path in .specbook; without a server URL"
+  )
+  .option(
+    "--url <url>",
+    "Specbook server URL; defaults to SPECBOOK_URL. Without one, runs the Specs in .specbook"
+  )
   .option("--token <token>", "project CI token; prefer SPECBOOK_TOKEN")
   .option("--project <id>", "project id; defaults to SPECBOOK_PROJECT")
   .option("--environment <name>", "target server environment")
@@ -598,10 +607,13 @@ program
       "publish a pipeline summary comment"
     ).choices(["github", "gitlab", "none"])
   )
-  .action(async (options: CiOptions) => {
+  .action(async (selector: string | undefined, options: CiOptions) => {
+    const remote = !!(options.url ?? process.env.SPECBOOK_URL);
     const result = await working(
-      "Waiting for remote Specs",
-      () => runCi(options),
+      remote
+        ? "Waiting for remote Specs"
+        : `Running ${selector ?? "all Specs"}`,
+      () => runCi(options, selector),
       "timer"
     );
     if (!result.qualityGate.passed) {

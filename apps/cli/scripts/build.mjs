@@ -35,6 +35,10 @@ await fs.copyFile(
 await fs.cp(`${runtime}/dist/assets`, "dist/assets", { recursive: true });
 await fs.chmod("dist/index.js", 0o755);
 await fs.copyFile("../../docs/cli/README.md", "dist/README.md");
+await fs.copyFile(
+  "../../docs/cli/development-notes.md",
+  "dist/development-notes.md"
+);
 await fs.cp("../../docs/cli/examples", "dist/examples", { recursive: true });
 await build({
   entryPoints: ["../backend/src/index.ts"],
