@@ -1391,10 +1391,10 @@ export function stepTitlesError(
   const mismatch = expected.findIndex(
     (title, index) => comparable(title) !== comparable(stepTitles[index] ?? "")
   );
-  if (mismatch < 0 && expected.length === stepTitles.length) {
+  if (mismatch === -1 && expected.length === stepTitles.length) {
     return null;
   }
-  const index = mismatch < 0 ? expected.length : mismatch;
+  const index = mismatch === -1 ? expected.length : mismatch;
   const detail =
     index < expected.length
       ? stepTitles[index] === undefined

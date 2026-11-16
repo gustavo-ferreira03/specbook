@@ -9,7 +9,7 @@ function decodeBase32(input: string): Buffer {
   const bytes: number[] = [];
   for (const char of clean) {
     const index = BASE32.indexOf(char);
-    if (index < 0) {
+    if (index === -1) {
       throw new Error("The authenticator key is not valid base32.");
     }
     value = (value << 5) | index;

@@ -184,7 +184,7 @@ export async function withRunSlot<T>(
         signal,
         abort: () => {
           const index = slotQueue.indexOf(waiter);
-          if (index < 0) {
+          if (index === -1) {
             return;
           }
           slotQueue.splice(index, 1);

@@ -217,7 +217,7 @@ export async function branchSessionForTurn(
 
   const branch = sessionManager.getBranch();
   const targetIndex = branch.findIndex((entry) => entry.id === messageId);
-  const target = targetIndex >= 0 ? branch[targetIndex] : undefined;
+  const target = targetIndex !== -1 ? branch[targetIndex] : undefined;
   if (
     !target ||
     target.type !== "message" ||

@@ -107,7 +107,7 @@ function prepareRecording(recording: unknown): {
     (event) => event.type === 4 && /^https?:/.test(event.data?.href || "")
   );
   const snapshot =
-    page < 0
+    page === -1
       ? -1
       : recorded.findIndex((event, index) => index > page && event.type === 2);
   const trimmed =

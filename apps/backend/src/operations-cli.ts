@@ -4,7 +4,7 @@ import path from "node:path";
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const storageIndex = args.indexOf("--storage");
-  if (storageIndex >= 0) {
+  if (storageIndex !== -1) {
     if (!args[storageIndex + 1]) {
       throw new Error("Provide a directory after --storage.");
     }

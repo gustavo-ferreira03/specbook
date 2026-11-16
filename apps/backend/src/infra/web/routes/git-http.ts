@@ -103,7 +103,7 @@ function parseBasicAuth(
   }
   const decoded = Buffer.from(value, "base64").toString("utf-8");
   const separator = decoded.indexOf(":");
-  if (separator < 0) {
+  if (separator === -1) {
     return null;
   }
   return {
@@ -117,10 +117,10 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
   const lf = buffer.indexOf("\n\n");
   let index = -1;
   let separator = 0;
-  if (crlf >= 0 && (lf < 0 || crlf <= lf)) {
+  if (crlf !== -1 && (lf === -1 || crlf <= lf)) {
     index = crlf;
     separator = 4;
-  } else if (lf >= 0) {
+  } else if (lf !== -1) {
     index = lf;
     separator = 2;
   }
@@ -135,7 +135,7 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
     .toString("utf-8")
     .split(/\r?\n/)) {
     const colon = line.indexOf(":");
-    if (colon < 0) {
+    if (colon === -1) {
       continue;
     }
     const name = line.slice(0, colon).trim();

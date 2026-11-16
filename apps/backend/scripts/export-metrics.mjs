@@ -12,10 +12,10 @@ const args = process.argv.slice(2);
 const runsMode = args.includes("--runs");
 const agentMode = args.includes("--agent");
 const outIndex = args.indexOf("--out");
-const outPath = outIndex >= 0 ? args[outIndex + 1] : null;
+const outPath = outIndex !== -1 ? args[outIndex + 1] : null;
 const positional = args.filter(
   (arg, index) =>
-    !arg.startsWith("--") && (outIndex < 0 || index !== outIndex + 1)
+    !arg.startsWith("--") && (outIndex === -1 || index !== outIndex + 1)
 );
 const storageRoot =
   process.env.SPECBOOK_STORAGE_DIR ?? path.join(backendRoot, "storage");
@@ -27,7 +27,7 @@ const inputPath =
     agentMode ? "agent-events.jsonl" : "chat-turns.jsonl"
   );
 
-if ((runsMode && agentMode) || (outIndex >= 0 && !outPath)) {
+if ((runsMode && agentMode) || (outIndex !== -1 && !outPath)) {
   console.error("Use either --runs or --agent, and supply a file after --out.");
   process.exit(1);
 }

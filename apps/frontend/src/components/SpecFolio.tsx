@@ -30,7 +30,7 @@ export function SpecFolio({
   }
   const chapter = tree.specs.filter((spec) => spec.featureId === featureId);
   const index = chapter.findIndex((spec) => spec.id === specId);
-  if (index < 0) {
+  if (index === -1) {
     return null;
   }
   const feature = tree.features.find((item) => item.id === featureId);

@@ -2036,7 +2036,7 @@ describe("CI access and quality gates", () => {
       } else {
         const id = Number(target.pathname.split("/").at(-1));
         const index = list.findIndex((comment) => comment.id === id);
-        assert.ok(index >= 0);
+        assert.ok(index !== -1);
         if (request.method === "DELETE") {
           commentDeletes++;
           list.splice(index, 1);
