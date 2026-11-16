@@ -38,6 +38,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Smoke CLI from source and package
+        run: |
+          pnpm --filter specbook exec node --import tsx src/index.ts --help
+          pnpm --filter specbook exec node dist/index.js --help
+
       - name: Install display and storage tools
         run: |
           sudo apt-get update

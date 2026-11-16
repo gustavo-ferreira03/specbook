@@ -19,7 +19,10 @@ const MAX_UI_DOWNLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_UI_EXTRACTED_BYTES = 1024 * 1024 * 1024;
 declare const SPECBOOK_UI_RELEASE_SHA256: string;
 const expectedUiSha256 =
-  SPECBOOK_UI_RELEASE_SHA256 === undefined ? "" : SPECBOOK_UI_RELEASE_SHA256;
+  // oxlint-disable-next-line unicorn/no-typeof-undefined -- The checksum constant is injected only into release builds.
+  typeof SPECBOOK_UI_RELEASE_SHA256 === "undefined"
+    ? ""
+    : SPECBOOK_UI_RELEASE_SHA256;
 
 export interface ServeOptions {
   port?: string;
