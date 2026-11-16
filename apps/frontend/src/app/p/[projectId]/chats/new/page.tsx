@@ -192,7 +192,7 @@ const NewChatContent = function NewChatContent({
               {visibleSuggestions.map((suggestion) => (
                 <button
                   key={suggestion.title}
-                  aria-label={suggestion.title}
+                  aria-label={`${suggestion.title} ${suggestion.body}`}
                   type="button"
                   disabled={modelMissing || sending}
                   onClick={() => {
