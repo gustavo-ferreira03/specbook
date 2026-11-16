@@ -20,6 +20,7 @@ docs/*
 !docs/cli/
 docs/cli/*
 !docs/cli/README.md
+!docs/cli/development-notes.md
 !docs/cli/examples/
 !docs/cli/examples/*.yaml
 site

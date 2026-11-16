@@ -30,7 +30,7 @@ The public download route needs no token. Docker builds include the tarball; a d
 ```sh
 pnpm --filter @specbook/runtime build
 mkdir -p apps/backend/dist
-pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz
+node apps/cli/scripts/package.mjs apps/backend/dist/specbook.tgz
 ```
 
 This package exposes the `specbook` executable. It requires Node.js 22.19.0 or newer and downloads Chromium on the first browser command. Run `specbook --help` for the command list. The package includes full command, credential, agent-restriction and packaging documentation in [dist/README.md](dist/README.md), copied from the repository's `docs/cli/README.md` during the build.

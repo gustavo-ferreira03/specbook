@@ -32,13 +32,13 @@ Docker builds and packs the CLI into `apps/backend/dist/specbook.tgz`. A develop
 ```sh
 pnpm --filter @specbook/runtime build
 mkdir -p apps/backend/dist
-pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz
+node apps/cli/scripts/package.mjs apps/backend/dist/specbook.tgz
 npm install -g ./apps/backend/dist/specbook.tgz
 cd /path/to/your/app
 specbook init --base-url http://localhost:3000 --agent codex
 ```
 
-Packing runs the CLI build through its `prepack` script. You can also run the downloaded package without installing it globally with `npx --yes --package="https://specbook.example.com/api/cli/specbook.tgz" specbook --help`. The executable is named `specbook`; the tarball URL selects this project's package.
+The packaging helper builds the CLI and bundles its tested model-provider dependencies using the repository's production lockfile. Use this helper to produce installable archives. You can also run the downloaded package without installing it globally with `npx --yes --package="https://specbook.example.com/api/cli/specbook.tgz" specbook --help`. The executable is named `specbook`; the tarball URL selects this project's package.
 
 ## Write and run Specs
 

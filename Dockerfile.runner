@@ -11,7 +11,7 @@ COPY apps/cli/package.json ./apps/cli/
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm --filter @specbook/runtime build \
-    && pnpm --dir apps/cli pack --out /tmp/specbook.tgz
+    && node apps/cli/scripts/package.mjs /tmp/specbook.tgz
 
 FROM node:26-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0
 

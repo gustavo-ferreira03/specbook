@@ -32,9 +32,46 @@ jobs:
           mkdir -p dist/release
           node apps/frontend/scripts/package-ui.mjs dist/release
           export SPECBOOK_UI_RELEASE_SHA256="$(cut -d ' ' -f 1 dist/release/specbook-ui-*.tar.gz.sha256)"
-          pnpm --dir apps/cli pack --out ../../dist/release/specbook.tgz
+          node apps/cli/scripts/package.mjs dist/release/specbook.tgz
           cd dist/release
           sha256sum specbook.tgz > specbook.tgz.sha256
+      - name: Verify the installed release package
+        timeout-minutes: 5
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          smoke_dir="$(mktemp -d)"
+          smoke_pid=""
+          cleanup() {
+            smoke_status=$?
+            trap - EXIT
+            if [ -n "$smoke_pid" ]; then
+              kill "$smoke_pid" 2>/dev/null || true
+              wait "$smoke_pid" 2>/dev/null || true
+            fi
+            if [ "$smoke_status" -ne 0 ]; then cat "$smoke_dir/server.log" 2>/dev/null || true; fi
+            rm -rf "$smoke_dir"
+            exit "$smoke_status"
+          }
+          trap cleanup EXIT
+          npm install --prefix "$smoke_dir/install" --ignore-scripts --omit=dev --no-audit --no-fund "$PWD/dist/release/specbook.tgz"
+          smoke_cli="$smoke_dir/install/node_modules/.bin/specbook"
+          test "$("$smoke_cli" --version)" = "${RELEASE_TAG#v}"
+          mkdir "$smoke_dir/ui"
+          tar -xzf "dist/release/specbook-ui-${RELEASE_TAG#v}.tar.gz" -C "$smoke_dir/ui"
+          SPECBOOK_HOME="$smoke_dir/home" PORT=4820 "$smoke_cli" serve --ui "$smoke_dir/ui" --data "$smoke_dir/data" --host 127.0.0.1 --port 4821 > "$smoke_dir/server.log" 2>&1 &
+          smoke_pid=$!
+          smoke_deadline=$((SECONDS + 90))
+          until [ "$(curl --silent --max-time 2 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:4821/api/health)" = 200 ] && [ "$(curl --silent --max-time 2 --output /dev/null --write-out '%{http_code}' http://127.0.0.1:4821/)" = 200 ]; do
+            kill -0 "$smoke_pid"
+            if [ "$SECONDS" -ge "$smoke_deadline" ]; then echo "Installed Specbook did not become ready" >&2; exit 1; fi
+            sleep 1
+          done
+          curl --fail --silent --max-time 30 http://127.0.0.1:4821/api/cli/specbook.tgz --output "$smoke_dir/served.tgz"
+          tar -tzf "$smoke_dir/served.tgz" > "$smoke_dir/served-files"
+          grep -Fxq 'package/node_modules/@earendil-works/pi-coding-agent/package.json' "$smoke_dir/served-files"
+          grep -Fxq 'package/node_modules/@earendil-works/pi-ai/package.json' "$smoke_dir/served-files"
       - name: Attach release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
