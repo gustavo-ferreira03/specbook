@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 declare const SPECBOOK_CLI_VERSION: string;
 export const CLI_VERSION: string =
-  SPECBOOK_CLI_VERSION === undefined
+  typeof SPECBOOK_CLI_VERSION === "undefined"
     ? JSON.parse(
         readFileSync(new URL("../package.json", import.meta.url), "utf-8")
       ).version
