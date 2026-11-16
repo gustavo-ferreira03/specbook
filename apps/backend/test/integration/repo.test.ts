@@ -211,7 +211,7 @@ describe("project, feature and spec through the writer", () => {
     };
     const list = specsRepository.listSpecs;
     let moved = false;
-    specsRepository.listSpecs = async function (id) {
+    specsRepository.listSpecs = async function listSpecs(id) {
       const rows = await list.call(this, id);
       if (id === projectId && !moved) {
         moved = true;

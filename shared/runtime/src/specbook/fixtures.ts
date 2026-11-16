@@ -268,7 +268,7 @@ async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
       replay.receive(event);
     }
   });
-  const content = `${await readRecorderSource()}\n;(${function (
+  const content = `${await readRecorderSource()}\n;(${function content(
     createImages: typeof createReplayImageRecorder
   ) {
     if (window !== window.top) {
