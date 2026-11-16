@@ -63,7 +63,7 @@ function fileKey(file: string): string {
 
 function testResult(test: Json): SpecFileResult {
   const results = records(test.results);
-  const result = results[results.length - 1];
+  const result = results.at(-1);
   if (!result) {
     return {
       status: "error",

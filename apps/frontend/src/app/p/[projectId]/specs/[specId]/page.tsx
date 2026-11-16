@@ -354,9 +354,7 @@ function VerificationBanner({
       ? null
       : (latestEvidence?.data?.failedStep ?? null);
     const lastStep =
-      !passed && !failedStep && steps.length > 0
-        ? steps[steps.length - 1]
-        : null;
+      !passed && !failedStep && steps.length > 0 ? steps.at(-1) : null;
     detail = (
       <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <RelativeTime value={latestRun.startedAt} />

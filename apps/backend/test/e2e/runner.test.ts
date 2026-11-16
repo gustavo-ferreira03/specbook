@@ -403,9 +403,7 @@ describe(
               showWarning: false,
             });
             player.pause(
-              initialEvents[initialEvents.length - 1].timestamp -
-                initialEvents[0].timestamp +
-                1
+              initialEvents.at(-1).timestamp - initialEvents[0].timestamp + 1
             );
             await new Promise((resolve) =>
               requestAnimationFrame(() => requestAnimationFrame(resolve))
@@ -426,7 +424,7 @@ describe(
               showWarning: false,
             });
             updatedPlayer.pause(
-              events[events.length - 1].timestamp - events[0].timestamp + 1
+              events.at(-1).timestamp - events[0].timestamp + 1
             );
             await new Promise((resolve) =>
               requestAnimationFrame(() => requestAnimationFrame(resolve))

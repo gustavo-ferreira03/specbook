@@ -492,7 +492,7 @@ class Validator {
     }
     if (inStep && declarator.init?.type === "AwaitExpression") {
       this.requestCall(declarator.init.argument);
-      this.responseScopes[this.responseScopes.length - 1].add(id.name);
+      this.responseScopes.at(-1).add(id.name);
       return true;
     }
     if (!declarator.init) {
@@ -512,7 +512,7 @@ class Validator {
         'Only locators can be stored in constants, like const button = page.getByRole("button", { name: "Save" }).'
       );
     }
-    this.scopes[this.scopes.length - 1].add(id.name);
+    this.scopes.at(-1).add(id.name);
     return false;
   }
 

@@ -137,7 +137,7 @@ export function classifyOtpControls(
     .sort((a, b) => a.index - b.index);
   let run: PageControl[] = [];
   for (const box of boxes) {
-    const previous = run[run.length - 1];
+    const previous = run.at(-1);
     run =
       previous &&
       box.index - previous.index === 1 &&
