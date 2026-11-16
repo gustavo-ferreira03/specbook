@@ -1,14 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  LoaderCircle,
+  RefreshCw,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, ArrowRight, Check, LoaderCircle, RefreshCw } from "lucide-react";
-import { useAuth } from "@/components/AuthProvider";
-import { EmptyState } from "@/components/EmptyState";
-import { InstanceHeader } from "@/components/InstanceHeader";
-import { ModelSettings } from "@/components/ModelSettings";
-import { PageContainer, PageHeader } from "@/components/PageHeader";
-import { InlineFeedback, SettingsBlock, SettingsFooter, SettingsRow, SettingsSection } from "@/components/SettingsLayout";
+import { useCallback, useEffect, useState } from "react";
+
+import { useAuth } from "@/components/auth-provider";
+import { EmptyState } from "@/components/empty-state";
+import { InstanceHeader } from "@/components/instance-header";
+import { ModelSettings } from "@/components/model-settings";
+import { PageContainer, PageHeader } from "@/components/page-header";
+import {
+  InlineFeedback,
+  SettingsBlock,
+  SettingsFooter,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/settings-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,122 +31,386 @@ import type { Project, SetupStatus } from "@/lib/types";
 
 type SetupStep = "admin" | "model" | "project";
 
-export default function SetupPage() {
-    const router = useRouter();
-    const { refresh } = useAuth();
-    const [status, setStatus] = useState<SetupStatus | null>(null);
-    const [step, setStep] = useState<SetupStep>("model");
-    const [error, setError] = useState("");
-    const [loadError, setLoadError] = useState("");
-    const [busy, setBusy] = useState(false);
-    const [adminName, setAdminName] = useState("");
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [projectName, setProjectName] = useState("");
-    const [baseUrl, setBaseUrl] = useState("");
-    const [demo, setDemo] = useState(false);
+const SetupPage = function SetupPage() {
+  const router = useRouter();
+  const { refresh } = useAuth();
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [step, setStep] = useState<SetupStep>("model");
+  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [adminName, setAdminName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [demo, setDemo] = useState(false);
 
-    const load = useCallback(async () => {
-        setLoadError("");
-        try {
-            const result = await api<SetupStatus>("/setup/status");
-            if (result.authenticated === false && !result.needsAdmin) { router.replace("/login"); return; }
-            if (result.authenticated) {
-                const currentUser = await refresh();
-                if (currentUser && currentUser.role !== "admin") { router.replace("/"); return; }
-            }
-            if (result.completed) { router.replace("/"); return; }
-            setStatus(result);
-            setStep(result.needsAdmin ? "admin" : "model");
-        } catch (reason) { setLoadError(errorMessage(reason)); }
-    }, [router, refresh]);
-
-    useEffect(() => { void load(); }, [load]);
-
-    async function createAdmin(event: React.FormEvent) {
-        event.preventDefault();
-        setBusy(true);
-        setError("");
-        try {
-            await api("/setup/admin", { method: "POST", body: JSON.stringify({ name: adminName.trim(), email: email.trim(), password }) });
-            setPassword("");
-            await refresh();
-            await load();
-        } catch (reason) { setError(errorMessage(reason)); }
-        finally { setBusy(false); }
-    }
-
-    function connectionTested() {
-        if (!status?.needsProject) { router.replace("/"); return; }
-        setError("");
-        setStep("project");
-    }
-
-    function tryDemo() {
-        setDemo(true);
-        setProjectName("Sauce Demo");
-        setBaseUrl("https://www.saucedemo.com");
-        setError("");
-    }
-
-    async function createProject(event: React.FormEvent) {
-        event.preventDefault();
-        setBusy(true);
-        setError("");
-        try {
-            const result = demo
-                ? await api<{ project: Project; discoveryChatId: string | null }>("/setup/demo", { method: "POST" })
-                : await api<{ project: Project; discoveryChatId: string | null }>("/projects", { method: "POST", body: JSON.stringify({ name: projectName.trim(), baseUrl: baseUrl.trim() }) });
-            try { localStorage.setItem("specbook:last-project", result.project.id); } catch {}
-            router.push(result.discoveryChatId ? `/p/${result.project.id}/chats/${result.discoveryChatId}` : `/p/${result.project.id}`);
-        } catch (reason) {
-            setError(errorMessage(reason));
-            setBusy(false);
+  const load = useCallback(async () => {
+    setLoadError("");
+    try {
+      const result = await api<SetupStatus>("/setup/status");
+      if (result.authenticated === false && !result.needsAdmin) {
+        router.replace("/login");
+        return;
+      }
+      if (result.authenticated) {
+        const currentUser = await refresh();
+        if (currentUser && currentUser.role !== "admin") {
+          router.replace("/");
+          return;
         }
+      }
+      if (result.completed) {
+        router.replace("/");
+        return;
+      }
+      setStatus(result);
+      setStep(result.needsAdmin ? "admin" : "model");
+    } catch (error_) {
+      setLoadError(errorMessage(error_));
     }
+  }, [router, refresh]);
 
-    const steps: { id: SetupStep; title: string }[] = [
-        ...(status?.needsAdmin ? [{ id: "admin" as const, title: "Create admin" }] : []),
-        { id: "model", title: "Connect model" },
-        ...(status?.needsProject ? [{ id: "project" as const, title: "First project" }] : []),
-    ];
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Reset the previous request or selection when its external key changes before loading fresh state.
+    load();
+  }, [load]);
 
-    return <main className="min-h-dvh bg-surface">
-        <InstanceHeader setup />
-        <PageHeader title="Set up Specbook" description="Create the administrator account, then connect a model." width="reading" />
-        <PageContainer width="reading" className="pb-16" innerClassName="space-y-8">
-            {loadError ? <EmptyState icon={AlertCircle} tone="danger" role="alert" title="Setup could not load" description={loadError} action={<Button onClick={() => void load()}><RefreshCw size={14} /> Try again</Button>} /> : !status ? <div role="status" aria-label="Loading setup" aria-busy="true" className="space-y-5"><Skeleton className="h-5 w-60" /><Skeleton className="h-48 w-full" /></div> : <>
-                <ol aria-label="Setup progress" className="flex flex-wrap items-center gap-x-6 gap-y-3 text-body">
-                    {steps.map((item, index) => <li key={item.id} aria-current={step === item.id ? "step" : undefined} className={`flex items-center gap-2 ${step === item.id ? "font-medium text-ink" : "text-ink-muted"}`}>
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-meta tabular" aria-hidden="true">{index < steps.findIndex((item) => item.id === step) ? <Check size={14} /> : index + 1}</span>{item.title}
-                    </li>)}
+  const createAdmin = async function createAdmin(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api("/setup/admin", {
+        method: "POST",
+        body: JSON.stringify({
+          name: adminName.trim(),
+          email: email.trim(),
+          password,
+        }),
+      });
+      setPassword("");
+      await refresh();
+      await load();
+    } catch (error_) {
+      setError(errorMessage(error_));
+      // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const connectionTested = function connectionTested() {
+    if (!status?.needsProject) {
+      router.replace("/");
+      return;
+    }
+    setError("");
+    setStep("project");
+  };
+
+  const tryDemo = function tryDemo() {
+    setDemo(true);
+    setProjectName("Sauce Demo");
+    setBaseUrl("https://www.saucedemo.com");
+    setError("");
+  };
+
+  const createProject = async function createProject(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = demo
+        ? await api<{ project: Project; discoveryChatId: string | null }>(
+            "/setup/demo",
+            { method: "POST" }
+          )
+        : await api<{ project: Project; discoveryChatId: string | null }>(
+            "/projects",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                name: projectName.trim(),
+                baseUrl: baseUrl.trim(),
+              }),
+            }
+          );
+      try {
+        localStorage.setItem("specbook:last-project", result.project.id);
+      } catch {
+        // Keep the last usable state if this optional operation fails.
+      }
+      router.push(
+        result.discoveryChatId
+          ? `/p/${result.project.id}/chats/${result.discoveryChatId}`
+          : `/p/${result.project.id}`
+      );
+    } catch (error_) {
+      setError(errorMessage(error_));
+      setBusy(false);
+    }
+  };
+
+  const steps: { id: SetupStep; title: string }[] = [
+    ...(status?.needsAdmin
+      ? [{ id: "admin" as const, title: "Create admin" }]
+      : []),
+    { id: "model", title: "Connect model" },
+    ...(status?.needsProject
+      ? [{ id: "project" as const, title: "First project" }]
+      : []),
+  ];
+
+  return (
+    <main className="bg-surface min-h-dvh">
+      <InstanceHeader setup />
+      <PageHeader
+        title="Set up Specbook"
+        description="Create the administrator account, then connect a model."
+        width="reading"
+      />
+      <PageContainer
+        width="reading"
+        className="pb-16"
+        innerClassName="space-y-8"
+      >
+        {(() => {
+          if (loadError) {
+            return (
+              <EmptyState
+                icon={AlertCircle}
+                tone="danger"
+                role="alert"
+                title="Setup could not load"
+                description={loadError}
+                action={
+                  <Button onClick={() => load()}>
+                    <RefreshCw size={14} /> Try again
+                  </Button>
+                }
+              />
+            );
+          }
+          if (status) {
+            return (
+              <>
+                <ol
+                  aria-label="Setup progress"
+                  className="text-body flex flex-wrap items-center gap-x-6 gap-y-3"
+                >
+                  {steps.map((item, index) => (
+                    <li
+                      key={item.id}
+                      aria-current={step === item.id ? "step" : undefined}
+                      className={`flex items-center gap-2 ${step === item.id ? "text-ink font-medium" : "text-ink-muted"}`}
+                    >
+                      <span
+                        className="border-line bg-surface text-meta tabular flex size-6 shrink-0 items-center justify-center rounded-full border"
+                        aria-hidden="true"
+                      >
+                        {index <
+                        steps.findIndex(
+                          (itemValue) => itemValue.id === step
+                        ) ? (
+                          <Check size={14} />
+                        ) : (
+                          index + 1
+                        )}
+                      </span>
+                      {item.title}
+                    </li>
+                  ))}
                 </ol>
-                {step === "admin" && <SettingsSection id="setup-admin-heading" title="Create the administrator" description="This account manages access and settings for this Specbook instance.">
+                {step === "admin" && (
+                  <SettingsSection
+                    id="setup-admin-heading"
+                    title="Create the administrator"
+                    description="This account manages access and settings for this Specbook instance."
+                  >
                     <form onSubmit={createAdmin}>
-                        <SettingsRow label="Name" htmlFor="admin-name"><Input id="admin-name" value={adminName} onChange={(event) => setAdminName(event.target.value)} required autoComplete="name" disabled={busy} /></SettingsRow>
-                        <SettingsRow label="Email" htmlFor="admin-email"><Input id="admin-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" disabled={busy} /></SettingsRow>
-                        <SettingsRow label="Password" htmlFor="admin-password" description="Use at least 12 characters."><Input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} maxLength={128} required autoComplete="new-password" disabled={busy} /></SettingsRow>
-                        <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}><Button type="submit" disabled={busy}>{busy ? "Creating account…" : "Create admin and continue"}<ArrowRight size={14} /></Button></SettingsFooter>
+                      <SettingsRow label="Name" htmlFor="admin-name">
+                        <Input
+                          id="admin-name"
+                          value={adminName}
+                          onChange={(event) => setAdminName(event.target.value)}
+                          required
+                          autoComplete="name"
+                          disabled={busy}
+                        />
+                      </SettingsRow>
+                      <SettingsRow label="Email" htmlFor="admin-email">
+                        <Input
+                          id="admin-email"
+                          type="email"
+                          value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          required
+                          autoComplete="email"
+                          disabled={busy}
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        label="Password"
+                        htmlFor="admin-password"
+                        description="Use at least 12 characters."
+                      >
+                        <Input
+                          id="admin-password"
+                          type="password"
+                          value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          minLength={12}
+                          maxLength={128}
+                          required
+                          autoComplete="new-password"
+                          disabled={busy}
+                        />
+                      </SettingsRow>
+                      <SettingsFooter
+                        feedback={
+                          <InlineFeedback
+                            feedback={
+                              error ? { type: "error", text: error } : null
+                            }
+                          />
+                        }
+                      >
+                        <Button type="submit" disabled={busy}>
+                          {busy
+                            ? "Creating account…"
+                            : "Create admin and continue"}
+                          <ArrowRight size={14} />
+                        </Button>
+                      </SettingsFooter>
                     </form>
-                </SettingsSection>}
-                {step === "model" && <ModelSettings onConnectionTested={connectionTested} />}
-                {step === "project" && <>
-                    <SettingsSection id="setup-project-heading" title="Your first project" description="Use an app your Specbook server can reach. You can change these details later."
-                        actions={<Button variant="outline" onClick={demo ? () => { setDemo(false); setProjectName(""); setBaseUrl(""); } : tryDemo} disabled={busy}>{demo ? "Use my own app" : "Try with a demo app"}</Button>}>
-                        <form onSubmit={createProject}>
-                            <SettingsRow label="Project name" htmlFor="setup-project-name"><Input id="setup-project-name" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Customer portal" required disabled={busy || demo} /></SettingsRow>
-                            <SettingsRow label="App URL" htmlFor="setup-base-url"><Input id="setup-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} type="url" inputMode="url" placeholder="https://staging.example.com" required disabled={busy || demo} /></SettingsRow>
-                            {demo && <SettingsBlock><p className="text-body text-ink">Sauce Demo is a public practice store. Specbook will save its public login for the agent to use.</p><p className="mt-2 text-body text-ink-muted">Username: <code className="text-meta">standard_user</code><br />Password: <code className="text-meta">secret_sauce</code></p></SettingsBlock>}
-                            <SettingsFooter feedback={<InlineFeedback feedback={error ? { type: "error", text: error } : null} />}>
-                                <Button type="submit" disabled={busy}>{busy && <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />}{busy ? "Preparing your project…" : "Create project and explore"}<ArrowRight size={14} /></Button>
-                            </SettingsFooter>
-                        </form>
+                  </SettingsSection>
+                )}
+                {step === "model" && (
+                  <ModelSettings onConnectionTested={connectionTested} />
+                )}
+                {step === "project" && (
+                  <>
+                    <SettingsSection
+                      id="setup-project-heading"
+                      title="Your first project"
+                      description="Use an app your Specbook server can reach. You can change these details later."
+                      actions={
+                        <Button
+                          variant="outline"
+                          onClick={
+                            demo
+                              ? () => {
+                                  setDemo(false);
+                                  setProjectName("");
+                                  setBaseUrl("");
+                                }
+                              : tryDemo
+                          }
+                          disabled={busy}
+                        >
+                          {demo ? "Use my own app" : "Try with a demo app"}
+                        </Button>
+                      }
+                    >
+                      <form onSubmit={createProject}>
+                        <SettingsRow
+                          label="Project name"
+                          htmlFor="setup-project-name"
+                        >
+                          <Input
+                            id="setup-project-name"
+                            value={projectName}
+                            onChange={(event) =>
+                              setProjectName(event.target.value)
+                            }
+                            placeholder="Customer portal"
+                            required
+                            disabled={busy || demo}
+                          />
+                        </SettingsRow>
+                        <SettingsRow label="App URL" htmlFor="setup-base-url">
+                          <Input
+                            id="setup-base-url"
+                            value={baseUrl}
+                            onChange={(event) => setBaseUrl(event.target.value)}
+                            type="url"
+                            inputMode="url"
+                            placeholder="https://staging.example.com"
+                            required
+                            disabled={busy || demo}
+                          />
+                        </SettingsRow>
+                        {demo && (
+                          <SettingsBlock>
+                            <p className="text-body text-ink">
+                              Sauce Demo is a public practice store. Specbook
+                              will save its public login for the agent to use.
+                            </p>
+                            <p className="text-body text-ink-muted mt-2">
+                              Username:{" "}
+                              <code className="text-meta">standard_user</code>
+                              <br />
+                              Password:{" "}
+                              <code className="text-meta">secret_sauce</code>
+                            </p>
+                          </SettingsBlock>
+                        )}
+                        <SettingsFooter
+                          feedback={
+                            <InlineFeedback
+                              feedback={
+                                error ? { type: "error", text: error } : null
+                              }
+                            />
+                          }
+                        >
+                          <Button type="submit" disabled={busy}>
+                            {busy && (
+                              <LoaderCircle
+                                size={14}
+                                className="animate-spin motion-reduce:animate-none"
+                              />
+                            )}
+                            {busy
+                              ? "Preparing your project…"
+                              : "Create project and explore"}
+                            <ArrowRight size={14} />
+                          </Button>
+                        </SettingsFooter>
+                      </form>
                     </SettingsSection>
                     <div className="flex flex-wrap justify-between gap-3">
-                        <Button variant="ghost" onClick={() => { setError(""); setStep("model"); }} disabled={busy}><ArrowLeft size={14} /> Model settings</Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setError("");
+                          setStep("model");
+                        }}
+                        disabled={busy}
+                      >
+                        <ArrowLeft size={14} /> Model settings
+                      </Button>
                     </div>
-                </>}
-            </>}
-        </PageContainer>
-    </main>;
-}
+                  </>
+                )}
+              </>
+            );
+          }
+          return (
+            <output
+              aria-label="Loading setup"
+              aria-busy="true"
+              className="block space-y-5"
+            >
+              <Skeleton className="h-5 w-60" />
+              <Skeleton className="h-48 w-full" />
+            </output>
+          );
+        })()}
+      </PageContainer>
+    </main>
+  );
+};
+export default SetupPage;

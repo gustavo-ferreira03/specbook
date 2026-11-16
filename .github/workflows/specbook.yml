@@ -1,95 +1,94 @@
 name: Specbook
 
 on:
-    pull_request:
-    push:
-        branches: [main]
-    workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-    contents: read
+  contents: read
 
 concurrency:
-    group: specbook-${{ github.ref }}
-    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: specbook-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-    specs:
-        name: Run Specbook's own Specs
-        runs-on: ubuntu-24.04
-        steps:
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+  specs:
+    name: Run Specbook's own Specs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-            - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
-            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-              with:
-                  node-version: 26
-                  cache: pnpm
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 26
+          cache: pnpm
 
-            - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
 
-            - name: Build the CLI
-              run: pnpm --filter @specbook/runtime --filter specbook build
+      - name: Build the CLI
+        run: pnpm --filter @specbook/runtime --filter specbook build
 
-            - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-            - name: Build the image under test
-              uses: docker/build-push-action@v6
-              with:
-                  context: .
-                  load: true
-                  tags: specbook:ci
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
+      - name: Build the image under test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: specbook:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-            - name: Restore the target instance from its fixture
-              run: |
-                  docker volume create specbook-target
-                  docker run --rm -v specbook-target:/data -v "$PWD/.specbook/ci/fixtures:/fixtures:ro" \
-                      --entrypoint node specbook:ci apps/backend/dist/operations-cli.js restore /fixtures/target.tar.gz
+      - name: Restore the target instance from its fixture
+        run: |
+          docker volume create specbook-target
+          docker run --rm -v specbook-target:/data -v "$PWD/.specbook/ci/fixtures:/fixtures:ro" \
+              --entrypoint node specbook:ci apps/backend/dist/operations-cli.js restore /fixtures/target.tar.gz
 
-            - name: Start the target and the tester
-              run: |
-                  docker run -d --name specbook-target --network host -v specbook-target:/data \
-                      -e PORT=5000 -e FRONTEND_PORT=5001 -e FRONTEND_ORIGIN=http://127.0.0.1:5001 specbook:ci
-                  docker run -d --name specbook-tester --network host \
-                      -e FRONTEND_ORIGIN=http://127.0.0.1:4001 specbook:ci
+      - name: Start the target and the tester
+        run: |
+          docker run -d --name specbook-target --network host -v specbook-target:/data \
+              -e PORT=5000 -e FRONTEND_PORT=5001 -e FRONTEND_ORIGIN=http://127.0.0.1:5001 specbook:ci
+          docker run -d --name specbook-tester --network host \
+              -e FRONTEND_ORIGIN=http://127.0.0.1:4001 specbook:ci
 
-            - name: Run the Specs
-              env:
-                  SPECBOOK_JUNIT_PATH: specbook-junit.xml
-                  SPECBOOK_SUMMARY_PATH: specbook-summary.md
-              run: node .specbook/ci/run.mjs
+      - name: Run the Specs
+        env:
+          SPECBOOK_JUNIT_PATH: specbook-junit.xml
+          SPECBOOK_SUMMARY_PATH: specbook-summary.md
+        run: node .specbook/ci/run.mjs
 
+      - name: Show container logs
+        if: failure()
+        run: |
+          docker logs specbook-tester 2>&1 | tail -n 200
+          docker logs specbook-target 2>&1 | tail -n 200
 
-            - name: Show container logs
-              if: failure()
-              run: |
-                  docker logs specbook-tester 2>&1 | tail -n 200
-                  docker logs specbook-target 2>&1 | tail -n 200
+      - name: Upload the report
+        id: report
+        if: always() && hashFiles('specbook-report.html') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: specbook-report.html
+          archive: false
 
-            - name: Upload the report
-              id: report
-              if: always() && hashFiles('specbook-report.html') != ''
-              uses: actions/upload-artifact@v7
-              with:
-                  path: specbook-report.html
-                  archive: false
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: specbook-results
+          path: |
+            specbook-junit.xml
+            specbook-summary.md
+          if-no-files-found: ignore
 
-            - uses: actions/upload-artifact@v7
-              if: always()
-              with:
-                  name: specbook-results
-                  path: |
-                      specbook-junit.xml
-                      specbook-summary.md
-                  if-no-files-found: ignore
-
-            - name: Publish the summary
-              if: always()
-              env:
-                  REPORT_URL: ${{ steps.report.outputs.artifact-url }}
-              run: |
-                  if [ -n "$REPORT_URL" ]; then echo "**[Open the Specbook report]($REPORT_URL)** with each Spec's steps, screenshots and recordings." >> "$GITHUB_STEP_SUMMARY"; echo >> "$GITHUB_STEP_SUMMARY"; fi
-                  test -f specbook-summary.md && cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Publish the summary
+        if: always()
+        env:
+          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+        run: |
+          if [ -n "$REPORT_URL" ]; then echo "**[Open the Specbook report]($REPORT_URL)** with each Spec's steps, screenshots and recordings." >> "$GITHUB_STEP_SUMMARY"; echo >> "$GITHUB_STEP_SUMMARY"; fi
+          test -f specbook-summary.md && cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY" || true

@@ -1,106 +1,180 @@
-import { errorCodeSchema, type ErrorCode } from "./errors.ts";
 import path from "node:path";
+
+import { errorCodeSchema } from "./errors.ts";
+import type { ErrorCode } from "./errors.ts";
 import { FAILED_STEP_ANNOTATION } from "./specbook/guard.ts";
 
 export interface SpecFileResult {
-    status: "passed" | "failed" | "error";
-    durationMs: number | null;
-    failReason: string | null;
-    failedStep: string | null;
-    errorCode?: ErrorCode | null;
-    attachments: { name: string; path: string; contentType: string }[];
+  status: "passed" | "failed" | "error";
+  durationMs: number | null;
+  failReason: string | null;
+  failedStep: string | null;
+  errorCode?: ErrorCode | null;
+  attachments: { name: string; path: string; contentType: string }[];
 }
 
 export interface PlaywrightReport {
-    files: Map<string, SpecFileResult>;
-    errors: string[];
+  files: Map<string, SpecFileResult>;
+  errors: string[];
 }
 
 type Json = Record<string, unknown>;
 
-const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+// oxlint-disable-next-line no-control-regex -- Control characters must be matched explicitly at this input/output boundary.
+const ANSI = /\u001B\[[0-9;]*[A-Za-z]/gu;
 
-export function stripAnsi(text: string): string {
-    return text.replace(ANSI, "");
-}
+export const stripAnsi = function stripAnsi(text: string): string {
+  return text.replaceAll(ANSI, "");
+};
 
-function records(value: unknown): Json[] {
-    return Array.isArray(value) ? value.filter((item): item is Json => !!item && typeof item === "object") : [];
-}
+const records = function records(value: unknown): Json[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Json => !!item && typeof item === "object")
+    : [];
+};
 
-function text(value: unknown): string | null {
-    return typeof value === "string" && value.trim() ? value : null;
-}
+const text = function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+};
 
-function errorMessage(error: Json): string | null {
-    const message = text(error.message) ?? text(error.value);
-    return message ? stripAnsi(message).trim() : null;
-}
+const errorMessage = function errorMessage(error: Json): string | null {
+  const message = text(error.message) ?? text(error.value);
+  return message ? stripAnsi(message).trim() : null;
+};
 
-function failedStepOf(test: Json, result: Json): string | null {
-    for (const annotation of [...records(result.annotations), ...records(test.annotations)]) {
-        if (annotation.type === FAILED_STEP_ANNOTATION && text(annotation.description)) return String(annotation.description);
+const failedStepOf = function failedStepOf(
+  test: Json,
+  result: Json
+): string | null {
+  for (const annotation of [
+    ...records(result.annotations),
+    ...records(test.annotations),
+  ]) {
+    if (
+      annotation.type === FAILED_STEP_ANNOTATION &&
+      text(annotation.description)
+    ) {
+      return String(annotation.description);
     }
-    const failed = records(result.steps).find((step) => step.error);
-    return failed ? text(failed.title) : null;
-}
+  }
+  const failed = records(result.steps).find((step) => step.error);
+  return failed ? text(failed.title) : null;
+};
 
-function fileKey(file: string): string {
-    return path.basename(file).replace(/\.spec\.ts$/, "");
-}
+const fileKey = function fileKey(file: string): string {
+  return path.basename(file).replace(/\.spec\.ts$/u, "");
+};
 
-function testResult(test: Json): SpecFileResult {
-    const results = records(test.results);
-    const result = results[results.length - 1];
-    if (!result) return { status: "error", durationMs: null, failReason: "Playwright did not run the test", failedStep: null, attachments: [], errorCode: "infrastructure" };
-    const duration = Number(result.duration);
-    const durationMs = Number.isFinite(duration) ? Math.round(duration) : null;
-    const attachments = records(result.attachments).flatMap((attachment) =>
-        typeof attachment.name === "string" && typeof attachment.path === "string"
-            ? [{ name: attachment.name, path: attachment.path, contentType: String(attachment.contentType ?? "") }]
-            : [],
-    );
-    const status = String(result.status ?? "");
-    if (status === "passed") return { status: "passed", durationMs, failReason: null, failedStep: null, attachments };
-    const messages = records(result.errors).map(errorMessage).filter((message): message is string => !!message);
-    const single = result.error && typeof result.error === "object" ? errorMessage(result.error as Json) : null;
-    if (messages.length === 0 && single) messages.push(single);
-    if (status === "skipped") {
-        return { status: "error", durationMs, failReason: messages.join("\n\n") || "The test was skipped", failedStep: null, attachments, errorCode: "infrastructure" };
-    }
+const testResult = function testResult(test: Json): SpecFileResult {
+  const results = records(test.results);
+  const result = results.at(-1);
+  if (!result) {
     return {
-        status: "failed",
-        durationMs,
-        failReason: messages.join("\n\n") || (status === "timedOut" ? "The test timed out" : `The test ${status || "failed"}`),
-        failedStep: failedStepOf(test, result),
-        attachments,
-        errorCode: [...records(result.annotations), ...records(test.annotations)].filter((annotation) => annotation.type === "specbook-error-code")
-            .map((annotation) => errorCodeSchema.safeParse(annotation.description)).find((parsed) => parsed.success)?.data ?? "infrastructure",
+      status: "error",
+      durationMs: null,
+      failReason: "Playwright did not run the test",
+      failedStep: null,
+      attachments: [],
+      errorCode: "infrastructure",
     };
-}
+  }
+  const duration = Number(result.duration);
+  const durationMs = Number.isFinite(duration) ? Math.round(duration) : null;
+  const attachments = records(result.attachments).flatMap((attachment) =>
+    typeof attachment.name === "string" && typeof attachment.path === "string"
+      ? [
+          {
+            name: attachment.name,
+            path: attachment.path,
+            contentType: String(attachment.contentType ?? ""),
+          },
+        ]
+      : []
+  );
+  const status = String(result.status ?? "");
+  if (status === "passed") {
+    return {
+      status: "passed",
+      durationMs,
+      failReason: null,
+      failedStep: null,
+      attachments,
+    };
+  }
+  const messages = records(result.errors)
+    .map(errorMessage)
+    .filter((message): message is string => !!message);
+  const single =
+    result.error && typeof result.error === "object"
+      ? errorMessage(result.error as Json)
+      : null;
+  if (messages.length === 0 && single) {
+    messages.push(single);
+  }
+  if (status === "skipped") {
+    return {
+      status: "error",
+      durationMs,
+      failReason: messages.join("\n\n") || "The test was skipped",
+      failedStep: null,
+      attachments,
+      errorCode: "infrastructure",
+    };
+  }
+  return {
+    status: "failed",
+    durationMs,
+    failReason:
+      messages.join("\n\n") ||
+      (status === "timedOut"
+        ? "The test timed out"
+        : `The test ${status || "failed"}`),
+    failedStep: failedStepOf(test, result),
+    attachments,
+    errorCode:
+      [...records(result.annotations), ...records(test.annotations)]
+        .filter((annotation) => annotation.type === "specbook-error-code")
+        .map((annotation) => errorCodeSchema.safeParse(annotation.description))
+        .find((parsed) => parsed.success)?.data ?? "infrastructure",
+  };
+};
 
-function collect(suites: Json[], files: Map<string, SpecFileResult>, file: string | null): void {
-    for (const suite of suites) {
-        const suiteFile = text(suite.file) ?? file;
-        for (const spec of records(suite.specs)) {
-            const specFile = text(spec.file) ?? suiteFile;
-            if (!specFile) continue;
-            const key = fileKey(specFile);
-            for (const test of records(spec.tests)) {
-                const result = testResult(test);
-                const previous = files.get(key);
-                if (!previous || previous.status === "passed") files.set(key, result);
-            }
+const collect = function collect(
+  suites: Json[],
+  files: Map<string, SpecFileResult>,
+  file: string | null
+): void {
+  for (const suite of suites) {
+    const suiteFile = text(suite.file) ?? file;
+    for (const spec of records(suite.specs)) {
+      const specFile = text(spec.file) ?? suiteFile;
+      if (!specFile) {
+        continue;
+      }
+      const key = fileKey(specFile);
+      for (const test of records(spec.tests)) {
+        const result = testResult(test);
+        const previous = files.get(key);
+        if (!previous || previous.status === "passed") {
+          files.set(key, result);
         }
-        collect(records(suite.suites), files, suiteFile);
+      }
     }
-}
+    collect(records(suite.suites), files, suiteFile);
+  }
+};
 
-export function parsePlaywrightReport(json: string): PlaywrightReport {
-    const data = JSON.parse(json) as Json;
-    if (!data || typeof data !== "object" || !Array.isArray(data.suites)) throw new Error("Playwright report has no suites");
-    const files = new Map<string, SpecFileResult>();
-    collect(records(data.suites), files, null);
-    const errors = records(data.errors).map(errorMessage).filter((message): message is string => !!message);
-    return { files, errors };
-}
+export const parsePlaywrightReport = function parsePlaywrightReport(
+  json: string
+): PlaywrightReport {
+  const data = JSON.parse(json) as Json;
+  if (!data || typeof data !== "object" || !Array.isArray(data.suites)) {
+    throw new Error("Playwright report has no suites");
+  }
+  const files = new Map<string, SpecFileResult>();
+  collect(records(data.suites), files, null);
+  const errors = records(data.errors)
+    .map(errorMessage)
+    .filter((message): message is string => !!message);
+  return { files, errors };
+};

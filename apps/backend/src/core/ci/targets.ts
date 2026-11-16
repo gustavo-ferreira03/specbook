@@ -1,27 +1,60 @@
 import { isIP } from "node:net";
+
+import {
+  httpTarget,
+  isPrivateAddress,
+  NetworkTargetError,
+  resolveTarget,
+} from "@specbook/runtime/network/targets";
+import type {
+  AddressResolver,
+  RunNetworkPolicy,
+} from "@specbook/runtime/network/targets";
+
 import type { RunEnvironment } from "../../infra/db/schema";
+import { projectsRepository } from "../../infra/repositories/projects";
+import type { Project } from "../../infra/repositories/projects";
 import { resolveRunEnvironment } from "../environments";
-import { projectsRepository, type Project } from "../../infra/repositories/projects";
-import { httpTarget, isPrivateAddress, NetworkTargetError, resolveTarget, type AddressResolver, type RunNetworkPolicy } from "@specbook/runtime/network/targets";
+
+export const projectRunPolicy = async function projectRunPolicy(
+  project: Project,
+  baseUrl: string,
+  resolver?: AddressResolver,
+  environment?: RunEnvironment
+): Promise<RunNetworkPolicy> {
+  const target = httpTarget(baseUrl);
+  const selected =
+    environment ??
+    (await resolveRunEnvironment(project.id, "Production", baseUrl));
+  const base = httpTarget(selected.configuredBaseUrl);
+  const origins = [...new Set([base.origin, ...selected.allowedOrigins])];
+  if (!origins.includes(target.origin)) {
+    throw new NetworkTargetError(
+      "Add this origin in Settings → Environments before using it for a deployment or preview run"
+    );
+  }
+  // Private hostnames are resolved inside the runner's network, never on the server.
+  if (selected.executor === "runner" || selected.executor === "tunnel") {
+    return { origins, allowPrivate: true };
+  }
+  const hostname = base.hostname.replaceAll(/^\[|\]$/gu, "");
+  const allowPrivate = isIP(hostname)
+    ? isPrivateAddress(hostname)
+    : hostname === "localhost" || hostname.endsWith(".localhost");
+  await resolveTarget(target, allowPrivate, resolver);
+  return { origins, allowPrivate };
+};
+
+export const runNetworkPolicy = async function runNetworkPolicy(
+  projectId: string,
+  baseUrl: string,
+  environment?: RunEnvironment
+): Promise<RunNetworkPolicy> {
+  const project = await projectsRepository.getProject(projectId);
+  if (!project) {
+    throw new NetworkTargetError("Project not found");
+  }
+  return projectRunPolicy(project, baseUrl, undefined, environment);
+};
 
 export type { RunNetworkPolicy } from "@specbook/runtime/network/targets";
-
-export async function projectRunPolicy(project: Project, baseUrl: string, resolver?: AddressResolver, environment?: RunEnvironment): Promise<RunNetworkPolicy> {
-    const target = httpTarget(baseUrl);
-    const selected = environment ?? await resolveRunEnvironment(project.id, "Production", baseUrl);
-    const base = httpTarget(selected.configuredBaseUrl);
-    const origins = [...new Set([base.origin, ...selected.allowedOrigins])];
-    if (!origins.includes(target.origin)) throw new NetworkTargetError("Add this origin in Settings → Environments before using it for a deployment or preview run");
-    // Private hostnames are resolved inside the runner's network, never on the server.
-    if (selected.executor === "runner" || selected.executor === "tunnel") return { origins, allowPrivate: true };
-    const hostname = base.hostname.replace(/^\[|\]$/g, "");
-    const allowPrivate = isIP(hostname) ? isPrivateAddress(hostname) : hostname === "localhost" || hostname.endsWith(".localhost");
-    await resolveTarget(target, allowPrivate, resolver);
-    return { origins, allowPrivate };
-}
-
-export async function runNetworkPolicy(projectId: string, baseUrl: string, environment?: RunEnvironment): Promise<RunNetworkPolicy> {
-    const project = await projectsRepository.getProject(projectId);
-    if (!project) throw new NetworkTargetError("Project not found");
-    return projectRunPolicy(project, baseUrl, undefined, environment);
-}

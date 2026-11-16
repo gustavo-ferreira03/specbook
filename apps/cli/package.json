@@ -2,7 +2,6 @@
   "name": "specbook",
   "version": "0.2.0",
   "description": "Specbook behavior contracts, private-network runners and hosted server",
-  "type": "module",
   "bin": {
     "specbook": "dist/index.js"
   },
@@ -10,9 +9,7 @@
     "dist",
     "README.md"
   ],
-  "engines": {
-    "node": ">=22"
-  },
+  "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "tsx src/index.ts",
@@ -55,5 +52,8 @@
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

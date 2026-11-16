@@ -1,0 +1,139 @@
+"use client";
+
+import {
+  ChevronDown,
+  KeyRound,
+  Link2,
+  LogOut,
+  Settings,
+  UserRound,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+import { useAuth } from "@/components/auth-provider";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { api, errorMessage } from "@/lib/api";
+
+export const UserMenu = function UserMenu() {
+  const { user, isAdmin, refresh } = useAuth();
+  const router = useRouter();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const resolvedValue = await api<{ oidcEnabled: boolean }>(
+          "/auth/options"
+        );
+        const result = resolvedValue;
+        return setSsoEnabled(result.oidcEnabled);
+      } catch {
+        // Keep the last usable state if this optional operation fails.
+      }
+    })();
+  }, []);
+  const connectSso = async function connectSso() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ url: string }>("/auth/oidc/start", {
+        method: "POST",
+        body: JSON.stringify({ link: true }),
+      });
+      window.location.assign(result.url);
+    } catch (error_) {
+      setError(errorMessage(error_));
+      setBusy(false);
+    }
+  };
+  const signOut = async function signOut() {
+    setBusy(true);
+    setError("");
+    try {
+      await api("/auth/logout", { method: "POST" });
+      await refresh();
+      router.replace("/login");
+    } catch (error_) {
+      setError(errorMessage(error_));
+      setBusy(false);
+    }
+  };
+  if (!user) {
+    return null;
+  }
+  return (
+    <div className="min-w-0">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-w-full"
+            aria-label={`Account: ${user.name}`}
+          >
+            <UserRound size={14} />
+            <span className="max-w-32 truncate">{user.name}</span>
+            <ChevronDown size={12} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="max-w-[calc(100vw-32px)]">
+          <DropdownMenuLabel>
+            <p className="truncate font-medium">{user.name}</p>
+            <p className="text-meta text-ink-muted mt-0.5 truncate font-normal">
+              {user.email}
+            </p>
+            <p className="text-meta text-ink-muted mt-0.5 font-normal capitalize">
+              {user.role}
+            </p>
+          </DropdownMenuLabel>
+          {isAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/settings">
+                  <Settings size={14} /> Instance settings
+                </Link>
+              </DropdownMenuItem>
+            </>
+          )}
+          <DropdownMenuItem asChild>
+            <Link href="/settings?tab=access-tokens">
+              <KeyRound size={14} /> Access tokens
+            </Link>
+          </DropdownMenuItem>
+          {ssoEnabled && (
+            <DropdownMenuItem disabled={busy} onSelect={() => connectSso()}>
+              <Link2 size={14} /> Connect single sign-on
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              signOut();
+            }}
+            disabled={busy}
+          >
+            <LogOut size={14} /> {busy ? "Signing out…" : "Sign out"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {error && (
+        <p role="alert" className="text-meta text-danger mt-1">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+};

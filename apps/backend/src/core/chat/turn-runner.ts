@@ -1,545 +1,761 @@
-import { errorCodeOf, providerErrorCode, type ErrorCode } from "@specbook/runtime/errors";
 import path from "node:path";
-import type { TurnPolicy } from "../jobs/policy";
+
 import {
-    createAgentSession,
-    DefaultResourceLoader,
-    type SessionManager,
+  createAgentSession,
+  DefaultResourceLoader,
 } from "@earendil-works/pi-coding-agent";
-import {
-    beginChatBrowserTool,
-    closeChatBrowser,
-    endChatBrowserTool,
-    getOrCreateChatBrowser,
-} from "../browser/sessions";
-import { bridgeBrowserTools, type BrowserToolPolicy } from "../browser/mcp";
-import { modelRegistryPromise, modelRuntimePromise } from "../llm/runtime";
-import { storageRoot } from "../paths";
-import { createProjectScrubber } from "../credentials/scrub";
+import type { SessionManager } from "@earendil-works/pi-coding-agent";
+import { errorCodeOf, providerErrorCode } from "@specbook/runtime/errors";
+import type { ErrorCode } from "@specbook/runtime/errors";
+
+import { logger } from "../../infra/logger";
 import { chatsRepository } from "../../infra/repositories/chats";
 import { credentialsRepository } from "../../infra/repositories/credentials";
 import { jobsRepository } from "../../infra/repositories/jobs";
 import { projectContextsRepository } from "../../infra/repositories/project-contexts";
 import { projectsRepository } from "../../infra/repositories/projects";
 import { settingsRepository } from "../../infra/repositories/settings";
-import { logger } from "../../infra/logger";
 import { auditTools } from "../accounts/audit";
+import { bridgeBrowserTools } from "../browser/mcp";
+import type { BrowserToolPolicy } from "../browser/mcp";
+import {
+  beginChatBrowserTool,
+  closeChatBrowser,
+  endChatBrowserTool,
+  getOrCreateChatBrowser,
+} from "../browser/sessions";
+import { createProjectScrubber } from "../credentials/scrub";
+import { resolveRunEnvironment } from "../environments";
+import type { TurnPolicy } from "../jobs/policy";
+import {
+  browserFailureMessage,
+  providerFailure,
+  providerFailureMessage,
+} from "../jobs/presentation-errors";
+import { modelRegistryPromise, modelRuntimePromise } from "../llm/runtime";
+import { storageRoot } from "../paths";
+import { createBackgroundTaskTool } from "../steward/tools";
+import { hasTunnel, tunnelStartCommand } from "../tunnel/registry";
+import { requireValue } from "../utils/require-value";
+import {
+  ChatBusyError,
+  clearActiveChatSession,
+  consumeAbortRequest,
+  getActiveChatSession,
+  getChatQueueState,
+  publishChatUpdate,
+  releaseChatTurn,
+  setActiveChatSession,
+  takePendingFollowUps,
+  tryReserveChatTurn,
+} from "./chat-registry";
+import type { ActiveChatSession } from "./chat-registry";
+import {
+  createContextTools,
+  createSpecBatchTool,
+  createApiDocumentationTool,
+  createChatResultsTool,
+} from "./context-tools";
+import { createCredentialTools } from "./credential-tools";
+import { ChatTurnTimeoutError, withTurnTimeout } from "./deadline";
+// oxlint-disable-next-line import/no-cycle -- These service modules call each other after initialization; keep the existing orchestration boundary.
+import { confirmDiscoveredContext } from "./discovery";
+import {
+  chatNavigationOrigins,
+  createAutonomousBrowserPolicy,
+  createDiscoveryBrowserPolicy,
+  createOriginBrowserPolicy,
+} from "./discovery-policy";
+import { createExplorationTools } from "./exploration-tools";
+import { TurnMetricsRecorder } from "./metrics";
+import type { TurnTrigger } from "./metrics";
+import { buildSystemPrompt } from "./prompts";
 import { agentSettings, getSecuritySettings } from "./safety-settings";
 import {
-    ChatBusyError,
-    clearActiveChatSession,
-    consumeAbortRequest,
-    getActiveChatSession,
-    getChatQueueState,
-    publishChatUpdate,
-    releaseChatTurn,
-    setActiveChatSession,
-    takePendingFollowUps,
-    tryReserveChatTurn,
-    type ActiveChatSession,
-} from "./chat-registry";
-import { createContextTools, createSpecBatchTool, createApiDocumentationTool, createChatResultsTool } from "./context-tools";
-import { createCredentialTools } from "./credential-tools";
-import { confirmDiscoveredContext } from "./discovery";
-import { createExplorationTools } from "./exploration-tools";
-import { createBackgroundTaskTool } from "../steward/tools";
-import { chatNavigationOrigins, createAutonomousBrowserPolicy, createDiscoveryBrowserPolicy, createOriginBrowserPolicy } from "./discovery-policy";
-import { TurnMetricsRecorder, type TurnTrigger } from "./metrics";
-import { buildSystemPrompt } from "./prompts";
-import {
-    appendError,
-    appendWarning,
-    branchSessionForTurn,
-    cwd,
-    ensureUserMessage,
-    messagesOf,
-    openSession,
-    TOOL_STEP_TYPE,
-    userMessageCount,
-    type AgentMessage,
+  appendError,
+  appendWarning,
+  branchSessionForTurn,
+  cwd,
+  ensureUserMessage,
+  messagesOf,
+  openSession,
+  TOOL_STEP_TYPE,
+  userMessageCount,
 } from "./session-store";
+import type { AgentMessage } from "./session-store";
 import { createSessionTools } from "./session-tools";
 import { createDomainTools } from "./tools";
-import { ChatTurnTimeoutError, withTurnTimeout } from "./deadline";
-import { browserFailureMessage, providerFailure, providerFailureMessage } from "../jobs/presentation-errors";
 import type { ChatToolStepRecord } from "./types";
-import { resolveRunEnvironment } from "../environments";
-import { hasTunnel, tunnelStartCommand } from "../tunnel/registry";
+
+const createResourceLoader = async function createResourceLoader(
+  promptText: string
+): Promise<DefaultResourceLoader> {
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    systemPromptOverride: () => promptText,
+    appendSystemPromptOverride: () => [],
+  });
+  await loader.reload();
+  return loader;
+};
+
+export const startChatTurn = function startChatTurn(
+  id: string,
+  userText: string
+): void {
+  if (!tryReserveChatTurn(id)) {
+    throw new ChatBusyError("The agent is still replying");
+  }
+  runReservedChatTurn(id, userText, undefined, "message").catch(console.error);
+};
+
+export const startBranchedChatTurn = async function startBranchedChatTurn(
+  id: string,
+  messageId: string,
+  options: { editedText?: string; userOnly?: boolean } = {}
+): Promise<void> {
+  if (!tryReserveChatTurn(id)) {
+    throw new ChatBusyError("The agent is still replying");
+  }
+  let branch: Awaited<ReturnType<typeof branchSessionForTurn>>;
+  try {
+    branch = await branchSessionForTurn(id, messageId, options);
+  } catch (error) {
+    releaseChatTurn(id);
+    publishChatUpdate(id);
+    throw error;
+  }
+  const trigger: TurnTrigger =
+    options.editedText === undefined ? "retry" : "edit";
+  runReservedChatTurn(id, branch.text, branch.sessionManager, trigger).catch(
+    console.error
+  );
+};
+
+export const branchChatForTurn = async function branchChatForTurn(
+  id: string,
+  messageId: string,
+  options: { editedText?: string; userOnly?: boolean } = {}
+): Promise<{ text: string; sessionManager: SessionManager }> {
+  if (!tryReserveChatTurn(id)) {
+    throw new Error("The agent is still replying");
+  }
+  try {
+    return await branchSessionForTurn(id, messageId, options);
+  } finally {
+    releaseChatTurn(id);
+  }
+};
+
+export const runChatTurn = async function runChatTurn(
+  id: string,
+  userText: string,
+  existingSessionManager?: SessionManager,
+  policy?: TurnPolicy
+): Promise<TurnOutcome> {
+  if (!tryReserveChatTurn(id)) {
+    return await { status: "busy" };
+  }
+  return await runReservedChatTurn(
+    id,
+    userText,
+    existingSessionManager,
+    existingSessionManager ? "retry" : "message",
+    policy
+  );
+};
+
+// oxlint-disable-next-line complexity -- Keep the turn-runner decision tree together so state transitions and error ordering remain explicit.
+const runReservedChatTurn = async function runReservedChatTurn(
+  id: string,
+  userText: string,
+  existingSessionManager: SessionManager | undefined,
+  trigger: TurnTrigger,
+  turnPolicy?: TurnPolicy
+): Promise<TurnOutcome> {
+  publishChatUpdate(id);
+  const metrics = new TurnMetricsRecorder(id, trigger);
+  let sessionManager: SessionManager | null = existingSessionManager ?? null;
+  let previousUserCount = 0;
+  let activeSession: ActiveChatSession | null = null;
+  let outcome: TurnOutcome = { status: "completed" };
+  const fail = async (code: ErrorCode, message: string) => {
+    outcome = { status: "failed", errorCode: code, message };
+    const job = await jobsRepository.forChat(id);
+    if (job) {
+      await jobsRepository.update(job.id, { errorCode: code });
+    }
+  };
+  try {
+    if (consumeAbortRequest(id)) {
+      metrics.fail("aborted", "aborted_before_start");
+      return { status: "aborted", errorCode: "cancelled" };
+    }
+    const row = await chatsRepository.getChatRow(id);
+    sessionManager ??= await openSession(id);
+    if (!row || !sessionManager) {
+      metrics.fail("error", "chat_missing");
+      await fail("infrastructure", "The chat no longer exists.");
+      return outcome;
+    }
+    metrics.setContext({
+      projectId: row.projectId,
+      mode: row.contextRevisionId ? "discovery" : "standard",
+    });
+    metrics.seedFromSession(sessionManager);
+    if (consumeAbortRequest(id)) {
+      metrics.fail("aborted", "aborted_before_start");
+      return { status: "aborted", errorCode: "cancelled" };
+    }
+    previousUserCount = userMessageCount(sessionManager);
+    const storedProject = await projectsRepository.getProject(row.projectId);
+    const environment = storedProject
+      ? (turnPolicy?.environment ??
+        (await resolveRunEnvironment(row.projectId)))
+      : undefined;
+    const runnerEnvironment = environment?.executor === "runner";
+    const project =
+      storedProject && turnPolicy?.baseUrl
+        ? { ...storedProject, baseUrl: turnPolicy.baseUrl }
+        : storedProject;
+    if (!project) {
+      metrics.fail("error", "project_missing");
+      ensureUserMessage(sessionManager, userText, previousUserCount);
+      appendError(
+        sessionManager,
+        "The project for this chat no longer exists."
+      );
+      await fail(
+        "infrastructure",
+        "The project for this chat no longer exists."
+      );
+      return outcome;
+    }
+    if (environment?.executor === "tunnel" && !hasTunnel(environment.id)) {
+      const message = `No tunnel connected in group ${environment.runnerGroup}. Start ${tunnelStartCommand(environment, row.projectId)} inside the private network with SPECBOOK_URL and SPECBOOK_RUNNER_TOKEN, then send your message again.`;
+      ensureUserMessage(sessionManager, userText, previousUserCount);
+      appendError(sessionManager, message);
+      await fail("environment", message);
+      return outcome;
+    }
+
+    const [modelRegistry, modelRuntime, { provider, model: modelName }] =
+      await Promise.all([
+        modelRegistryPromise,
+        modelRuntimePromise,
+        settingsRepository.getLlmSettings(),
+      ]);
+    metrics.setContext({
+      provider: provider || null,
+      model: modelName || null,
+    });
+    const model =
+      // oxlint-disable-next-line unicorn/no-array-method-this-argument -- ModelRegistry.find accepts provider and model identifiers; it is not Array.find.
+      provider && modelName ? modelRegistry.find(provider, modelName) : null;
+    if (!model) {
+      metrics.fail(
+        "error",
+        provider || modelName ? "model_unavailable" : "model_not_configured"
+      );
+      await fail(
+        "provider_model",
+        "The selected model is unavailable or not configured."
+      );
+      ensureUserMessage(sessionManager, userText, previousUserCount);
+      appendError(
+        sessionManager,
+        provider || modelName
+          ? `The configured LLM model "${provider}/${modelName}" is unavailable. Open Settings and choose an available provider and model.`
+          : "No LLM model is configured. Open Settings and choose a provider and model."
+      );
+      return outcome;
+    }
+    if (!modelRegistry.hasConfiguredAuth(model)) {
+      metrics.fail("error", "provider_not_authenticated");
+      await fail("provider_auth", "The model provider is not authenticated.");
+      ensureUserMessage(sessionManager, userText, previousUserCount);
+      appendError(
+        sessionManager,
+        `The LLM provider "${provider}" is not authenticated. Open Settings and connect it or add an API key.`
+      );
+      return outcome;
+    }
+
+    const contextRevision = row.contextRevisionId
+      ? await projectContextsRepository.getProjectContextRevision(
+          row.contextRevisionId
+        )
+      : null;
+    const discoveryRevision =
+      contextRevision?.status === "draft" ? contextRevision : null;
+
+    let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
+    let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null =
+      null;
+    const scrub = createProjectScrubber(row.projectId);
+    if (!runnerEnvironment) {
+      try {
+        const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
+        const profiles = await credentialsRepository.listProfiles(
+          row.projectId
+        );
+        const origins = chatNavigationOrigins(startUrl, environment, profiles);
+        chatBrowser = await getOrCreateChatBrowser(id, origins, environment);
+        const browser = chatBrowser;
+        const basePolicy: BrowserToolPolicy = (() => {
+          if (discoveryRevision) {
+            return {
+              ...createDiscoveryBrowserPolicy(
+                discoveryRevision,
+                browser.mcp,
+                origins
+              ),
+              sanitizeResult: scrub,
+            };
+          }
+          if (turnPolicy?.browserScope === "explore") {
+            return {
+              ...createAutonomousBrowserPolicy(
+                project.baseUrl,
+                browser.mcp,
+                origins
+              ),
+              sanitizeResult: scrub,
+            };
+          }
+          return {
+            ...createOriginBrowserPolicy(project.baseUrl, browser.mcp, origins),
+            sanitizeResult: scrub,
+          };
+        })();
+        const policy: BrowserToolPolicy = {
+          ...basePolicy,
+          sendScreenshots: async () =>
+            await (async () => {
+              const awaitedValue11709 = await getSecuritySettings();
+              return awaitedValue11709.sendScreenshotsToModel;
+            })(),
+          beforeCall: async (toolName, args, signal) => {
+            await browser.mcp.ensureBrowser(signal);
+            await basePolicy.beforeCall?.(toolName, args, signal);
+            beginChatBrowserTool(id, toolName);
+            publishChatUpdate(id);
+          },
+          afterCall: async (toolName, args, result, signal) => {
+            try {
+              if (!signal?.aborted) {
+                await basePolicy.afterCall?.(toolName, args, result, signal);
+              }
+            } finally {
+              endChatBrowserTool(id, toolName);
+              publishChatUpdate(id);
+            }
+          },
+        };
+        browserTools = bridgeBrowserTools(browser.mcp, browser.workDir, policy);
+        metrics.setBrowserAvailable(true);
+        await turnPolicy?.browserReady?.();
+      } catch (error) {
+        logger.warn("chat browser unavailable", { chatId: id, error });
+        if (turnPolicy?.infrastructureFailure) {
+          await fail(errorCodeOf(error) ?? "infrastructure", String(error));
+          await turnPolicy.infrastructureFailure(
+            String(error),
+            outcome.errorCode
+          );
+          return outcome;
+        }
+        appendWarning(sessionManager, browserFailureMessage(error));
+      }
+    }
+
+    const credentialTools = runnerEnvironment
+      ? []
+      : createCredentialTools({
+          projectId: row.projectId,
+          baseUrl: requireValue(storedProject).baseUrl,
+          environment,
+          chatId: id,
+          mcp: chatBrowser?.mcp ?? null,
+          workDir: chatBrowser?.workDir ?? null,
+          scrub,
+          notify: () => publishChatUpdate(id),
+          canPrompt: !turnPolicy,
+        });
+    const sessionTools = runnerEnvironment
+      ? []
+      : createSessionTools({
+          projectId: row.projectId,
+          baseUrl: project.baseUrl,
+          productionBaseUrl: requireValue(storedProject).baseUrl,
+          environment,
+          mcp: chatBrowser?.mcp ?? null,
+          workDir: chatBrowser?.workDir ?? null,
+        });
+    const explorationTools = runnerEnvironment
+      ? []
+      : createExplorationTools({
+          baseUrl: project.baseUrl,
+          mcp: chatBrowser?.mcp ?? null,
+          scrub,
+          recordEvidence: async (json) => {
+            const job = await jobsRepository.forChat(id);
+            if (job) {
+              await jobsRepository.log(job.id, "page_scan", json);
+            }
+            return `/p/${row.projectId}/chats/${job?.sourceChatId ?? id}`;
+          },
+        });
+    const customTools = discoveryRevision
+      ? [
+          ...browserTools,
+          ...createContextTools(discoveryRevision.id, row.projectId, id),
+          ...(runnerEnvironment
+            ? []
+            : [createApiDocumentationTool(row.projectId, environment)]),
+          ...credentialTools,
+          ...sessionTools,
+          ...explorationTools,
+        ]
+      : [
+          ...browserTools,
+          ...createDomainTools(row.projectId, {
+            scrub,
+            metrics,
+            baseUrl: project.baseUrl,
+            environment,
+          }),
+          createSpecBatchTool(row.projectId, id),
+          createChatResultsTool(row.projectId, id),
+          ...(runnerEnvironment
+            ? []
+            : [createApiDocumentationTool(row.projectId, environment)]),
+          ...(turnPolicy
+            ? []
+            : [createBackgroundTaskTool(row.projectId, `chat:${id}`, id)]),
+          ...credentialTools,
+          ...sessionTools,
+          ...explorationTools,
+        ];
+    const confirmedContext = discoveryRevision
+      ? null
+      : await projectContextsRepository.getLatestConfirmedProjectContext(
+          row.projectId
+        );
+    const resourceLoader = await createResourceLoader(
+      buildSystemPrompt(project, discoveryRevision, confirmedContext) +
+        (turnPolicy?.prompt ?? "") +
+        (runnerEnvironment
+          ? "\nThis environment executes on a private-network runner. Live browser exploration is unavailable. Use saved Specs, results and evidence. Run Specs through the runner; never claim to have reproduced behavior in a live browser. Credentials are configured locally on the runner with specbook credentials, never in the server vault."
+          : "")
+    );
+    if (consumeAbortRequest(id)) {
+      metrics.fail("aborted", "aborted_before_start");
+      return { status: "aborted", errorCode: "cancelled" };
+    }
+    const { session } = await createAgentSession({
+      model,
+      modelRuntime,
+      cwd,
+      noTools: "builtin",
+      customTools: auditTools(
+        row.projectId,
+        id,
+        turnPolicy ? turnPolicy.tools(customTools) : customTools
+      ),
+      resourceLoader,
+      sessionManager,
+      settingsManager: await agentSettings(),
+    });
+    const active: ActiveChatSession = {
+      session,
+      sessionManager,
+      aborted: false,
+    };
+    const manager = active.sessionManager;
+    activeSession = active;
+    setActiveChatSession(id, active);
+    const queuedFollowUps = takePendingFollowUps(id);
+    let modelError = "";
+    let promptFailed = false;
+    let timedOut = false;
+    let messageAnchor: string | null = null;
+    const runningSteps = new Map<string, ChatToolStepRecord>();
+    // oxlint-disable-next-line complexity -- Keep the turn-runner decision tree together so state transitions and error ordering remain explicit.
+    const unsubscribe = session.subscribe((event) => {
+      const value = event as unknown as SessionEventValue;
+      const messages = (() => {
+        if (value.type === "agent_end" && Array.isArray(value.messages)) {
+          return value.messages;
+        }
+        if (value.message) {
+          return [value.message];
+        }
+        return [];
+      })();
+      for (const message of messages) {
+        if (
+          message.role === "assistant" &&
+          message.stopReason === "error" &&
+          message.errorMessage
+        ) {
+          modelError = message.errorMessage;
+        }
+      }
+      if (
+        value.type === "message_start" &&
+        value.message?.role === "assistant"
+      ) {
+        messageAnchor = messagesOf(id, manager).at(-1)?.id ?? null;
+        publishChatUpdate(id, {
+          type: "message_start",
+          afterMessageId: messageAnchor,
+        });
+      }
+      if (value.type === "message_start" && value.message?.role === "user") {
+        metrics.userMessage();
+      }
+      if (
+        value.type === "message_update" &&
+        value.assistantMessageEvent?.type === "text_delta"
+      ) {
+        const { delta } = value.assistantMessageEvent;
+        if (delta) {
+          publishChatUpdate(id, { type: "assistant_delta", delta });
+        }
+      }
+      if (value.type === "message_end" && value.message?.role === "assistant") {
+        metrics.assistantMessage(value.message);
+        turnPolicy?.tokens(value.message.usage?.totalTokens ?? 0);
+      }
+      if (value.type === "message_end") {
+        const { message } = value;
+        const afterMessageId = messageAnchor;
+        queueMicrotask(() => {
+          const entry = manager
+            .getBranch()
+            .find(
+              (entryValue) =>
+                entryValue.type === "message" && entryValue.message === message
+            );
+          const record = entry
+            ? messagesOf(id, manager).find(
+                (recordValue) => recordValue.id === entry.id
+              )
+            : undefined;
+          publishChatUpdate(id, {
+            type: "message_end",
+            message: record,
+            afterMessageId,
+          });
+        });
+      }
+      if (
+        value.type === "tool_execution_start" &&
+        value.toolName &&
+        value.toolCallId
+      ) {
+        const { toolName, toolCallId } = value;
+        metrics.toolStart(toolName);
+        const entry = manager
+          .getBranch()
+          .toReversed()
+          .find(
+            (entryValue) =>
+              entryValue.type === "message" &&
+              entryValue.message.role === "assistant" &&
+              entryValue.message.content.some(
+                (part) => part.type === "toolCall" && part.id === toolCallId
+              )
+          );
+        if (entry) {
+          const step: ChatToolStepRecord = {
+            id: `${entry.id}:${toolCallId}`,
+            toolName,
+            afterMessageId: messagesOf(id, manager).at(-1)?.id ?? null,
+            startedAt: Date.now(),
+            endedAt: null,
+          };
+          runningSteps.set(toolCallId, step);
+          manager.appendCustomEntry(TOOL_STEP_TYPE, step);
+          publishChatUpdate(id, { type: "tool_start", toolName, step });
+        }
+      }
+      if (
+        value.type === "tool_execution_end" &&
+        value.toolName &&
+        value.toolCallId
+      ) {
+        metrics.toolEnd(value.toolName, value.isError === true);
+        const step = runningSteps.get(value.toolCallId);
+        if (step) {
+          const endedAt = Date.now();
+          manager.appendCustomEntry(TOOL_STEP_TYPE, { ...step, endedAt });
+          publishChatUpdate(id, {
+            type: "tool_end",
+            toolName: value.toolName,
+            stepId: step.id,
+            endedAt,
+          });
+          runningSteps.delete(value.toolCallId);
+        }
+      }
+      if (value.type === "agent_start") {
+        publishChatUpdate(id, { type: "agent_status", status: "working" });
+      }
+      if (value.type === "agent_end") {
+        publishChatUpdate(
+          id,
+          value.willRetry
+            ? {
+                type: "agent_status",
+                status: "retrying",
+                message: providerFailureMessage(value.errorMessage),
+              }
+            : { type: "updated" }
+        );
+      }
+      if (value.type === "agent_settled") {
+        publishChatUpdate(id, { type: "agent_status", status: "idle" });
+      }
+      if (value.type === "auto_retry_start") {
+        metrics.autoRetry();
+        publishChatUpdate(id, {
+          type: "agent_status",
+          status: "retrying",
+          message: `Retrying (${value.attempt ?? 1}/${value.maxAttempts ?? 1})`,
+        });
+      }
+      if (value.type === "queue_update") {
+        publishChatUpdate(id, {
+          type: "queue_update",
+          steering: value.steering?.length ?? 0,
+          followUp: value.followUp?.length ?? 0,
+        });
+      }
+    });
+
+    try {
+      await withTurnTimeout(
+        async () => {
+          const promptPromise = session.prompt(userText);
+          for (const followUp of queuedFollowUps) {
+            // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+            await session.followUp(followUp);
+          }
+          await promptPromise;
+        },
+        async () => {
+          active.aborted = true;
+          await Promise.allSettled([session.abort(), closeChatBrowser(id)]);
+        }
+      );
+    } catch (error) {
+      promptFailed = true;
+      if (error instanceof ChatTurnTimeoutError) {
+        timedOut = true;
+        await fail("infrastructure", error.message);
+        metrics.fail("error", "turn_timeout");
+        ensureUserMessage(sessionManager, userText, previousUserCount);
+        appendError(sessionManager, error.message);
+      } else if (!active.aborted) {
+        metrics.fail("error", "prompt_failed");
+        await fail(providerErrorCode(error), providerFailureMessage(error));
+        ensureUserMessage(sessionManager, userText, previousUserCount);
+        appendError(sessionManager, providerFailureMessage(error));
+      }
+    } finally {
+      unsubscribe();
+      session.dispose();
+      clearActiveChatSession(id, session);
+    }
+    if (discoveryRevision && !active.aborted && !promptFailed) {
+      await confirmDiscoveredContext(discoveryRevision.id).catch((error) =>
+        logger.warn("discovered context was not confirmed", {
+          chatId: id,
+          error,
+        })
+      );
+    }
+    if (active.aborted && !timedOut) {
+      metrics.fail("aborted", "user_abort");
+      outcome = { status: "aborted", errorCode: "cancelled" };
+    }
+    if (modelError && !active.aborted && !promptFailed) {
+      metrics.fail("error", "model_error");
+      await fail("provider_error", providerFailureMessage(modelError));
+      appendError(sessionManager, providerFailureMessage(modelError));
+    }
+  } catch (error) {
+    const aborted =
+      activeSession?.aborted ?? getActiveChatSession(id)?.aborted ?? false;
+    metrics.fail(
+      aborted ? "aborted" : "error",
+      aborted ? "user_abort" : "turn_failed"
+    );
+    if (aborted) {
+      outcome = { status: "aborted", errorCode: "cancelled" };
+    } else {
+      await fail(errorCodeOf(error) ?? "infrastructure", String(error));
+    }
+    if (!aborted) {
+      logger.error("chat turn failed", { chatId: id, error });
+    }
+    if (sessionManager) {
+      if (!aborted) {
+        ensureUserMessage(sessionManager, userText, previousUserCount);
+        appendError(
+          sessionManager,
+          providerFailure(error).code === "provider_error"
+            ? "Specbook could not complete this conversation turn. Try again. If it keeps failing, check System status in global Settings."
+            : providerFailureMessage(error)
+        );
+      }
+    } else {
+      console.error(error);
+    }
+  } finally {
+    try {
+      await turnPolicy?.flush();
+    } finally {
+      releaseChatTurn(id);
+      publishChatUpdate(id, { type: "agent_status", status: "idle" });
+      publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
+      publishChatUpdate(id);
+      metrics.finish();
+    }
+  }
+  return outcome;
+};
 
 const agentDir = path.join(storageRoot, "pi-agent");
 
-async function createResourceLoader(promptText: string): Promise<DefaultResourceLoader> {
-    const loader = new DefaultResourceLoader({
-        cwd,
-        agentDir,
-        noExtensions: true,
-        noSkills: true,
-        noPromptTemplates: true,
-        noThemes: true,
-        noContextFiles: true,
-        systemPromptOverride: () => promptText,
-        appendSystemPromptOverride: () => [],
-    });
-    await loader.reload();
-    return loader;
-}
-
-export function startChatTurn(id: string, userText: string): void {
-    if (!tryReserveChatTurn(id)) throw new ChatBusyError("The agent is still replying");
-    void runReservedChatTurn(id, userText, undefined, "message").catch(console.error);
-}
-
-export async function startBranchedChatTurn(
-    id: string,
-    messageId: string,
-    options: { editedText?: string; userOnly?: boolean } = {},
-): Promise<void> {
-    if (!tryReserveChatTurn(id)) throw new ChatBusyError("The agent is still replying");
-    let branch: Awaited<ReturnType<typeof branchSessionForTurn>>;
-    try {
-        branch = await branchSessionForTurn(id, messageId, options);
-    } catch (error) {
-        releaseChatTurn(id);
-        publishChatUpdate(id);
-        throw error;
-    }
-    const trigger: TurnTrigger = options.editedText !== undefined ? "edit" : "retry";
-    void runReservedChatTurn(id, branch.text, branch.sessionManager, trigger).catch(console.error);
-}
-
-export async function branchChatForTurn(
-    id: string,
-    messageId: string,
-    options: { editedText?: string; userOnly?: boolean } = {},
-): Promise<{ text: string; sessionManager: SessionManager }> {
-    if (!tryReserveChatTurn(id)) throw new Error("The agent is still replying");
-    try {
-        return await branchSessionForTurn(id, messageId, options);
-    } finally {
-        releaseChatTurn(id);
-    }
-}
-
 export interface TurnOutcome {
-    status: "completed" | "failed" | "aborted" | "busy";
-    errorCode?: ErrorCode;
-    message?: string;
-}
-
-export async function runChatTurn(
-    id: string,
-    userText: string,
-    existingSessionManager?: SessionManager,
-    policy?: TurnPolicy,
-): Promise<TurnOutcome> {
-    if (!tryReserveChatTurn(id)) return { status: "busy" };
-    return runReservedChatTurn(id, userText, existingSessionManager, existingSessionManager ? "retry" : "message", policy);
+  status: "completed" | "failed" | "aborted" | "busy";
+  errorCode?: ErrorCode;
+  message?: string;
 }
 
 interface SessionEventValue {
-    type?: string;
-    message?: AgentMessage & { usage?: Parameters<TurnMetricsRecorder["assistantMessage"]>[0]["usage"] };
-    messages?: AgentMessage[];
-    assistantMessageEvent?: { type?: string; delta?: string };
-    toolName?: string;
-    toolCallId?: string;
-    isError?: boolean;
-    steering?: readonly string[];
-    followUp?: readonly string[];
-    willRetry?: boolean;
-    attempt?: number;
-    maxAttempts?: number;
-    errorMessage?: string;
-}
-
-async function runReservedChatTurn(
-    id: string,
-    userText: string,
-    existingSessionManager: SessionManager | undefined,
-    trigger: TurnTrigger,
-    turnPolicy?: TurnPolicy,
-): Promise<TurnOutcome> {
-    publishChatUpdate(id);
-    const metrics = new TurnMetricsRecorder(id, trigger);
-    let sessionManager: SessionManager | null = existingSessionManager ?? null;
-    let previousUserCount = 0;
-    let activeSession: ActiveChatSession | null = null;
-    let outcome: TurnOutcome = { status: "completed" };
-    const fail = async (code: ErrorCode, message: string) => {
-        outcome = { status: "failed", errorCode: code, message };
-        const job = await jobsRepository.forChat(id);
-        if (job) await jobsRepository.update(job.id, { errorCode: code });
-    };
-    try {
-        if (consumeAbortRequest(id)) {
-            metrics.fail("aborted", "aborted_before_start");
-            return { status: "aborted", errorCode: "cancelled" };
-        }
-        const row = await chatsRepository.getChatRow(id);
-        sessionManager = sessionManager ?? (await openSession(id));
-        if (!row || !sessionManager) {
-            metrics.fail("error", "chat_missing");
-            await fail("infrastructure", "The chat no longer exists.");
-            return outcome;
-        }
-        metrics.setContext({ projectId: row.projectId, mode: row.contextRevisionId ? "discovery" : "standard" });
-        metrics.seedFromSession(sessionManager);
-        if (consumeAbortRequest(id)) {
-            metrics.fail("aborted", "aborted_before_start");
-            return { status: "aborted", errorCode: "cancelled" };
-        }
-        previousUserCount = userMessageCount(sessionManager);
-        const storedProject = await projectsRepository.getProject(row.projectId);
-        const environment = storedProject ? turnPolicy?.environment ?? await resolveRunEnvironment(row.projectId) : undefined;
-        const runnerEnvironment = environment?.executor === "runner";
-        const project = storedProject && turnPolicy?.baseUrl ? { ...storedProject, baseUrl: turnPolicy.baseUrl } : storedProject;
-        if (!project) {
-            metrics.fail("error", "project_missing");
-            ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(sessionManager, "The project for this chat no longer exists.");
-            await fail("infrastructure", "The project for this chat no longer exists.");
-            return outcome;
-        }
-        if (environment?.executor === "tunnel" && !hasTunnel(environment.id)) {
-            const message = `No tunnel connected in group ${environment.runnerGroup}. Start ${tunnelStartCommand(environment, row.projectId)} inside the private network with SPECBOOK_URL and SPECBOOK_RUNNER_TOKEN, then send your message again.`;
-            ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(sessionManager, message);
-            await fail("environment", message);
-            return outcome;
-        }
-
-        const [modelRegistry, modelRuntime, { provider, model: modelName }] = await Promise.all([
-            modelRegistryPromise,
-            modelRuntimePromise,
-            settingsRepository.getLlmSettings(),
-        ]);
-        metrics.setContext({ provider: provider || null, model: modelName || null });
-        const model = provider && modelName ? modelRegistry.find(provider, modelName) : null;
-        if (!model) {
-            metrics.fail("error", provider || modelName ? "model_unavailable" : "model_not_configured");
-            await fail("provider_model", "The selected model is unavailable or not configured.");
-            ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(
-                sessionManager,
-                provider || modelName
-                    ? `The configured LLM model "${provider}/${modelName}" is unavailable. Open Settings and choose an available provider and model.`
-                    : "No LLM model is configured. Open Settings and choose a provider and model.",
-            );
-            return outcome;
-        }
-        if (!modelRegistry.hasConfiguredAuth(model)) {
-            metrics.fail("error", "provider_not_authenticated");
-            await fail("provider_auth", "The model provider is not authenticated.");
-            ensureUserMessage(sessionManager, userText, previousUserCount);
-            appendError(
-                sessionManager,
-                `The LLM provider "${provider}" is not authenticated. Open Settings and connect it or add an API key.`,
-            );
-            return outcome;
-        }
-
-        const contextRevision = row.contextRevisionId
-            ? await projectContextsRepository.getProjectContextRevision(row.contextRevisionId)
-            : null;
-        const discoveryRevision = contextRevision?.status === "draft" ? contextRevision : null;
-
-        let browserTools: ReturnType<typeof bridgeBrowserTools> = [];
-        let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null = null;
-        const scrub = createProjectScrubber(row.projectId);
-        if (!runnerEnvironment) try {
-            const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
-            const profiles = await credentialsRepository.listProfiles(row.projectId);
-            const origins = chatNavigationOrigins(startUrl, environment, profiles);
-            chatBrowser = await getOrCreateChatBrowser(id, origins, environment);
-            const browser = chatBrowser;
-            const basePolicy: BrowserToolPolicy = discoveryRevision
-                ? { ...createDiscoveryBrowserPolicy(discoveryRevision, browser.mcp, origins), sanitizeResult: scrub }
-                : turnPolicy?.browserScope === "explore" ? { ...createAutonomousBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub }
-                    : { ...createOriginBrowserPolicy(project.baseUrl, browser.mcp, origins), sanitizeResult: scrub };
-            const policy: BrowserToolPolicy = {
-                ...basePolicy,
-                sendScreenshots: async () => (await getSecuritySettings()).sendScreenshotsToModel,
-                beforeCall: async (toolName, args, signal) => {
-                    await browser.mcp.ensureBrowser(signal);
-                    await basePolicy.beforeCall?.(toolName, args, signal);
-                    beginChatBrowserTool(id, toolName);
-                    publishChatUpdate(id);
-                },
-                afterCall: async (toolName, args, result, signal) => {
-                    try {
-                        if (!signal?.aborted) await basePolicy.afterCall?.(toolName, args, result, signal);
-                    } finally {
-                        endChatBrowserTool(id, toolName);
-                        publishChatUpdate(id);
-                    }
-                },
-            };
-            browserTools = bridgeBrowserTools(browser.mcp, browser.workDir, policy);
-            metrics.setBrowserAvailable(true);
-            await turnPolicy?.browserReady?.();
-        } catch (error) {
-            logger.warn("chat browser unavailable", { chatId: id, error });
-            if (turnPolicy?.infrastructureFailure) {
-                await fail(errorCodeOf(error) ?? "infrastructure", String(error));
-                await turnPolicy.infrastructureFailure(String(error), outcome.errorCode);
-                return outcome;
-            }
-            appendWarning(
-                sessionManager,
-                browserFailureMessage(error),
-            );
-        }
-
-        const credentialTools = runnerEnvironment ? [] : createCredentialTools({
-            projectId: row.projectId,
-            baseUrl: storedProject!.baseUrl,
-            environment,
-            chatId: id,
-            mcp: chatBrowser?.mcp ?? null,
-            workDir: chatBrowser?.workDir ?? null,
-            scrub,
-            notify: () => publishChatUpdate(id),
-            canPrompt: !turnPolicy,
-        });
-        const sessionTools = runnerEnvironment ? [] : createSessionTools({
-            projectId: row.projectId,
-            baseUrl: project.baseUrl,
-            productionBaseUrl: storedProject!.baseUrl,
-            environment,
-            mcp: chatBrowser?.mcp ?? null,
-            workDir: chatBrowser?.workDir ?? null,
-        });
-        const explorationTools = runnerEnvironment ? [] : createExplorationTools({
-            baseUrl: project.baseUrl,
-            mcp: chatBrowser?.mcp ?? null,
-            scrub,
-            recordEvidence: async (json) => {
-                const job = await jobsRepository.forChat(id);
-                if (job) await jobsRepository.log(job.id, "page_scan", json);
-                return `/p/${row.projectId}/chats/${job?.sourceChatId ?? id}`;
-            },
-        });
-        const customTools = discoveryRevision
-            ? [
-                  ...browserTools,
-                  ...createContextTools(discoveryRevision.id, row.projectId, id),
-                  ...(!runnerEnvironment ? [createApiDocumentationTool(row.projectId, environment)] : []),
-                  ...credentialTools,
-                  ...sessionTools,
-                  ...explorationTools,
-              ]
-            : [
-                  ...browserTools,
-                  ...createDomainTools(row.projectId, { scrub, metrics, baseUrl: project.baseUrl, environment }),
-                  createSpecBatchTool(row.projectId, id),
-                  createChatResultsTool(row.projectId, id),
-                  ...(!runnerEnvironment ? [createApiDocumentationTool(row.projectId, environment)] : []),
-                  ...(!turnPolicy ? [createBackgroundTaskTool(row.projectId, `chat:${id}`, id)] : []),
-                  ...credentialTools,
-                  ...sessionTools,
-                  ...explorationTools,
-              ];
-        const confirmedContext = discoveryRevision
-            ? null
-            : await projectContextsRepository.getLatestConfirmedProjectContext(row.projectId);
-        const resourceLoader = await createResourceLoader(
-            buildSystemPrompt(project, discoveryRevision, confirmedContext) + (turnPolicy?.prompt ?? "") + (runnerEnvironment
-                ? "\nThis environment executes on a private-network runner. Live browser exploration is unavailable. Use saved Specs, results and evidence. Run Specs through the runner; never claim to have reproduced behavior in a live browser. Credentials are configured locally on the runner with specbook credentials, never in the server vault."
-                : ""),
-        );
-        if (consumeAbortRequest(id)) {
-            metrics.fail("aborted", "aborted_before_start");
-            return { status: "aborted", errorCode: "cancelled" };
-        }
-        const { session } = await createAgentSession({
-            model,
-            modelRuntime,
-            cwd,
-            noTools: "builtin",
-            customTools: auditTools(row.projectId, id, turnPolicy ? turnPolicy.tools(customTools) : customTools),
-            resourceLoader,
-            sessionManager,
-            settingsManager: await agentSettings(),
-        });
-        const active: ActiveChatSession = { session, sessionManager, aborted: false };
-        const manager = active.sessionManager;
-        activeSession = active;
-        setActiveChatSession(id, active);
-        const queuedFollowUps = takePendingFollowUps(id);
-        let modelError = "";
-        let promptFailed = false;
-        let timedOut = false;
-        let messageAnchor: string | null = null;
-        const runningSteps = new Map<string, ChatToolStepRecord>();
-        const unsubscribe = session.subscribe((event) => {
-            const value = event as unknown as SessionEventValue;
-            const messages =
-                value.type === "agent_end" && Array.isArray(value.messages)
-                    ? value.messages
-                    : value.message
-                      ? [value.message]
-                      : [];
-            for (const message of messages) {
-                if (message.role === "assistant" && message.stopReason === "error" && message.errorMessage) {
-                    modelError = message.errorMessage;
-                }
-            }
-            if (value.type === "message_start" && value.message?.role === "assistant") {
-                messageAnchor = messagesOf(id, manager).at(-1)?.id ?? null;
-                publishChatUpdate(id, { type: "message_start", afterMessageId: messageAnchor });
-            }
-            if (value.type === "message_start" && value.message?.role === "user") {
-                metrics.userMessage();
-            }
-            if (value.type === "message_update" && value.assistantMessageEvent?.type === "text_delta") {
-                const delta = value.assistantMessageEvent.delta;
-                if (delta) publishChatUpdate(id, { type: "assistant_delta", delta });
-            }
-            if (value.type === "message_end" && value.message?.role === "assistant") {
-                metrics.assistantMessage(value.message);
-                turnPolicy?.tokens(value.message.usage?.totalTokens ?? 0);
-            }
-            if (value.type === "message_end") {
-                const message = value.message;
-                const afterMessageId = messageAnchor;
-                queueMicrotask(() => {
-                    const entry = manager.getBranch().find((entry) => entry.type === "message" && entry.message === message);
-                    const record = entry ? messagesOf(id, manager).find((record) => record.id === entry.id) : undefined;
-                    publishChatUpdate(id, { type: "message_end", message: record, afterMessageId });
-                });
-            }
-            if (value.type === "tool_execution_start" && value.toolName && value.toolCallId) {
-                const { toolName, toolCallId } = value;
-                metrics.toolStart(toolName);
-                const entry = manager.getBranch().reverse().find((entry) =>
-                    entry.type === "message" && entry.message.role === "assistant" &&
-                    entry.message.content.some((part) => part.type === "toolCall" && part.id === toolCallId),
-                );
-                if (entry) {
-                    const step: ChatToolStepRecord = {
-                        id: `${entry.id}:${toolCallId}`,
-                        toolName,
-                        afterMessageId: messagesOf(id, manager).at(-1)?.id ?? null,
-                        startedAt: Date.now(),
-                        endedAt: null,
-                    };
-                    runningSteps.set(toolCallId, step);
-                    manager.appendCustomEntry(TOOL_STEP_TYPE, step);
-                    publishChatUpdate(id, { type: "tool_start", toolName, step });
-                }
-            }
-            if (value.type === "tool_execution_end" && value.toolName && value.toolCallId) {
-                metrics.toolEnd(value.toolName, value.isError === true);
-                const step = runningSteps.get(value.toolCallId);
-                if (step) {
-                    const endedAt = Date.now();
-                    manager.appendCustomEntry(TOOL_STEP_TYPE, { ...step, endedAt });
-                    publishChatUpdate(id, { type: "tool_end", toolName: value.toolName, stepId: step.id, endedAt });
-                    runningSteps.delete(value.toolCallId);
-                }
-            }
-            if (value.type === "agent_start") {
-                publishChatUpdate(id, { type: "agent_status", status: "working" });
-            }
-            if (value.type === "agent_end") {
-                publishChatUpdate(
-                    id,
-                    value.willRetry
-                        ? { type: "agent_status", status: "retrying", message: providerFailureMessage(value.errorMessage) }
-                        : { type: "updated" },
-                );
-            }
-            if (value.type === "agent_settled") {
-                publishChatUpdate(id, { type: "agent_status", status: "idle" });
-            }
-            if (value.type === "auto_retry_start") {
-                metrics.autoRetry();
-                publishChatUpdate(id, {
-                    type: "agent_status",
-                    status: "retrying",
-                    message: `Retrying (${value.attempt ?? 1}/${value.maxAttempts ?? 1})`,
-                });
-            }
-            if (value.type === "queue_update") {
-                publishChatUpdate(id, {
-                    type: "queue_update",
-                    steering: value.steering?.length ?? 0,
-                    followUp: value.followUp?.length ?? 0,
-                });
-            }
-        });
-
-        try {
-            await withTurnTimeout(async () => {
-                const promptPromise = session.prompt(userText);
-                for (const followUp of queuedFollowUps) await session.followUp(followUp);
-                await promptPromise;
-            }, async () => {
-                active.aborted = true;
-                await Promise.allSettled([session.abort(), closeChatBrowser(id)]);
-            });
-        } catch (error) {
-            promptFailed = true;
-            if (error instanceof ChatTurnTimeoutError) {
-                timedOut = true;
-                await fail("infrastructure", error.message);
-                metrics.fail("error", "turn_timeout");
-                ensureUserMessage(sessionManager, userText, previousUserCount);
-                appendError(sessionManager, error.message);
-            } else if (!active.aborted) {
-                metrics.fail("error", "prompt_failed");
-                await fail(providerErrorCode(error), providerFailureMessage(error));
-                ensureUserMessage(sessionManager, userText, previousUserCount);
-                appendError(
-                    sessionManager,
-                    providerFailureMessage(error),
-                );
-            }
-        } finally {
-            unsubscribe();
-            session.dispose();
-            clearActiveChatSession(id, session);
-        }
-        if (discoveryRevision && !active.aborted && !promptFailed) {
-            await confirmDiscoveredContext(discoveryRevision.id).catch((error) =>
-                logger.warn("discovered context was not confirmed", { chatId: id, error }),
-            );
-        }
-        if (active.aborted && !timedOut) { metrics.fail("aborted", "user_abort"); outcome = { status: "aborted", errorCode: "cancelled" }; }
-        if (modelError && !active.aborted && !promptFailed) {
-            metrics.fail("error", "model_error");
-            await fail("provider_error", providerFailureMessage(modelError));
-            appendError(sessionManager, providerFailureMessage(modelError));
-        }
-    } catch (error) {
-        const aborted = activeSession?.aborted ?? getActiveChatSession(id)?.aborted ?? false;
-        metrics.fail(aborted ? "aborted" : "error", aborted ? "user_abort" : "turn_failed");
-        if (!aborted) await fail(errorCodeOf(error) ?? "infrastructure", String(error));
-        else outcome = { status: "aborted", errorCode: "cancelled" };
-        if (!aborted) logger.error("chat turn failed", { chatId: id, error });
-        if (sessionManager) {
-            if (!aborted) {
-                ensureUserMessage(sessionManager, userText, previousUserCount);
-                appendError(
-                    sessionManager,
-                    providerFailure(error).code === "provider_error"
-                        ? "Specbook could not complete this conversation turn. Try again. If it keeps failing, check System status in global Settings."
-                        : providerFailureMessage(error),
-                );
-            }
-        } else {
-            console.error(error);
-        }
-    } finally {
-        try {
-            await turnPolicy?.flush();
-        } finally {
-            releaseChatTurn(id);
-            publishChatUpdate(id, { type: "agent_status", status: "idle" });
-            publishChatUpdate(id, { type: "queue_update", ...getChatQueueState(id) });
-            publishChatUpdate(id);
-            void metrics.finish();
-        }
-    }
-    return outcome;
+  type?: string;
+  message?: AgentMessage & {
+    usage?: Parameters<TurnMetricsRecorder["assistantMessage"]>[0]["usage"];
+  };
+  messages?: AgentMessage[];
+  assistantMessageEvent?: { type?: string; delta?: string };
+  toolName?: string;
+  toolCallId?: string;
+  isError?: boolean;
+  steering?: readonly string[];
+  followUp?: readonly string[];
+  willRetry?: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+  errorMessage?: string;
 }

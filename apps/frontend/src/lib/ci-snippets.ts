@@ -1,25 +1,39 @@
 export const CI_PROVIDERS = [
-    ["github", "GitHub Actions", ".github/workflows/specbook.yml"],
-    ["gitlab", "GitLab CI", ".gitlab-ci.yml"],
-    ["bitbucket", "Bitbucket Pipelines", "bitbucket-pipelines.yml"],
-    ["circleci", "CircleCI", ".circleci/config.yml"],
-    ["jenkins", "Jenkins", "Jenkinsfile"],
+  ["github", "GitHub Actions", ".github/workflows/specbook.yml"],
+  ["gitlab", "GitLab CI", ".gitlab-ci.yml"],
+  ["bitbucket", "Bitbucket Pipelines", "bitbucket-pipelines.yml"],
+  ["circleci", "CircleCI", ".circleci/config.yml"],
+  ["jenkins", "Jenkins", "Jenkinsfile"],
 ] as const;
 
-export type CiProvider = typeof CI_PROVIDERS[number][0];
+export type CiProvider = (typeof CI_PROVIDERS)[number][0];
 
-export function ciSnippet(provider: CiProvider, apiUrl: string, projectId: string, failOnFlaky: boolean, failOnKnownBugs: boolean, environment = "production"): string {
-    const env = {
-        SPECBOOK_URL: apiUrl.replace(/\/+$/, ""),
-        SPECBOOK_PROJECT: projectId,
-        SPECBOOK_ENVIRONMENT: environment,
-        SPECBOOK_FAIL_ON_FLAKY: String(failOnFlaky),
-        SPECBOOK_FAIL_ON_KNOWN_BUGS: String(failOnKnownBugs),
-    };
-    const yamlEnv = (indent: number) => Object.entries(env).map(([key, value]) => `${" ".repeat(indent)}${key}: ${JSON.stringify(value)}`).join("\n");
+export const ciSnippet = function ciSnippet(
+  provider: CiProvider,
+  apiUrl: string,
+  projectId: string,
+  failOnFlaky: boolean,
+  failOnKnownBugs: boolean,
+  environment = "production"
+): string {
+  const env = {
+    SPECBOOK_URL: apiUrl.replace(/\/+$/u, ""),
+    SPECBOOK_PROJECT: projectId,
+    SPECBOOK_ENVIRONMENT: environment,
+    SPECBOOK_FAIL_ON_FLAKY: String(failOnFlaky),
+    SPECBOOK_FAIL_ON_KNOWN_BUGS: String(failOnKnownBugs),
+  };
+  const yamlEnv = (indent: number) =>
+    Object.entries(env)
+      .map(
+        ([key, value]) =>
+          `${" ".repeat(indent)}${key}: ${JSON.stringify(value)}`
+      )
+      .join("\n");
 
-    switch (provider) {
-        case "github": return `name: Specbook
+  switch (provider) {
+    case "github": {
+      return `name: Specbook
 on: [workflow_dispatch, pull_request]
 jobs:
   verify:
@@ -67,7 +81,9 @@ ${yamlEnv(6)}
         run: |
           if [ -n "$REPORT_URL" ]; then printf '**[Open the Specbook report](%s)**\\n\\n' "$REPORT_URL" >> "$GITHUB_STEP_SUMMARY"; fi
           test ! -f specbook-summary.md || cat specbook-summary.md >> "$GITHUB_STEP_SUMMARY"`;
-        case "gitlab": return `specbook:
+    }
+    case "gitlab": {
+      return `specbook:
   image: node:26
   resource_group: specbook-$SPECBOOK_PROJECT-$CI_MERGE_REQUEST_IID
   rules:
@@ -91,13 +107,20 @@ ${yamlEnv(4)}
     paths:
       - specbook-report.html
       - specbook-summary.md`;
-        case "bitbucket": return `image: node:26
+    }
+    case "bitbucket": {
+      return `image: node:26
 pipelines:
   default:
     - step:
         name: Verify with Specbook
         script:
-${Object.entries(env).map(([key, value]) => `          - export ${key}='${value.replace(/'/g, "'\\''")}'`).join("\n")}
+${Object.entries(env)
+  .map(
+    ([key, value]) =>
+      `          - export ${key}='${value.replaceAll("'", "'\\''")}'`
+  )
+  .join("\n")}
           - export SPECBOOK_COMMIT_SHA="$BITBUCKET_COMMIT"
           - export SPECBOOK_REF="$BITBUCKET_BRANCH"
           - export SPECBOOK_BUILD_URL="https://bitbucket.org/$BITBUCKET_REPO_FULL_NAME/pipelines/results/$BITBUCKET_BUILD_NUMBER"
@@ -109,7 +132,9 @@ ${Object.entries(env).map(([key, value]) => `          - export ${key}='${value.
           - test-results/specbook.xml
           - specbook-report.html
           - specbook-summary.md`;
-        case "circleci": return `version: 2.1
+    }
+    case "circleci": {
+      return `version: 2.1
 jobs:
   specbook:
     docker:
@@ -136,10 +161,17 @@ workflows:
   verify:
     jobs:
       - specbook`;
-        case "jenkins": return `pipeline {
+    }
+    case "jenkins": {
+      return `pipeline {
   agent any // Node.js 26 and npm must be available.
   environment {
-${Object.entries(env).map(([key, value]) => `    ${key} = '${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`).join("\n")}
+${Object.entries(env)
+  .map(
+    ([key, value]) =>
+      `    ${key} = '${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`
+  )
+  .join("\n")}
     SPECBOOK_TOKEN = credentials('specbook-ci-token')
   }
   stages {
@@ -163,6 +195,8 @@ ${Object.entries(env).map(([key, value]) => `    ${key} = '${value.replace(/\\/g
   }
 }`;
     }
-}
-
-
+    default: {
+      throw new Error("Unsupported CI provider");
+    }
+  }
+};

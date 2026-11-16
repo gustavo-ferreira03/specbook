@@ -1,81 +1,142 @@
-import { type HumanSpec, type RunStatus, type ProjectContext } from "@specbook/runtime/types";
-export { EMPTY_PROJECT_CONTEXT, type HumanSpec, type RunStatus, type ProjectContext } from "@specbook/runtime/types";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { ErrorCode } from "@specbook/runtime/errors";
+import type { RunnerPayload } from "@specbook/runtime/runner-protocol";
+import type { RunStatus, ProjectContext } from "@specbook/runtime/types";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
-export type SpecStatus = "unverified" | "awaiting_deploy" | "passed" | "failed" | "invalid";
+import type { SsoSettings, UserRole } from "../../core/accounts/schemas";
+import type { SecuritySettings } from "../../core/chat/safety-settings";
+import type { JobStatus, JobLimits, InboxKind } from "../../core/jobs/schemas";
+import type {
+  RetentionSettings,
+  RetentionCleanup,
+} from "../../core/operations/schemas";
+import type { StewardIntent } from "../../core/steward/schemas";
+import type { ProjectObservation } from "../../core/steward/signals";
+
+export {
+  EMPTY_PROJECT_CONTEXT,
+  type HumanSpec,
+  type RunStatus,
+  type ProjectContext,
+} from "@specbook/runtime/types";
+
+export type SpecStatus =
+  | "unverified"
+  | "awaiting_deploy"
+  | "passed"
+  | "failed"
+  | "invalid";
 export interface RunEnvironment {
-    configuredBaseUrl: string;
-    id: string;
-    name: string;
-    baseUrl: string;
-    allowedOrigins: string[];
-    credentialOverrides: Record<string, string>;
-    executor?: "server" | "runner" | "tunnel";
-    runnerGroup?: string | null;
-    timeoutScale?: number;
+  configuredBaseUrl: string;
+  id: string;
+  name: string;
+  baseUrl: string;
+  allowedOrigins: string[];
+  credentialOverrides: Record<string, string>;
+  executor?: "server" | "runner" | "tunnel";
+  runnerGroup?: string | null;
+  timeoutScale?: number;
 }
 
 export interface LlmSettings {
-    provider: string;
-    model: string;
+  provider: string;
+  model: string;
 }
 
 export type ChatMode = "standard" | "discovery";
 export type ProjectContextStatus = "draft" | "confirmed" | "discarded";
 
 export interface DiscoveryBrief {
-    goal: string;
-    startUrl: string;
-    safetyNotes: string[];
+  goal: string;
+  startUrl: string;
+  safetyNotes: string[];
 }
 
 export const projects = sqliteTable("projects", {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    baseUrl: text("base_url").notNull(),
-    contextSyncError: text("context_sync_error"),
-    gitAccessTokenHash: text("git_access_token_hash"),
-    gitAccessTokenPrefix: text("git_access_token_prefix"),
-    gitAccessTokenCreatedAt: text("git_access_token_created_at"),
-    gitAccessTokenLastUsedAt: text("git_access_token_last_used_at"),
-    gitExternalSyncError: text("git_external_sync_error"),
-    createdAt: text("created_at").notNull(),
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  baseUrl: text("base_url").notNull(),
+  contextSyncError: text("context_sync_error"),
+  gitAccessTokenHash: text("git_access_token_hash"),
+  gitAccessTokenPrefix: text("git_access_token_prefix"),
+  gitAccessTokenCreatedAt: text("git_access_token_created_at"),
+  gitAccessTokenLastUsedAt: text("git_access_token_last_used_at"),
+  gitExternalSyncError: text("git_external_sync_error"),
+  createdAt: text("created_at").notNull(),
 });
 
-export const environments = sqliteTable("environments", {
+export const environments = sqliteTable(
+  "environments",
+  {
     id: text("id").primaryKey(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
-    allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull().default([]),
-    credentialOverrides: text("credential_overrides", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
-    executor: text("executor").$type<"server" | "runner" | "tunnel">().notNull().default("server"),
+    allowedOrigins: text("allowed_origins", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    credentialOverrides: text("credential_overrides", { mode: "json" })
+      .$type<Record<string, string>>()
+      .notNull()
+      .default({}),
+    executor: text("executor")
+      .$type<"server" | "runner" | "tunnel">()
+      .notNull()
+      .default("server"),
     runnerGroup: text("runner_group"),
     timeoutScale: integer("timeout_scale").notNull().default(1),
-}, (table) => [uniqueIndex("environments_project_name_idx").on(table.projectId, table.name)]);
+  },
+  (table) => [
+    uniqueIndex("environments_project_name_idx").on(
+      table.projectId,
+      table.name
+    ),
+  ]
+);
 
 export const runnerTokens = sqliteTable("runner_tokens", {
-    id: text("id").primaryKey(),
-    purpose: text("purpose").$type<"runner" | "tunnel">().notNull().default("runner"),
-    name: text("name").notNull(),
-    group: text("group"),
-    tokenHash: text("token_hash").notNull().unique(),
-    createdAt: text("created_at").notNull(),
-    lastSeenAt: text("last_seen_at"),
-    cliVersion: text("cli_version"),
-    protocolVersion: integer("protocol_version"),
-    concurrency: integer("concurrency").notNull().default(1),
-    projectIds: text("project_ids", { mode: "json" }).$type<string[] | null>(),
+  id: text("id").primaryKey(),
+  purpose: text("purpose")
+    .$type<"runner" | "tunnel">()
+    .notNull()
+    .default("runner"),
+  name: text("name").notNull(),
+  group: text("group"),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: text("created_at").notNull(),
+  lastSeenAt: text("last_seen_at"),
+  cliVersion: text("cli_version"),
+  protocolVersion: integer("protocol_version"),
+  concurrency: integer("concurrency").notNull().default(1),
+  projectIds: text("project_ids", { mode: "json" }).$type<string[] | null>(),
 });
 
-export const runnerJobs = sqliteTable("runner_jobs", {
+export const runnerJobs = sqliteTable(
+  "runner_jobs",
+  {
     id: text("id").primaryKey(),
     batchId: text("batch_id").notNull().unique(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     group: text("group"),
-    payload: text("payload", { mode: "json" }).$type<import("@specbook/runtime/runner-protocol").RunnerPayload>().notNull(),
-    status: text("status").$type<"queued" | "leased" | "completing" | "completed">().notNull().default("queued"),
-    runnerId: text("runner_id").references(() => runnerTokens.id, { onDelete: "set null" }),
+    payload: text("payload", { mode: "json" }).$type<RunnerPayload>().notNull(),
+    status: text("status")
+      .$type<"queued" | "leased" | "completing" | "completed">()
+      .notNull()
+      .default("queued"),
+    runnerId: text("runner_id").references(() => runnerTokens.id, {
+      onDelete: "set null",
+    }),
     runnerInstanceId: text("runner_instance_id"),
     leaseId: text("lease_id"),
     leaseExpiresAt: text("lease_expires_at"),
@@ -86,243 +147,344 @@ export const runnerJobs = sqliteTable("runner_jobs", {
     completionStartedAt: text("completion_started_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
-}, (table) => [index("runner_jobs_status_group").on(table.status, table.group), index("runner_jobs_lease_expiry").on(table.leaseExpiresAt)]);
+  },
+  (table) => [
+    index("runner_jobs_status_group").on(table.status, table.group),
+    index("runner_jobs_lease_expiry").on(table.leaseExpiresAt),
+  ]
+);
 
-export const runnerInstances = sqliteTable("runner_instances", {
+export const runnerInstances = sqliteTable(
+  "runner_instances",
+  {
     id: text("id").primaryKey(),
-    runnerId: text("runner_id").notNull().references(() => runnerTokens.id, { onDelete: "cascade" }),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runnerTokens.id, { onDelete: "cascade" }),
     mode: text("mode").$type<"runner" | "tunnel">().notNull(),
     cliVersion: text("cli_version").notNull(),
     protocolVersion: integer("protocol_version").notNull(),
     concurrency: integer("concurrency").notNull(),
     lastSeenAt: text("last_seen_at").notNull(),
     disconnectedAt: text("disconnected_at"),
-}, (table) => [index("runner_instances_token").on(table.runnerId)]);
+  },
+  (table) => [index("runner_instances_token").on(table.runnerId)]
+);
 
 export const features = sqliteTable(
-    "features",
-    {
-        id: text("id").primaryKey(),
-        projectId: text("project_id")
-            .notNull()
-            .references(() => projects.id),
-        parentId: text("parent_id"),
-        title: text("title").notNull(),
-        description: text("description").notNull().default(""),
-        path: text("path").notNull(),
-        createdAt: text("created_at").notNull(),
-    },
-    (table) => [uniqueIndex("features_project_path_unique").on(table.projectId, table.path)],
+  "features",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    parentId: text("parent_id"),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    path: text("path").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("features_project_path_unique").on(table.projectId, table.path),
+  ]
 );
 
 export const specs = sqliteTable(
-    "specs",
-    {
-        id: text("id").primaryKey(),
-        projectId: text("project_id")
-            .notNull()
-            .references(() => projects.id),
-        featureId: text("feature_id")
-            .notNull()
-            .references(() => features.id),
-        title: text("title").notNull(),
-        description: text("description").notNull().default(""),
-        status: text("status").$type<SpecStatus>().notNull().default("unverified"),
-        path: text("path").notNull(),
-        sourceHash: text("source_hash").notNull(),
-        markdownHash: text("markdown_hash").notNull().default(""),
-        invalidReason: text("invalid_reason"),
-        createdAt: text("created_at").notNull(),
-        updatedAt: text("updated_at").notNull(),
-    },
-    (table) => [uniqueIndex("specs_project_path_unique").on(table.projectId, table.path)],
+  "specs",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    featureId: text("feature_id")
+      .notNull()
+      .references(() => features.id),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    status: text("status").$type<SpecStatus>().notNull().default("unverified"),
+    path: text("path").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    markdownHash: text("markdown_hash").notNull().default(""),
+    invalidReason: text("invalid_reason"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("specs_project_path_unique").on(table.projectId, table.path),
+  ]
 );
 
-export const specEnvironmentStates = sqliteTable("spec_environment_states", {
-    specId: text("spec_id").notNull().references(() => specs.id, { onDelete: "cascade" }),
-    environmentId: text("environment_id").notNull().references(() => environments.id, { onDelete: "cascade" }),
+export const specEnvironmentStates = sqliteTable(
+  "spec_environment_states",
+  {
+    specId: text("spec_id")
+      .notNull()
+      .references(() => specs.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
     sourceHash: text("source_hash").notNull(),
     markdownHash: text("markdown_hash").notNull(),
     status: text("status").$type<SpecStatus>().notNull(),
     updatedAt: text("updated_at").notNull(),
-}, (table) => [uniqueIndex("spec_environment_states_spec_environment_idx").on(table.specId, table.environmentId)]);
+  },
+  (table) => [
+    uniqueIndex("spec_environment_states_spec_environment_idx").on(
+      table.specId,
+      table.environmentId
+    ),
+  ]
+);
 
 export const chats = sqliteTable("chats", {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-        .notNull()
-        .references(() => projects.id),
-    contextRevisionId: text("context_revision_id"),
-    createdAt: text("created_at").notNull(),
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id),
+  contextRevisionId: text("context_revision_id"),
+  createdAt: text("created_at").notNull(),
 });
 
-export const projectContextRevisions = sqliteTable("project_context_revisions", {
+export const projectContextRevisions = sqliteTable(
+  "project_context_revisions",
+  {
     id: text("id").primaryKey(),
     projectId: text("project_id")
-        .notNull()
-        .references(() => projects.id),
+      .notNull()
+      .references(() => projects.id),
     sourceChatId: text("source_chat_id"),
     status: text("status").$type<ProjectContextStatus>().notNull(),
     brief: text("brief", { mode: "json" }).$type<DiscoveryBrief>().notNull(),
-    context: text("context", { mode: "json" }).$type<ProjectContext>().notNull(),
+    context: text("context", { mode: "json" })
+      .$type<ProjectContext>()
+      .notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
     confirmedAt: text("confirmed_at"),
-});
+  }
+);
 
 export const runs = sqliteTable(
-    "runs",
-    {
-        id: text("id").primaryKey(),
-        specId: text("spec_id")
-            .notNull()
-            .references(() => specs.id),
-        commitSha: text("commit_sha").notNull(),
-        sourceHash: text("source_hash").notNull(),
-        status: text("status").$type<RunStatus>().notNull(),
-        startedAt: text("started_at").notNull(),
-        durationMs: integer("duration_ms"),
-        failReason: text("fail_reason"),
-        errorCode: text("error_code").$type<import("@specbook/runtime/errors").ErrorCode>(),
-        automationPending: integer("automation_pending", { mode: "boolean" }).notNull().default(false),
-        awaitingDeploy: integer("awaiting_deploy", { mode: "boolean" }).notNull().default(false),
-        healOnFailure: integer("heal_on_failure", { mode: "boolean" }).notNull().default(true),
-        retryOf: text("retry_of"),
-        flaky: integer("flaky", { mode: "boolean" }).notNull().default(false),
+  "runs",
+  {
+    id: text("id").primaryKey(),
+    specId: text("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    commitSha: text("commit_sha").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    status: text("status").$type<RunStatus>().notNull(),
+    startedAt: text("started_at").notNull(),
+    durationMs: integer("duration_ms"),
+    failReason: text("fail_reason"),
+    errorCode: text("error_code").$type<ErrorCode>(),
+    automationPending: integer("automation_pending", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    awaitingDeploy: integer("awaiting_deploy", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    healOnFailure: integer("heal_on_failure", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    retryOf: text("retry_of"),
+    flaky: integer("flaky", { mode: "boolean" }).notNull().default(false),
     baseUrl: text("base_url"),
     environment: text("environment", { mode: "json" }).$type<RunEnvironment>(),
-    },
-    (table) => [index("runs_spec_started_idx").on(table.specId, table.startedAt), uniqueIndex("runs_retry_of_unique").on(table.retryOf)],
+  },
+  (table) => [
+    index("runs_spec_started_idx").on(table.specId, table.startedAt),
+    uniqueIndex("runs_retry_of_unique").on(table.retryOf),
+  ]
 );
 
 export interface CredentialField {
-    key: string;
-    value: string;
-    sensitive: boolean;
+  key: string;
+  value: string;
+  sensitive: boolean;
 }
 
 export const credentialProfiles = sqliteTable("credential_profiles", {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-        .notNull()
-        .references(() => projects.id),
-    name: text("name").notNull(),
-    allowedOrigins: text("allowed_origins", { mode: "json" }).$type<string[]>().notNull(),
-    fields: text("fields", { mode: "json" }).$type<CredentialField[]>().notNull(),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id),
+  name: text("name").notNull(),
+  allowedOrigins: text("allowed_origins", { mode: "json" })
+    .$type<string[]>()
+    .notNull(),
+  fields: text("fields", { mode: "json" }).$type<CredentialField[]>().notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 export const chatSessions = sqliteTable(
-    "chat_sessions",
-    {
-        id: text("id").primaryKey(),
-        projectId: text("project_id")
-            .notNull()
-            .references(() => projects.id),
-        profileId: text("profile_id")
-            .notNull()
-            .references(() => credentialProfiles.id),
-        state: text("state").notNull(),
-        savedAt: text("saved_at").notNull(),
-    },
-    (table) => [uniqueIndex("chat_sessions_profile_unique").on(table.projectId, table.profileId)],
+  "chat_sessions",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => credentialProfiles.id),
+    state: text("state").notNull(),
+    savedAt: text("saved_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("chat_sessions_profile_unique").on(
+      table.projectId,
+      table.profileId
+    ),
+  ]
 );
 
 export const appSettings = sqliteTable("app_settings", {
-    id: integer("id").primaryKey(),
-    llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),
-    llmDeviceId: text("llm_device_id"),
-    agentPaused: integer("agent_paused", { mode: "boolean" }).notNull().default(false),
-    sso: text("sso", { mode: "json" }).$type<import("../../core/accounts/schemas").SsoSettings>(),
-    retention: text("retention", { mode: "json" }).$type<import("../../core/operations/schemas").RetentionSettings>(),
-    retentionLastCleanup: text("retention_last_cleanup", { mode: "json" }).$type<import("../../core/operations/schemas").RetentionCleanup>(),
-    security: text("security", { mode: "json" }).$type<import("../../core/chat/safety-settings").SecuritySettings>(),
-    updatedAt: text("updated_at").notNull(),
+  id: integer("id").primaryKey(),
+  llm: text("llm", { mode: "json" }).$type<LlmSettings>().notNull(),
+  llmDeviceId: text("llm_device_id"),
+  agentPaused: integer("agent_paused", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  sso: text("sso", { mode: "json" }).$type<SsoSettings>(),
+  retention: text("retention", { mode: "json" }).$type<RetentionSettings>(),
+  retentionLastCleanup: text("retention_last_cleanup", {
+    mode: "json",
+  }).$type<RetentionCleanup>(),
+  security: text("security", { mode: "json" }).$type<SecuritySettings>(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 export const users = sqliteTable("users", {
-    id: text("id").primaryKey(),
-    email: text("email").notNull().unique(),
-    name: text("name").notNull(),
-    passwordHash: text("password_hash"),
-    role: text("role").$type<import("../../core/accounts/schemas").UserRole>().notNull(),
-    disabledAt: text("disabled_at"),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  passwordHash: text("password_hash"),
+  role: text("role").$type<UserRole>().notNull(),
+  disabledAt: text("disabled_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
-export const userSessions = sqliteTable("user_sessions", {
+export const userSessions = sqliteTable(
+  "user_sessions",
+  {
     tokenHash: text("token_hash").primaryKey(),
-    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     createdAt: text("created_at").notNull(),
     expiresAt: text("expires_at").notNull(),
-}, (table) => [index("user_sessions_user").on(table.userId), index("user_sessions_expiry").on(table.expiresAt)]);
+  },
+  (table) => [
+    index("user_sessions_user").on(table.userId),
+    index("user_sessions_expiry").on(table.expiresAt),
+  ]
+);
 
-export const personalAccessTokens = sqliteTable("personal_access_tokens", {
+export const personalAccessTokens = sqliteTable(
+  "personal_access_tokens",
+  {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     tokenHash: text("token_hash").notNull().unique(),
     createdAt: text("created_at").notNull(),
     lastUsedAt: text("last_used_at"),
     expiresAt: text("expires_at"),
-}, (table) => [index("personal_access_tokens_user").on(table.userId)]);
+  },
+  (table) => [index("personal_access_tokens_user").on(table.userId)]
+);
 
 export const userInvites = sqliteTable("user_invites", {
-    id: text("id").primaryKey(),
-    tokenHash: text("token_hash").notNull().unique(),
-    email: text("email").notNull(),
-    role: text("role").$type<import("../../core/accounts/schemas").UserRole>().notNull(),
-    createdBy: text("created_by").notNull().references(() => users.id),
-    createdAt: text("created_at").notNull(),
-    expiresAt: text("expires_at").notNull(),
-    consumedAt: text("consumed_at"),
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  email: text("email").notNull(),
+  role: text("role").$type<UserRole>().notNull(),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
 });
 
-export const oidcIdentities = sqliteTable("oidc_identities", {
+export const oidcIdentities = sqliteTable(
+  "oidc_identities",
+  {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     issuer: text("issuer").notNull(),
     subject: text("subject").notNull(),
-}, (table) => [uniqueIndex("oidc_issuer_subject").on(table.issuer, table.subject), index("oidc_user").on(table.userId)]);
+  },
+  (table) => [
+    uniqueIndex("oidc_issuer_subject").on(table.issuer, table.subject),
+    index("oidc_user").on(table.userId),
+  ]
+);
 
 export const oidcStates = sqliteTable("oidc_states", {
-    stateHash: text("state_hash").primaryKey(),
-    browserHash: text("browser_hash").notNull(),
-    pkceVerifier: text("pkce_verifier").notNull(),
-    nonce: text("nonce").notNull(),
-    redirectUri: text("redirect_uri").notNull(),
-    issuer: text("issuer").notNull(),
-    clientId: text("client_id").notNull(),
-    linkUserId: text("link_user_id").references(() => users.id, { onDelete: "cascade" }),
-    expiresAt: text("expires_at").notNull(),
+  stateHash: text("state_hash").primaryKey(),
+  browserHash: text("browser_hash").notNull(),
+  pkceVerifier: text("pkce_verifier").notNull(),
+  nonce: text("nonce").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  issuer: text("issuer").notNull(),
+  clientId: text("client_id").notNull(),
+  linkUserId: text("link_user_id").references(() => users.id, {
+    onDelete: "cascade",
+  }),
+  expiresAt: text("expires_at").notNull(),
 });
 
-export const auditEvents = sqliteTable("audit_events", {
+export const auditEvents = sqliteTable(
+  "audit_events",
+  {
     id: text("id").primaryKey(),
     actorId: text("actor_id"),
     actorName: text("actor_name").notNull(),
-    actorKind: text("actor_kind").$type<"user" | "agent" | "ci" | "git" | "system">().notNull(),
+    actorKind: text("actor_kind")
+      .$type<"user" | "agent" | "ci" | "git" | "system">()
+      .notNull(),
     action: text("action").notNull(),
     projectId: text("project_id"),
-    details: text("details", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    details: text("details", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
     createdAt: text("created_at").notNull(),
-}, (table) => [index("audit_created").on(table.createdAt, table.id), index("audit_project").on(table.projectId)]);
+  },
+  (table) => [
+    index("audit_created").on(table.createdAt, table.id),
+    index("audit_project").on(table.projectId),
+  ]
+);
 
-export const jobs = sqliteTable("jobs", {
+export const jobs = sqliteTable(
+  "jobs",
+  {
     id: text("id").primaryKey(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     chatId: text("chat_id").notNull().unique(),
-    sourceChatId: text("source_chat_id").references(() => chats.id, { onDelete: "set null" }),
+    sourceChatId: text("source_chat_id").references(() => chats.id, {
+      onDelete: "set null",
+    }),
     trigger: text("trigger").notNull(),
     kind: text("kind").notNull().default("review"),
     specId: text("spec_id"),
     runId: text("run_id").unique(),
-    classification: text("classification").$type<"test_drift" | "application_bug" | "environment">(),
+    classification: text("classification").$type<
+      "test_drift" | "application_bug" | "environment"
+    >(),
     goal: text("goal").notNull(),
-    status: text("status").$type<import("../../core/jobs/schemas").JobStatus>().notNull(),
-    limits: text("limits", { mode: "json" }).$type<import("../../core/jobs/schemas").JobLimits>().notNull(),
+    status: text("status").$type<JobStatus>().notNull(),
+    limits: text("limits", { mode: "json" }).$type<JobLimits>().notNull(),
     tokensUsed: integer("tokens_used").notNull().default(0),
     actionsUsed: integer("actions_used").notNull().default(0),
     elapsedMs: integer("elapsed_ms").notNull().default(0),
@@ -330,110 +492,199 @@ export const jobs = sqliteTable("jobs", {
     safetyRetries: integer("safety_retries").notNull().default(0),
     retryAt: text("retry_at"),
     systemError: text("system_error"),
-    errorCode: text("error_code").$type<import("@specbook/runtime/errors").ErrorCode>(),
-    infrastructureRetries: integer("infrastructure_retries").notNull().default(0),
+    errorCode: text("error_code").$type<ErrorCode>(),
+    infrastructureRetries: integer("infrastructure_retries")
+      .notNull()
+      .default(0),
     startedAt: text("started_at"),
     heartbeatAt: text("heartbeat_at"),
     pendingMessage: text("pending_message").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
-}, (table) => [index("jobs_project_status").on(table.projectId, table.status)]);
+  },
+  (table) => [index("jobs_project_status").on(table.projectId, table.status)]
+);
 
-export const inboxItems = sqliteTable("inbox_items", {
+export const inboxItems = sqliteTable(
+  "inbox_items",
+  {
     id: text("id").primaryKey(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-    jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
-    kind: text("kind").$type<import("../../core/jobs/schemas").InboxKind>().notNull(),
-    status: text("status").$type<"pending" | "applying" | "approved" | "rejected" | "answered" | "dismissed">().notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<InboxKind>().notNull(),
+    status: text("status")
+      .$type<
+        | "pending"
+        | "applying"
+        | "approved"
+        | "rejected"
+        | "answered"
+        | "dismissed"
+      >()
+      .notNull(),
     title: text("title").notNull(),
     body: text("body").notNull(),
-    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    payload: text("payload", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull(),
     answer: text("answer"),
     commitSha: text("commit_sha"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
-}, (table) => [index("inbox_project_status").on(table.projectId, table.status), index("inbox_job_kind_status").on(table.jobId, table.kind, table.status), index("inbox_project_kind_status").on(table.projectId, table.kind, table.status)]);
+  },
+  (table) => [
+    index("inbox_project_status").on(table.projectId, table.status),
+    index("inbox_job_kind_status").on(table.jobId, table.kind, table.status),
+    index("inbox_project_kind_status").on(
+      table.projectId,
+      table.kind,
+      table.status
+    ),
+  ]
+);
 
-export const jobActions = sqliteTable("job_actions", {
+export const jobActions = sqliteTable(
+  "job_actions",
+  {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
     action: text("action").notNull(),
     detail: text("detail").notNull(),
     createdAt: text("created_at").notNull(),
-}, (table) => [index("job_actions_job").on(table.jobId)]);
+  },
+  (table) => [index("job_actions_job").on(table.jobId)]
+);
 
 export const projectAutomations = sqliteTable("project_automations", {
-    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
-    cron: text("cron"),
-    specIds: text("spec_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
-    healFailures: integer("heal_failures", { mode: "boolean" }).notNull().default(true),
-    webhookUrl: text("webhook_url"),
-    allowPrivateWebhook: integer("allow_private_webhook", { mode: "boolean" }).notNull().default(false),
-    nextRunAt: text("next_run_at"),
-    lastBatchId: text("last_batch_id"),
-    lastBatchStatus: text("last_batch_status").$type<RunStatus>(),
-    lastError: text("last_error"),
-    updatedAt: text("updated_at").notNull(),
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  cron: text("cron"),
+  specIds: text("spec_ids", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  healFailures: integer("heal_failures", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  webhookUrl: text("webhook_url"),
+  allowPrivateWebhook: integer("allow_private_webhook", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  nextRunAt: text("next_run_at"),
+  lastBatchId: text("last_batch_id"),
+  lastBatchStatus: text("last_batch_status").$type<RunStatus>(),
+  lastError: text("last_error"),
+  updatedAt: text("updated_at").notNull(),
 });
 
-export const webhookNotifications = sqliteTable("webhook_notifications", {
+export const webhookNotifications = sqliteTable(
+  "webhook_notifications",
+  {
     id: text("id").primaryKey(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     batchId: text("batch_id").notNull(),
     status: text("status").$type<RunStatus>().notNull(),
     webhookUrl: text("webhook_url").notNull(),
-    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    payload: text("payload", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull(),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: text("next_attempt_at"),
     deliveredAt: text("delivered_at"),
     lastError: text("last_error"),
     createdAt: text("created_at").notNull(),
-}, (table) => [uniqueIndex("webhook_batch_status_unique").on(table.batchId, table.status), index("webhook_retry_idx").on(table.nextAttemptAt)]);
+  },
+  (table) => [
+    uniqueIndex("webhook_batch_status_unique").on(table.batchId, table.status),
+    index("webhook_retry_idx").on(table.nextAttemptAt),
+  ]
+);
 
 export const projectStewards = sqliteTable("project_stewards", {
-    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
-    autonomy: text("autonomy").$type<"observe" | "propose">().notNull().default("propose"),
-    paused: integer("paused", { mode: "boolean" }).notNull().default(false),
-    observation: text("observation", { mode: "json" }).$type<import("../../core/steward/signals").ProjectObservation>().notNull().default({}),
-    updatedAt: text("updated_at").notNull(),
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  autonomy: text("autonomy")
+    .$type<"observe" | "propose">()
+    .notNull()
+    .default("propose"),
+  paused: integer("paused", { mode: "boolean" }).notNull().default(false),
+  observation: text("observation", { mode: "json" })
+    .$type<ProjectObservation>()
+    .notNull()
+    .default({}),
+  updatedAt: text("updated_at").notNull(),
 });
 
-export const projectSignals = sqliteTable("project_signals", {
+export const projectSignals = sqliteTable(
+  "project_signals",
+  {
     id: text("id").primaryKey(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     kind: text("kind").notNull(),
     title: text("title").notNull(),
     body: text("body").notNull(),
-    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
-    status: text("status").$type<"pending" | "handled" | "observed">().notNull().default("pending"),
+    payload: text("payload", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    status: text("status")
+      .$type<"pending" | "handled" | "observed">()
+      .notNull()
+      .default("pending"),
     createdAt: text("created_at").notNull(),
-}, (table) => [uniqueIndex("project_signal_key").on(table.projectId, table.key)]);
+  },
+  (table) => [uniqueIndex("project_signal_key").on(table.projectId, table.key)]
+);
 
-export const stewardIntents = sqliteTable("steward_intents", {
+export const stewardIntents = sqliteTable(
+  "steward_intents",
+  {
     id: text("id").primaryKey(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     fingerprint: text("fingerprint").notNull(),
     source: text("source").$type<"user" | "event">().notNull().default("event"),
-    sourceChatId: text("source_chat_id").references(() => chats.id, { onDelete: "set null" }),
-    intent: text("intent", { mode: "json" }).$type<import("../../core/steward/schemas").StewardIntent>().notNull(),
+    sourceChatId: text("source_chat_id").references(() => chats.id, {
+      onDelete: "set null",
+    }),
+    intent: text("intent", { mode: "json" }).$type<StewardIntent>().notNull(),
     priority: integer("priority").notNull(),
-    status: text("status").$type<"pending" | "running" | "completed" | "ignored" | "failed">().notNull().default("pending"),
+    status: text("status")
+      .$type<"pending" | "running" | "completed" | "ignored" | "failed">()
+      .notNull()
+      .default("pending"),
     reason: text("reason").notNull(),
     jobId: text("job_id"),
     batchId: text("batch_id"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
-}, (table) => [uniqueIndex("steward_intent_key").on(table.projectId, table.key)]);
+  },
+  (table) => [uniqueIndex("steward_intent_key").on(table.projectId, table.key)]
+);
 
 export const projectCiTokens = sqliteTable("project_ci_tokens", {
-    projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
-    tokenHash: text("token_hash"),
-    tokenPrefix: text("token_prefix"),
-    createdAt: text("created_at"),
-    lastUsedAt: text("last_used_at"),
-    requestWindowStartedAt: text("request_window_started_at"),
-    requestCount: integer("request_count").notNull().default(0),
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash"),
+  tokenPrefix: text("token_prefix"),
+  createdAt: text("created_at"),
+  lastUsedAt: text("last_used_at"),
+  requestWindowStartedAt: text("request_window_started_at"),
+  requestCount: integer("request_count").notNull().default(0),
 });
-

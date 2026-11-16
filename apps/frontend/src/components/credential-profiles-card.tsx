@@ -1,0 +1,554 @@
+"use client";
+
+import { KeyRound, PencilLine, Plus, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { EmptyState } from "@/components/empty-state";
+import {
+  InlineFeedback,
+  SettingsBlock,
+  SettingsSection,
+} from "@/components/settings-layout";
+import { Button, focusRing } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  createCredentialProfile,
+  deleteCredentialProfile,
+  listCredentialProfiles,
+  updateCredentialProfile,
+} from "@/lib/api";
+import type { CredentialFieldInput, CredentialProfile } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+interface DraftField {
+  key: string;
+  value: string;
+  sensitive: boolean;
+  hasValue: boolean;
+  previousKey?: string;
+}
+
+const draftFromProfile = function draftFromProfile(
+  profile: CredentialProfile
+): DraftField[] {
+  return profile.fields.map((field) => ({
+    key: field.key,
+    value: field.sensitive ? "" : field.value,
+    sensitive: field.sensitive,
+    hasValue: field.sensitive && field.hasValue,
+    previousKey: field.key,
+  }));
+};
+
+export const CredentialProfilesCard = function CredentialProfilesCard({
+  projectId,
+}: {
+  projectId: string;
+}) {
+  const [profiles, setProfiles] = useState<CredentialProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+  const [openId, setOpenId] = useState<string | "new" | null>(null);
+  const [name, setName] = useState("");
+  const [fields, setFields] = useState<DraftField[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CredentialProfile | null>(
+    null
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await listCredentialProfiles(projectId);
+      setProfiles(result.profiles);
+    } catch (error_) {
+      setError(error_ instanceof Error ? error_.message : String(error_));
+      // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Reset the previous request or selection when its external key changes before loading fresh state.
+    refresh();
+  }, [refresh]);
+
+  const openNew = function openNew(trigger: HTMLElement) {
+    triggerRef.current = trigger;
+    setFormError("");
+    setOpenId("new");
+    setName("");
+    setFields([
+      { key: "username", value: "", sensitive: false, hasValue: false },
+      { key: "password", value: "", sensitive: true, hasValue: false },
+    ]);
+  };
+
+  const openEdit = function openEdit(
+    profile: CredentialProfile,
+    trigger: HTMLElement
+  ) {
+    triggerRef.current = trigger;
+    setFormError("");
+    setOpenId(profile.id);
+    setName(profile.name);
+    setFields(draftFromProfile(profile));
+  };
+
+  const save = async function save() {
+    if (!name.trim()) {
+      setFormError("Profile name is required.");
+      return;
+    }
+    if (!fields.length || fields.some((field) => !field.key.trim())) {
+      setFormError("Add at least one field and give every field a name.");
+      return;
+    }
+    if (
+      new Set(fields.map((field) => field.key.trim())).size !== fields.length
+    ) {
+      setFormError("Field names must be unique.");
+      return;
+    }
+    setSaving(true);
+    setFormError("");
+    const inputs: CredentialFieldInput[] = fields.map((field) => ({
+      key: field.key.trim(),
+      value: field.value === "" && field.hasValue ? undefined : field.value,
+      sensitive: field.sensitive,
+      previousKey: field.previousKey,
+    }));
+    try {
+      if (openId === "new") {
+        await createCredentialProfile(projectId, {
+          name: name.trim(),
+          fields: inputs,
+        });
+      } else if (openId) {
+        await updateCredentialProfile(openId, { fields: inputs });
+      }
+      setOpenId(null);
+      await refresh();
+    } catch (error_) {
+      setFormError(
+        (() => {
+          if (error_ instanceof Error) {
+            return error_.message;
+          }
+          if (typeof error_ === "object" && error_ !== null) {
+            return JSON.stringify(error_);
+          }
+          return String(error_);
+        })()
+      );
+      // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmRemove = async function confirmRemove() {
+    if (!deleteTarget) {
+      return;
+    }
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteCredentialProfile(deleteTarget.id);
+      setDeleteTarget(null);
+      await refresh();
+    } catch (error_) {
+      setDeleteError(error_ instanceof Error ? error_.message : String(error_));
+      // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const editing =
+    openId !== null && openId !== "new"
+      ? profiles.find((profile) => profile.id === openId)
+      : undefined;
+
+  return (
+    <>
+      <SettingsSection
+        id="credentials-heading"
+        title="Credentials"
+        description="All values are encrypted. Sensitive fields stay hidden from the agent and run evidence."
+        actions={
+          profiles.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(event) => openNew(event.currentTarget)}
+            >
+              <Plus size={14} /> New profile
+            </Button>
+          )
+        }
+      >
+        {error && (
+          <SettingsBlock>
+            <InlineFeedback feedback={{ type: "error", text: error }} />
+          </SettingsBlock>
+        )}
+        {loading && profiles.length === 0 && (
+          <output
+            className="block"
+            aria-label="Loading credential profiles"
+            aria-busy="true"
+          >
+            {[0, 1].map((row) => (
+              <SettingsBlock key={row} className="flex items-center gap-3">
+                <Skeleton className="size-8 rounded-full" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+              </SettingsBlock>
+            ))}
+          </output>
+        )}
+        {!loading && profiles.length === 0 && !error && (
+          <EmptyState
+            size="compact"
+            icon={KeyRound}
+            title="No credential profiles yet"
+            description="Add a login so the agent can sign in while it explores and verifies."
+            action={
+              <Button
+                type="button"
+                size="sm"
+                onClick={(event) => openNew(event.currentTarget)}
+              >
+                <Plus size={14} /> New profile
+              </Button>
+            }
+            className="py-10"
+          />
+        )}
+        {profiles.length > 0 && (
+          <ul>
+            {profiles.map((profile) => (
+              <li
+                key={profile.id}
+                className="group border-line hover:bg-surface-soft relative flex min-h-16 items-center gap-3 border-b px-4 py-3 transition-colors last:border-0 sm:px-5"
+              >
+                <span className="border-line bg-surface text-ink-muted flex size-8 shrink-0 items-center justify-center rounded-full border">
+                  <KeyRound size={15} aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={(event) => openEdit(profile, event.currentTarget)}
+                    className="text-control text-ink focus-visible:ring-ring block max-w-full truncate rounded-sm text-left font-medium outline-none after:absolute after:inset-0 focus-visible:ring-2"
+                  >
+                    {profile.name}
+                  </button>
+                  <p className="text-meta text-ink-subtle mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {profile.fields.map((field) => (
+                      <span
+                        key={field.key}
+                        className="inline-flex min-w-0 items-center gap-1"
+                      >
+                        <span className="font-mono">{field.key}</span>
+                        <span
+                          className="truncate"
+                          aria-label={(() => {
+                            if (field.sensitive) {
+                              if (field.hasValue) {
+                                return "saved";
+                              }
+                              return "empty";
+                            }
+                          })()}
+                        >
+                          {(() => {
+                            if (field.sensitive) {
+                              if (field.hasValue) {
+                                return "••••";
+                              }
+                              return "empty";
+                            }
+                            return field.value;
+                          })()}
+                        </span>
+                      </span>
+                    ))}
+                  </p>
+                </div>
+                <div className="relative z-10 flex shrink-0 items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Edit ${profile.name}`}
+                        onClick={(event) =>
+                          openEdit(profile, event.currentTarget)
+                        }
+                      >
+                        <PencilLine size={14} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Edit</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Delete ${profile.name}`}
+                        className="hover:bg-danger-soft hover:text-danger"
+                        onClick={(event) => {
+                          triggerRef.current = event.currentTarget;
+                          setDeleteError("");
+                          setDeleteTarget(profile);
+                        }}
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete</TooltipContent>
+                  </Tooltip>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SettingsSection>
+
+      <Dialog
+        open={openId !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) {
+            setOpenId(null);
+          }
+        }}
+      >
+        <DialogContent
+          className="max-h-[85dvh] max-w-xl overflow-y-auto"
+          onCloseAutoFocus={(event) => {
+            const trigger = triggerRef.current;
+            if (!trigger?.isConnected) {
+              return;
+            }
+            event.preventDefault();
+            trigger.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {openId === "new"
+                ? "New credential profile"
+                : `Edit ${editing?.name ?? "profile"}`}
+            </DialogTitle>
+            <DialogDescription>
+              {openId === "new"
+                ? "Choose which fields stay hidden from the agent and run evidence."
+                : "Leave a saved sensitive value blank to keep it."}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="mt-5 space-y-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              save();
+            }}
+          >
+            <div>
+              <Label htmlFor="credential-name" className="mb-1.5">
+                Profile name
+              </Label>
+              <Input
+                id="credential-name"
+                value={name}
+                disabled={openId !== "new"}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="admin"
+                autoComplete="off"
+              />
+            </div>
+            <fieldset className="min-w-0">
+              <legend className="text-control text-ink mb-1.5 font-medium">
+                Fields
+              </legend>
+              <div className="space-y-2">
+                {fields.length > 0 && (
+                  <div
+                    className="text-meta text-ink-subtle hidden grid-cols-[7rem_minmax(0,1fr)_6rem_2rem] gap-2 sm:grid"
+                    aria-hidden="true"
+                  >
+                    <span>Name</span>
+                    <span>Value</span>
+                    <span />
+                    <span />
+                  </div>
+                )}
+                {fields.map((field, index) => (
+                  <div
+                    key={index}
+                    className="grid grid-cols-[minmax(0,1fr)_2rem] gap-2 sm:grid-cols-[7rem_minmax(0,1fr)_6rem_2rem]"
+                  >
+                    <Input
+                      value={field.key}
+                      aria-label={`Field ${index + 1} name`}
+                      placeholder="field"
+                      className="text-meta font-mono"
+                      autoComplete="off"
+                      onChange={(event) =>
+                        setFields(
+                          fields.map((f, i) =>
+                            i === index ? { ...f, key: event.target.value } : f
+                          )
+                        )
+                      }
+                    />
+                    <Input
+                      type={field.sensitive ? "password" : "text"}
+                      autoComplete="off"
+                      aria-label={`${field.key || `Field ${index + 1}`} value`}
+                      value={field.value}
+                      placeholder={
+                        field.hasValue ? "Saved (leave blank to keep)" : "Value"
+                      }
+                      className="col-start-1 row-start-2 sm:col-start-auto sm:row-start-auto"
+                      onChange={(event) =>
+                        setFields(
+                          fields.map((f, i) =>
+                            i === index
+                              ? { ...f, value: event.target.value }
+                              : f
+                          )
+                        )
+                      }
+                    />
+                    <label className="text-meta text-ink-muted col-start-1 row-start-3 flex min-h-9 cursor-pointer items-center gap-2 sm:col-start-auto sm:row-start-auto">
+                      <input
+                        type="checkbox"
+                        checked={field.sensitive}
+                        aria-label={`${field.key || `Field ${index + 1}`} sensitive`}
+                        className={cn(
+                          "accent-primary size-4 shrink-0",
+                          focusRing
+                        )}
+                        onChange={(event) =>
+                          setFields(
+                            fields.map((f, i) =>
+                              i === index
+                                ? { ...f, sensitive: event.target.checked }
+                                : f
+                            )
+                          )
+                        }
+                      />
+                      Sensitive
+                    </label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setFields(fields.filter((_, i) => i !== index))
+                      }
+                      className="hover:bg-danger-soft hover:text-danger col-start-2 row-start-1 size-9 sm:col-start-auto sm:row-start-auto"
+                      aria-label={`Remove ${field.key || "field"}`}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="-ml-1"
+                  onClick={() =>
+                    setFields([
+                      ...fields,
+                      { key: "", value: "", sensitive: true, hasValue: false },
+                    ])
+                  }
+                >
+                  <Plus size={14} /> Add field
+                </Button>
+              </div>
+            </fieldset>
+            {formError && (
+              <InlineFeedback feedback={{ type: "error", text: formError }} />
+            )}
+            <DialogFooter className="border-line border-t pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpenId(null)}
+                disabled={saving}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {(() => {
+                  if (saving) {
+                    return "Saving…";
+                  }
+                  if (openId === "new") {
+                    return "Create profile";
+                  }
+                  return "Save changes";
+                })()}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDeleteDialog
+        open={deleteTarget !== null}
+        title="Delete credential profile?"
+        description={
+          <>
+            <strong className="text-ink font-semibold">
+              {deleteTarget?.name}
+            </strong>{" "}
+            and its encrypted values are removed. The agent can no longer use it
+            to sign in.
+          </>
+        }
+        confirmLabel="Delete profile"
+        busy={deleting}
+        error={deleteError}
+        returnFocusRef={triggerRef}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setDeleteError("");
+        }}
+        onConfirm={() => confirmRemove()}
+      />
+    </>
+  );
+};

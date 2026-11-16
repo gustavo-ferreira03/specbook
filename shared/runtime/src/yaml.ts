@@ -1,217 +1,321 @@
 import { parse, stringify } from "yaml";
-import { EMPTY_PROJECT_CONTEXT, type HumanSpec, type ProjectContext } from "./types.ts";
 
-export class YamlParseError extends Error {}
+import { EMPTY_PROJECT_CONTEXT } from "./types.ts";
+import type { HumanSpec, ProjectContext } from "./types.ts";
+
+export class YamlParseError extends Error {
+  override name = "YamlParseError";
+}
 
 export interface SpecYaml {
-    title: string | null;
-    description: string;
-    humanSpec: HumanSpec;
+  title: string | null;
+  description: string;
+  humanSpec: HumanSpec;
 }
 
 export interface FeatureYaml {
-    title: string | null;
-    description: string;
+  title: string | null;
+  description: string;
 }
 
-function parseDocument(source: string): Record<string, unknown> {
-    let data: unknown;
-    try {
-        data = parse(source);
-    } catch (error) {
-        throw new YamlParseError(`Invalid YAML: ${error instanceof Error ? error.message : String(error)}`);
+const parseDocument = function parseDocument(
+  source: string
+): Record<string, unknown> {
+  let data: unknown;
+  try {
+    data = parse(source);
+  } catch (error) {
+    throw new YamlParseError(
+      `Invalid YAML: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (data === null || data === undefined) {
+    return {};
+  }
+  if (typeof data !== "object" || Array.isArray(data)) {
+    throw new YamlParseError(
+      "Invalid YAML: the document must be a mapping of keys to values"
+    );
+  }
+  return data as Record<string, unknown>;
+};
+
+const rejectUnknownKeys = function rejectUnknownKeys(
+  data: Record<string, unknown>,
+  allowed: string[],
+  label: string
+): void {
+  for (const key of Object.keys(data)) {
+    if (!allowed.includes(key)) {
+      throw new YamlParseError(
+        `Unknown key "${key}" in ${label} (allowed: ${allowed.join(", ")})`
+      );
     }
-    if (data === null || data === undefined) return {};
-    if (typeof data !== "object" || Array.isArray(data)) {
-        throw new YamlParseError("Invalid YAML: the document must be a mapping of keys to values");
-    }
-    return data as Record<string, unknown>;
-}
+  }
+};
 
-function rejectUnknownKeys(data: Record<string, unknown>, allowed: string[], label: string): void {
-    for (const key of Object.keys(data)) {
-        if (!allowed.includes(key)) {
-            throw new YamlParseError(`Unknown key "${key}" in ${label} (allowed: ${allowed.join(", ")})`);
-        }
-    }
-}
-
-function optionalString(data: Record<string, unknown>, key: string): string | null {
-    const value = data[key];
-    if (value === undefined || value === null) return null;
-    if (typeof value !== "string") throw new YamlParseError(`"${key}" must be a string`);
-    return value.trim() || null;
-}
-
-function stringWithDefault(data: Record<string, unknown>, key: string): string {
-    const value = data[key];
-    if (value === undefined || value === null) return "";
-    if (typeof value === "string") return value.trim();
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
+const optionalString = function optionalString(
+  data: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = data[key];
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
     throw new YamlParseError(`"${key}" must be a string`);
-}
+  }
+  return value.trim() || null;
+};
 
-function stringArray(data: Record<string, unknown>, key: string): string[] {
-    const value = data[key];
-    if (value === undefined || value === null) return [];
-    if (!Array.isArray(value)) throw new YamlParseError(`"${key}" must be a list`);
-    return value.map((item, index) => {
-        if (typeof item === "string") return item.trim();
-        if (typeof item === "number" || typeof item === "boolean") return String(item);
-        throw new YamlParseError(`"${key}[${index}]" must be a string`);
-    });
-}
+const stringWithDefault = function stringWithDefault(
+  data: Record<string, unknown>,
+  key: string
+): string {
+  const value = data[key];
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  throw new YamlParseError(`"${key}" must be a string`);
+};
 
-function recordArray(data: Record<string, unknown>, key: string): Record<string, unknown>[] {
-    const value = data[key];
-    if (value === undefined || value === null) return [];
-    if (!Array.isArray(value)) throw new YamlParseError(`"${key}" must be a list`);
-    return value.map((item, index) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) {
-            throw new YamlParseError(`"${key}[${index}]" must be a mapping`);
-        }
-        return item as Record<string, unknown>;
-    });
-}
+const stringArray = function stringArray(
+  data: Record<string, unknown>,
+  key: string
+): string[] {
+  const value = data[key];
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new YamlParseError(`"${key}" must be a list`);
+  }
+  return value.map((item, index) => {
+    if (typeof item === "string") {
+      return item.trim();
+    }
+    if (typeof item === "number" || typeof item === "boolean") {
+      return String(item);
+    }
+    throw new YamlParseError(`"${key}[${index}]" must be a string`);
+  });
+};
 
-const SPEC_KEYS = ["title", "description", "preconditions", "steps", "expectedResult", "postconditions"];
+const recordArray = function recordArray(
+  data: Record<string, unknown>,
+  key: string
+): Record<string, unknown>[] {
+  const value = data[key];
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new YamlParseError(`"${key}" must be a list`);
+  }
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new YamlParseError(`"${key}[${index}]" must be a mapping`);
+    }
+    return item as Record<string, unknown>;
+  });
+};
 
-export function serializeSpecYaml(doc: {
-    title: string;
-    description: string;
-    humanSpec: HumanSpec;
+const SPEC_KEYS = [
+  "title",
+  "description",
+  "preconditions",
+  "steps",
+  "expectedResult",
+  "postconditions",
+];
+
+export const serializeSpecYaml = function serializeSpecYaml(doc: {
+  title: string;
+  description: string;
+  humanSpec: HumanSpec;
 }): string {
-    return stringify({
-        title: doc.title,
-        description: doc.description,
-        preconditions: doc.humanSpec.preconditions,
-        steps: doc.humanSpec.steps,
-        expectedResult: doc.humanSpec.expectedResult,
-        postconditions: doc.humanSpec.postconditions,
-    });
-}
+  return stringify({
+    title: doc.title,
+    description: doc.description,
+    preconditions: doc.humanSpec.preconditions,
+    steps: doc.humanSpec.steps,
+    expectedResult: doc.humanSpec.expectedResult,
+    postconditions: doc.humanSpec.postconditions,
+  });
+};
 
-export function parseSpecYaml(source: string): SpecYaml {
-    const data = parseDocument(source);
-    rejectUnknownKeys(data, SPEC_KEYS, "spec.yml");
-    return {
-        title: optionalString(data, "title"),
-        description: stringWithDefault(data, "description"),
-        humanSpec: {
-            preconditions: stringArray(data, "preconditions"),
-            steps: stringArray(data, "steps"),
-            expectedResult: stringWithDefault(data, "expectedResult"),
-            postconditions: stringArray(data, "postconditions"),
-        },
-    };
-}
+export const parseSpecYaml = function parseSpecYaml(source: string): SpecYaml {
+  const data = parseDocument(source);
+  rejectUnknownKeys(data, SPEC_KEYS, "spec.yml");
+  return {
+    title: optionalString(data, "title"),
+    description: stringWithDefault(data, "description"),
+    humanSpec: {
+      preconditions: stringArray(data, "preconditions"),
+      steps: stringArray(data, "steps"),
+      expectedResult: stringWithDefault(data, "expectedResult"),
+      postconditions: stringArray(data, "postconditions"),
+    },
+  };
+};
 
 const FEATURE_KEYS = ["title", "description"];
 
-export function serializeFeatureYaml(doc: { title: string; description: string }): string {
-    return stringify({ title: doc.title, description: doc.description });
-}
+export const serializeFeatureYaml = function serializeFeatureYaml(doc: {
+  title: string;
+  description: string;
+}): string {
+  return stringify({ title: doc.title, description: doc.description });
+};
 
-export function parseFeatureYaml(source: string): FeatureYaml {
-    const data = parseDocument(source);
-    rejectUnknownKeys(data, FEATURE_KEYS, "feature.yml");
-    return {
-        title: optionalString(data, "title"),
-        description: stringWithDefault(data, "description"),
-    };
-}
+export const parseFeatureYaml = function parseFeatureYaml(
+  source: string
+): FeatureYaml {
+  const data = parseDocument(source);
+  rejectUnknownKeys(data, FEATURE_KEYS, "feature.yml");
+  return {
+    title: optionalString(data, "title"),
+    description: stringWithDefault(data, "description"),
+  };
+};
 
 const CONTEXT_KEYS = [
-    "summary",
-    "areas",
-    "terminology",
-    "roles",
-    "businessRules",
-    "uiPatterns",
-    "executionNotes",
-    "unknowns",
-    "sources",
+  "summary",
+  "areas",
+  "terminology",
+  "roles",
+  "businessRules",
+  "uiPatterns",
+  "executionNotes",
+  "unknowns",
+  "sources",
 ];
 
-export function serializeContextYaml(context: ProjectContext): string {
-    return stringify({
-        summary: context.summary,
-        areas: context.areas,
-        terminology: context.terminology,
-        roles: context.roles,
-        businessRules: context.businessRules,
-        uiPatterns: context.uiPatterns,
-        executionNotes: context.executionNotes,
-        unknowns: context.unknowns,
-        sources: context.sources,
-    });
-}
+export const serializeContextYaml = function serializeContextYaml(
+  context: ProjectContext
+): string {
+  return stringify({
+    summary: context.summary,
+    areas: context.areas,
+    terminology: context.terminology,
+    roles: context.roles,
+    businessRules: context.businessRules,
+    uiPatterns: context.uiPatterns,
+    executionNotes: context.executionNotes,
+    unknowns: context.unknowns,
+    sources: context.sources,
+  });
+};
 
-export function parseContextYaml(source: string): ProjectContext {
-    const data = parseDocument(source);
-    rejectUnknownKeys(data, CONTEXT_KEYS, "context.yml");
-    const areas = recordArray(data, "areas").map((area, index) => {
-        rejectUnknownKeys(area, ["name", "routes", "description"], `areas[${index}]`);
-        return {
-            name: stringWithDefault(area, "name"),
-            routes: stringArray(area, "routes"),
-            description: stringWithDefault(area, "description"),
-        };
-    });
-    const terminology = recordArray(data, "terminology").map((entry, index) => {
-        rejectUnknownKeys(entry, ["term", "meaning"], `terminology[${index}]`);
-        return { term: stringWithDefault(entry, "term"), meaning: stringWithDefault(entry, "meaning") };
-    });
-    const roles = recordArray(data, "roles").map((role, index) => {
-        rejectUnknownKeys(role, ["name", "capabilities"], `roles[${index}]`);
-        return { name: stringWithDefault(role, "name"), capabilities: stringArray(role, "capabilities") };
-    });
-    const sources = recordArray(data, "sources").map((entry, index) => {
-        rejectUnknownKeys(entry, ["url", "note"], `sources[${index}]`);
-        return { url: stringWithDefault(entry, "url"), note: stringWithDefault(entry, "note") };
-    });
+export const parseContextYaml = function parseContextYaml(
+  source: string
+): ProjectContext {
+  const data = parseDocument(source);
+  rejectUnknownKeys(data, CONTEXT_KEYS, "context.yml");
+  const areas = recordArray(data, "areas").map((area, index) => {
+    rejectUnknownKeys(
+      area,
+      ["name", "routes", "description"],
+      `areas[${index}]`
+    );
     return {
-        ...EMPTY_PROJECT_CONTEXT,
-        summary: stringWithDefault(data, "summary"),
-        areas,
-        terminology,
-        roles,
-        businessRules: stringArray(data, "businessRules"),
-        uiPatterns: stringArray(data, "uiPatterns"),
-        executionNotes: stringArray(data, "executionNotes"),
-        unknowns: stringArray(data, "unknowns"),
-        sources,
+      name: stringWithDefault(area, "name"),
+      routes: stringArray(area, "routes"),
+      description: stringWithDefault(area, "description"),
     };
-}
+  });
+  const terminology = recordArray(data, "terminology").map((entry, index) => {
+    rejectUnknownKeys(entry, ["term", "meaning"], `terminology[${index}]`);
+    return {
+      term: stringWithDefault(entry, "term"),
+      meaning: stringWithDefault(entry, "meaning"),
+    };
+  });
+  const roles = recordArray(data, "roles").map((role, index) => {
+    rejectUnknownKeys(role, ["name", "capabilities"], `roles[${index}]`);
+    return {
+      name: stringWithDefault(role, "name"),
+      capabilities: stringArray(role, "capabilities"),
+    };
+  });
+  const sources = recordArray(data, "sources").map((entry, index) => {
+    rejectUnknownKeys(entry, ["url", "note"], `sources[${index}]`);
+    return {
+      url: stringWithDefault(entry, "url"),
+      note: stringWithDefault(entry, "note"),
+    };
+  });
+  return {
+    ...EMPTY_PROJECT_CONTEXT,
+    summary: stringWithDefault(data, "summary"),
+    areas,
+    terminology,
+    roles,
+    businessRules: stringArray(data, "businessRules"),
+    uiPatterns: stringArray(data, "uiPatterns"),
+    executionNotes: stringArray(data, "executionNotes"),
+    unknowns: stringArray(data, "unknowns"),
+    sources,
+  };
+};
 
-export function parseYamlTitle(source: string): string | null {
-    try {
-        const data = parseDocument(source);
-        return typeof data.title === "string" && data.title.trim() ? data.title.trim() : null;
-    } catch {
-        return null;
-    }
-}
+export const parseYamlTitle = function parseYamlTitle(
+  source: string
+): string | null {
+  try {
+    const data = parseDocument(source);
+    return typeof data.title === "string" && data.title.trim()
+      ? data.title.trim()
+      : null;
+  } catch {
+    return null;
+  }
+};
 
-function canonicalJson(value: unknown): string {
-    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-    if (value && typeof value === "object") {
-        const entries = Object.entries(value as Record<string, unknown>)
-            .filter(([, entry]) => entry !== undefined)
-            .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
-        return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
-    }
-    return JSON.stringify(value ?? null);
-}
+const canonicalJson = function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .toSorted(([left], [right]) =>
+        left < right
+          ? -1
+          : (() => {
+              if (left > right) {
+                return 1;
+              }
+              return 0;
+            })()
+      );
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+};
 
-function normalizedContext(context: ProjectContext): ProjectContext {
-    try {
-        return parseContextYaml(serializeContextYaml(context));
-    } catch {
-        return context;
-    }
-}
+const normalizedContext = function normalizedContext(
+  context: ProjectContext
+): ProjectContext {
+  try {
+    return parseContextYaml(serializeContextYaml(context));
+  } catch {
+    return context;
+  }
+};
 
-export function sameProjectContext(left: ProjectContext, right: ProjectContext): boolean {
-    return canonicalJson(normalizedContext(left)) === canonicalJson(normalizedContext(right));
-}
+export const sameProjectContext = function sameProjectContext(
+  left: ProjectContext,
+  right: ProjectContext
+): boolean {
+  return (
+    canonicalJson(normalizedContext(left)) ===
+    canonicalJson(normalizedContext(right))
+  );
+};

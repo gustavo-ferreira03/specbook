@@ -1,56 +1,112 @@
 import { isIP } from "node:net";
 
 export interface HostAllowlist {
-    any: boolean;
-    exact: Set<string>;
-    anyPort: Set<string>;
+  any: boolean;
+  exact: Set<string>;
+  anyPort: Set<string>;
 }
 
-function parseHost(value: string): URL | null {
-    if (!value || /[\s/@\\?#,]/.test(value)) return null;
+const parseHost = function parseHost(value: string): URL | null {
+  if (!value || /[\s/@\\?#,]/u.test(value)) {
+    return null;
+  }
+  try {
+    const url = new URL(`http://${value}`);
+    return url.host ? url : null;
+  } catch {
+    return null;
+  }
+};
+
+export const buildHostAllowlist = function buildHostAllowlist(
+  _port: number,
+  env: NodeJS.ProcessEnv = process.env
+): HostAllowlist {
+  const allowlist: HostAllowlist = {
+    any: false,
+    exact: new Set(),
+    anyPort: new Set(["localhost"]),
+  };
+  for (const value of [
+    env.FRONTEND_ORIGIN,
+    env.SPECBOOK_PUBLIC_API_URL,
+    env.SPECBOOK_BACKEND_URL,
+  ]) {
     try {
-        const url = new URL(`http://${value}`);
-        return url.host ? url : null;
-    } catch { return null; }
-}
-
-export function buildHostAllowlist(_port: number, env: NodeJS.ProcessEnv = process.env): HostAllowlist {
-    const allowlist: HostAllowlist = { any: false, exact: new Set(), anyPort: new Set(["localhost"]) };
-    for (const value of [env.FRONTEND_ORIGIN, env.SPECBOOK_PUBLIC_API_URL, env.SPECBOOK_BACKEND_URL]) {
-        try { if (value) allowlist.exact.add(new URL(value).host.toLowerCase()); } catch {}
+      if (value) {
+        allowlist.exact.add(new URL(value).host.toLowerCase());
+      }
+    } catch {
+      /* Cleanup is best effort; preserve the original result. */
+      /* Cleanup is best effort; preserve the original result. */
     }
-    for (const raw of (env.SPECBOOK_ALLOWED_HOSTS ?? "").split(",")) {
-        const entry = raw.trim().toLowerCase();
-        if (entry === "*") allowlist.any = true;
-        else {
-            const url = parseHost(entry);
-            if (!url) continue;
-            if (entry === url.hostname) allowlist.anyPort.add(url.hostname);
-            else allowlist.exact.add(url.host);
-        }
+  }
+  for (const raw of (env.SPECBOOK_ALLOWED_HOSTS ?? "").split(",")) {
+    const entry = raw.trim().toLowerCase();
+    if (entry === "*") {
+      allowlist.any = true;
+    } else {
+      const url = parseHost(entry);
+      if (!url) {
+        continue;
+      }
+      if (entry === url.hostname) {
+        allowlist.anyPort.add(url.hostname);
+      } else {
+        allowlist.exact.add(url.host);
+      }
     }
-    return allowlist;
-}
+  }
+  return allowlist;
+};
 
-export function isAllowedHost(allowlist: HostAllowlist, host: string | undefined): boolean {
-    const url = host ? parseHost(host) : null;
-    if (!url) return false;
-    return allowlist.any || isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0
-        || allowlist.exact.has(url.host) || allowlist.anyPort.has(url.hostname);
-}
+export const isAllowedHost = function isAllowedHost(
+  allowlist: HostAllowlist,
+  host: string | undefined
+): boolean {
+  const url = host ? parseHost(host) : null;
+  if (!url) {
+    return false;
+  }
+  return (
+    allowlist.any ||
+    isIP(url.hostname.replaceAll(/^\[|\]$/gu, "")) !== 0 ||
+    allowlist.exact.has(url.host) ||
+    allowlist.anyPort.has(url.hostname)
+  );
+};
 
-export function matchesOriginHost(origin: string, host: string): boolean {
-    try {
-        const url = new URL(origin);
-        const target = new URL(`${url.protocol}//${host}`);
-        return ["http:", "https:"].includes(url.protocol) && url.origin === origin && url.host === target.host;
-    } catch { return false; }
-}
+export const matchesOriginHost = function matchesOriginHost(
+  origin: string,
+  host: string
+): boolean {
+  try {
+    const url = new URL(origin);
+    const target = new URL(`${url.protocol}//${host}`);
+    return (
+      ["http:", "https:"].includes(url.protocol) &&
+      url.origin === origin &&
+      url.host === target.host
+    );
+  } catch {
+    return false;
+  }
+};
 
-export function frontendProxyOrigin(headers: Headers, allowlist: HostAllowlist): string | null {
-    if (headers.get("x-specbook-proxy") !== "1") return null;
-    const host = headers.get("x-forwarded-host") ?? "";
-    const protocol = headers.get("x-forwarded-proto");
-    if (!isAllowedHost(allowlist, host) || (protocol !== "http" && protocol !== "https")) return null;
-    return `${protocol}://${host}`;
-}
+export const frontendProxyOrigin = function frontendProxyOrigin(
+  headers: Headers,
+  allowlist: HostAllowlist
+): string | null {
+  if (headers.get("x-specbook-proxy") !== "1") {
+    return null;
+  }
+  const host = headers.get("x-forwarded-host") ?? "";
+  const protocol = headers.get("x-forwarded-proto");
+  if (
+    !isAllowedHost(allowlist, host) ||
+    (protocol !== "http" && protocol !== "https")
+  ) {
+    return null;
+  }
+  return `${protocol}://${host}`;
+};

@@ -1,0 +1,157 @@
+"use client";
+
+import type VncClient from "@novnc/novnc";
+import { AlertCircle, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { websocketUrl } from "@/lib/api";
+
+export type VncStatus = "connecting" | "connected" | "error";
+
+export const VncViewer = function VncViewer({
+  vncSessionId,
+  onStatusChange,
+}: {
+  vncSessionId: string;
+  onStatusChange?: (status: VncStatus) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<VncStatus>("connecting");
+  const [error, setError] = useState("");
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    let connection: InstanceType<typeof VncClient> | null = null;
+    let cancelled = false;
+    setStatus("connecting");
+    setError("");
+    container.replaceChildren();
+
+    const handleConnect: EventListener = () => {
+      if (!cancelled) {
+        setStatus("connected");
+      }
+    };
+    const handleDisconnect: EventListener = (event) => {
+      if (cancelled) {
+        return;
+      }
+      const clean = (event as CustomEvent<{ clean?: boolean }>).detail?.clean;
+      setError(
+        clean
+          ? "The browser stream ended."
+          : "The browser connection was interrupted."
+      );
+      setStatus("error");
+    };
+    const handleSecurityFailure: EventListener = (event) => {
+      if (cancelled) {
+        return;
+      }
+      const reason = (event as CustomEvent<{ reason?: string }>).detail?.reason;
+      setError(reason || "The browser connection could not be secured.");
+      setStatus("error");
+    };
+
+    const connect = async function connect() {
+      try {
+        // oxlint-disable-next-line react/todo -- Oxlint React Compiler cannot analyze this supported JavaScript syntax; preserve its cleanup and error behavior.
+        const { default: noVNC } = await import("@novnc/novnc");
+        if (cancelled || !containerRef.current) {
+          return;
+        }
+        connection = new noVNC(
+          containerRef.current,
+          websocketUrl(`/vnc/${encodeURIComponent(vncSessionId)}`),
+          { shared: true }
+        );
+        connection.background =
+          getComputedStyle(document.documentElement)
+            .getPropertyValue("--color-browser")
+            .trim() || "black";
+        connection.scaleViewport = true;
+        connection.viewOnly = true;
+        connection.addEventListener("connect", handleConnect);
+        connection.addEventListener("disconnect", handleDisconnect);
+        connection.addEventListener("securityfailure", handleSecurityFailure);
+      } catch (connectError) {
+        if (cancelled) {
+          return;
+        }
+        setError(
+          connectError instanceof Error
+            ? connectError.message
+            : String(connectError)
+        );
+        setStatus("error");
+      }
+    };
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (connection) {
+        connection.removeEventListener("connect", handleConnect);
+        connection.removeEventListener("disconnect", handleDisconnect);
+        connection.removeEventListener(
+          "securityfailure",
+          handleSecurityFailure
+        );
+        connection.disconnect();
+      }
+      container.replaceChildren();
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- This dependency intentionally triggers a retry, navigation reset, or DOM measurement without being read by the effect.
+  }, [retryKey, vncSessionId]);
+
+  useEffect(() => {
+    onStatusChange?.(status);
+  }, [onStatusChange, status]);
+
+  return (
+    <div className="bg-browser relative h-full min-h-0 w-full overflow-hidden">
+      <div ref={containerRef} className="h-full w-full overflow-hidden" />
+      {status === "connecting" && (
+        <output className="bg-browser text-control absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/70">
+          <span className="flex gap-1" aria-hidden="true">
+            <span className="status-pulse size-1.5 rounded-full bg-white/80" />
+            <span className="status-pulse size-1.5 rounded-full bg-white/80 [animation-delay:200ms]" />
+            <span className="status-pulse size-1.5 rounded-full bg-white/80 [animation-delay:400ms]" />
+          </span>
+          Connecting to the live browser
+        </output>
+      )}
+      {status === "error" && (
+        <div className="bg-browser absolute inset-0 flex items-center justify-center px-5 text-center">
+          <Alert
+            className="max-w-xs border-0 bg-transparent p-0 text-white"
+            role="alert"
+          >
+            <span className="mx-auto mb-3 flex size-9 items-center justify-center rounded-full bg-white/10">
+              <AlertCircle
+                className="text-white/80"
+                size={18}
+                aria-hidden="true"
+              />
+            </span>
+            <p className="text-control mb-4 text-white/80">{error}</p>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setRetryKey((key) => key + 1)}
+              className="focus-visible:ring-offset-browser bg-white text-black shadow-none hover:bg-white/85 focus-visible:ring-white"
+            >
+              <RefreshCw size={13} /> Reconnect
+            </Button>
+          </Alert>
+        </div>
+      )}
+    </div>
+  );
+};

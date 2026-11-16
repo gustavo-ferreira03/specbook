@@ -1,12 +1,12 @@
 title: Browse Project settings sections
 description: Each Project settings tab opens its section without submitting changes.
 preconditions:
-- Signed in as the Specbook administrator
+  - Signed in as the Specbook administrator
 steps:
-- Open Project settings
-- Select the General tab
-- Select the App context tab
-- Select the Automation tab
-- Select the Git tab
+  - Open Project settings
+  - Select the General tab
+  - Select the App context tab
+  - Select the Automation tab
+  - Select the Git tab
 expectedResult: The Git tab shows the Specbook repository section
 postconditions: []

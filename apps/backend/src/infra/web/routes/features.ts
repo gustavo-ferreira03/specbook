@@ -1,97 +1,143 @@
-import { access } from "../access";
 import { zValidator } from "@hono/zod-validator";
+import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
+import { YamlParseError } from "@specbook/runtime/yaml";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+
 import { deleteFeatureData, ResourceBusyError } from "../../../core/deletion";
-import { UnsafeRepoPathError } from "@specbook/runtime/safe-fs";
-import { YamlParseError } from "@specbook/runtime/yaml";
 import { editFeatureFile, readFeatureRaw } from "../../../core/repo/manual";
-import { createFeatureInRepo, updateFeatureInRepo } from "../../../core/repo/writer";
+import {
+  createFeatureInRepo,
+  updateFeatureInRepo,
+} from "../../../core/repo/writer";
 import { featuresRepository } from "../../repositories/features";
 import { projectsRepository } from "../../repositories/projects";
+import { access } from "../access";
+
+const mapManualError = function mapManualError(error: unknown): never {
+  if (error instanceof HTTPException) {
+    throw error;
+  }
+  if (
+    error instanceof ResourceBusyError ||
+    error instanceof UnsafeRepoPathError
+  ) {
+    throw new HTTPException(409, { message: error.message });
+  }
+  if (error instanceof YamlParseError) {
+    throw new HTTPException(400, { message: error.message });
+  }
+  if (
+    error instanceof Error &&
+    /unfinished rebase|uncommitted changes/u.test(error.message)
+  ) {
+    throw new HTTPException(409, { message: error.message });
+  }
+  throw error;
+};
+
+export const createFeaturesRouter = function createFeaturesRouter(): Hono {
+  const router = new Hono();
+
+  router.post(
+    "/projects/:id/features",
+    access("editor"),
+    zValidator("json", createFeatureSchema),
+    async (c) => {
+      const project = await projectsRepository.getProject(c.req.param("id"));
+      if (!project) {
+        throw new HTTPException(404, { message: "Project not found" });
+      }
+      const { parentId, title, description } = c.req.valid("json");
+      if (parentId) {
+        const parent = await featuresRepository.getFeature(parentId);
+        if (!parent || parent.projectId !== project.id) {
+          throw new HTTPException(404, { message: "Parent feature not found" });
+        }
+      }
+      const feature = await createFeatureInRepo(
+        project.id,
+        parentId ?? null,
+        title,
+        description
+      ).catch(mapManualError);
+      return c.json({ feature });
+    }
+  );
+
+  router.patch(
+    "/features/:id",
+    access("editor"),
+    zValidator("json", updateFeatureSchema),
+    async (c) => {
+      const feature = await featuresRepository.getFeature(c.req.param("id"));
+      if (!feature) {
+        throw new HTTPException(404, { message: "Feature not found" });
+      }
+      const updated = await updateFeatureInRepo(
+        feature,
+        c.req.valid("json")
+      ).catch(mapManualError);
+      return c.json({ feature: updated });
+    }
+  );
+
+  router.get("/features/:id/file", access("viewer"), async (c) => {
+    const feature = await featuresRepository.getFeature(c.req.param("id"));
+    if (!feature) {
+      throw new HTTPException(404, { message: "Feature not found" });
+    }
+    return c.json({ feature, yaml: await readFeatureRaw(feature) });
+  });
+
+  router.put(
+    "/features/:id/file",
+    access("editor"),
+    zValidator("json", editFileSchema),
+    async (c) => {
+      const feature = await featuresRepository.getFeature(c.req.param("id"));
+      if (!feature) {
+        throw new HTTPException(404, { message: "Feature not found" });
+      }
+      const updated = await editFeatureFile(
+        feature,
+        c.req.valid("json").yaml
+      ).catch(mapManualError);
+      return c.json({ feature: updated });
+    }
+  );
+
+  router.delete("/features/:id", access("editor"), async (c) => {
+    try {
+      if (!(await deleteFeatureData(c.req.param("id")))) {
+        throw new HTTPException(404, { message: "Feature not found" });
+      }
+      return c.body(null, 204);
+    } catch (error) {
+      mapManualError(error);
+    }
+  });
+
+  return router;
+};
 
 const editFileSchema = z.object({ yaml: z.string().min(1) });
 
 const createFeatureSchema = z.object({
-    parentId: z.string().min(1).optional(),
-    title: z.string().min(1),
-    description: z.string().default(""),
+  parentId: z.string().min(1).optional(),
+  title: z.string().min(1),
+  description: z.string().default(""),
 });
 
 const updateFeatureSchema = z
-    .object({
-        title: z.string().min(1).optional(),
-        description: z.string().optional(),
-    })
-    .refine((value) => value.title !== undefined || value.description !== undefined, {
-        message: "Provide at least one of title or description",
-    });
-
-function mapManualError(error: unknown): never {
-    if (error instanceof HTTPException) throw error;
-    if (
-
-
-        error instanceof ResourceBusyError ||
-        error instanceof UnsafeRepoPathError
-    ) {
-        throw new HTTPException(409, { message: error.message });
+  .object({
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+  })
+  .refine(
+    (value) => value.title !== undefined || value.description !== undefined,
+    {
+      message: "Provide at least one of title or description",
     }
-    if (error instanceof YamlParseError) throw new HTTPException(400, { message: error.message });
-    if (error instanceof Error && /unfinished rebase|uncommitted changes/.test(error.message)) {
-        throw new HTTPException(409, { message: error.message });
-    }
-    throw error;
-}
-
-export function createFeaturesRouter(): Hono {
-    const router = new Hono();
-
-    router.post("/projects/:id/features", access("editor"), zValidator("json", createFeatureSchema), async (c) => {
-        const project = await projectsRepository.getProject(c.req.param("id"));
-        if (!project) throw new HTTPException(404, { message: "Project not found" });
-        const { parentId, title, description } = c.req.valid("json");
-        if (parentId) {
-            const parent = await featuresRepository.getFeature(parentId);
-            if (!parent || parent.projectId !== project.id) {
-                throw new HTTPException(404, { message: "Parent feature not found" });
-            }
-        }
-        const feature = await createFeatureInRepo(project.id, parentId ?? null, title, description).catch(mapManualError);
-        return c.json({ feature });
-    });
-
-    router.patch("/features/:id", access("editor"), zValidator("json", updateFeatureSchema), async (c) => {
-        const feature = await featuresRepository.getFeature(c.req.param("id"));
-        if (!feature) throw new HTTPException(404, { message: "Feature not found" });
-        const updated = await updateFeatureInRepo(feature, c.req.valid("json")).catch(mapManualError);
-        return c.json({ feature: updated });
-    });
-
-    router.get("/features/:id/file", access("viewer"), async (c) => {
-        const feature = await featuresRepository.getFeature(c.req.param("id"));
-        if (!feature) throw new HTTPException(404, { message: "Feature not found" });
-        return c.json({ feature, yaml: await readFeatureRaw(feature) });
-    });
-
-    router.put("/features/:id/file", access("editor"), zValidator("json", editFileSchema), async (c) => {
-        const feature = await featuresRepository.getFeature(c.req.param("id"));
-        if (!feature) throw new HTTPException(404, { message: "Feature not found" });
-        const updated = await editFeatureFile(feature, c.req.valid("json").yaml).catch(mapManualError);
-        return c.json({ feature: updated });
-    });
-
-    router.delete("/features/:id", access("editor"), async (c) => {
-        try {
-            if (!(await deleteFeatureData(c.req.param("id")))) {
-                throw new HTTPException(404, { message: "Feature not found" });
-            }
-            return c.body(null, 204);
-        } catch (error) {
-            mapManualError(error);
-        }
-    });
-
-    return router;
-}
+  );

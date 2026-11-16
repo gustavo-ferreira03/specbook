@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
+
 import { and, desc, eq } from "drizzle-orm";
+
+import { publishChatUpdate } from "../../core/chat/chat-registry";
+import { requireValue } from "../../core/utils/require-value";
 import { db } from "../db/client";
 import { projectSignals, projectStewards, stewardIntents } from "../db/schema";
-import { publishChatUpdate } from "../../core/chat/chat-registry";
 
 export type Steward = typeof projectStewards.$inferSelect;
 export type ProjectSignal = typeof projectSignals.$inferSelect;
@@ -10,41 +13,124 @@ export type Intent = typeof stewardIntents.$inferSelect;
 const now = () => new Date().toISOString();
 
 export const stewardRepository = {
-    async get(projectId: string): Promise<Steward> {
-        const select = async () => (await db.select().from(projectStewards).where(eq(projectStewards.projectId, projectId)))[0];
-        const existing = await select();
-        if (existing) return existing;
-        await db.insert(projectStewards).values({ projectId, updatedAt: now() }).onConflictDoNothing();
-        return (await select())!;
-    },
-    async update(projectId: string, patch: Partial<Pick<Steward, "autonomy" | "paused" | "observation">>) {
-        await this.get(projectId);
-        await db.update(projectStewards).set({ ...patch, updatedAt: now() }).where(eq(projectStewards.projectId, projectId));
-    },
-    async signal(input: Pick<ProjectSignal, "projectId" | "key" | "kind" | "title" | "body"> & { payload?: Record<string, unknown> }) {
-        await db.insert(projectSignals).values({ ...input, id: crypto.randomUUID(), createdAt: now() }).onConflictDoNothing();
-    },
-    async signals(projectId: string, limit: number | null = 300) {
-        const query = db.select().from(projectSignals).where(eq(projectSignals.projectId, projectId)).orderBy(desc(projectSignals.createdAt));
-        return limit === null ? query : query.limit(limit);
-    },
-    async pendingSignals(projectId: string) {
-        return db.select().from(projectSignals).where(and(eq(projectSignals.projectId, projectId), eq(projectSignals.status, "pending")));
-    },
-    async acknowledge(id: string, status: ProjectSignal["status"]) {
-        await db.update(projectSignals).set({ status }).where(eq(projectSignals.id, id));
-    },
-    async addIntent(input: Pick<Intent, "projectId" | "key" | "fingerprint" | "intent" | "priority" | "reason"> & Partial<Pick<Intent, "source" | "sourceChatId">>) {
-        await db.insert(stewardIntents).values({ ...input, id: crypto.randomUUID(), createdAt: now(), updatedAt: now() }).onConflictDoNothing();
-        const row = (await db.select().from(stewardIntents).where(and(eq(stewardIntents.projectId, input.projectId), eq(stewardIntents.key, input.key))))[0]!;
-        if (row.sourceChatId) publishChatUpdate(row.sourceChatId);
-        return row;
-    },
-    async intents(projectId: string) {
-        return db.select().from(stewardIntents).where(eq(stewardIntents.projectId, projectId)).orderBy(desc(stewardIntents.priority), desc(stewardIntents.createdAt));
-    },
-    async updateIntent(id: string, patch: Partial<Pick<Intent, "status" | "jobId" | "batchId" | "reason">>) {
-        const [row] = await db.update(stewardIntents).set({ ...patch, updatedAt: now() }).where(eq(stewardIntents.id, id)).returning();
-        if (row?.sourceChatId) publishChatUpdate(row.sourceChatId);
-    },
+  async get(projectId: string): Promise<Steward> {
+    const select = async () =>
+      await (async () => {
+        const awaitedValue612 = await db
+          .select()
+          .from(projectStewards)
+          .where(eq(projectStewards.projectId, projectId));
+        return awaitedValue612[0];
+      })();
+    const existing = await select();
+    if (existing) {
+      return existing;
+    }
+    await db
+      .insert(projectStewards)
+      .values({ projectId, updatedAt: now() })
+      .onConflictDoNothing();
+    return requireValue(await select());
+  },
+  async update(
+    projectId: string,
+    patch: Partial<Pick<Steward, "autonomy" | "paused" | "observation">>
+  ) {
+    await this.get(projectId);
+    await db
+      .update(projectStewards)
+      .set({ ...patch, updatedAt: now() })
+      .where(eq(projectStewards.projectId, projectId));
+  },
+  async signal(
+    input: Pick<
+      ProjectSignal,
+      "projectId" | "key" | "kind" | "title" | "body"
+    > & { payload?: Record<string, unknown> }
+  ) {
+    await db
+      .insert(projectSignals)
+      .values({ ...input, id: crypto.randomUUID(), createdAt: now() })
+      .onConflictDoNothing();
+  },
+  async signals(projectId: string, limit: number | null = 300) {
+    const query = db
+      .select()
+      .from(projectSignals)
+      .where(eq(projectSignals.projectId, projectId))
+      .orderBy(desc(projectSignals.createdAt));
+    return await (limit === null ? query : query.limit(limit));
+  },
+  async pendingSignals(projectId: string) {
+    return await db
+      .select()
+      .from(projectSignals)
+      .where(
+        and(
+          eq(projectSignals.projectId, projectId),
+          eq(projectSignals.status, "pending")
+        )
+      );
+  },
+  async acknowledge(id: string, status: ProjectSignal["status"]) {
+    await db
+      .update(projectSignals)
+      .set({ status })
+      .where(eq(projectSignals.id, id));
+  },
+  async addIntent(
+    input: Pick<
+      Intent,
+      "projectId" | "key" | "fingerprint" | "intent" | "priority" | "reason"
+    > &
+      Partial<Pick<Intent, "source" | "sourceChatId">>
+  ) {
+    await db
+      .insert(stewardIntents)
+      .values({
+        ...input,
+        id: crypto.randomUUID(),
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      .onConflictDoNothing();
+    const row = requireValue(
+      await (async () => {
+        const awaitedValue2755 = await db
+          .select()
+          .from(stewardIntents)
+          .where(
+            and(
+              eq(stewardIntents.projectId, input.projectId),
+              eq(stewardIntents.key, input.key)
+            )
+          );
+        return awaitedValue2755[0];
+      })()
+    );
+    if (row.sourceChatId) {
+      publishChatUpdate(row.sourceChatId);
+    }
+    return row;
+  },
+  async intents(projectId: string) {
+    return await db
+      .select()
+      .from(stewardIntents)
+      .where(eq(stewardIntents.projectId, projectId))
+      .orderBy(desc(stewardIntents.priority), desc(stewardIntents.createdAt));
+  },
+  async updateIntent(
+    id: string,
+    patch: Partial<Pick<Intent, "status" | "jobId" | "batchId" | "reason">>
+  ) {
+    const [row] = await db
+      .update(stewardIntents)
+      .set({ ...patch, updatedAt: now() })
+      .where(eq(stewardIntents.id, id))
+      .returning();
+    if (row?.sourceChatId) {
+      publishChatUpdate(row.sourceChatId);
+    }
+  },
 };

@@ -1,124 +1,263 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, runBatch, type DbQuery } from "../../infra/db/client";
+
+import { db, runBatch } from "../../infra/db/client";
+import type { DbQuery } from "../../infra/db/client";
 import { piAuthPath, storageRoot } from "../paths";
-import { clearEncryptionKeyCache, decryptWithKey, encryptionKeySource, encryptSecret, encryptWithKey, keyFingerprint, loadEncryptionKey, localKeyPath, parseEncryptionKey } from "./crypto";
+import {
+  clearEncryptionKeyCache,
+  decryptWithKey,
+  encryptionKeySource,
+  encryptSecret,
+  encryptWithKey,
+  keyFingerprint,
+  loadEncryptionKey,
+  localKeyPath,
+  parseEncryptionKey,
+} from "./crypto";
 import { writeProtectedFile } from "./files";
 import { encryptedColumns, transformSecretColumn } from "./locations";
 
-const rotationPath = path.join(storageRoot, "key-rotation.json");
-const rotationSchema = z.object({ from: z.string(), to: z.string(), previousKey: z.string(), nextKey: z.string() }).strict();
-
-export async function migrateCredentialFields(): Promise<void> {
-    const columns = await db.all<{ name: string }>(sql`PRAGMA table_info(credential_profiles)`);
-    if (columns.length === 0) return;
+export const migrateCredentialFields =
+  async function migrateCredentialFields(): Promise<void> {
+    const columns = await db.all<{ name: string }>(
+      sql`PRAGMA table_info(credential_profiles)`
+    );
+    if (columns.length === 0) {
+      return;
+    }
     const legacy = columns.some((column) => column.name === "identifier");
-    const rows = await db.all<{ id: string; fields: string; identifier?: string | null }>(sql.raw(
-        `SELECT id, fields${legacy ? ", identifier" : ""} FROM credential_profiles`,
-    ));
+    const rows = await db.all<{
+      id: string;
+      fields: string;
+      identifier?: string | null;
+    }>(
+      sql.raw(
+        `SELECT id, fields${legacy ? ", identifier" : ""} FROM credential_profiles`
+      )
+    );
     const queries: DbQuery[] = [];
     for (const row of rows) {
-        const fields = (JSON.parse(row.fields) as { key: string; value: string; sensitive?: boolean }[])
-            .map((field) => ({ ...field, sensitive: field.sensitive !== false }));
-        if (row.identifier) {
-            const username = { key: "username", value: encryptSecret(row.identifier), sensitive: false };
-            const index = fields.findIndex((field) => field.key === username.key);
-            if (index === -1) fields.unshift(username);
-            else fields[index] = username;
+      const fields = (
+        JSON.parse(row.fields) as {
+          key: string;
+          value: string;
+          sensitive?: boolean;
+        }[]
+      ).map((field) => ({ ...field, sensitive: field.sensitive !== false }));
+      if (row.identifier) {
+        const username = {
+          key: "username",
+          value: encryptSecret(row.identifier),
+          sensitive: false,
+        };
+        const index = fields.findIndex((field) => field.key === username.key);
+        if (index === -1) {
+          fields.unshift(username);
+        } else {
+          fields[index] = username;
         }
-        const serialized = JSON.stringify(fields);
-        if (serialized === row.fields && !row.identifier) continue;
-        queries.push(db.run(legacy
+      }
+      const serialized = JSON.stringify(fields);
+      if (serialized === row.fields && !row.identifier) {
+        continue;
+      }
+      queries.push(
+        db.run(
+          legacy
             ? sql`UPDATE credential_profiles SET fields = ${serialized}, identifier = NULL WHERE id = ${row.id}`
-            : sql`UPDATE credential_profiles SET fields = ${serialized} WHERE id = ${row.id}`));
+            : sql`UPDATE credential_profiles SET fields = ${serialized} WHERE id = ${row.id}`
+        )
+      );
     }
     await runBatch(queries);
-}
+  };
 
-async function readOptional(file: string): Promise<string | null> {
-    try { return await fs.readFile(file, "utf8"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
-}
-
-async function readOptionalKey(file: string): Promise<Buffer | null> {
-    try { return parseEncryptionKey(await fs.readFile(file)); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
-}
-
-async function reencryptStoredSecrets(target: Buffer, fallbacks: Buffer[]): Promise<void> {
-    const transform = (value: string): string => {
-        try { decryptWithKey(value, target); return value; } catch {}
-        for (const key of fallbacks) {
-            try { return encryptWithKey(decryptWithKey(value, key), target); } catch {}
-        }
-        throw new Error("Stored credentials could not be decrypted. Restore the matching encryption key before starting Specbook.");
-    };
-    const queries: DbQuery[] = [];
-    for (const field of encryptedColumns) {
-        const columns = await db.all<{ name: string }>(sql.raw(`PRAGMA table_info(${field.table})`));
-        if (!columns.some((column) => column.name === field.column)) continue;
-        const idColumn = "id" in field ? field.id : "id";
-        const rows = await db.all<{ id: string | number; value: string | null }>(sql.raw(`SELECT ${idColumn} AS id, ${field.column} AS value FROM ${field.table}`));
-        for (const row of rows) {
-            if (!row.value) continue;
-            const next = transformSecretColumn(row.value, "json" in field ? field.json : undefined, transform);
-            if (next !== row.value) queries.push(db.run(sql`UPDATE ${sql.raw(field.table)} SET ${sql.raw(field.column)} = ${next} WHERE ${sql.raw(idColumn)} = ${row.id}`));
-        }
+const readOptional = async function readOptional(
+  file: string
+): Promise<string | null> {
+  try {
+    return await fs.readFile(file, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
     }
-    const auth = await readOptional(piAuthPath);
-    let nextAuth: string | null = null;
-    if (auth !== null) {
-        if (auth.startsWith("v1:")) nextAuth = transform(auth);
-        else {
-            const parsed: unknown = JSON.parse(auth);
-            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("The saved model credentials file is invalid.");
-            nextAuth = encryptWithKey(JSON.stringify(parsed), target);
-        }
-    }
-    await runBatch(queries);
-    if (nextAuth !== null && nextAuth !== auth) await writeProtectedFile(piAuthPath, nextAuth);
-}
+    throw error;
+  }
+};
 
-async function finishRotation(record: z.infer<typeof rotationSchema>, current: Buffer): Promise<void> {
-    const fingerprint = keyFingerprint(current);
-    const old = fingerprint === record.from ? current : parseEncryptionKey(decryptWithKey(record.previousKey, current));
-    const next = fingerprint === record.to ? current : parseEncryptionKey(decryptWithKey(record.nextKey, current));
-    if (keyFingerprint(old) !== record.from || keyFingerprint(next) !== record.to) throw new Error("Key rotation does not match the configured encryption key.");
-    await reencryptStoredSecrets(next, [old]);
-    if (encryptionKeySource() === "local") {
-        await writeProtectedFile(localKeyPath, next);
-        clearEncryptionKeyCache();
-    } else if (fingerprint !== record.to) {
-        throw new Error("Key rotation is complete. Configure the new SPECBOOK_ENCRYPTION_KEY or SPECBOOK_ENCRYPTION_KEY_FILE before restarting Specbook.");
+const readOptionalKey = async function readOptionalKey(
+  file: string
+): Promise<Buffer | null> {
+  try {
+    return parseEncryptionKey(await fs.readFile(file));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
     }
+    throw error;
+  }
+};
+
+const reencryptStoredSecrets = async function reencryptStoredSecrets(
+  target: Buffer,
+  fallbacks: Buffer[]
+): Promise<void> {
+  const transform = (value: string): string => {
+    try {
+      decryptWithKey(value, target);
+      return value;
+    } catch {
+      /* Cleanup is best effort after the operation has completed or failed. */
+    }
+    for (const key of fallbacks) {
+      try {
+        return encryptWithKey(decryptWithKey(value, key), target);
+      } catch {
+        /* Cleanup is best effort after the operation has completed or failed. */
+      }
+    }
+    throw new Error(
+      "Stored credentials could not be decrypted. Restore the matching encryption key before starting Specbook."
+    );
+  };
+  const queries: DbQuery[] = [];
+  for (const field of encryptedColumns) {
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+    const columns = await db.all<{ name: string }>(
+      sql.raw(`PRAGMA table_info(${field.table})`)
+    );
+    if (!columns.some((column) => column.name === field.column)) {
+      continue;
+    }
+    const idColumn = "id" in field ? field.id : "id";
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+    const rows = await db.all<{ id: string | number; value: string | null }>(
+      sql.raw(
+        `SELECT ${idColumn} AS id, ${field.column} AS value FROM ${field.table}`
+      )
+    );
+    for (const row of rows) {
+      if (!row.value) {
+        continue;
+      }
+      const next = transformSecretColumn(
+        row.value,
+        "json" in field ? field.json : undefined,
+        transform
+      );
+      if (next !== row.value) {
+        queries.push(
+          db.run(
+            sql`UPDATE ${sql.raw(field.table)} SET ${sql.raw(field.column)} = ${next} WHERE ${sql.raw(idColumn)} = ${row.id}`
+          )
+        );
+      }
+    }
+  }
+  const auth = await readOptional(piAuthPath);
+  let nextAuth: string | null = null;
+  if (auth !== null) {
+    if (auth.startsWith("v1:")) {
+      nextAuth = transform(auth);
+    } else {
+      const parsed: unknown = JSON.parse(auth);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("The saved model credentials file is invalid.");
+      }
+      nextAuth = encryptWithKey(JSON.stringify(parsed), target);
+    }
+  }
+  await runBatch(queries);
+  if (nextAuth !== null && nextAuth !== auth) {
+    await writeProtectedFile(piAuthPath, nextAuth);
+  }
+};
+
+const finishRotation = async function finishRotation(
+  record: z.infer<typeof rotationSchema>,
+  current: Buffer
+): Promise<void> {
+  const fingerprint = keyFingerprint(current);
+  const old =
+    fingerprint === record.from
+      ? current
+      : parseEncryptionKey(decryptWithKey(record.previousKey, current));
+  const next =
+    fingerprint === record.to
+      ? current
+      : parseEncryptionKey(decryptWithKey(record.nextKey, current));
+  if (
+    keyFingerprint(old) !== record.from ||
+    keyFingerprint(next) !== record.to
+  ) {
+    throw new Error(
+      "Key rotation does not match the configured encryption key."
+    );
+  }
+  await reencryptStoredSecrets(next, [old]);
+  if (encryptionKeySource() === "local") {
+    await writeProtectedFile(localKeyPath, next);
+    clearEncryptionKeyCache();
+  } else if (fingerprint !== record.to) {
+    throw new Error(
+      "Key rotation is complete. Configure the new SPECBOOK_ENCRYPTION_KEY or SPECBOOK_ENCRYPTION_KEY_FILE before restarting Specbook."
+    );
+  }
+  await fs.rm(rotationPath, { force: true });
+};
+
+export const migrateSecrets = async function migrateSecrets(): Promise<void> {
+  const key = loadEncryptionKey();
+  const pending = await readOptional(rotationPath);
+  if (pending) {
+    await finishRotation(rotationSchema.parse(JSON.parse(pending)), key);
+  }
+  const target = loadEncryptionKey();
+  if (encryptionKeySource() === "local") {
+    return;
+  }
+  const local = await readOptionalKey(localKeyPath);
+  if (local) {
+    await reencryptStoredSecrets(target, [local]);
+  }
+  await fs.rm(localKeyPath, { force: true });
+};
+
+export const rotateEncryptionKey = async function rotateEncryptionKey(
+  next: Buffer
+): Promise<{ fingerprint: string; requiresConfiguration: boolean }> {
+  await migrateSecrets();
+  const current = loadEncryptionKey();
+  if (keyFingerprint(current) === keyFingerprint(next)) {
+    throw new Error("The new encryption key must differ from the current key.");
+  }
+  const record = {
+    from: keyFingerprint(current),
+    to: keyFingerprint(next),
+    previousKey: encryptWithKey(current.toString("base64"), next),
+    nextKey: encryptWithKey(next.toString("base64"), current),
+  };
+  await writeProtectedFile(rotationPath, JSON.stringify(record));
+  await reencryptStoredSecrets(next, [current]);
+  const requiresConfiguration = encryptionKeySource() !== "local";
+  if (!requiresConfiguration) {
+    await writeProtectedFile(localKeyPath, next);
+    clearEncryptionKeyCache();
     await fs.rm(rotationPath, { force: true });
-}
+  }
+  return { fingerprint: record.to, requiresConfiguration };
+};
 
-export async function migrateSecrets(): Promise<void> {
-    const key = loadEncryptionKey();
-    const pending = await readOptional(rotationPath);
-    if (pending) await finishRotation(rotationSchema.parse(JSON.parse(pending)), key);
-    const target = loadEncryptionKey();
-    if (encryptionKeySource() === "local") return;
-    const local = await readOptionalKey(localKeyPath);
-    if (local) await reencryptStoredSecrets(target, [local]);
-    await fs.rm(localKeyPath, { force: true });
-}
-
-export async function rotateEncryptionKey(next: Buffer): Promise<{ fingerprint: string; requiresConfiguration: boolean }> {
-    await migrateSecrets();
-    const current = loadEncryptionKey();
-    if (keyFingerprint(current) === keyFingerprint(next)) throw new Error("The new encryption key must differ from the current key.");
-    const record = { from: keyFingerprint(current), to: keyFingerprint(next), previousKey: encryptWithKey(current.toString("base64"), next), nextKey: encryptWithKey(next.toString("base64"), current) };
-    await writeProtectedFile(rotationPath, JSON.stringify(record));
-    await reencryptStoredSecrets(next, [current]);
-    const requiresConfiguration = encryptionKeySource() !== "local";
-    if (!requiresConfiguration) {
-        await writeProtectedFile(localKeyPath, next);
-        clearEncryptionKeyCache();
-        await fs.rm(rotationPath, { force: true });
-    }
-    return { fingerprint: record.to, requiresConfiguration };
-}
+const rotationPath = path.join(storageRoot, "key-rotation.json");
+const rotationSchema = z
+  .object({
+    from: z.string(),
+    to: z.string(),
+    previousKey: z.string(),
+    nextKey: z.string(),
+  })
+  .strict();

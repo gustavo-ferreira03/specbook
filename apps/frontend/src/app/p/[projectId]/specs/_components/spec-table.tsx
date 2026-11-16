@@ -1,228 +1,400 @@
 "use client";
 
-import { useDisplayStatus } from "@/lib/projectOverview";
-import { useAuth } from "@/components/AuthProvider";
-
-import Link from "next/link";
 import { Folder, LoaderCircle, Play } from "lucide-react";
-import { RelativeTime } from "@/components/RelativeTime";
-import { StatusPill } from "@/components/StatusPill";
+import Link from "next/link";
+
+import { useAuth } from "@/components/auth-provider";
+import { RelativeTime } from "@/components/relative-time";
+import { StatusPill } from "@/components/status-pill";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { countLabel, environmentLabel, formatDuration, formatNumber } from "@/lib/format";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  countLabel,
+  environmentLabel,
+  formatDuration,
+  formatNumber,
+} from "@/lib/format";
+import { useDisplayStatus } from "@/lib/project-overview";
+import { requiredValue } from "@/lib/required-value";
 import { SPEC_STATUS_ORDER, countStatuses, statusMeta } from "@/lib/status";
-import { cn } from "@/lib/utils";
 import type { Feature, Run, SpecSummary } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export type LastRuns = Record<string, Run | null | undefined>;
 
-export function lastRunsOf(specs: SpecSummary[]): LastRuns {
-    return Object.fromEntries(specs.map((spec) => [spec.id, spec.lastRun ?? null]));
-}
+export const lastRunsOf = function lastRunsOf(specs: SpecSummary[]): LastRuns {
+  return Object.fromEntries(
+    specs.map((spec) => [spec.id, spec.lastRun ?? null])
+  );
+};
 
-export function orderFeatures(features: Feature[], rootId: string | null = null): { feature: Feature; label: string; depth: number }[] {
-    const byParent = new Map<string | null, Feature[]>();
-    const known = new Set(features.map((feature) => feature.id));
-    for (const feature of features) {
-        const parent = feature.parentId && known.has(feature.parentId) ? feature.parentId : null;
-        byParent.set(parent, [...(byParent.get(parent) ?? []), feature]);
+export const orderFeatures = function orderFeatures(
+  features: Feature[],
+  rootId: string | null = null
+): { feature: Feature; label: string; depth: number }[] {
+  const byParent = new Map<string | null, Feature[]>();
+  const known = new Set(features.map((feature) => feature.id));
+  for (const feature of features) {
+    const parent =
+      feature.parentId && known.has(feature.parentId) ? feature.parentId : null;
+    byParent.set(parent, [...(byParent.get(parent) ?? []), feature]);
+  }
+  const result: { feature: Feature; label: string; depth: number }[] = [];
+  const visit = function visit(
+    parentId: string | null,
+    trail: string[],
+    depth: number
+  ) {
+    for (const feature of byParent.get(parentId) ?? []) {
+      const path = [...trail, feature.title];
+      result.push({ feature, label: path.join(" / "), depth });
+      visit(feature.id, path, depth + 1);
     }
-    const result: { feature: Feature; label: string; depth: number }[] = [];
-    function visit(parentId: string | null, trail: string[], depth: number) {
-        for (const feature of byParent.get(parentId) ?? []) {
-            const path = [...trail, feature.title];
-            result.push({ feature, label: path.join(" / "), depth });
-            visit(feature.id, path, depth + 1);
-        }
-    }
-    visit(rootId, [], 0);
-    return result;
-}
+  };
+  visit(rootId, [], 0);
+  return result;
+};
 
 export interface SpecGroup {
-    id: string;
-    title: React.ReactNode;
-    specs: SpecSummary[];
-    emptyText?: string;
+  id: string;
+  title: React.ReactNode;
+  specs: SpecSummary[];
+  emptyText?: string;
 }
 
-function canRun(spec: SpecSummary) {
-    return spec.status !== "invalid";
-}
+const canRun = function canRun(spec: SpecSummary) {
+  return spec.status !== "invalid";
+};
 
-function GroupSummary({ specs }: { specs: SpecSummary[] }) {
-    const counts = countStatuses(specs);
-    const problems = SPEC_STATUS_ORDER.filter((status) => status !== "passed" && (counts[status] ?? 0) > 0);
-    if (problems.length === 0) return null;
-    return (
-        <span className="hidden items-center gap-2.5 text-meta text-ink-muted sm:flex">
-            {problems.map((status) => {
-                const meta = statusMeta(status);
-                const Icon = meta.icon;
-                return (
-                    <span key={status} className="inline-flex items-center gap-1" title={meta.label}>
-                        <Icon size={12} strokeWidth={2.25} aria-hidden="true" className={meta.iconColor} />
-                        <span className="tabular">{formatNumber(counts[status] ?? 0)}</span>
-                        <span className="sr-only">{meta.label}</span>
-                    </span>
-                );
-            })}
-        </span>
-    );
-}
-
-function LastRunText({ run }: { run: Run | null | undefined }) {
-    if (run === undefined) return <Skeleton className="ml-auto h-3 w-20" />;
-    if (run === null) return <span className="text-ink-subtle" aria-label="Not run">—</span>;
-    return <span className="inline-flex flex-wrap items-center gap-x-1.5 lg:flex-col lg:items-end"><RelativeTime value={run.startedAt} />{environmentLabel(run.environment?.name) && <span className="text-meta text-ink-subtle" title={run.baseUrl ?? undefined}>{run.environment!.name}</span>}</span>;
-}
-
-function SpecRow({ projectId, spec, run, running, onRun }: { projectId: string; spec: SpecSummary; run: Run | null | undefined; running: boolean; onRun?: (spec: SpecSummary) => void }) {
-    const { canEdit } = useAuth();
-    const duration = run?.durationMs != null ? formatDuration(run.durationMs) : null;
-    const status = useDisplayStatus(spec);
-    return (
-        <li className="group/row relative flex items-center gap-3 border-b border-line px-4 py-2.5 transition-colors duration-150 hover:bg-surface-soft sm:gap-4">
-            <span className="hidden w-40 shrink-0 lg:flex">
-                <StatusPill status={status} size="sm" />
-            </span>
-            <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-2">
-                    <Link
-                        href={`/p/${projectId}/specs/${spec.id}`}
-                        className="min-w-0 flex-1 truncate rounded-sm text-body font-medium lg:flex-initial text-ink outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
-                    >
-                        {spec.title}
-                    </Link>
-                    {run?.flaky && <StatusPill status="flaky" size="sm" />}
-                    <span aria-hidden="true" className="toc-leader hidden lg:block" />
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted lg:hidden">
-                    <StatusPill status={status} size="sm" />
-                    <LastRunText run={run} />
-                    {duration && <><span aria-hidden="true" className="text-ink-disabled">·</span><span className="tabular">{duration}</span></>}
-                </div>
-            </div>
-            <span className="hidden w-32 shrink-0 text-right text-meta text-ink-muted lg:block">
-                <LastRunText run={run} />
-            </span>
-            <span className="hidden w-14 shrink-0 text-right text-meta text-ink-subtle tabular lg:block">
-                {duration ?? (run === undefined ? "" : "—")}
-            </span>
-            <span className="relative z-10 flex w-7 shrink-0 justify-end">
-                {canEdit && onRun && canRun(spec) && (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                aria-label={`Run ${spec.title}`}
-                                disabled={running}
-                                onClick={() => onRun(spec)}
-                                className="text-ink-subtle hover:text-ink disabled:opacity-45"
-                            >
-                                <Play size={13} />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Run</TooltipContent>
-                    </Tooltip>
-                )}
-            </span>
-        </li>
-    );
-}
-
-function GroupHeader({ group, chapter, running, onRunGroup }: { group: SpecGroup; chapter?: number; running: boolean; onRunGroup?: (group: SpecGroup) => void }) {
-    const { canEdit } = useAuth();
-    const runnable = group.specs.filter(canRun);
-    return (
-        <li className="flex min-h-11 items-center gap-2.5 border-b border-line bg-surface-soft px-4 py-1.5">
-            {chapter ? <span aria-hidden="true" className="tabular min-w-3.5 shrink-0 text-control font-semibold text-ink-subtle">{chapter}</span> : <Folder size={14} aria-hidden="true" className="shrink-0 text-ink-subtle" />}
-            <h2 className="min-w-0 truncate text-control font-semibold text-ink">
-                {group.title}
-            </h2>
-            <span className="tabular text-meta text-ink-subtle" aria-label={countLabel(group.specs.length, "Spec")}>{formatNumber(group.specs.length)}</span>
-            <span className="flex-1" />
-            <GroupSummary specs={group.specs} />
-            {canEdit && onRunGroup && runnable.length > 0 && (
-                <Button type="button" variant="ghost" size="sm" className="-mr-2 h-7 px-2" disabled={running} onClick={() => onRunGroup(group)} aria-label={`Run ${countLabel(runnable.length, "Spec")} in ${typeof group.title === "string" ? group.title : "this feature"}`}>
-                    <Play size={12} /> Run
-                </Button>
-            )}
-        </li>
-    );
-}
-
-export function SpecTable({
-    projectId,
-    groups,
-    lastRuns,
-    running,
-    onRunSpec,
-    onRunGroup,
-    label,
-    className,
+const GroupSummary = function GroupSummary({
+  specs,
 }: {
-    projectId: string;
-    groups: SpecGroup[];
-    lastRuns: LastRuns;
-    running: boolean;
-    onRunSpec?: (spec: SpecSummary) => void;
-    onRunGroup?: (group: SpecGroup) => void;
-    label: string;
-    className?: string;
+  specs: SpecSummary[];
 }) {
+  const counts = countStatuses(specs);
+  const problems = SPEC_STATUS_ORDER.filter(
+    (status) => status !== "passed" && (counts[status] ?? 0) > 0
+  );
+  if (problems.length === 0) {
+    return null;
+  }
+  return (
+    <span className="text-meta text-ink-muted hidden items-center gap-2.5 sm:flex">
+      {problems.map((status) => {
+        const meta = statusMeta(status);
+        const Icon = meta.icon;
+        return (
+          <span
+            key={status}
+            className="inline-flex items-center gap-1"
+            title={meta.label}
+          >
+            <Icon
+              size={12}
+              strokeWidth={2.25}
+              aria-hidden="true"
+              className={meta.iconColor}
+            />
+            <span className="tabular">{formatNumber(counts[status] ?? 0)}</span>
+            <span className="sr-only">{meta.label}</span>
+          </span>
+        );
+      })}
+    </span>
+  );
+};
+
+const LastRunText = function LastRunText({
+  run,
+}: {
+  run: Run | null | undefined;
+}) {
+  if (run === undefined) {
+    return <Skeleton className="ml-auto h-3 w-20" />;
+  }
+  if (run === null) {
     return (
-        <div className={cn("sheet overflow-hidden rounded-xl bg-surface", className)}>
-            <div aria-hidden="true" className="hidden items-center gap-4 border-b border-line px-4 py-2 text-meta font-semibold text-ink-subtle lg:flex">
-                <span className="w-40 shrink-0">Status</span>
-                <span className="flex-1">Spec</span>
-                <span className="w-32 shrink-0 text-right">Last run</span>
-                <span className="w-14 shrink-0 text-right">Duration</span>
-                <span className="w-7 shrink-0" />
-            </div>
-            <ul aria-label={label} className="[&>li:last-child>ul>li:last-child]:border-b-0">
-                {groups.map((group, index) => (
-                    <li key={group.id} id={`feature-${group.id}`} className="scroll-mt-4">
-                        <ul aria-label={typeof group.title === "string" ? group.title : undefined}>
-                            <GroupHeader group={group} chapter={group.id === "__orphans__" ? undefined : index + 1} running={running} onRunGroup={onRunGroup} />
-                            {group.specs.length === 0 ? (
-                                <li className="border-b border-line px-4 py-3 text-control text-ink-subtle">{group.emptyText ?? "No Specs yet."}</li>
-                            ) : (
-                                group.specs.map((spec) => (
-                                    <SpecRow key={spec.id} projectId={projectId} spec={spec} run={lastRuns[spec.id]} running={running} onRun={onRunSpec} />
-                                ))
-                            )}
-                        </ul>
-                    </li>
-                ))}
+      <span className="text-ink-subtle" aria-label="Not run">
+        —
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-1.5 lg:flex-col lg:items-end">
+      <RelativeTime value={run.startedAt} />
+      {environmentLabel(run.environment?.name) && (
+        <span
+          className="text-meta text-ink-subtle"
+          title={run.baseUrl ?? undefined}
+        >
+          {requiredValue(run.environment).name}
+        </span>
+      )}
+    </span>
+  );
+};
+
+const SpecRow = function SpecRow({
+  projectId,
+  spec,
+  run,
+  running,
+  onRun,
+}: {
+  projectId: string;
+  spec: SpecSummary;
+  run: Run | null | undefined;
+  running: boolean;
+  onRun?: (spec: SpecSummary) => void;
+}) {
+  const { canEdit } = useAuth();
+  const duration =
+    run?.durationMs === null || run?.durationMs === undefined
+      ? null
+      : formatDuration(run.durationMs);
+  const status = useDisplayStatus(spec);
+  return (
+    <li className="group/row border-line hover:bg-surface-soft relative flex items-center gap-3 border-b px-4 py-2.5 transition-colors duration-150 sm:gap-4">
+      <span className="hidden w-40 shrink-0 lg:flex">
+        <StatusPill status={status} size="sm" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <Link
+            href={`/p/${projectId}/specs/${spec.id}`}
+            className="text-body text-ink focus-visible:after:ring-ring min-w-0 flex-1 truncate rounded-sm font-medium outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-inset lg:flex-initial"
+          >
+            {spec.title}
+          </Link>
+          {run?.flaky && <StatusPill status="flaky" size="sm" />}
+          <span aria-hidden="true" className="toc-leader hidden lg:block" />
+        </div>
+        <div className="text-meta text-ink-muted mt-1 flex flex-wrap items-center gap-2 lg:hidden">
+          <StatusPill status={status} size="sm" />
+          <LastRunText run={run} />
+          {duration && (
+            <>
+              <span aria-hidden="true" className="text-ink-disabled">
+                ·
+              </span>
+              <span className="tabular">{duration}</span>
+            </>
+          )}
+        </div>
+      </div>
+      <span className="text-meta text-ink-muted hidden w-32 shrink-0 text-right lg:block">
+        <LastRunText run={run} />
+      </span>
+      <span className="text-meta text-ink-subtle tabular hidden w-14 shrink-0 text-right lg:block">
+        {duration ?? (run === undefined ? "" : "—")}
+      </span>
+      <span className="relative z-10 flex w-7 shrink-0 justify-end">
+        {canEdit && onRun && canRun(spec) && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Run ${spec.title}`}
+                disabled={running}
+                onClick={() => onRun(spec)}
+                className="text-ink-subtle hover:text-ink disabled:opacity-45"
+              >
+                <Play size={13} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Run</TooltipContent>
+          </Tooltip>
+        )}
+      </span>
+    </li>
+  );
+};
+
+const GroupHeader = function GroupHeader({
+  group,
+  chapter,
+  running,
+  onRunGroup,
+}: {
+  group: SpecGroup;
+  chapter?: number;
+  running: boolean;
+  onRunGroup?: (group: SpecGroup) => void;
+}) {
+  const { canEdit } = useAuth();
+  const runnable = group.specs.filter(canRun);
+  return (
+    <li className="border-line bg-surface-soft flex min-h-11 items-center gap-2.5 border-b px-4 py-1.5">
+      {chapter ? (
+        <span
+          aria-hidden="true"
+          className="tabular text-control text-ink-subtle min-w-3.5 shrink-0 font-semibold"
+        >
+          {chapter}
+        </span>
+      ) : (
+        <Folder
+          size={14}
+          aria-hidden="true"
+          className="text-ink-subtle shrink-0"
+        />
+      )}
+      <h2 className="text-control text-ink min-w-0 truncate font-semibold">
+        {group.title}
+      </h2>
+      <span
+        className="tabular text-meta text-ink-subtle"
+        aria-label={countLabel(group.specs.length, "Spec")}
+      >
+        {formatNumber(group.specs.length)}
+      </span>
+      <span className="flex-1" />
+      <GroupSummary specs={group.specs} />
+      {canEdit && onRunGroup && runnable.length > 0 && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-mr-2 h-7 px-2"
+          disabled={running}
+          onClick={() => onRunGroup(group)}
+          aria-label={`Run ${countLabel(runnable.length, "Spec")} in ${typeof group.title === "string" ? group.title : "this feature"}`}
+        >
+          <Play size={12} /> Run
+        </Button>
+      )}
+    </li>
+  );
+};
+
+export const SpecTable = function SpecTable({
+  projectId,
+  groups,
+  lastRuns,
+  running,
+  onRunSpec,
+  onRunGroup,
+  label,
+  className,
+}: {
+  projectId: string;
+  groups: SpecGroup[];
+  lastRuns: LastRuns;
+  running: boolean;
+  onRunSpec?: (spec: SpecSummary) => void;
+  onRunGroup?: (group: SpecGroup) => void;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("sheet bg-surface overflow-hidden rounded-xl", className)}
+    >
+      <div
+        aria-hidden="true"
+        className="border-line text-meta text-ink-subtle hidden items-center gap-4 border-b px-4 py-2 font-semibold lg:flex"
+      >
+        <span className="w-40 shrink-0">Status</span>
+        <span className="flex-1">Spec</span>
+        <span className="w-32 shrink-0 text-right">Last run</span>
+        <span className="w-14 shrink-0 text-right">Duration</span>
+        <span className="w-7 shrink-0" />
+      </div>
+      <ul
+        aria-label={label}
+        className="[&>li:last-child>ul>li:last-child]:border-b-0"
+      >
+        {groups.map((group, index) => (
+          <li key={group.id} id={`feature-${group.id}`} className="scroll-mt-4">
+            <ul
+              aria-label={
+                typeof group.title === "string" ? group.title : undefined
+              }
+            >
+              <GroupHeader
+                group={group}
+                chapter={group.id === "__orphans__" ? undefined : index + 1}
+                running={running}
+                onRunGroup={onRunGroup}
+              />
+              {group.specs.length === 0 ? (
+                <li className="border-line text-control text-ink-subtle border-b px-4 py-3">
+                  {group.emptyText ?? "No Specs yet."}
+                </li>
+              ) : (
+                group.specs.map((spec) => (
+                  <SpecRow
+                    key={spec.id}
+                    projectId={projectId}
+                    spec={spec}
+                    run={lastRuns[spec.id]}
+                    running={running}
+                    onRun={onRunSpec}
+                  />
+                ))
+              )}
             </ul>
-        </div>
-    );
-}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
 
-export function SpecTableSkeleton({ groups = 3, rows = 3 }: { groups?: number; rows?: number }) {
-    return (
-        <div className="overflow-hidden rounded-xl border border-line" aria-hidden="true">
-            <div className="hidden h-9 border-b border-line sm:block" />
-            {Array.from({ length: groups }).map((_, group) => (
-                <div key={group}>
-                    <div className="flex h-11 items-center gap-2.5 border-b border-line bg-surface-soft px-4"><Skeleton className="h-3.5 w-32" /></div>
-                    {Array.from({ length: rows }).map((_, row) => (
-                        <div key={row} className="flex h-12 items-center gap-4 border-b border-line px-4 last:border-0">
-                            <Skeleton className="hidden h-5 w-16 rounded-full sm:block" />
-                            <Skeleton className="h-3.5 flex-1 sm:max-w-72" />
-                            <Skeleton className="hidden h-3 w-20 sm:block" />
-                        </div>
-                    ))}
-                </div>
-            ))}
+export const SpecTableSkeleton = function SpecTableSkeleton({
+  groups = 3,
+  rows = 3,
+}: {
+  groups?: number;
+  rows?: number;
+}) {
+  return (
+    <div
+      className="border-line overflow-hidden rounded-xl border"
+      aria-hidden="true"
+    >
+      <div className="border-line hidden h-9 border-b sm:block" />
+      {Array.from({ length: groups }).map((_, group) => (
+        <div key={group}>
+          <div className="border-line bg-surface-soft flex h-11 items-center gap-2.5 border-b px-4">
+            <Skeleton className="h-3.5 w-32" />
+          </div>
+          {Array.from({ length: rows }).map((_Value, row) => (
+            <div
+              key={row}
+              className="border-line flex h-12 items-center gap-4 border-b px-4 last:border-0"
+            >
+              <Skeleton className="hidden h-5 w-16 rounded-full sm:block" />
+              <Skeleton className="h-3.5 flex-1 sm:max-w-72" />
+              <Skeleton className="hidden h-3 w-20 sm:block" />
+            </div>
+          ))}
         </div>
-    );
-}
+      ))}
+    </div>
+  );
+};
 
-export function RunningIcon({ running, size = 13 }: { running: boolean; size?: number }) {
-    return running ? <LoaderCircle size={size} className="animate-spin motion-reduce:animate-none" /> : <Play size={size} />;
-}
+export const RunningIcon = function RunningIcon({
+  running,
+  size = 13,
+}: {
+  running: boolean;
+  size?: number;
+}) {
+  return running ? (
+    <LoaderCircle
+      size={size}
+      className="animate-spin motion-reduce:animate-none"
+    />
+  ) : (
+    <Play size={size} />
+  );
+};

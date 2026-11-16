@@ -1,193 +1,310 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { storageRoot } from "../paths";
-import { isChatBusy, publishChatUpdate, releaseChatTurn, tryReserveChatTurn } from "../chat/chat-registry";
-import { launchBrowserMcp, type BrowserMcp } from "./mcp";
-import { BrowserUnavailableError, getVncSession, hasVncViewers, startVncStack, stopVncStack, type VncSession } from "./vnc";
+
 import type { RunEnvironment } from "../../infra/db/schema";
+import {
+  isChatBusy,
+  publishChatUpdate,
+  releaseChatTurn,
+  tryReserveChatTurn,
+} from "../chat/chat-registry";
+import { storageRoot } from "../paths";
 import { createEnvironmentTunnelProxy } from "../tunnel/registry";
+import { launchBrowserMcp } from "./mcp";
+import type { BrowserMcp } from "./mcp";
+import {
+  BrowserUnavailableError,
+  getVncSession,
+  hasVncViewers,
+  startVncStack,
+  stopVncStack,
+} from "./vnc";
+import type { VncSession } from "./vnc";
+
+export const removeInactiveBrowserData =
+  async function removeInactiveBrowserData(
+    chatId: string,
+    before: number
+  ): Promise<boolean> {
+    const directory = path.join(storageRoot, "chat", "browser", chatId);
+    const stat = await fs.lstat(directory).catch(() => null);
+    if (
+      !stat?.isDirectory() ||
+      stat.mtimeMs >= before ||
+      browsers.has(chatId) ||
+      pending.has(chatId) ||
+      closing.has(chatId) ||
+      deletingChats.has(chatId)
+    ) {
+      return false;
+    }
+    if (!tryReserveChatTurn(chatId)) {
+      return false;
+    }
+    try {
+      await fs.rm(directory, { recursive: true, force: true });
+      return true;
+    } finally {
+      releaseChatTurn(chatId);
+    }
+  };
+
+const touchChatBrowser = function touchChatBrowser(
+  chatId: string,
+  browser: ChatBrowser
+): void {
+  clearTimeout(browser.idleTimer);
+  browser.idleTimer = setTimeout(() => {
+    if (
+      isChatBusy(chatId) ||
+      browser.activeTools.size > 0 ||
+      hasVncViewers(browser.vnc.id)
+    ) {
+      touchChatBrowser(chatId, browser);
+    } else {
+      closeChatBrowser(chatId);
+    }
+  }, BROWSER_IDLE_MS);
+  browser.idleTimer.unref();
+};
+
+export const getChatBrowser = async function getChatBrowser(
+  chatId: string
+): Promise<ChatBrowser | null> {
+  if (deletingChats.has(chatId)) {
+    return null;
+  }
+  const browser = browsers.get(chatId);
+  if (!browser) {
+    return null;
+  }
+  const turnActive = isChatBusy(chatId);
+  if (!getVncSession(browser.vnc.id)) {
+    if (!turnActive) {
+      closeChatBrowser(chatId);
+    }
+    return null;
+  }
+  if (!turnActive && Date.now() - browser.lastHealthCheck >= 5000) {
+    try {
+      await browser.mcp.client.listTools();
+      browser.lastHealthCheck = Date.now();
+    } catch {
+      await closeChatBrowser(chatId);
+      return null;
+    }
+  }
+  touchChatBrowser(chatId, browser);
+  return browser;
+};
+
+export const getOrCreateChatBrowser = async function getOrCreateChatBrowser(
+  chatId: string,
+  navigationOrigins: string[],
+  environment?: RunEnvironment
+): Promise<ChatBrowser> {
+  await closing.get(chatId);
+  if (deletingChats.has(chatId)) {
+    throw new Error("Chat is being deleted");
+  }
+  const navigationPolicy = `${environment?.executor === "tunnel" ? environment.id : "server"}:${[...new Set(navigationOrigins)].toSorted().join(";")}`;
+  const existing = browsers.get(chatId);
+  if (existing) {
+    if (
+      !getVncSession(existing.vnc.id) ||
+      existing.navigationPolicy !== navigationPolicy
+    ) {
+      await closeChatBrowser(chatId);
+    } else {
+      try {
+        await existing.mcp.client.listTools();
+        touchChatBrowser(chatId, existing);
+        return existing;
+      } catch {
+        await closeChatBrowser(chatId);
+      }
+    }
+  }
+  const inFlight = pending.get(chatId);
+  if (inFlight) {
+    const browser = await inFlight;
+    return browser.navigationPolicy === navigationPolicy
+      ? browser
+      : getOrCreateChatBrowser(chatId, navigationOrigins, environment);
+  }
+  const promise = (async () => {
+    const proxy =
+      environment?.executor === "tunnel"
+        ? await createEnvironmentTunnelProxy(environment)
+        : undefined;
+    const vnc = await startVncStack().catch(async (error) => {
+      await proxy?.close();
+      throw error;
+    });
+    const workDir = path.join(storageRoot, "chat", "browser", chatId);
+    try {
+      await fs.rm(path.join(workDir, "profile"), {
+        recursive: true,
+        force: true,
+      });
+      const mcp = await launchBrowserMcp({
+        workDir,
+        display: vnc.display,
+        navigationOrigins,
+        proxyServer: proxy?.server,
+      });
+      if (deletingChats.has(chatId)) {
+        await mcp.close();
+        await stopVncStack(vnc.id);
+        throw new Error("Chat is being deleted");
+      }
+      const idleTimer = setTimeout(() => {
+        /* No action is needed until this callback is replaced or invoked by its owner. */
+      }, BROWSER_IDLE_MS);
+      idleTimer.unref();
+      const record: ChatBrowser = {
+        vnc,
+        mcp,
+        workDir,
+        idleTimer,
+        lastHealthCheck: Date.now(),
+        activeTools: new Map(),
+        navigationPolicy,
+        proxy,
+      };
+      browsers.set(chatId, record);
+      touchChatBrowser(chatId, record);
+      return record;
+    } catch (error) {
+      await proxy?.close();
+      await stopVncStack(vnc.id);
+      if (deletingChats.has(chatId)) {
+        throw error;
+      }
+      throw error instanceof BrowserUnavailableError
+        ? error
+        : new BrowserUnavailableError(error);
+    }
+  })();
+  pending.set(chatId, promise);
+  try {
+    return await promise;
+  } finally {
+    pending.delete(chatId);
+  }
+};
+
+export const closeChatBrowser = async function closeChatBrowser(
+  chatId: string
+): Promise<void> {
+  const inFlight = closing.get(chatId);
+  if (inFlight) {
+    return inFlight;
+  }
+  const record = browsers.get(chatId);
+  if (!record) {
+    return;
+  }
+  browsers.delete(chatId);
+  record.activeTools.clear();
+  clearTimeout(record.idleTimer);
+  const task = (async () => {
+    try {
+      await record.mcp.close();
+    } finally {
+      await record.proxy?.close();
+      await stopVncStack(record.vnc.id);
+    }
+  })();
+  closing.set(chatId, task);
+  try {
+    await task;
+  } finally {
+    closing.delete(chatId);
+    publishChatUpdate(chatId);
+  }
+};
+
+export const beginChatBrowserTool = function beginChatBrowserTool(
+  chatId: string,
+  toolName: string
+): void {
+  const browser = browsers.get(chatId);
+  if (!browser) {
+    return;
+  }
+  browser.activeTools.set(
+    toolName,
+    (browser.activeTools.get(toolName) ?? 0) + 1
+  );
+  touchChatBrowser(chatId, browser);
+};
+
+export const endChatBrowserTool = function endChatBrowserTool(
+  chatId: string,
+  toolName: string
+): void {
+  const browser = browsers.get(chatId);
+  if (!browser) {
+    return;
+  }
+  const count = browser.activeTools.get(toolName) ?? 0;
+  if (count <= 1) {
+    browser.activeTools.delete(toolName);
+  } else {
+    browser.activeTools.set(toolName, count - 1);
+  }
+  touchChatBrowser(chatId, browser);
+};
+
+export const blockChatBrowser = async function blockChatBrowser(
+  chatId: string
+): Promise<void> {
+  deletingChats.add(chatId);
+  await pending.get(chatId)?.catch(() => {
+    /* No action is needed until this callback is replaced or invoked by its owner. */
+  });
+  await closeChatBrowser(chatId);
+};
+
+export const cancelChatBrowserDeletion = function cancelChatBrowserDeletion(
+  chatId: string
+): void {
+  deletingChats.delete(chatId);
+};
+
+export const removeChatBrowserData = async function removeChatBrowserData(
+  chatId: string
+): Promise<void> {
+  const root = path.resolve(storageRoot, "chat", "browser");
+  const directory = path.resolve(root, chatId);
+  if (path.dirname(directory) !== root) {
+    throw new Error("Invalid chat browser directory");
+  }
+  await fs.rm(directory, { recursive: true, force: true });
+};
+
+export const closeAllChatBrowsers =
+  async function closeAllChatBrowsers(): Promise<void> {
+    await Promise.allSettled(pending.values());
+    await Promise.all([...browsers.keys()].map(closeChatBrowser));
+    await Promise.allSettled(closing.values());
+  };
 
 const BROWSER_IDLE_MS = 10 * 60 * 1000;
 
 interface ChatBrowser {
-    vnc: VncSession;
-    mcp: BrowserMcp;
-    workDir: string;
-    idleTimer: NodeJS.Timeout;
-    lastHealthCheck: number;
-    activeTools: Map<string, number>;
-    navigationPolicy: string;
-    proxy?: Awaited<ReturnType<typeof createEnvironmentTunnelProxy>>;
+  vnc: VncSession;
+  mcp: BrowserMcp;
+  workDir: string;
+  idleTimer: NodeJS.Timeout;
+  lastHealthCheck: number;
+  activeTools: Map<string, number>;
+  navigationPolicy: string;
+  proxy?: Awaited<ReturnType<typeof createEnvironmentTunnelProxy>>;
 }
 
 const browsers = new Map<string, ChatBrowser>();
 const pending = new Map<string, Promise<ChatBrowser>>();
 const closing = new Map<string, Promise<void>>();
 const deletingChats = new Set<string>();
-
-export async function removeInactiveBrowserData(chatId: string, before: number): Promise<boolean> {
-    const directory = path.join(storageRoot, "chat", "browser", chatId);
-    const stat = await fs.lstat(directory).catch(() => null);
-    if (!stat?.isDirectory() || stat.mtimeMs >= before || browsers.has(chatId) || pending.has(chatId) || closing.has(chatId) || deletingChats.has(chatId)) return false;
-    if (!tryReserveChatTurn(chatId)) return false;
-    try { await fs.rm(directory, { recursive: true, force: true }); return true; }
-    finally { releaseChatTurn(chatId); }
-}
-
-function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
-    clearTimeout(browser.idleTimer);
-    browser.idleTimer = setTimeout(() => {
-        if (isChatBusy(chatId) || browser.activeTools.size > 0 || hasVncViewers(browser.vnc.id)) touchChatBrowser(chatId, browser);
-        else void closeChatBrowser(chatId);
-    }, BROWSER_IDLE_MS);
-    browser.idleTimer.unref();
-}
-
-export async function getChatBrowser(chatId: string): Promise<ChatBrowser | null> {
-    if (deletingChats.has(chatId)) return null;
-    const browser = browsers.get(chatId);
-    if (!browser) return null;
-    const turnActive = isChatBusy(chatId);
-    if (!getVncSession(browser.vnc.id)) {
-        if (!turnActive) void closeChatBrowser(chatId);
-        return null;
-    }
-    if (!turnActive && Date.now() - browser.lastHealthCheck >= 5000) {
-        try {
-            await browser.mcp.client.listTools();
-            browser.lastHealthCheck = Date.now();
-        } catch {
-            await closeChatBrowser(chatId);
-            return null;
-        }
-    }
-    touchChatBrowser(chatId, browser);
-    return browser;
-}
-
-export async function getOrCreateChatBrowser(chatId: string, navigationOrigins: string[], environment?: RunEnvironment): Promise<ChatBrowser> {
-    await closing.get(chatId);
-    if (deletingChats.has(chatId)) throw new Error("Chat is being deleted");
-    const navigationPolicy = `${environment?.executor === "tunnel" ? environment.id : "server"}:${[...new Set(navigationOrigins)].sort().join(";")}`;
-    const existing = browsers.get(chatId);
-    if (existing) {
-        if (!getVncSession(existing.vnc.id) || existing.navigationPolicy !== navigationPolicy) {
-            await closeChatBrowser(chatId);
-        } else {
-            try {
-                await existing.mcp.client.listTools();
-                touchChatBrowser(chatId, existing);
-                return existing;
-            } catch {
-                await closeChatBrowser(chatId);
-            }
-        }
-    }
-    const inFlight = pending.get(chatId);
-    if (inFlight) {
-        const browser = await inFlight;
-        return browser.navigationPolicy === navigationPolicy ? browser : getOrCreateChatBrowser(chatId, navigationOrigins, environment);
-    }
-    const promise = (async () => {
-        const proxy = environment?.executor === "tunnel" ? await createEnvironmentTunnelProxy(environment) : undefined;
-        const vnc = await startVncStack().catch(async (error) => { await proxy?.close(); throw error; });
-        const workDir = path.join(storageRoot, "chat", "browser", chatId);
-        try {
-            await fs.rm(path.join(workDir, "profile"), { recursive: true, force: true });
-            const mcp = await launchBrowserMcp({ workDir, display: vnc.display, navigationOrigins, proxyServer: proxy?.server });
-            if (deletingChats.has(chatId)) {
-                await mcp.close();
-                await stopVncStack(vnc.id);
-                throw new Error("Chat is being deleted");
-            }
-            const idleTimer = setTimeout(() => undefined, BROWSER_IDLE_MS);
-            idleTimer.unref();
-            const record: ChatBrowser = {
-                vnc,
-                mcp,
-                workDir,
-                idleTimer,
-                lastHealthCheck: Date.now(),
-                activeTools: new Map(),
-                navigationPolicy,
-                proxy,
-            };
-            browsers.set(chatId, record);
-            touchChatBrowser(chatId, record);
-            return record;
-        } catch (error) {
-            await proxy?.close();
-            await stopVncStack(vnc.id);
-            if (deletingChats.has(chatId)) throw error;
-            throw error instanceof BrowserUnavailableError ? error : new BrowserUnavailableError(error);
-        }
-    })();
-    pending.set(chatId, promise);
-    try {
-        return await promise;
-    } finally {
-        pending.delete(chatId);
-    }
-}
-
-export async function closeChatBrowser(chatId: string): Promise<void> {
-    const inFlight = closing.get(chatId);
-    if (inFlight) return inFlight;
-    const record = browsers.get(chatId);
-    if (!record) return;
-    browsers.delete(chatId);
-    record.activeTools.clear();
-    clearTimeout(record.idleTimer);
-    const task = (async () => {
-        try {
-            await record.mcp.close();
-        } finally {
-            await record.proxy?.close();
-            await stopVncStack(record.vnc.id);
-        }
-    })();
-    closing.set(chatId, task);
-    try { await task; } finally {
-        closing.delete(chatId);
-        publishChatUpdate(chatId);
-    }
-}
-
-export function beginChatBrowserTool(chatId: string, toolName: string): void {
-    const browser = browsers.get(chatId);
-    if (!browser) return;
-    browser.activeTools.set(toolName, (browser.activeTools.get(toolName) ?? 0) + 1);
-    touchChatBrowser(chatId, browser);
-}
-
-export function endChatBrowserTool(chatId: string, toolName: string): void {
-    const browser = browsers.get(chatId);
-    if (!browser) return;
-    const count = browser.activeTools.get(toolName) ?? 0;
-    if (count <= 1) browser.activeTools.delete(toolName);
-    else browser.activeTools.set(toolName, count - 1);
-    touchChatBrowser(chatId, browser);
-}
-
-export async function blockChatBrowser(chatId: string): Promise<void> {
-    deletingChats.add(chatId);
-    await pending.get(chatId)?.catch(() => undefined);
-    await closeChatBrowser(chatId);
-}
-
-export function cancelChatBrowserDeletion(chatId: string): void {
-    deletingChats.delete(chatId);
-}
-
-export async function removeChatBrowserData(chatId: string): Promise<void> {
-    const root = path.resolve(storageRoot, "chat", "browser");
-    const directory = path.resolve(root, chatId);
-    if (path.dirname(directory) !== root) throw new Error("Invalid chat browser directory");
-    await fs.rm(directory, { recursive: true, force: true });
-}
-
-export async function closeAllChatBrowsers(): Promise<void> {
-    await Promise.allSettled([...pending.values()]);
-    await Promise.all([...browsers.keys()].map(closeChatBrowser));
-    await Promise.allSettled([...closing.values()]);
-}

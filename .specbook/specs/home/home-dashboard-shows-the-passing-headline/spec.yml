@@ -1,8 +1,8 @@
 title: Home dashboard shows the passing headline
 description: The project Home dashboard summarizes the passing Specs.
 preconditions:
-- Signed in as the Specbook administrator
+  - Signed in as the Specbook administrator
 steps:
-- Open the project Home dashboard
+  - Open the project Home dashboard
 expectedResult: The dashboard headline says every Spec is passing
 postconditions: []

@@ -1,437 +1,822 @@
 import crypto from "node:crypto";
+
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { SECRET_NAME_PATTERN } from "@specbook/runtime/specbook/guard";
 import { z } from "zod";
-import { extractMcpText, getActiveTabUrl, renderMcpResult, type BrowserMcp } from "../browser/mcp";
-import { registerCredentialRequest, resolveCredentialRequest, waitForCredentialRequest, type CredentialRequestField, type CredentialRequestKind } from "./credential-requests";
+
+import type { RunEnvironment } from "../../infra/db/schema";
+import type { CredentialProfileRow } from "../../infra/repositories/credentials";
+import {
+  extractMcpText,
+  getActiveTabUrl,
+  renderMcpResult,
+} from "../browser/mcp";
+import type { BrowserMcp } from "../browser/mcp";
 import { decryptSecret } from "../credentials/crypto";
 import {
-    classifyOtpControls,
-    fillFunction,
-    inspectionFunction,
-    loginFieldKeys,
-    parsePageControls,
-    selectLoginFills,
-    selectOtpFills,
-    type ControlFill,
+  classifyOtpControls,
+  fillFunction,
+  inspectionFunction,
+  loginFieldKeys,
+  parsePageControls,
+  selectLoginFills,
+  selectOtpFills,
 } from "../credentials/login-classifier";
-import { getProfileByName, listPublicProfiles, publicProfile } from "../credentials/profiles";
+import type { ControlFill } from "../credentials/login-classifier";
+import {
+  getProfileByName,
+  listPublicProfiles,
+  publicProfile,
+} from "../credentials/profiles";
 import { resolveCredentialProfile } from "../credentials/resolve";
-import { createSecretScrubber, registerTransientSecret } from "../credentials/scrub";
+import {
+  createSecretScrubber,
+  registerTransientSecret,
+} from "../credentials/scrub";
 import { generateTotp } from "../credentials/totp";
-import type { CredentialProfileRow } from "../../infra/repositories/credentials";
-import type { RunEnvironment } from "../../infra/db/schema";
-import { SECRET_NAME_PATTERN } from "@specbook/runtime/specbook/guard";
+import { requireValue } from "../utils/require-value";
+import {
+  registerCredentialRequest,
+  resolveCredentialRequest,
+  waitForCredentialRequest,
+} from "./credential-requests";
+import type {
+  CredentialRequestField,
+  CredentialRequestKind,
+} from "./credential-requests";
+
+const text = function text(value: string) {
+  return {
+    content: [{ type: "text" as const, text: value }],
+    details: undefined,
+    terminate: false,
+  };
+};
+
+const publicFields = function publicFields(profile: CredentialProfileRow) {
+  return publicProfile(profile).fields;
+};
+
+const publicLoginFields = function publicLoginFields(
+  profile: CredentialProfileRow
+) {
+  const keys = loginFieldKeys(profile.fields.map((field) => field.key));
+  return publicFields(profile)
+    .filter(
+      (field) => field.key === keys.identifier || field.key === keys.password
+    )
+    .flatMap((field) =>
+      field.sensitive
+        ? []
+        : [
+            {
+              key: field.key,
+              value: field.value,
+              type: (() => {
+                if (field.key === keys.password) {
+                  return "password";
+                }
+                if (field.value.includes("@")) {
+                  return "email";
+                }
+                if (/^\+?[\d\s()-]+$/u.test(field.value)) {
+                  return "phone";
+                }
+                return "username";
+              })(),
+            },
+          ]
+    );
+};
+
+const handleFor = function handleFor(label: string, origin: string): string {
+  const source =
+    label.trim() ||
+    new URL(origin).hostname.replace(/^www\./u, "").split(".")[0];
+  const slug = source
+    .normalize("NFKD")
+    .replaceAll(/[̀-ͯ]/gu, "")
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_-]+/gu, "-")
+    .replaceAll(/^[^a-z]+|-+$/gu, "")
+    .slice(0, 40);
+  return SECRET_NAME_PATTERN.test(slug) ? slug : "login";
+};
+
+const evaluationResult = function evaluationResult(output: string): unknown {
+  const section = output.match(
+    /### Result\s*\n(?<capture1>[\s\S]*?)(?:\n### |$)/u
+  );
+  if (!section) {
+    return null;
+  }
+  try {
+    return JSON.parse(section[1].trim());
+  } catch {
+    return null;
+  }
+};
+
+export const consumeVaultSubmit = function consumeVaultSubmit(
+  mcp: BrowserMcp,
+  origin: string
+): boolean {
+  const fill = recentVaultFills.get(mcp);
+  if (!fill || fill.origin !== origin || Date.now() - fill.at > 120_000) {
+    return false;
+  }
+  recentVaultFills.delete(mcp);
+  return true;
+};
+
+export const createCredentialTools = function createCredentialTools(
+  options: CredentialToolOptions
+) {
+  const resolveProfile = async function resolveProfile(
+    name: string
+  ): Promise<{ profile: CredentialProfileRow; allowed: Set<string> } | string> {
+    const resolved = await resolveCredentialProfile(
+      options.projectId,
+      name,
+      options.baseUrl,
+      options.environment
+    );
+    return typeof resolved === "string"
+      ? resolved
+      : { profile: resolved.profile, allowed: resolved.fillOrigins };
+  };
+
+  const activeOrigin = async function activeOrigin(
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    if (!options.mcp) {
+      return null;
+    }
+    const url = await getActiveTabUrl(options.mcp, signal);
+    if (!url) {
+      return null;
+    }
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === "http:" || parsed.protocol === "https:"
+        ? parsed.origin
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const evaluate = async function evaluate(
+    fn: string,
+    signal?: AbortSignal
+  ): Promise<{ ok: true; value: unknown } | { ok: false }> {
+    const result = await requireValue(options.mcp).client.callTool(
+      { name: "browser_evaluate", arguments: { function: fn } },
+      undefined,
+      { signal }
+    );
+    if (result.isError) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      value: evaluationResult(extractMcpText(result as { content?: unknown })),
+    };
+  };
+
+  const fillPage = async function fillPage(
+    origin: string,
+    pick: (
+      controls: ReturnType<typeof parsePageControls>
+    ) => ControlFill[] | string,
+    signal?: AbortSignal
+  ): Promise<
+    { filled: number; tokens: string[] } | { error: string; errorType?: string }
+  > {
+    const nonce = crypto.randomBytes(8).toString("hex");
+    const inspection = await evaluate(inspectionFunction(nonce), signal);
+    if (!inspection.ok) {
+      return { error: "Could not inspect the page inputs." };
+    }
+    const fills = pick(parsePageControls(inspection.value));
+    if (typeof fills === "string") {
+      return { error: fills, errorType: "no_fields" };
+    }
+    const written = await evaluate(fillFunction(fills, origin, nonce), signal);
+    if (!written.ok) {
+      return { error: "The page rejected the fill." };
+    }
+    const outcome = written.value as {
+      filled?: number;
+      refused?: string;
+      found?: string;
+    } | null;
+    if (outcome?.refused === "origin_changed") {
+      return {
+        error: `The page navigated away from ${origin} (now on ${outcome.found ?? "unknown"}) before the fill. Nothing was written.`,
+        errorType: "origin_changed",
+      };
+    }
+    const filled = Number(outcome?.filled ?? 0);
+    if (filled > 0) {
+      recentVaultFills.set(requireValue(options.mcp), {
+        origin,
+        at: Date.now(),
+      });
+    }
+    return { filled, tokens: [...new Set(fills.map((fill) => fill.token))] };
+  };
+
+  const waitForUser = async function waitForUser(
+    kind: CredentialRequestKind,
+    profileName: string,
+    fields: CredentialRequestField[],
+    origin: string | null,
+    signal?: AbortSignal
+  ) {
+    const request = registerCredentialRequest(
+      options.chatId,
+      options.projectId,
+      profileName,
+      fields,
+      kind,
+      origin
+    );
+    const onAbort = () =>
+      resolveCredentialRequest(options.chatId, request.id, "dismissed");
+    signal?.addEventListener("abort", onAbort, { once: true });
+    options.notify();
+    const outcome = await waitForCredentialRequest(
+      options.chatId,
+      request.id,
+      REQUEST_TIMEOUT_MS
+    ).finally(() => signal?.removeEventListener("abort", onAbort));
+    options.notify();
+    signal?.throwIfAborted();
+    return outcome;
+  };
+
+  const freeHandle = async function freeHandle(
+    base: string,
+    origin: string
+  ): Promise<string> {
+    for (let n = 1; n < 50; n += 1) {
+      const candidate = n === 1 ? base : `${base.slice(0, 36)}-${n}`;
+      // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+      const resolved = await resolveProfile(candidate);
+      if (typeof resolved === "string" || resolved.allowed.has(origin)) {
+        return candidate;
+      }
+    }
+    return `${base.slice(0, 30)}-${crypto.randomBytes(3).toString("hex")}`;
+  };
+
+  const vaultFill = async function vaultFill(
+    handle: string,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    if (!options.mcp) {
+      return {
+        success: false,
+        error: "The agent browser is not available this turn.",
+      };
+    }
+    const resolved = await resolveProfile(handle);
+    if (typeof resolved === "string") {
+      return { success: false, error: `${resolved} Use browser_vault_list.` };
+    }
+    const { profile } = resolved;
+    const keys = loginFieldKeys(profile.fields.map((field) => field.key));
+    if (!keys.password && !keys.identifier) {
+      return {
+        success: false,
+        error_type: "not_a_login",
+        error: `Vault item "${handle}" holds no login. Use fill_secret for its fields.`,
+      };
+    }
+    const origin = await activeOrigin(signal);
+    if (!origin) {
+      return {
+        success: false,
+        error:
+          "Could not determine the current page origin. Navigate to the login page first.",
+      };
+    }
+    if (!resolved.allowed.has(origin)) {
+      return {
+        success: false,
+        error_type: "origin_mismatch",
+        error: `Refused: current page origin (${origin}) does not match the vault item's bound origin(s) (${[...resolved.allowed].join(", ")}). Vault fills only run on the exact origin(s) the credential was saved for.`,
+      };
+    }
+    const loginFields = publicLoginFields(profile);
+    const value = (key?: string) => {
+      const field = key
+        ? profile.fields.find((item) => item.key === key)
+        : undefined;
+      return field?.sensitive !== false && field?.value
+        ? decryptSecret(field.value)
+        : undefined;
+    };
+    const values = {
+      identifier: value(keys.identifier),
+      password: value(keys.password),
+    };
+    if (!values.identifier && !values.password) {
+      return {
+        success: true,
+        filled_fields: 0,
+        kind: "login",
+        origin,
+        login_fields: loginFields,
+        next: "Type the non-sensitive login fields, then submit.",
+      };
+    }
+    const mask = createSecretScrubber(
+      Object.values(values).filter((item): item is string => Boolean(item))
+    );
+    try {
+      const outcome = await fillPage(
+        origin,
+        (controls) => {
+          const fills = selectLoginFills(controls, values);
+          if (fills.length > 0) {
+            return fills;
+          }
+          return loginFields.length > 0
+            ? "No sensitive login field on this page. Type the non-sensitive login fields, continue, then call browser_vault_fill again."
+            : "No login form fields were found on the current page.";
+        },
+        signal
+      );
+      if ("error" in outcome) {
+        return {
+          success: false,
+          error_type: outcome.errorType,
+          error: mask(await options.scrub(outcome.error)),
+        };
+      }
+      const passwordFilled = outcome.tokens.includes("current-password");
+      const twoFactor = keys.totp
+        ? " (a code will be generated automatically)"
+        : "";
+      return {
+        success: outcome.filled > 0,
+        filled_fields: outcome.filled,
+        kind: "login",
+        origin,
+        next: (() => {
+          if (passwordFilled || !values.password) {
+            return `Submit. If the site then asks for a verification code, call browser_vault_enter_code with this handle${twoFactor}.`;
+          }
+          if (loginFields.length > 0) {
+            return "Type the non-sensitive login fields, continue to the password step, then call browser_vault_fill again.";
+          }
+          return "Only the username or email field was on this page. Continue to the password step, then call browser_vault_fill again.";
+        })(),
+      };
+    } catch (error) {
+      signal?.throwIfAborted();
+      return {
+        success: false,
+        error: mask(
+          await options.scrub(
+            `browser_vault_fill failed: ${error instanceof Error ? error.message : String(error)}`
+          )
+        ),
+      };
+    }
+  };
+
+  return [
+    defineTool({
+      name: "browser_vault_list",
+      label: "browser_vault_list",
+      description:
+        "List saved credential fields, login handles, bound origins and 2FA mode. Non-sensitive values are visible; sensitive values are never returned. Type login_fields with browser_type, then use browser_vault_fill.",
+      parameters: Type.Unsafe(z.object({}).toJSONSchema()),
+      async execute(_id, _params, signal) {
+        const profiles = await listPublicProfiles(options.projectId);
+        const items = await Promise.all(
+          profiles.map(async (item) => {
+            const resolved = await resolveProfile(item.name);
+            if (typeof resolved === "string") {
+              return { handle: item.name, available: false, error: resolved };
+            }
+            const { profile, allowed } = resolved;
+            const keys = loginFieldKeys(
+              profile.fields.map((field) => field.key)
+            );
+            const origins = [...allowed];
+            if (!keys.password && !keys.identifier) {
+              return {
+                handle: item.name,
+                kind: "secret",
+                origin: origins[0],
+                fields: publicFields(profile),
+              };
+            }
+            return {
+              handle: item.name,
+              kind: "login",
+              label: item.name,
+              origin: origins[0],
+              ...(origins.length > 1 ? { allowed_origins: origins } : {}),
+              fields: publicFields(profile),
+              login_fields: publicLoginFields(profile),
+              two_factor: keys.totp
+                ? "automatic"
+                : "the user is asked for the code",
+            };
+          })
+        );
+        const origin = await activeOrigin(signal).catch(() => null);
+        const logins = items.filter(
+          (item) => "kind" in item && item.kind === "login"
+        );
+        const hint = (() => {
+          if (logins.length === 0) {
+            return "No saved logins. On a login page, call browser_vault_save_login to ask the user to save one. Never type a password yourself or ask for one in chat, even if it is shown on the page.";
+          }
+          if (
+            origin &&
+            !logins.some(
+              (item) =>
+                item.origin === origin ||
+                ("allowed_origins" in item &&
+                  item.allowed_origins?.includes(origin))
+            )
+          ) {
+            return `No saved login for ${origin}. On its login page, call browser_vault_save_login.`;
+          }
+        })();
+        return json({
+          success: true,
+          current_origin: origin,
+          items,
+          ...(hint ? { hint } : {}),
+        });
+      },
+    }),
+    defineTool({
+      name: "browser_vault_save_login",
+      label: "browser_vault_save_login",
+      description:
+        "Ask the user to save a login through the secure form in this chat. Username is non-sensitive; password is sensitive. The login is bound to the page's origin. Saved logins are reused; replace: true corrects a failed login. label distinguishes roles. save_declined: stop asking this turn; the user can retry or add it in Settings → Credentials.",
+      parameters: Type.Unsafe<z.infer<typeof vaultSaveLoginSchema>>(
+        vaultSaveLoginSchema.toJSONSchema()
+      ),
+      async execute(_id, inputParams, signal) {
+        signal?.throwIfAborted();
+        const params = vaultSaveLoginSchema.parse(inputParams ?? {});
+        if (!options.mcp) {
+          return json({
+            success: false,
+            error: "The agent browser is not available this turn.",
+          });
+        }
+        const origin = await activeOrigin(signal);
+        if (!origin) {
+          return json({
+            success: false,
+            error:
+              "Open the site's login page first; the login is saved for that page's origin.",
+          });
+        }
+        const handle = await freeHandle(
+          handleFor(params.label ?? "", origin),
+          origin
+        );
+        const existing = await resolveProfile(handle);
+        if (
+          !params.replace &&
+          typeof existing !== "string" &&
+          existing.allowed.has(origin) &&
+          loginFieldKeys(existing.profile.fields.map((field) => field.key))
+            .password
+        ) {
+          return json({
+            success: true,
+            already_saved: true,
+            handle,
+            origin,
+            login_fields: publicLoginFields(existing.profile),
+            next: "A login is already saved for this site. On the login page, use browser_vault_fill with this handle. Pass replace: true only to correct it after a failed login.",
+          });
+        }
+        const outcome = await waitForUser(
+          "login",
+          handle,
+          LOGIN_FIELDS,
+          origin,
+          signal
+        );
+        if (outcome === "dismissed") {
+          return json({
+            success: false,
+            error_type: "save_declined",
+            error:
+              "The user chose not to save a login for this site. Do not ask again this turn.",
+          });
+        }
+        if (outcome !== "saved") {
+          return json({
+            success: false,
+            error_type: "timeout",
+            error:
+              "The user has not submitted the login form yet. Tell them it is waiting in the chat, or call browser_vault_save_login again when they are ready.",
+          });
+        }
+        const saved = await getProfileByName(options.projectId, handle);
+        const loginFields = saved ? publicLoginFields(saved) : [];
+        const fill = await vaultFill(handle, signal);
+        return json({
+          success: true,
+          handle,
+          origin,
+          login_fields: loginFields,
+          fill,
+          next:
+            loginFields.length > 0
+              ? "Type the non-sensitive login fields if the form has them, then submit."
+              : "Submit the form.",
+        });
+      },
+    }),
+    defineTool({
+      name: "browser_vault_fill",
+      label: "browser_vault_fill",
+      description:
+        "Enter sensitive login fields from a vault handle after you typed its non-sensitive login_fields. Refused unless the page origin matches the handle's bound origin. Submit the form yourself.",
+      parameters: Type.Unsafe<z.infer<typeof vaultHandleSchema>>(
+        vaultHandleSchema.toJSONSchema()
+      ),
+      async execute(_id, inputParams, signal) {
+        signal?.throwIfAborted();
+        const params = vaultHandleSchema.parse(inputParams);
+        return json(await vaultFill(params.handle, signal));
+      },
+    }),
+    defineTool({
+      name: "browser_vault_enter_code",
+      label: "browser_vault_enter_code",
+      description:
+        "Enter a verification or 2FA code for a handle: generated from a saved authenticator key, otherwise asked from the user in a form. no_code_field means a passkey, hardware key or app approval: ask the user to approve it on their device and wait for the page to change.",
+      parameters: Type.Unsafe<z.infer<typeof vaultOptionalHandleSchema>>(
+        vaultOptionalHandleSchema.toJSONSchema()
+      ),
+      async execute(_id, inputParams, signal) {
+        signal?.throwIfAborted();
+        const params = vaultOptionalHandleSchema.parse(inputParams ?? {});
+        if (!options.mcp) {
+          return json({
+            success: false,
+            error: "The agent browser is not available this turn.",
+          });
+        }
+        const origin = await activeOrigin(signal);
+        if (!origin) {
+          return json({
+            success: false,
+            error: "No page with a code field is open.",
+          });
+        }
+        const nonce = crypto.randomBytes(8).toString("hex");
+        const inspection = await evaluate(inspectionFunction(nonce), signal);
+        const otpControls = inspection.ok
+          ? classifyOtpControls(parsePageControls(inspection.value))
+          : [];
+        if (otpControls.length === 0) {
+          return json({
+            success: false,
+            error_type: "no_code_field",
+            error:
+              "No one-time-code field on the current page. If the site wants a passkey, hardware key or an approval tap in an app, tell the user to complete it on their device and wait for the page to move on.",
+          });
+        }
+        let code: string | undefined;
+        let source = "user";
+        const resolved = params.handle
+          ? await resolveProfile(params.handle)
+          : null;
+        if (resolved && typeof resolved !== "string") {
+          const seedKey = loginFieldKeys(
+            resolved.profile.fields.map((field) => field.key)
+          ).totp;
+          const seed = seedKey
+            ? resolved.profile.fields.find((field) => field.key === seedKey)
+                ?.value
+            : undefined;
+          if (seed) {
+            try {
+              code = generateTotp(decryptSecret(seed));
+              source = "authenticator";
+            } catch {
+              code = undefined;
+            }
+          }
+        }
+        if (!code && options.canPrompt === false) {
+          return json({
+            success: false,
+            error_type: "prompt_unavailable",
+            error: `${new URL(origin).host} asks for a one-time code and this background run cannot ask the user. Ask for help with a question, and suggest saving an authenticator key for this login in Settings → Credentials so codes can be generated automatically.`,
+          });
+        }
+        if (!code) {
+          const outcome = await waitForUser(
+            "code",
+            params.handle ?? "code",
+            [{ key: "code", label: "Verification code" }],
+            origin,
+            signal
+          );
+          if (typeof outcome !== "object") {
+            return json({
+              success: false,
+              error_type: "code_declined",
+              error:
+                "The user did not enter a code. Do not ask again this turn.",
+            });
+          }
+          code = outcome.code.replaceAll(/[\s-]/gu, "");
+        }
+        registerTransientSecret(options.projectId, code);
+        const value = code;
+        const outcome = await fillPage(
+          origin,
+          (controls) => selectOtpFills(classifyOtpControls(controls), value),
+          signal
+        );
+        if ("error" in outcome) {
+          return json({
+            success: false,
+            error_type: outcome.errorType,
+            error: await options.scrub(outcome.error),
+          });
+        }
+        return json({
+          success: outcome.filled > 0,
+          filled_fields: outcome.filled,
+          origin,
+          source,
+          next: "Submit the form (many sites auto-submit when the last digit lands).",
+        });
+      },
+    }),
+    defineTool({
+      name: "fill_secret",
+      label: "fill_secret",
+      description:
+        "Type a stored field the vault cannot place, such as an API token or a custom field, into an element from the latest browser_snapshot. Only on its allowed origins. For sign-ins use browser_vault_fill for sensitive fields; type non-sensitive values from browser_vault_list with browser_type.",
+      parameters: Type.Unsafe<z.infer<typeof fillSecretSchema>>(
+        fillSecretSchema.toJSONSchema()
+      ),
+      async execute(_id, inputParams, signal) {
+        signal?.throwIfAborted();
+        const params = fillSecretSchema.parse(inputParams);
+        if (!options.mcp || !options.workDir) {
+          return text(
+            "fill_secret failed: the agent browser is not available this turn."
+          );
+        }
+        const resolved = await resolveProfile(params.profile);
+        if (typeof resolved === "string") {
+          return text(`fill_secret failed: ${resolved}`);
+        }
+        const field = resolved.profile.fields.find(
+          (f) => f.key === params.field
+        );
+        if (!field || field.value === "") {
+          return text(
+            `fill_secret failed: profile "${params.profile}" has no field "${params.field}" with a value.`
+          );
+        }
+        const origin = await activeOrigin(signal);
+        if (!origin) {
+          return text(
+            "fill_secret failed: could not determine the active page URL."
+          );
+        }
+        if (!resolved.allowed.has(origin)) {
+          return text(
+            `fill_secret refused: the active page origin ${origin} is not allowed for this credential (allowed: ${[...resolved.allowed].join(", ")}).`
+          );
+        }
+        try {
+          signal?.throwIfAborted();
+          const value = decryptSecret(field.value);
+          const result = await options.mcp.client.callTool(
+            {
+              name: "browser_type",
+              arguments: {
+                element: params.element,
+                target: params.target,
+                text: value,
+              },
+            },
+            undefined,
+            { signal }
+          );
+          const rendered = await renderMcpResult(
+            result as { content?: unknown },
+            options.workDir
+          );
+          const cleaned = await options.scrub(rendered);
+          return text(
+            cleaned ||
+              `Filled ${params.profile}.${params.field} into ${params.element}.`
+          );
+        } catch (error) {
+          signal?.throwIfAborted();
+          return text(
+            await options.scrub(
+              `fill_secret failed: ${error instanceof Error ? error.message : String(error)}`
+            )
+          );
+        }
+      },
+    }),
+    defineTool({
+      name: "request_credential",
+      label: "request_credential",
+      description:
+        'Ask the user for a non-login secret, such as an API token, through a secure form in this chat; for sign-ins use browser_vault_save_login. Values are stored encrypted and usable only through fill_secret or secret() in spec.ts. Waits up to 10 minutes. Profile and field keys are lowercase slugs like "service" / "token".',
+      parameters: Type.Unsafe<z.infer<typeof requestCredentialSchema>>(
+        requestCredentialSchema.toJSONSchema()
+      ),
+      async execute(_id, inputParams, signal) {
+        signal?.throwIfAborted();
+        const params = requestCredentialSchema.parse(inputParams);
+        if (params.fields.length === 0) {
+          return text("request_credential failed: request at least one field.");
+        }
+        const outcome = await waitForUser(
+          "fields",
+          params.profileName,
+          params.fields,
+          null,
+          signal
+        );
+        if (outcome === "saved") {
+          return text(
+            `Credential profile "${params.profileName}" saved with fields: ${params.fields.map((f) => f.key).join(", ")}. Use browser_vault_list / fill_secret to use it.`
+          );
+        }
+        if (outcome === "dismissed") {
+          return text("The user dismissed the credential form without saving.");
+        }
+        return text(
+          "The user has not submitted the credential form yet. Ask them to fill it, or call request_credential again when they are ready."
+        );
+      },
+    }),
+  ];
+};
 
 // Ported from Hermes Agent tools/browser_vault_tool.py (MIT, Copyright (c) 2025 Nous Research).
 
 const fillSecretSchema = z.object({
-    profile: z.string(),
-    field: z.string(),
-    element: z.string(),
-    target: z.string(),
+  profile: z.string(),
+  field: z.string(),
+  element: z.string(),
+  target: z.string(),
 });
 
 const requestCredentialSchema = z.object({
-    profileName: z.string(),
-    fields: z.array(z.object({ key: z.string(), label: z.string().optional() })),
+  profileName: z.string(),
+  fields: z.array(z.object({ key: z.string(), label: z.string().optional() })),
 });
 
 const vaultHandleSchema = z.object({ handle: z.string() });
 const vaultOptionalHandleSchema = z.object({ handle: z.string().optional() });
-const vaultSaveLoginSchema = z.object({ label: z.string().optional(), replace: z.boolean().optional() });
+const vaultSaveLoginSchema = z.object({
+  label: z.string().optional(),
+  replace: z.boolean().optional(),
+});
 
 const LOGIN_FIELDS: CredentialRequestField[] = [
-    { key: "username", label: "Email or username", sensitive: false },
-    { key: "password", label: "Password", sensitive: true },
+  { key: "username", label: "Email or username", sensitive: false },
+  { key: "password", label: "Password", sensitive: true },
 ];
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 
-function text(value: string) {
-    return {
-        content: [{ type: "text" as const, text: value }],
-        details: undefined,
-        terminate: false,
-    };
-}
-
 const json = (value: unknown) => text(JSON.stringify(value));
 
-function publicFields(profile: CredentialProfileRow) {
-    return publicProfile(profile).fields;
-}
-
-function publicLoginFields(profile: CredentialProfileRow) {
-    const keys = loginFieldKeys(profile.fields.map((field) => field.key));
-    return publicFields(profile).filter((field) => field.key === keys.identifier || field.key === keys.password)
-        .flatMap((field) => field.sensitive ? [] : [{ key: field.key, value: field.value, type: field.key === keys.password ? "password"
-            : field.value.includes("@") ? "email" : /^\+?[\d\s()-]+$/.test(field.value) ? "phone" : "username" }]);
-}
-
-function handleFor(label: string, origin: string): string {
-    const source = label.trim() || new URL(origin).hostname.replace(/^www\./, "").split(".")[0];
-    const slug = source.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z]+|-+$/g, "").slice(0, 40);
-    return SECRET_NAME_PATTERN.test(slug) ? slug : "login";
-}
-
-function evaluationResult(output: string): unknown {
-    const section = output.match(/### Result\s*\n([\s\S]*?)(?:\n### |$)/);
-    if (!section) return null;
-    try {
-        return JSON.parse(section[1].trim());
-    } catch {
-        return null;
-    }
-}
-
-const recentVaultFills = new WeakMap<BrowserMcp, { origin: string; at: number }>();
-
-export function consumeVaultSubmit(mcp: BrowserMcp, origin: string): boolean {
-    const fill = recentVaultFills.get(mcp);
-    if (!fill || fill.origin !== origin || Date.now() - fill.at > 120_000) return false;
-    recentVaultFills.delete(mcp);
-    return true;
-}
+const recentVaultFills = new WeakMap<
+  BrowserMcp,
+  { origin: string; at: number }
+>();
 
 export interface CredentialToolOptions {
-    projectId: string;
-    baseUrl: string;
-    environment?: RunEnvironment;
-    chatId: string;
-    mcp: BrowserMcp | null;
-    workDir: string | null;
-    scrub: (value: string) => Promise<string>;
-    notify: () => void;
-    canPrompt?: boolean;
-}
-
-export function createCredentialTools(options: CredentialToolOptions) {
-    async function resolveProfile(name: string): Promise<{ profile: CredentialProfileRow; allowed: Set<string> } | string> {
-        const resolved = await resolveCredentialProfile(options.projectId, name, options.baseUrl, options.environment);
-        return typeof resolved === "string" ? resolved : { profile: resolved.profile, allowed: resolved.fillOrigins };
-    }
-
-    async function activeOrigin(signal?: AbortSignal): Promise<string | null> {
-        if (!options.mcp) return null;
-        const url = await getActiveTabUrl(options.mcp, signal);
-        if (!url) return null;
-        try {
-            const parsed = new URL(url);
-            return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.origin : null;
-        } catch {
-            return null;
-        }
-    }
-
-    async function evaluate(fn: string, signal?: AbortSignal): Promise<{ ok: true; value: unknown } | { ok: false }> {
-        const result = await options.mcp!.client.callTool({ name: "browser_evaluate", arguments: { function: fn } }, undefined, { signal });
-        if (result.isError) return { ok: false };
-        return { ok: true, value: evaluationResult(extractMcpText(result as { content?: unknown })) };
-    }
-
-    async function fillPage(
-        origin: string,
-        pick: (controls: ReturnType<typeof parsePageControls>) => ControlFill[] | string,
-        signal?: AbortSignal,
-    ): Promise<{ filled: number; tokens: string[] } | { error: string; errorType?: string }> {
-        const nonce = crypto.randomBytes(8).toString("hex");
-        const inspection = await evaluate(inspectionFunction(nonce), signal);
-        if (!inspection.ok) return { error: "Could not inspect the page inputs." };
-        const fills = pick(parsePageControls(inspection.value));
-        if (typeof fills === "string") return { error: fills, errorType: "no_fields" };
-        const written = await evaluate(fillFunction(fills, origin, nonce), signal);
-        if (!written.ok) return { error: "The page rejected the fill." };
-        const outcome = written.value as { filled?: number; refused?: string; found?: string } | null;
-        if (outcome?.refused === "origin_changed") {
-            return { error: `The page navigated away from ${origin} (now on ${outcome.found ?? "unknown"}) before the fill. Nothing was written.`, errorType: "origin_changed" };
-        }
-        const filled = Number(outcome?.filled ?? 0);
-        if (filled > 0) recentVaultFills.set(options.mcp!, { origin, at: Date.now() });
-        return { filled, tokens: [...new Set(fills.map((fill) => fill.token))] };
-    }
-
-    async function waitForUser(kind: CredentialRequestKind, profileName: string, fields: CredentialRequestField[], origin: string | null, signal?: AbortSignal) {
-        const request = registerCredentialRequest(options.chatId, options.projectId, profileName, fields, kind, origin);
-        const onAbort = () => resolveCredentialRequest(options.chatId, request.id, "dismissed");
-        signal?.addEventListener("abort", onAbort, { once: true });
-        options.notify();
-        const outcome = await waitForCredentialRequest(options.chatId, request.id, REQUEST_TIMEOUT_MS)
-            .finally(() => signal?.removeEventListener("abort", onAbort));
-        options.notify();
-        signal?.throwIfAborted();
-        return outcome;
-    }
-
-    async function freeHandle(base: string, origin: string): Promise<string> {
-        for (let n = 1; n < 50; n++) {
-            const candidate = n === 1 ? base : `${base.slice(0, 36)}-${n}`;
-            const resolved = await resolveProfile(candidate);
-            if (typeof resolved === "string" || resolved.allowed.has(origin)) return candidate;
-        }
-        return `${base.slice(0, 30)}-${crypto.randomBytes(3).toString("hex")}`;
-    }
-
-    async function vaultFill(handle: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
-        if (!options.mcp) return { success: false, error: "The agent browser is not available this turn." };
-        const resolved = await resolveProfile(handle);
-        if (typeof resolved === "string") return { success: false, error: `${resolved} Use browser_vault_list.` };
-        const { profile } = resolved;
-        const keys = loginFieldKeys(profile.fields.map((field) => field.key));
-        if (!keys.password && !keys.identifier) {
-            return { success: false, error_type: "not_a_login", error: `Vault item "${handle}" holds no login. Use fill_secret for its fields.` };
-        }
-        const origin = await activeOrigin(signal);
-        if (!origin) return { success: false, error: "Could not determine the current page origin. Navigate to the login page first." };
-        if (!resolved.allowed.has(origin)) {
-            return { success: false, error_type: "origin_mismatch",
-                error: `Refused: current page origin (${origin}) does not match the vault item's bound origin(s) (${[...resolved.allowed].join(", ")}). Vault fills only run on the exact origin(s) the credential was saved for.` };
-        }
-        const loginFields = publicLoginFields(profile);
-        const value = (key?: string) => {
-            const field = key ? profile.fields.find((item) => item.key === key) : undefined;
-            return field?.sensitive !== false && field?.value ? decryptSecret(field.value) : undefined;
-        };
-        const values = { identifier: value(keys.identifier), password: value(keys.password) };
-        if (!values.identifier && !values.password) {
-            return { success: true, filled_fields: 0, kind: "login", origin, login_fields: loginFields,
-                next: "Type the non-sensitive login fields, then submit." };
-        }
-        const mask = createSecretScrubber(Object.values(values).filter((item): item is string => Boolean(item)));
-        try {
-            const outcome = await fillPage(origin, (controls) => {
-                const fills = selectLoginFills(controls, values);
-                if (fills.length > 0) return fills;
-                return loginFields.length > 0
-                    ? "No sensitive login field on this page. Type the non-sensitive login fields, continue, then call browser_vault_fill again."
-                    : "No login form fields were found on the current page.";
-            }, signal);
-            if ("error" in outcome) return { success: false, error_type: outcome.errorType, error: mask(await options.scrub(outcome.error)) };
-            const passwordFilled = outcome.tokens.includes("current-password");
-            const twoFactor = keys.totp ? " (a code will be generated automatically)" : "";
-            return {
-                success: outcome.filled > 0,
-                filled_fields: outcome.filled,
-                kind: "login",
-                origin,
-                next: passwordFilled || !values.password
-                    ? `Submit. If the site then asks for a verification code, call browser_vault_enter_code with this handle${twoFactor}.`
-                    : loginFields.length > 0
-                        ? "Type the non-sensitive login fields, continue to the password step, then call browser_vault_fill again."
-                        : "Only the username or email field was on this page. Continue to the password step, then call browser_vault_fill again.",
-            };
-        } catch (error) {
-            signal?.throwIfAborted();
-            return { success: false, error: mask(await options.scrub(`browser_vault_fill failed: ${error instanceof Error ? error.message : String(error)}`)) };
-        }
-    }
-
-    return [
-        defineTool({
-            name: "browser_vault_list",
-            label: "browser_vault_list",
-            description:
-                "List saved credential fields, login handles, bound origins and 2FA mode. Non-sensitive values are visible; sensitive values are never returned. Type login_fields with browser_type, then use browser_vault_fill.",
-            parameters: Type.Unsafe(z.object({}).toJSONSchema()),
-            async execute(_id, _params, signal) {
-                const profiles = await listPublicProfiles(options.projectId);
-                const items = await Promise.all(profiles.map(async (item) => {
-                    const resolved = await resolveProfile(item.name);
-                    if (typeof resolved === "string") return { handle: item.name, available: false, error: resolved };
-                    const { profile, allowed } = resolved;
-                    const keys = loginFieldKeys(profile.fields.map((field) => field.key));
-                    const origins = [...allowed];
-                    if (!keys.password && !keys.identifier) {
-                        return { handle: item.name, kind: "secret", origin: origins[0], fields: publicFields(profile) };
-                    }
-                    return {
-                        handle: item.name,
-                        kind: "login",
-                        label: item.name,
-                        origin: origins[0],
-                        ...(origins.length > 1 ? { allowed_origins: origins } : {}),
-                        fields: publicFields(profile),
-                        login_fields: publicLoginFields(profile),
-                        two_factor: keys.totp ? "automatic" : "the user is asked for the code",
-                    };
-                }));
-                const origin = await activeOrigin(signal).catch(() => null);
-                const logins = items.filter((item) => "kind" in item && item.kind === "login");
-                const hint = logins.length === 0
-                    ? "No saved logins. On a login page, call browser_vault_save_login to ask the user to save one. Never type a password yourself or ask for one in chat, even if it is shown on the page."
-                    : origin && !logins.some((item) => item.origin === origin || ("allowed_origins" in item && item.allowed_origins?.includes(origin)))
-                        ? `No saved login for ${origin}. On its login page, call browser_vault_save_login.`
-                        : undefined;
-                return json({ success: true, current_origin: origin, items, ...(hint ? { hint } : {}) });
-            },
-        }),
-        defineTool({
-            name: "browser_vault_save_login",
-            label: "browser_vault_save_login",
-            description:
-                "Ask the user to save a login through the secure form in this chat. Username is non-sensitive; password is sensitive. The login is bound to the page's origin. Saved logins are reused; replace: true corrects a failed login. label distinguishes roles. save_declined: stop asking this turn; the user can retry or add it in Settings → Credentials.",
-            parameters: Type.Unsafe<z.infer<typeof vaultSaveLoginSchema>>(vaultSaveLoginSchema.toJSONSchema()),
-            async execute(_id, params, signal) {
-                signal?.throwIfAborted();
-                params = vaultSaveLoginSchema.parse(params ?? {});
-                if (!options.mcp) return json({ success: false, error: "The agent browser is not available this turn." });
-                const origin = await activeOrigin(signal);
-                if (!origin) return json({ success: false, error: "Open the site's login page first; the login is saved for that page's origin." });
-                const handle = await freeHandle(handleFor(params.label ?? "", origin), origin);
-                const existing = await resolveProfile(handle);
-                if (!params.replace && typeof existing !== "string" && existing.allowed.has(origin) && loginFieldKeys(existing.profile.fields.map((field) => field.key)).password) {
-                    return json({ success: true, already_saved: true, handle, origin,
-                        login_fields: publicLoginFields(existing.profile),
-                        next: "A login is already saved for this site. On the login page, use browser_vault_fill with this handle. Pass replace: true only to correct it after a failed login." });
-                }
-                const outcome = await waitForUser("login", handle, LOGIN_FIELDS, origin, signal);
-                if (outcome === "dismissed") {
-                    return json({ success: false, error_type: "save_declined", error: "The user chose not to save a login for this site. Do not ask again this turn." });
-                }
-                if (outcome !== "saved") {
-                    return json({ success: false, error_type: "timeout", error: "The user has not submitted the login form yet. Tell them it is waiting in the chat, or call browser_vault_save_login again when they are ready." });
-                }
-                const saved = await getProfileByName(options.projectId, handle);
-                const loginFields = saved ? publicLoginFields(saved) : [];
-                const fill = await vaultFill(handle, signal);
-                return json({
-                    success: true,
-                    handle,
-                    origin,
-                    login_fields: loginFields,
-                    fill,
-                    next: loginFields.length > 0
-                        ? "Type the non-sensitive login fields if the form has them, then submit."
-                        : "Submit the form.",
-                });
-            },
-        }),
-        defineTool({
-            name: "browser_vault_fill",
-            label: "browser_vault_fill",
-            description:
-                "Enter sensitive login fields from a vault handle after you typed its non-sensitive login_fields. Refused unless the page origin matches the handle's bound origin. Submit the form yourself.",
-            parameters: Type.Unsafe<z.infer<typeof vaultHandleSchema>>(vaultHandleSchema.toJSONSchema()),
-            async execute(_id, params, signal) {
-                signal?.throwIfAborted();
-                params = vaultHandleSchema.parse(params);
-                return json(await vaultFill(params.handle, signal));
-            },
-        }),
-        defineTool({
-            name: "browser_vault_enter_code",
-            label: "browser_vault_enter_code",
-            description:
-                "Enter a verification or 2FA code for a handle: generated from a saved authenticator key, otherwise asked from the user in a form. no_code_field means a passkey, hardware key or app approval: ask the user to approve it on their device and wait for the page to change.",
-            parameters: Type.Unsafe<z.infer<typeof vaultOptionalHandleSchema>>(vaultOptionalHandleSchema.toJSONSchema()),
-            async execute(_id, params, signal) {
-                signal?.throwIfAborted();
-                params = vaultOptionalHandleSchema.parse(params ?? {});
-                if (!options.mcp) return json({ success: false, error: "The agent browser is not available this turn." });
-                const origin = await activeOrigin(signal);
-                if (!origin) return json({ success: false, error: "No page with a code field is open." });
-                const nonce = crypto.randomBytes(8).toString("hex");
-                const inspection = await evaluate(inspectionFunction(nonce), signal);
-                const otpControls = inspection.ok ? classifyOtpControls(parsePageControls(inspection.value)) : [];
-                if (otpControls.length === 0) {
-                    return json({ success: false, error_type: "no_code_field",
-                        error: "No one-time-code field on the current page. If the site wants a passkey, hardware key or an approval tap in an app, tell the user to complete it on their device and wait for the page to move on." });
-                }
-                let code: string | undefined;
-                let source = "user";
-                const resolved = params.handle ? await resolveProfile(params.handle) : null;
-                if (resolved && typeof resolved !== "string") {
-                    const seedKey = loginFieldKeys(resolved.profile.fields.map((field) => field.key)).totp;
-                    const seed = seedKey ? resolved.profile.fields.find((field) => field.key === seedKey)?.value : undefined;
-                    if (seed) {
-                        try {
-                            code = generateTotp(decryptSecret(seed));
-                            source = "authenticator";
-                        } catch {
-                            code = undefined;
-                        }
-                    }
-                }
-                if (!code && options.canPrompt === false) {
-                    return json({ success: false, error_type: "prompt_unavailable",
-                        error: `${new URL(origin).host} asks for a one-time code and this background run cannot ask the user. Ask for help with a question, and suggest saving an authenticator key for this login in Settings → Credentials so codes can be generated automatically.` });
-                }
-                if (!code) {
-                    const outcome = await waitForUser("code", params.handle ?? "code", [{ key: "code", label: "Verification code" }], origin, signal);
-                    if (typeof outcome !== "object") {
-                        return json({ success: false, error_type: "code_declined", error: "The user did not enter a code. Do not ask again this turn." });
-                    }
-                    code = outcome.code.replace(/[\s-]/g, "");
-                }
-                registerTransientSecret(options.projectId, code);
-                const value = code;
-                const outcome = await fillPage(origin, (controls) => selectOtpFills(classifyOtpControls(controls), value), signal);
-                if ("error" in outcome) return json({ success: false, error_type: outcome.errorType, error: await options.scrub(outcome.error) });
-                return json({ success: outcome.filled > 0, filled_fields: outcome.filled, origin, source,
-                    next: "Submit the form (many sites auto-submit when the last digit lands)." });
-            },
-        }),
-        defineTool({
-            name: "fill_secret",
-            label: "fill_secret",
-            description:
-                "Type a stored field the vault cannot place, such as an API token or a custom field, into an element from the latest browser_snapshot. Only on its allowed origins. For sign-ins use browser_vault_fill for sensitive fields; type non-sensitive values from browser_vault_list with browser_type.",
-            parameters: Type.Unsafe<z.infer<typeof fillSecretSchema>>(fillSecretSchema.toJSONSchema()),
-            async execute(_id, params, signal) {
-                signal?.throwIfAborted();
-                params = fillSecretSchema.parse(params);
-                if (!options.mcp || !options.workDir) {
-                    return text("fill_secret failed: the agent browser is not available this turn.");
-                }
-                const resolved = await resolveProfile(params.profile);
-                if (typeof resolved === "string") return text(`fill_secret failed: ${resolved}`);
-                const field = resolved.profile.fields.find((f) => f.key === params.field);
-                if (!field || field.value === "") {
-                    return text(`fill_secret failed: profile "${params.profile}" has no field "${params.field}" with a value.`);
-                }
-                const origin = await activeOrigin(signal);
-                if (!origin) return text("fill_secret failed: could not determine the active page URL.");
-                if (!resolved.allowed.has(origin)) {
-                    return text(
-                        `fill_secret refused: the active page origin ${origin} is not allowed for this credential (allowed: ${[...resolved.allowed].join(", ")}).`,
-                    );
-                }
-                try {
-                    signal?.throwIfAborted();
-                    const value = decryptSecret(field.value);
-                    const result = await options.mcp.client.callTool({
-                        name: "browser_type",
-                        arguments: { element: params.element, target: params.target, text: value },
-                    }, undefined, { signal });
-                    const rendered = await renderMcpResult(result as { content?: unknown }, options.workDir);
-                    const cleaned = await options.scrub(rendered);
-                    return text(cleaned || `Filled ${params.profile}.${params.field} into ${params.element}.`);
-                } catch (error) {
-                    signal?.throwIfAborted();
-                    return text(await options.scrub(`fill_secret failed: ${error instanceof Error ? error.message : String(error)}`));
-                }
-            },
-        }),
-        defineTool({
-            name: "request_credential",
-            label: "request_credential",
-            description:
-                "Ask the user for a non-login secret, such as an API token, through a secure form in this chat; for sign-ins use browser_vault_save_login. Values are stored encrypted and usable only through fill_secret or secret() in spec.ts. Waits up to 10 minutes. Profile and field keys are lowercase slugs like \"service\" / \"token\".",
-            parameters: Type.Unsafe<z.infer<typeof requestCredentialSchema>>(requestCredentialSchema.toJSONSchema()),
-            async execute(_id, params, signal) {
-                signal?.throwIfAborted();
-                params = requestCredentialSchema.parse(params);
-                if (params.fields.length === 0) return text("request_credential failed: request at least one field.");
-                const outcome = await waitForUser("fields", params.profileName, params.fields, null, signal);
-                if (outcome === "saved") {
-                    return text(
-                        `Credential profile "${params.profileName}" saved with fields: ${params.fields.map((f) => f.key).join(", ")}. Use browser_vault_list / fill_secret to use it.`,
-                    );
-                }
-                if (outcome === "dismissed") return text("The user dismissed the credential form without saving.");
-                return text(
-                    "The user has not submitted the credential form yet. Ask them to fill it, or call request_credential again when they are ready.",
-                );
-            },
-        }),
-    ];
+  projectId: string;
+  baseUrl: string;
+  environment?: RunEnvironment;
+  chatId: string;
+  mcp: BrowserMcp | null;
+  workDir: string | null;
+  scrub: (value: string) => Promise<string>;
+  notify: () => void;
+  canPrompt?: boolean;
 }

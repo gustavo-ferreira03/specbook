@@ -1,11 +1,10 @@
 title: Browse Specs by feature, status, and title
-description: The Specs list groups Specs by feature and filters them by status and
-  title.
+description: The Specs list groups Specs by feature and filters them by status and title.
 preconditions:
-- Signed in as the Specbook administrator
-- The project has the passing Spec “Home page opens” under Smoke
+  - Signed in as the Specbook administrator
+  - The project has the passing Spec “Home page opens” under Smoke
 steps:
-- Filter the list to passing Specs
-- Search for “Home page opens”
+  - Filter the list to passing Specs
+  - Search for “Home page opens”
 expectedResult: The list shows only “Home page opens”
 postconditions: []

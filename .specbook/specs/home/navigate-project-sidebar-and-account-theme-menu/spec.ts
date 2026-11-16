@@ -1,34 +1,56 @@
 import { test, expect } from "specbook";
 
-test("Navigate project sidebar and account theme menu", async ({ page, step, secret }) => {
-    await step("Signed in as the Specbook administrator", async () => {
-        await page.goto("/login?next=%2F");
-        await page.getByRole("textbox", { name: "Email" }).fill(secret("dogfood-admin", "username"));
-        await page.getByRole("textbox", { name: "Password" }).fill(secret("dogfood-admin", "password"));
-        await page.getByRole("button", { name: "Sign in" }).click();
-        await expect(page).toHaveURL(/\/p\/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe$/);
-        await expect(page.getByRole("button", { name: "Sauce Demo" })).toBeVisible();
-    });
-    await step("Open Home from the project sidebar", async () => {
-        await page.getByRole("link", { name: "Home", exact: true }).click();
-        await expect(page.getByRole("heading", { name: /^\d+ of \d+ Specs? passing$/ })).toBeVisible();
-    });
-    await step("Open Specs from the project sidebar", async () => {
-        await page.getByRole("link", { name: "Specs", exact: true }).click();
-        await expect(page).toHaveURL(/\/specs$/);
-        await expect(page.getByRole("heading", { name: "Specs", exact: true })).toBeVisible();
-    });
-    await step("Open Chats from the project sidebar", async () => {
-        await page.getByRole("link", { name: "Chats", exact: true }).click();
-        await expect(page).toHaveURL(/\/chats$/);
-        await expect(page.getByRole("heading", { name: "Chats", exact: true })).toBeVisible();
-    });
-    await step("Open the account menu", async () => {
-        await page.getByRole("button", { name: "Account: Dogfood Admin" }).click();
-        await expect(page.getByRole("menuitemradio", { name: "Light" })).toBeVisible();
-        await expect(page.getByRole("menuitemradio", { name: "Dark" })).toBeVisible();
-    });
-    await step("The System theme is selected", async () => {
-        await expect(page.getByRole("menuitemradio", { name: "System" })).toBeChecked();
-    });
+test("Navigate project sidebar and account theme menu", async ({
+  page,
+  step,
+  secret,
+}) => {
+  await step("Signed in as the Specbook administrator", async () => {
+    await page.goto("/login?next=%2F");
+    await page
+      .getByRole("textbox", { name: "Email" })
+      .fill(secret("dogfood-admin", "username"));
+    await page
+      .getByRole("textbox", { name: "Password" })
+      .fill(secret("dogfood-admin", "password"));
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(/\/p\/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe$/u);
+    await expect(
+      page.getByRole("button", { name: "Sauce Demo" })
+    ).toBeVisible();
+  });
+  await step("Open Home from the project sidebar", async () => {
+    await page.getByRole("link", { name: "Home", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: /^\d+ of \d+ Specs? passing$/u })
+    ).toBeVisible();
+  });
+  await step("Open Specs from the project sidebar", async () => {
+    await page.getByRole("link", { name: "Specs", exact: true }).click();
+    await expect(page).toHaveURL(/\/specs$/u);
+    await expect(
+      page.getByRole("heading", { name: "Specs", exact: true })
+    ).toBeVisible();
+  });
+  await step("Open Chats from the project sidebar", async () => {
+    await page.getByRole("link", { name: "Chats", exact: true }).click();
+    await expect(page).toHaveURL(/\/chats$/u);
+    await expect(
+      page.getByRole("heading", { name: "Chats", exact: true })
+    ).toBeVisible();
+  });
+  await step("Open the account menu", async () => {
+    await page.getByRole("button", { name: "Account: Dogfood Admin" }).click();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Light" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Dark" })
+    ).toBeVisible();
+  });
+  await step("The System theme is selected", async () => {
+    await expect(
+      page.getByRole("menuitemradio", { name: "System" })
+    ).toBeChecked();
+  });
 });

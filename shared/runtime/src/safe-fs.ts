@@ -2,76 +2,120 @@ import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export class UnsafeRepoPathError extends Error {}
-
-export function isInside(parent: string, child: string, options: { allowRoot: boolean; rejectDotPrefix?: boolean } = { allowRoot: true }): boolean {
-    const relative = path.relative(parent, child);
-    if (relative === "") return options.allowRoot;
-    return !path.isAbsolute(relative) && (options.rejectDotPrefix
-        ? !relative.startsWith("..")
-        : relative !== ".." && !relative.startsWith(`..${path.sep}`));
+export class UnsafeRepoPathError extends Error {
+  override name = "UnsafeRepoPathError";
 }
 
-function assertInside(root: string, target: string): void {
-    if (!isInside(root, target, { allowRoot: false, rejectDotPrefix: true })) {
-        throw new UnsafeRepoPathError(`Path escapes the project repository: ${target}`);
-    }
-}
+export const isInside = function isInside(
+  parent: string,
+  child: string,
+  options?: { allowRoot: boolean; rejectDotPrefix?: boolean }
+): boolean {
+  const relative = path.relative(parent, child);
+  if (relative === "") {
+    return options?.allowRoot ?? true;
+  }
+  return (
+    !path.isAbsolute(relative) &&
+    (options?.rejectDotPrefix
+      ? !relative.startsWith("..")
+      : relative !== ".." && !relative.startsWith(`..${path.sep}`))
+  );
+};
 
-async function assertNoSymlinks(root: string, target: string): Promise<void> {
-    const resolvedRoot = path.resolve(root);
-    const resolvedTarget = path.resolve(target);
-    assertInside(resolvedRoot, resolvedTarget);
-    const parts = path.relative(resolvedRoot, resolvedTarget).split(path.sep);
-    let current = resolvedRoot;
-    for (const part of parts) {
-        current = path.join(current, part);
-        let stat;
-        try {
-            stat = await fs.lstat(current);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-            throw error;
-        }
-        if (stat.isSymbolicLink()) {
-            throw new UnsafeRepoPathError(`Symbolic links are not allowed in project repositories: ${current}`);
-        }
-    }
-}
-
-export async function readRepoFile(root: string, target: string): Promise<string> {
-    await assertNoSymlinks(root, target);
-    const handle = await fs.open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-        return await handle.readFile("utf8");
-    } finally {
-        await handle.close();
-    }
-}
-
-export async function readOptionalRepoFile(root: string, target: string): Promise<string | null> {
-    try {
-        return await readRepoFile(root, target);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-        throw error;
-    }
-}
-
-export async function writeRepoFile(root: string, target: string, content: string): Promise<void> {
-    await assertNoSymlinks(root, target);
-    const handle = await fs.open(
-        target,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
-        0o644,
+const assertInside = function assertInside(root: string, target: string): void {
+  if (!isInside(root, target, { allowRoot: false, rejectDotPrefix: true })) {
+    throw new UnsafeRepoPathError(
+      `Path escapes the project repository: ${target}`
     );
-    try {
-        await handle.writeFile(content, "utf8");
-    } finally {
-        await handle.close();
-    }
-}
+  }
+};
 
-export async function assertRepoPathSafe(root: string, target: string): Promise<void> {
-    await assertNoSymlinks(root, target);
-}
+const assertNoSymlinks = async function assertNoSymlinks(
+  root: string,
+  target: string
+): Promise<void> {
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = path.resolve(target);
+  assertInside(resolvedRoot, resolvedTarget);
+  const parts = path.relative(resolvedRoot, resolvedTarget).split(path.sep);
+  let current = resolvedRoot;
+  for (const part of parts) {
+    current = path.join(current, part);
+    let stat;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
+      stat = await fs.lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+    if (stat.isSymbolicLink()) {
+      throw new UnsafeRepoPathError(
+        `Symbolic links are not allowed in project repositories: ${current}`
+      );
+    }
+  }
+};
+
+export const readRepoFile = async function readRepoFile(
+  root: string,
+  target: string
+): Promise<string> {
+  await assertNoSymlinks(root, target);
+  const handle = await fs.open(
+    target,
+    // oxlint-disable-next-line no-bitwise -- These are native OS flags or network address bit fields, which require bitwise operations.
+    constants.O_RDONLY | constants.O_NOFOLLOW
+  );
+  try {
+    return await handle.readFile("utf-8");
+  } finally {
+    await handle.close();
+  }
+};
+
+export const readOptionalRepoFile = async function readOptionalRepoFile(
+  root: string,
+  target: string
+): Promise<string | null> {
+  try {
+    return await readRepoFile(root, target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+};
+
+export const writeRepoFile = async function writeRepoFile(
+  root: string,
+  target: string,
+  content: string
+): Promise<void> {
+  await assertNoSymlinks(root, target);
+  const handle = await fs.open(
+    target,
+    // oxlint-disable-next-line no-bitwise -- These are native OS flags or network address bit fields, which require bitwise operations.
+    constants.O_WRONLY |
+      constants.O_CREAT |
+      constants.O_TRUNC |
+      constants.O_NOFOLLOW,
+    0o644
+  );
+  try {
+    await handle.writeFile(content, "utf-8");
+  } finally {
+    await handle.close();
+  }
+};
+
+export const assertRepoPathSafe = async function assertRepoPathSafe(
+  root: string,
+  target: string
+): Promise<void> {
+  await assertNoSymlinks(root, target);
+};
