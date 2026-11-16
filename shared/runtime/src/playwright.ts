@@ -210,7 +210,7 @@ function statusOf(result: SpecFileResult): Exclude<RunStatus, "running"> {
 export async function runPlaywrightSuite(
   options: SuiteOptions
 ): Promise<SuiteOutcome> {
-  const directory = options.directory;
+  const { directory } = options;
   const workDir = path.join(directory, "work");
   await fs.rm(workDir, { recursive: true, force: true });
   const policy = options.networkPolicy;

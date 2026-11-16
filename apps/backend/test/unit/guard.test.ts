@@ -362,7 +362,7 @@ describe("specbook page proxy", () => {
 
   test("mouse takes literal numbers and plain options, and dragTo takes a wrapped locator", async () => {
     const { wrapped, calls } = guarded();
-    const mouse = wrapped.mouse;
+    const { mouse } = wrapped;
     assert.equal(Object.getPrototypeOf(mouse), null);
     assert.ok(Object.isFrozen(mouse));
     assert.equal(unwrap(mouse), undefined);

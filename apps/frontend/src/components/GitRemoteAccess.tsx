@@ -198,7 +198,7 @@ export function GitRemoteAccess({
     );
   }
 
-  const hasToken = remote.token.hasToken;
+  const { hasToken } = remote.token;
 
   return (
     <>

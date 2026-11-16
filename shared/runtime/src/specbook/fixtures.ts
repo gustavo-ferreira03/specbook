@@ -124,7 +124,7 @@ class ReplayCapture {
         .split(/\s+/)
         .includes("__specbookSecret") || "data-specbook-secret" in attributes;
     const visit = (node: ReplayNode): void => {
-      const attributes = node.attributes;
+      const { attributes } = node;
       if (
         node.type === 2 &&
         attributes &&
@@ -484,7 +484,7 @@ export const test = base.extend<{
       const number = String(count).padStart(2, "0");
       _specbookEvidence.apiRequests = [];
       const real = _specbookEvidence.page;
-      const replay = _specbookEvidence.replay;
+      const { replay } = _specbookEvidence;
       const kind =
         runtime.executionPlans?.[path.basename(testInfo.file)]?.[count - 1]
           ?.kind ?? "step";

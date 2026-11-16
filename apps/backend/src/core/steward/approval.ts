@@ -21,7 +21,7 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
     return false;
   }
   const patch = fixProposalSchema.safeParse(payloadOf(item).params);
-  const before = payloadOf(item).before;
+  const { before } = payloadOf(item);
   if (
     !patch.success ||
     !isImplementationOnly(patch.data) ||

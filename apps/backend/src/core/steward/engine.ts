@@ -204,8 +204,7 @@ async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
   }
   if (signal.kind === "spec_changed") {
     const spec = await signalSpec(signal);
-    const observation = (await stewardRepository.get(signal.projectId))
-      .observation;
+    const { observation } = await stewardRepository.get(signal.projectId);
     return (
       !!spec &&
       spec.status !== "invalid" &&
@@ -214,8 +213,8 @@ async function isCurrentSignal(signal: ProjectSignal): Promise<boolean> {
     );
   }
   if (signal.kind === "deployment_changed") {
-    const deployment = (await stewardRepository.get(signal.projectId))
-      .observation.deployment;
+    const { deployment } = (await stewardRepository.get(signal.projectId))
+      .observation;
     return (
       !!deployment &&
       deployment.baseUrl === signal.payload.baseUrl &&

@@ -148,7 +148,7 @@ export async function checkPageLocators(
   };
   const results: LocatorCheck[] = [];
   for (const item of found) {
-    const locator = item.locator;
+    const { locator } = item;
     try {
       const count = await (value(item.node, item.bindings) as Locator).count();
       results.push({

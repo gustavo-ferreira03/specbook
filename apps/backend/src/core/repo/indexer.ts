@@ -95,7 +95,7 @@ async function readRepoEntry(
         unsafe: `${relative} is a symbolic link, which is not allowed`,
       };
     }
-    const code = (error as NodeJS.ErrnoException).code;
+    const { code } = error as NodeJS.ErrnoException;
     if (code === "EISDIR" || code === "ELOOP") {
       return { content: null, unsafe: `${relative} is not a regular file` };
     }
@@ -341,7 +341,7 @@ function specQuery(
     status: entry.status,
     invalidReason: entry.invalidReason,
   };
-  const existing = entry.existing;
+  const { existing } = entry;
   if (!existing) {
     const now = new Date().toISOString();
     const id = crypto.randomUUID();

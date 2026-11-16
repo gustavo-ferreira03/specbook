@@ -78,7 +78,7 @@ export function createDomainTools(
   options: DomainToolOptions = {}
 ) {
   const scrub = options.scrub ?? createProjectScrubber(projectId);
-  const metrics = options.metrics;
+  const { metrics } = options;
   return [
     defineTool({
       name: "list_features",

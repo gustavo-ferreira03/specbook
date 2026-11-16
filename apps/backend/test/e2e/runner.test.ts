@@ -651,8 +651,8 @@ describe(
             context.newCDPSession = newSession;
           }
           const frame = page.mainFrame();
-          const evaluateHandle = frame.evaluateHandle;
-          const screenshot = page.screenshot;
+          const { evaluateHandle } = frame;
+          const { screenshot } = page;
           let unsafeCaptures = 0;
           frame.evaluateHandle = async () => new Promise<never>(() => {});
           context.newCDPSession = async () => {

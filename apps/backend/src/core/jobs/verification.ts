@@ -93,7 +93,7 @@ export async function verifyProposal(
     throw new Error("Project not found");
   }
   const environment = await jobEnvironment(job);
-  const baseUrl = environment.baseUrl;
+  const { baseUrl } = environment;
   const spec = await specsRepository.getSpec(patch.specId);
   if (!spec || spec.projectId !== job.projectId) {
     throw new Error("Spec no longer exists");

@@ -296,7 +296,7 @@ describe("CI access and quality gates", () => {
     await new Promise<void>((resolve) =>
       server.listening ? resolve() : server.once("listening", resolve)
     );
-    const port = (server.address() as AddressInfo).port;
+    const { port } = server.address() as AddressInfo;
     assert.ok(port > 4500);
     const detach = attachTunnelWebSockets(server, buildHostAllowlist(port, {}));
     const sockets: InstanceType<typeof WebSocket>[] = [];

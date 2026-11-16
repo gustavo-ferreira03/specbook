@@ -106,7 +106,7 @@ function previousRunSpecCalls(sessionManager: SessionManager | null): {
     if (entry.type !== "message" || entry.message.role !== "assistant") {
       continue;
     }
-    const content = (entry.message as { content?: unknown }).content;
+    const { content } = entry.message as { content?: unknown };
     if (!Array.isArray(content)) {
       continue;
     }
@@ -230,7 +230,7 @@ export class TurnMetricsRecorder {
     model?: string;
   }): void {
     this.record.assistantMessages += 1;
-    const usage = message.usage;
+    const { usage } = message;
     if (!usage) {
       return;
     }

@@ -408,7 +408,7 @@ describe("bounded API documentation reads", () => {
     await new Promise<void>((resolve) =>
       server.listen(0, "127.0.0.1", resolve)
     );
-    const port = (server.address() as import("node:net").AddressInfo).port;
+    const { port } = server.address() as import("node:net").AddressInfo;
     const origin = `http://docs.example.test:${port}`;
     const options = {
       origins: [origin],

@@ -1883,7 +1883,7 @@ describe(
           (await specsRepository.getSpec(spec.id))?.status,
           "unverified"
         );
-        const createRun = runsRepository.createRun;
+        const { createRun } = runsRepository;
         runsRepository.createRun = async function (input) {
           const created = await createRun.call(this, input);
           await fs.mkdir(runsDir, { recursive: true });

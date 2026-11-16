@@ -19,7 +19,7 @@ export async function htmlReport(
   result: CiResult,
   options: { single?: boolean } = {}
 ): Promise<string> {
-  const batch = result.batch;
+  const { batch } = result;
   const features = new Map(
     (await featuresRepository.listFeatures(batch.projectId)).map((feature) => [
       feature.id,

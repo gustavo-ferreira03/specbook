@@ -114,7 +114,7 @@ export function createOriginBrowserPolicy(
   allowedOrigins: string[] = [],
   scope = "project"
 ): BrowserToolPolicy {
-  const origin = new URL(startUrl).origin;
+  const { origin } = new URL(startUrl);
   const origins = new Set([origin, ...allowedOrigins]);
   return {
     beforeCall: async (name, args, signal) => {

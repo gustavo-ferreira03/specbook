@@ -368,7 +368,7 @@ export async function readSpec(
   if (!analyzed.ok) {
     throw new Error(analyzed.error);
   }
-  const analysis = analyzed.analysis;
+  const { analysis } = analyzed;
   const mismatch = stepTitlesError(analysis.steps, yaml.humanSpec);
   if (mismatch) {
     throw new Error(mismatch);

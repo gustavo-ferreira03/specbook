@@ -452,7 +452,7 @@ export async function createLocalMcpServer(
       const available = (await listProfiles()).find(
         (item) => item.name === profile
       );
-      const origin = new URL(config.baseUrl).origin;
+      const { origin } = new URL(config.baseUrl);
       if (
         available &&
         fields.every((field) => available.fields.includes(field)) &&

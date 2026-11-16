@@ -100,7 +100,7 @@ export async function readRunEvidence(runId: string) {
     if (!available.has(item.file)) {
       return [];
     }
-    const number = item.number;
+    const { number } = item;
     const planned = currentOrder
       ? plan[item.number - 1]
       : plan.find((entry) => sameStepTitle(entry.title, item.label));

@@ -539,7 +539,7 @@ export async function renderHtmlReport(
   options: { single?: boolean } = {}
 ): Promise<string> {
   const batch = data;
-  const sections = data.sections;
+  const { sections } = data;
   const hasReplay = sections.some((section) => section.replay);
   const playerScript = hasReplay
     ? gzipSync(await publicAsset("rrweb-player.js"), { level: 9 }).toString(
@@ -578,7 +578,7 @@ export async function renderHtmlReport(
   const passed = results.filter((item) => item.status === "passed").length;
   const tally = (tone: Tone) =>
     sections.filter((entry) => entry.tone === tone).length;
-  const ci = batch.ci;
+  const { ci } = batch;
   const elapsed = batch.durationMs;
   const verdict = data.qualityGate.passed ? "passed" : "failed";
   const project = data.project ?? "";

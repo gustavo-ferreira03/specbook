@@ -55,12 +55,12 @@ export async function scanPage(
       "The agent browser is unavailable. Ask for help through the Inbox if it cannot be started."
     );
   }
-  const mcp = options.mcp;
+  const { mcp } = options;
   const start = new URL(options.baseUrl);
   if (!["http:", "https:"].includes(start.protocol)) {
     throw new Error("Page scans require an HTTP or HTTPS project URL");
   }
-  const origin = start.origin;
+  const { origin } = start;
   const checkOrigin = async () => {
     signal?.throwIfAborted();
     const active = await getActiveTabUrl(mcp, signal);

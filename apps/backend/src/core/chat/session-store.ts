@@ -351,7 +351,7 @@ export function messagesOf(
     if (entry.type !== "message") {
       continue;
     }
-    const role = entry.message.role;
+    const { role } = entry.message;
     if (role !== "user" && role !== "assistant") {
       continue;
     }
@@ -410,7 +410,7 @@ export function toolStepsOf(
     if (entry.type !== "message") {
       continue;
     }
-    const message = entry.message;
+    const { message } = entry;
     if (
       (message.role === "user" || message.role === "assistant") &&
       extractText(message).trim()

@@ -4898,7 +4898,7 @@ describe("accounts, roles and session security", () => {
       editor.cookie
     );
     assert.equal(created.status, 200, await created.clone().text());
-    const project = (await created.json()).project;
+    const { project } = await created.json();
     const featureResponse = await call(
       "POST",
       `/projects/${project.id}/features`,
@@ -6249,9 +6249,9 @@ describe("selected batch suggestions", () => {
     const initial = await presentSpecBatch(item);
     const selected = await selectSpecBatch(item, [initial.candidates[0]!.id]);
     const choice = (await presentSpecBatch(selected)).candidates[0]!;
-    const specId = (
+    const { specId } = (
       selected.payload.specBatch as { candidates: { specId: string }[] }
-    ).candidates[0]!.specId;
+    ).candidates[0]!;
     const job = (await jobsRepository.get(choice.jobId!))!;
     await selectedSpecInstructions(job);
     const input = {

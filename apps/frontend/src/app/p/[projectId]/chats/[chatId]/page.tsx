@@ -1174,7 +1174,7 @@ function ChatContent({
   const manageAutomation = useCallback(() => setSettingsTab("automation"), []);
   const resultGroups = useMemo(() => {
     const nodes = new Map<string | null, ReactNode>();
-    const data = chatResults.data;
+    const { data } = chatResults;
     if (!data || !state) {
       return nodes;
     }

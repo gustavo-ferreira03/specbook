@@ -304,7 +304,7 @@ ${item.body}`.slice(0, 6000),
           await jobsRepository.answer(item, answer!);
           void drainJobs();
         } else if (action === "report_bug") {
-          const params = payloadOf(item).params;
+          const { params } = payloadOf(item);
           const existing = (
             await jobsRepository.itemsByKind(item.projectId, "bug_report")
           ).find(

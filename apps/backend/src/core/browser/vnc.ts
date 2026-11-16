@@ -270,7 +270,7 @@ export async function startVncStack(): Promise<VncSession> {
     passwordDir = secret.dir;
     const xvfb = await startDisplay();
     xvfbProc = xvfb.proc;
-    const display = xvfb.display;
+    const { display } = xvfb;
     const x11vnc = spawnUntilReady(
       "x11vnc",
       [
@@ -369,7 +369,7 @@ class ByteQueue {
 
   fail(error: Error): void {
     this.failure ??= error;
-    const waiter = this.waiter;
+    const { waiter } = this;
     this.waiter = null;
     waiter?.reject(this.failure);
   }

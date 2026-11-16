@@ -346,7 +346,7 @@ program
   .addOption(agentOption())
   .action(async (options: { baseUrl?: string; agent?: "claude" | "codex" }) => {
     const agents = detectAgents();
-    let baseUrl = options.baseUrl;
+    let { baseUrl } = options;
     let agent = options.agent ?? agents[0];
     if (!baseUrl) {
       if (!interactive) {

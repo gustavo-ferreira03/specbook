@@ -279,7 +279,7 @@ async function execute(
           `Spec "${spec.title}" is invalid: ${analyzed.error}`
         );
       }
-      const humanSpec = parseSpecYaml(spec.files["spec.yml"]).humanSpec;
+      const { humanSpec } = parseSpecYaml(spec.files["spec.yml"]);
       const titlesError = stepTitlesError(analyzed.analysis.steps, humanSpec);
       if (titlesError) {
         throw new CodedError(

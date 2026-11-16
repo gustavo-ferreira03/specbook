@@ -541,7 +541,7 @@ async function runReservedChatTurn(
         value.type === "message_update" &&
         value.assistantMessageEvent?.type === "text_delta"
       ) {
-        const delta = value.assistantMessageEvent.delta;
+        const { delta } = value.assistantMessageEvent;
         if (delta) {
           publishChatUpdate(id, { type: "assistant_delta", delta });
         }
@@ -551,7 +551,7 @@ async function runReservedChatTurn(
         turnPolicy?.tokens(value.message.usage?.totalTokens ?? 0);
       }
       if (value.type === "message_end") {
-        const message = value.message;
+        const { message } = value;
         const afterMessageId = messageAnchor;
         queueMicrotask(() => {
           const entry = manager

@@ -365,9 +365,7 @@ describe("environment credential profiles", () => {
     assert.match(output, /visible-login|visible-tenant/);
     assert.doesNotMatch(output, /hidden-password|hidden-token/);
     assert.equal(result.content[0].type, "text");
-    const items = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ).items;
+    const { items } = JSON.parse((result.content[0] as { text: string }).text);
     assert.deepEqual(
       items.find((item: { handle: string }) => item.handle === "account")
         .login_fields,

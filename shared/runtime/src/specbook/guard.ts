@@ -722,7 +722,7 @@ export function createGuard(options: GuardOptions) {
           );
         }
         let currentMethod = method;
-        let data = requestOptions.data;
+        let { data } = requestOptions;
         checkOrigin(url, refs);
         for (let redirects = 0; redirects <= 5; redirects += 1) {
           checkOrigin(url, refs);
@@ -759,7 +759,7 @@ export function createGuard(options: GuardOptions) {
             throw error;
           }
           capture(evidence);
-          const location = response.headers().location;
+          const { location } = response.headers();
           if (
             [301, 302, 303, 307, 308].includes(response.status()) &&
             location

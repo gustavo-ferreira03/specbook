@@ -378,7 +378,7 @@ async function recover(
         const after = await readAgentState(
           await safeWorkspacePath(workspace, chatPath(state.id, "brain"))
         );
-        const baseline = latest.turn.baseline;
+        const { baseline } = latest.turn;
         const before: AgentState = {
           attempts: {},
           writes: after.writes,

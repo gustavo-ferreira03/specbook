@@ -223,7 +223,7 @@ export async function startBrowserDaemon(
 ): Promise<void> {
   const socket = await socketPath(workspace);
   const policy = await localNetworkPolicy(baseUrl);
-  const origin = httpTarget(baseUrl).origin;
+  const { origin } = httpTarget(baseUrl);
   const secrets = new Set<string>();
   let browser: Browser | undefined;
   let page: Page | undefined;

@@ -144,7 +144,7 @@ class Validator {
   importSource = { start: 0, end: 0 };
 
   run(file: t.File): void {
-    const program = file.program;
+    const { program } = file;
     if (program.interpreter) {
       fail(program.interpreter, "A hashbang line is not allowed.");
     }
@@ -209,7 +209,7 @@ class Validator {
           `Import only named bindings: import { test, expect } from "${SPEC_MODULE}".`
         );
       }
-      const name = specifier.imported.name;
+      const { name } = specifier.imported;
       if (!IMPORTS.has(name)) {
         fail(
           specifier,
@@ -299,7 +299,7 @@ class Validator {
           "Destructure only page, request, step and secret, without defaults or renaming."
         );
       }
-      const name = property.key.name;
+      const { name } = property.key;
       if (!FIXTURES.has(name)) {
         fail(
           property,
@@ -714,7 +714,7 @@ class Validator {
     }
     if (node.type === "CallExpression") {
       noTypeArguments(node);
-      const callee = node.callee;
+      const { callee } = node;
       if (callee.type !== "MemberExpression") {
         fail(node, "Only page and locator methods can be called here.");
       }
@@ -795,7 +795,7 @@ class Validator {
       fail(expression, `${this.unexpected(expression)} ${onlyActions}`);
     }
     noTypeArguments(expression);
-    const callee = expression.callee;
+    const { callee } = expression;
     if (
       callee.type === "Identifier" &&
       (callee.name === "step" || callee.name === "cleanup")
@@ -1308,7 +1308,7 @@ function parseSource(source: string): t.File {
       createParenthesizedExpressions: false,
     }) as unknown as t.File;
   } catch (error) {
-    const loc = (error as { loc?: { line: number; column: number } }).loc;
+    const { loc } = error as { loc?: { line: number; column: number } };
     const message =
       error instanceof Error
         ? error.message.replace(/\s*\(\d+:\d+\)$/, "")
