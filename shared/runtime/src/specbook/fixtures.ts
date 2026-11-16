@@ -496,14 +496,16 @@ export const test = base.extend<{
         });
       } catch (error) {
         outcome = "failed";
-        testInfo.annotations.push({
-          type: FAILED_STEP_ANNOTATION,
-          description: title,
-        });
-        testInfo.annotations.push({
-          type: "specbook-error-code",
-          description: specErrorCode(error),
-        });
+        testInfo.annotations.push(
+          {
+            type: FAILED_STEP_ANNOTATION,
+            description: title,
+          },
+          {
+            type: "specbook-error-code",
+            description: specErrorCode(error),
+          }
+        );
         try {
           if (!real) {
             throw new Error("This step has no browser page", { cause: error });
