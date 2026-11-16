@@ -357,13 +357,13 @@ describe(
             });
             const initialEvents = events.slice();
             const source = (
-              document.getElementById("small") as HTMLImageElement
+              document.querySelector("#small") as HTMLImageElement
             ).src;
-            const small = document.getElementById("small")!;
+            const small = document.querySelector("#small")!;
             small.style.width = "120px";
             small.style.height = "60px";
-            document.getElementById("hidden")!.style.display = "inline";
-            const late = document.getElementById("late") as HTMLImageElement;
+            document.querySelector("#hidden")!.style.display = "inline";
+            const late = document.querySelector("#late") as HTMLImageElement;
             late.src = source;
             await late.decode();
             await new Promise((resolve) =>

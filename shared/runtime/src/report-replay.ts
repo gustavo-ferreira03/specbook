@@ -25,7 +25,7 @@ async function decompress(value: string): Promise<string> {
 
 function loadLibrary(): Promise<ReplayPlayerOptions["Player"]> {
   return (library ??= (async () => {
-    const element = document.getElementById("specbook-replay-library");
+    const element = document.querySelector("#specbook-replay-library");
     const script = document.createElement("script");
     script.textContent = await decompress(element?.textContent ?? "");
     document.head.append(script);

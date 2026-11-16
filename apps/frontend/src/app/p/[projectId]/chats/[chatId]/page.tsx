@@ -1152,7 +1152,7 @@ function ChatContent({
     []
   );
   const scrollToResult = useCallback((id: string) => {
-    const element = document.getElementById(id);
+    const element = document.querySelector(`#${id}`);
     if (!element) {
       return;
     }
