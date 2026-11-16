@@ -281,7 +281,7 @@ export async function removeChatBrowserData(chatId: string): Promise<void> {
 }
 
 export async function closeAllChatBrowsers(): Promise<void> {
-  await Promise.allSettled([...pending.values()]);
+  await Promise.allSettled(pending.values());
   await Promise.all([...browsers.keys()].map(closeChatBrowser));
-  await Promise.allSettled([...closing.values()]);
+  await Promise.allSettled(closing.values());
 }
