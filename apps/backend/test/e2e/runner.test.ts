@@ -609,7 +609,7 @@ describe(
             assert.ok(pageText < 3, "sensitive values in page text are hidden");
             assert.ok(publicText < 3, "non-sensitive page text stays visible");
             assert.equal(
-              await page.locator('span[style="top:90px"]').innerText(),
+              await page.locator('span[style="top:90px"]').textContent(),
               SECRET,
               "the original page text is restored after capture"
             );
