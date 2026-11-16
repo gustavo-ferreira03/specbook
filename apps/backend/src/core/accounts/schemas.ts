@@ -8,7 +8,7 @@ const nameSchema = z
   .trim()
   .min(1)
   .max(80)
-  .regex(/^[^\x00-\x1F<>]+$/);
+  .regex(/^[^\u0000-\u001F<>]+$/);
 const passwordSchema = z.string().min(12).max(128);
 
 export const adminSchema = z

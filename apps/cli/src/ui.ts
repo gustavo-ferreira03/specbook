@@ -62,7 +62,7 @@ const badge = (status: string) =>
 const colored = (status: string) =>
   (statusColors[status] ?? pc.dim)(statusLabels[status] ?? status);
 const icon = (status: string) => icons[status as Status] ?? pc.dim("•");
-const width = (text: string) => text.replaceAll(/\x1B\[[0-9;]*m/g, "").length;
+const width = (text: string) => text.replaceAll(/\u001B\[[0-9;]*m/g, "").length;
 const pad = (text: string, size: number) =>
   text + " ".repeat(Math.max(0, size - width(text)));
 const columns = () => Math.min(process.stdout.columns || 100, 100);

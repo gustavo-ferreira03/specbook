@@ -49,7 +49,7 @@ async function historyForPath(
       relativePath,
     ]);
   return raw
-    .split("\x1E")
+    .split("\u001E")
     .map((record) => record.trim())
     .filter(Boolean)
     .map((record) => {
