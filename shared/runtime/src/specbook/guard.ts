@@ -151,9 +151,7 @@ export function isSecret(value: unknown): boolean {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type AnyFn = (...args: any[]) => any;
-export interface RawLocator {
-  [method: string]: any;
-}
+export type RawLocator = Record<string, any>;
 export interface RawPage {
   url(): string;
   mainFrame(): unknown;
