@@ -262,18 +262,32 @@ export const resolveRunSecrets = async function resolveRunSecrets(
   const byRef: Record<string, string[]> = {};
   const publicRefs: string[] = [];
   for (const ref of refs) {
-    const profile = store[ref.profile];
-    const value = profile?.fields[ref.field];
+    const envName = secretEnvName(ref.profile, ref.field);
+    const environment = process.env[envName] || undefined;
+    const profile = Object.hasOwn(store, ref.profile)
+      ? store[ref.profile]
+      : undefined;
+    const stored =
+      profile !== undefined && Object.hasOwn(profile.fields, ref.field);
+    const value =
+      environment ?? (stored ? profile.fields[ref.field] : undefined);
     if (value === undefined) {
       throw new Error(
-        `Credential field ${ref.profile}.${ref.field} is not configured`
+        `Credential field ${ref.profile}.${ref.field} is not configured; set ${envName} or run specbook credentials add ${ref.profile}`
       );
     }
-    secretEnv[secretEnvName(ref.profile, ref.field)] = value;
-    byRef[ref.envName] = profile.origins.length
-      ? profile.origins
-      : [new URL(baseUrl).origin];
-    if (!sensitiveFields(profile).includes(ref.field)) {
+    secretEnv[envName] = value;
+    const origins =
+      environment === undefined
+        ? requiredValue(profile).origins
+        : environmentProfileOrigins(ref.profile);
+    byRef[ref.envName] = origins.length ? origins : [new URL(baseUrl).origin];
+    const sensitive = stored
+      ? sensitiveFields(profile).includes(ref.field)
+      : isSensitiveByDefault(ref.field);
+    if (sensitive) {
+      runnerSecretValues.add(value);
+    } else {
       publicRefs.push(ref.envName);
     }
   }

@@ -24,7 +24,7 @@ test("CLI downloads are public and read-only, with actionable missing-package er
   assert.match(error, /CLI package is not built/u);
   assert.match(
     error,
-    /pnpm --dir apps\/cli pack --out \.\.\/backend\/dist\/specbook.tgz/u
+    /pnpm --filter @specbook\/runtime build && node apps\/cli\/scripts\/package\.mjs apps\/backend\/dist\/specbook\.tgz/u
   );
 
   const archive = Buffer.from([0x1f, 0x8b, 0x08, 0x00]);

@@ -33,7 +33,7 @@ COPY . .
 
 RUN pnpm --filter @specbook/runtime build \
     && pnpm --filter backend build \
-    && pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz \
+    && node apps/cli/scripts/package.mjs apps/backend/dist/specbook.tgz \
     && pnpm --filter frontend build \
     && node apps/frontend/scripts/package-ui.mjs dist/release \
     && mkdir -p dist/ui \

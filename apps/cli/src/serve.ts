@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
@@ -9,12 +9,16 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream } from "node:stream/web";
 import { setTimeout as wait } from "node:timers/promises";
+import { promisify } from "node:util";
+
+import { minimalChildEnv } from "@specbook/runtime/process";
 
 import { configHome, scrub } from "./credentials";
 import { normalizeServerUrl, redactTokens } from "./remote";
 
 const moduleDirectory = import.meta.dirname;
 const packageDirectory = path.resolve(moduleDirectory, "..");
+const execute = promisify(execFile);
 const MAX_UI_DOWNLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_UI_EXTRACTED_BYTES = 1024 * 1024 * 1024;
 declare const SPECBOOK_UI_RELEASE_SHA256: string;
@@ -297,7 +301,10 @@ const availablePort = async function availablePort(
   });
 };
 
-const cliPackage = async function cliPackage(data: string): Promise<string> {
+const cliPackage = async function cliPackage(
+  data: string,
+  signal?: AbortSignal
+): Promise<string> {
   if (process.env.SPECBOOK_CLI_PACKAGE_FILE) {
     return path.resolve(process.env.SPECBOOK_CLI_PACKAGE_FILE);
   }
@@ -309,6 +316,54 @@ const cliPackage = async function cliPackage(data: string): Promise<string> {
   const directory = path.join(data, "cli");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const file = path.join(directory, "specbook.tgz");
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(packageDirectory, "package.json"), "utf-8")
+  ) as { bundleDependencies?: unknown; bundledDependencies?: unknown };
+  const bundles = manifest.bundleDependencies ?? manifest.bundledDependencies;
+  if (bundles === true || (Array.isArray(bundles) && bundles.length > 0)) {
+    const scratch = await fs.mkdtemp(path.join(directory, ".package-"));
+    const packed = path.join(scratch, "output");
+    try {
+      await fs.mkdir(packed, { mode: 0o700 });
+      await execute(
+        "npm",
+        [
+          "pack",
+          "--ignore-scripts",
+          "--silent",
+          "--offline",
+          "--workspaces=false",
+          "--pack-destination",
+          packed,
+        ],
+        {
+          cwd: packageDirectory,
+          signal,
+          timeout: 60_000,
+          maxBuffer: 256 * 1024,
+          env: minimalChildEnv({
+            npm_config_cache: path.join(scratch, "cache"),
+            npm_config_update_notifier: "false",
+          }),
+        }
+      );
+      const [filename, ...extra] = await fs.readdir(packed);
+      if (!filename?.endsWith(".tgz") || extra.length > 0) {
+        throw new Error("npm did not produce one CLI package archive");
+      }
+      const archive = path.join(packed, filename);
+      const stat = await fs.lstat(archive);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error("The packed CLI archive must be a regular file");
+      }
+      signal?.throwIfAborted();
+      await fs.chmod(archive, 0o600);
+      await fs.rename(archive, file);
+      return file;
+    } finally {
+      await fs.rm(scratch, { recursive: true, force: true });
+    }
+  }
   const temporary = path.join(directory, `specbook-${process.pid}.tgz`);
   const tar = await import("tar");
   try {
@@ -390,7 +445,7 @@ export const runServe = async function runServe(
     ...process.env,
     NODE_ENV: "production",
     SPECBOOK_STORAGE_DIR: data,
-    SPECBOOK_CLI_PACKAGE_FILE: await cliPackage(data),
+    SPECBOOK_CLI_PACKAGE_FILE: await cliPackage(data, options.signal),
     FRONTEND_ORIGIN: process.env.FRONTEND_ORIGIN ?? url,
     FRONTEND_PORT: String(port),
     SPECBOOK_BACKEND_URL: process.env.SPECBOOK_BACKEND_URL ?? apiUrl,

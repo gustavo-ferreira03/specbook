@@ -27,7 +27,7 @@ export const createCliRouter = function createCliRouter(
       return c.json(
         {
           error:
-            "CLI package is not built. From the repository root, run: pnpm --filter @specbook/runtime build && mkdir -p apps/backend/dist && pnpm --dir apps/cli pack --out ../backend/dist/specbook.tgz",
+            "CLI package is not built. From the repository root, run: pnpm --filter @specbook/runtime build && node apps/cli/scripts/package.mjs apps/backend/dist/specbook.tgz",
         },
         404
       );
