@@ -567,10 +567,9 @@ export async function sendMessage(
       reply: {
         id,
         status: "working",
-        message:
-          "Specbook is working. Use specbook chat " +
-          id +
-          " --wait to read the reply.",
+        message: `Specbook is working. Use specbook chat ${
+          id
+        } --wait to read the reply.`,
       },
     };
     await fs.mkdir(

@@ -253,8 +253,7 @@ describe("security middleware", () => {
           route.fulfill({
             status: 200,
             headers: htmlReportHeaders(html),
-            body:
-              html + "<script>window.untrustedOuterExecuted = true</script>",
+            body: `${html}<script>window.untrustedOuterExecuted = true</script>`,
           })
         );
         await page.goto("http://127.0.0.1:4894/report");

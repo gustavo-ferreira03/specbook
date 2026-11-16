@@ -466,7 +466,7 @@ try {
     const flattenTools = (tools, namespace = "") =>
       tools.flatMap((tool) =>
         tool.type === "namespace"
-          ? flattenTools(tool.tools, namespace + tool.name + "__")
+          ? flattenTools(tool.tools, `${namespace + tool.name}__`)
           : [namespace + (tool.name ?? tool.type)]
       );
     modelRequest = { body: parsed, tools: flattenTools(parsed.tools).sort() };

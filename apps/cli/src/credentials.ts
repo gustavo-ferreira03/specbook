@@ -152,7 +152,7 @@ async function writeStore(store: Store): Promise<void> {
     `credentials-${process.pid}-${Date.now()}.tmp`
   );
   try {
-    await fs.writeFile(temporary, JSON.stringify(store, null, 2) + "\n", {
+    await fs.writeFile(temporary, `${JSON.stringify(store, null, 2)}\n`, {
       mode: 0o600,
       flag: "wx",
     });

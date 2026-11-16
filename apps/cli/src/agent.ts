@@ -465,7 +465,7 @@ export async function executeAgent(
             );
           }
         } catch {
-          errors = (errors + line + "\n").slice(-8000);
+          errors = `${errors + line}\n`.slice(-8000);
         }
       }
     });

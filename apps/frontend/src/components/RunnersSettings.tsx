@@ -558,7 +558,7 @@ export function RunnersSettings() {
                       disabled={busy || Boolean(secret) || !projects}
                     >
                       {projectIds.length
-                        ? countLabel(projectIds.length, "project") + " selected"
+                        ? `${countLabel(projectIds.length, "project")} selected`
                         : "Choose projects"}
                       <ChevronDown size={14} />
                     </Button>

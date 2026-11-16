@@ -121,7 +121,7 @@ export async function runLocal(
   };
   await fs.writeFile(
     path.join(directory, "run.json"),
-    secrets.scrub(JSON.stringify(run, null, 2)) + "\n"
+    `${secrets.scrub(JSON.stringify(run, null, 2))}\n`
   );
   await generateReport(workspace, id);
   return run;

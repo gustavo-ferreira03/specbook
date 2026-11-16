@@ -66,9 +66,9 @@ const agentOption = () =>
 // Human output and JSON share one call site so secrets are scrubbed on every path.
 async function print(result: unknown, render: () => string): Promise<void> {
   stdout.write(
-    scrubCi(
+    `${scrubCi(
       await scrubTokens(await scrub(json ? JSON.stringify(result) : render()))
-    ) + "\n"
+    )}\n`
   );
 }
 
@@ -254,7 +254,7 @@ const program = new Command("specbook")
       }
     },
     outputError: (text, write) =>
-      write(ui.failure(text.replace(/^error: /, "")) + "\n"),
+      write(`${ui.failure(text.replace(/^error: /, ""))}\n`),
   })
   .exitOverride()
   .addHelpText("before", `${pc.bold("specbook")} ${pc.dim(CLI_VERSION)}\n`)
@@ -804,7 +804,7 @@ program
               }
               return `${ui.success("Specbook is ready")}\n${pc.cyan(event.url)}\n${pc.dim(`Storage: ${event.data}`)}`;
             }),
-          (line) => stderr.write(line + "\n")
+          (line) => stderr.write(`${line}\n`)
         );
       } finally {
         process.removeListener("SIGINT", cancel);
@@ -1029,15 +1029,15 @@ async function main(): Promise<void> {
       raw.every((item) => item === "--json"))
   ) {
     stdout.write(
-      JSON.stringify({
+      `${JSON.stringify({
         help: program.helpInformation(),
         chatReplySchema: chatReplyJsonSchema,
-      }) + "\n"
+      })}\n`
     );
     return;
   }
   if (json && (raw.includes("--version") || raw.includes("-v"))) {
-    stdout.write(JSON.stringify({ version: CLI_VERSION }) + "\n");
+    stdout.write(`${JSON.stringify({ version: CLI_VERSION })}\n`);
     return;
   }
   if (!raw.length) {
@@ -1098,7 +1098,7 @@ main().catch(async (error) => {
     const id = raw.find((item) => /^c-[a-f0-9]{8}$/.test(item)) ?? "";
     const detail = error instanceof RemoteError ? error.detail : undefined;
     stdout.write(
-      scrubCi(
+      `${scrubCi(
         redactTokens(
           JSON.stringify(
             isChatCommand
@@ -1111,10 +1111,10 @@ main().catch(async (error) => {
               : { ok: false, error: safe, ...detail }
           )
         )
-      ) + "\n"
+      )}\n`
     );
   } else {
-    stderr.write(ui.failure(safe) + "\n");
+    stderr.write(`${ui.failure(safe)}\n`);
   }
   process.exitCode = 1;
 });

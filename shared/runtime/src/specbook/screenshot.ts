@@ -80,7 +80,7 @@ async function removeMasks(
                   for (const element of root.querySelectorAll("*")) {
                     if (element.shadowRoot) roots.push(element.shadowRoot);
                     if (
-                      !element.getAttribute(attribute)?.startsWith(marker + "-")
+                      !element.getAttribute(attribute)?.startsWith(`${marker}-`)
                     )
                       continue;
                     const style = element.getAttribute(saved);

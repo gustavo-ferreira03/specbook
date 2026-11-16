@@ -159,7 +159,7 @@ async function writeServers(servers: Server[]): Promise<void> {
   }
   const temporary = path.join(directory, `servers-${randomUUID()}.tmp`);
   try {
-    await fs.writeFile(temporary, JSON.stringify(servers, null, 2) + "\n", {
+    await fs.writeFile(temporary, `${JSON.stringify(servers, null, 2)}\n`, {
       mode: 0o600,
       flag: "wx",
     });
@@ -437,7 +437,7 @@ async function writeState(
   const temporary = `remote-${randomUUID()}.tmp`;
   const file = await safeWorkspacePath(workspace, temporary, true);
   try {
-    await fs.writeFile(file, JSON.stringify(state, null, 2) + "\n", {
+    await fs.writeFile(file, `${JSON.stringify(state, null, 2)}\n`, {
       flag: "wx",
     });
     await fs.rename(

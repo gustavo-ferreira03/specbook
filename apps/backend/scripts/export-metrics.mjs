@@ -175,11 +175,10 @@ const [columns, rows] = agentMode
       ]
     : [turnColumns, records];
 
-const csv =
-  [
-    columns.map(([name]) => name).join(","),
-    ...rows.map((row) => columns.map(([, get]) => csvCell(get(row))).join(",")),
-  ].join("\n") + "\n";
+const csv = `${[
+  columns.map(([name]) => name).join(","),
+  ...rows.map((row) => columns.map(([, get]) => csvCell(get(row))).join(",")),
+].join("\n")}\n`;
 
 if (outPath) {
   fs.writeFileSync(outPath, csv, "utf-8");

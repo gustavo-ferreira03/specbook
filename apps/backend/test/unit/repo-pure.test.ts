@@ -36,7 +36,7 @@ describe("slug", () => {
     );
     assert.equal(slugify("  --Olá, Mundo--  "), "ola-mundo");
     assert.equal(slugify("???"), "untitled");
-    const long = slugify("a".repeat(59) + " b c");
+    const long = slugify(`${"a".repeat(59)} b c`);
     assert.ok(long.length <= 60 && !long.endsWith("-"), long);
   });
 

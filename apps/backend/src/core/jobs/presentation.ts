@@ -578,13 +578,13 @@ export async function projectPresentation(
               ? specsById.get(patchSpecId)?.invalidReason
               : undefined;
         const updateReason = originalReason
-          ? plainReason(
+          ? `${plainReason(
               clean(originalReason),
               originalRun?.errorCode ??
                 (patchSpecId && specsById.get(patchSpecId)?.status === "invalid"
                   ? "invalid_spec"
                   : undefined)
-            ).replace(/[.!?]+$/, "") + "."
+            ).replace(/[.!?]+$/, "")}.`
           : "This suggestion updates how the Spec runs.";
         summary = `${updateReason} The expected behavior stays the same.`;
         break;

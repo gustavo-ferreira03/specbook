@@ -138,12 +138,11 @@ const table = (rows: string[][]) => {
   return rows
     .map(
       (row) =>
-        "  " +
-        row
+        `  ${row
           .map((cell, column) =>
             column === row.length - 1 ? cell : pad(cell, sizes[column]!)
           )
-          .join("   ")
+          .join("   ")}`
     )
     .join("\n");
 };
